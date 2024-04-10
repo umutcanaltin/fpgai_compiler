@@ -1,0 +1,181 @@
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+
+#define POLY_MASK_32 0xB4BCD35C
+#define POLY_MASK_31 0x7A5BC2E3
+int lfsr32, lfsr31;
+#define number_of_inputs 2
+#define number_of_outputs 2
+const float lr = 0.1;
+int input_matrix[2];
+int real_output_matrix[2];
+int output_matrix[2];
+int layer_1_weights[4];
+int layer_1_bias[2];
+int layer_1_output[2];
+int layer_1_delta_out[2];
+int activate( int x) { return x; }
+int dactivate( int x) { return 1; }
+int shift_lfsr(int *lfsr,  int polymonial_mask)
+{
+    int feedback;
+
+    feedback = *lfsr & 1;
+    *lfsr >>= 1;
+    if (feedback == 1)
+        *lfsr ^= polymonial_mask;
+    return *lfsr;
+}
+
+void init_lfsrs(void)
+{
+    lfsr32 = 0xABCDE; //seed values
+    lfsr31 = 0x23456789;
+}
+
+int get_random(void)
+{
+    /*this random number generator shifts the 32-bit LFSR twice before XORing
+      it with the 31-bit LFSR. the bottom 16 bits are used for the random number*/
+    shift_lfsr(&lfsr32, POLY_MASK_32);
+    return(shift_lfsr(&lfsr32, POLY_MASK_32) ^ shift_lfsr(&lfsr31, POLY_MASK_31));
+}
+
+
+
+void dense_layer_forward(int * layer_input, int * layer_bias, int * layer_weights , int * layer_output ,int number_of_input_nodes, int number_of_output_nodes){
+   
+   for (int i=0; i<number_of_output_nodes; i++) {
+      
+      int activation = *(layer_bias+i);
+      for (int j=0; j<number_of_input_nodes; j++) {
+
+         activation += *(layer_weights + number_of_output_nodes*i + j) * (*(layer_input + i));
+      
+      }
+      *(layer_output + i)= activate(activation);
+      
+   }
+   
+}
+
+void calculate_delta(int * delta_input_real, int * delta_input_calculated,int * layer_weights,  int * delta_output, int delta_output_num,int delta_input_num,int last_layer){
+   
+   if(last_layer){
+
+      for (int i=0; i<delta_output_num; i++) {
+
+         *(delta_output + i)= *(delta_input_real+i) - *(delta_input_calculated+i);
+
+         *(delta_output + i)= *(delta_output + i) * dactivate(*(delta_input_calculated+i));
+      }
+
+   }
+
+   else{
+
+      for (int i=0; i<delta_output_num; i++) {
+         float errorHidden = 0.0;
+         for(int j=0; j<delta_input_num; j++) {
+            // delta_input_layer == deltaoutput of the next layer
+            // delta_input_calculated == 
+            errorHidden += *(delta_input_real+j) *  (*(layer_weights+ i*delta_output_num + j));
+         }
+         *(delta_output+i) = errorHidden * dactivate(*(delta_input_calculated+i));
+      }
+
+
+   }
+
+}
+
+void change_weights(float * layer_input,float * layer_delta, float * layer_weight, float * layer_bias,int number_of_input_nodes, int number_of_output_nodes, float lr){
+   
+   for (int i=0; i<number_of_output_nodes; i++) {
+     
+      *(layer_bias+i) += *(layer_delta+i) * lr;
+      for (int j=0; j<number_of_input_nodes; j++) {
+         
+         *(layer_weight + j*number_of_output_nodes+i) += *(layer_input+j) * (*(layer_delta+i)) * lr;
+      }
+   }
+}
+
+
+void deeplearn( int MEM_1[6],int input_var_1 ,int input_var_2 ,int mode_var ,int real_output_var ,int& output_var){
+#pragma HLS INTERFACE ap_ctrl_none port=return 
+
+    #pragma HLS INTERFACE s_axilite port= input_var_1
+#pragma HLS INTERFACE s_axilite port= input_var_2
+#pragma HLS INTERFACE s_axilite port= mode_var
+#pragma HLS INTERFACE s_axilite port= real_output_var
+#pragma HLS INTERFACE s_axilite port= output_var
+#pragma HLS INTERFACE bram port =  MEM_1
+init_lfsrs();
+input_matrix[0]= input_var_1;
+input_matrix[1]= input_var_2;
+real_output_matrix[0]= 0;
+real_output_matrix[1]= 0;
+real_output_matrix[real_output_var]= 1;
+if(mode_var==0){
+for(int i = 0; i <4; i++){
+layer_1_weights[i]  = (get_random()% 100) /100 ;
+MEM_1[i] = layer_1_weights[i];
+ }
+for(int i = 0; i <2; i++){
+layer_1_bias[i]  = (get_random()% 100) /100 ;
+MEM_1[4+i] = layer_1_bias[i];
+ }
+for(int i = 0; i <2; i++){
+layer_1_output[i]  = 0;
+layer_1_delta_out[i]  = 0;
+ }
+
+
+output_var = 0.1;
+
+}
+if(mode_var==1){
+for(int i = 0; i <4; i++){
+layer_1_weights[i] = MEM_1[i]  ;
+ }
+for(int i = 0; i <2; i++){
+layer_1_bias[i] = MEM_1[4+i];
+ }
+for(int i = 0; i <2; i++){
+layer_1_output[i]  = 0;
+dense_layer_forward(input_matrix,layer_1_bias,layer_1_weights,layer_1_output,2,2);
+
+}
+if(mode_var==2){
+for(int i = 0; i <4; i++){
+layer_1_weights[i] = MEM_1[i]  ;
+ }
+for(int i = 0; i <2; i++){
+layer_1_bias[i] = MEM_1[4+i];
+ }
+for(int i = 0; i <2; i++){
+layer_1_output[i]  = 0;
+layer_1_delta_out[i]  = 0;
+ }
+dense_layer_forward(input_matrix,layer_1_bias,layer_1_weights,layer_1_output,2,2);
+calculate_delta(real_output_matrix,layer_1_output,layer_1_weights,layer_1_delta_out,2,2,1);
+change_weights(input_matrix,layer_1_delta_out,layer_1_weights,layer_1_bias,2,2,lr);
+for(int i = 0; i <4; i++){
+MEM_1[i] = layer_1_weights[i];
+ }
+for(int i = 0; i <2; i++){
+MEM_1[4+i] = layer_1_bias[i];
+ }
+
+                float loss_vall = 0;
+				   for(int i = 0; i < number_of_outputs; i++){
+					   loss_vall += real_output_matrix[i] - output_matrix[i] ;
+				   	}
+				   output_var = loss_vall;
+
+}
+
+}
