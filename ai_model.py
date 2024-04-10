@@ -4,7 +4,8 @@ from architectures.dense_layer import DenseLayer
 import onnx
 
 class AI_Model():
-    def __init__(self,onnx_file_name = "my_image_classifier.onnx", hardware_optimization = False, use_BRAM = True, use_DMA = True):
+    def __init__(self,onnx_file_name = "my_image_classifier.onnx", precision = "float64",vitis_hls_location= "default",hls_project_name="default",hls_solution_name="default"
+                 ,hardware_optimization = False, use_BRAM = True, use_DMA = True,user_DDR= True,memory_option_weights="default"):
         self.use_BRAM = use_BRAM
         self.use_DMA = use_DMA
         self.hardware_optimization = hardware_optimization
@@ -29,9 +30,34 @@ class AI_Model():
     def get_weights(self):
         return get_model_weights(self.model)
     
-    def generate_obj_rep(self):
+    def add_linear_activation(self):
+     
+        if(not self.layers[-1][0]):
+            self.layers.append([False,"linear"])
         for i in range(len(self.layers)):
-            print("a")
+            if(i != 0):
+                if(self.layers[i-1][0]):
+                    if(self.layers[i][0]):
+                        
+
+            
+    
+    def generate_obj_rep(self):
+       
+        for i in range(len(self.layers)):
+            if(self.layers[i][0]):
+                layer_weights = self.weights[i]
+                layer_bias = self.weights[i+1]
+                #skip the activation layer
+                if(self.layers[i][1] == "conv"):
+
+                    self.obj_arch_rep.append(ConvolutionLayer(weights=layer_weights,bias=layer_bias))
+                elif(self.layers[i][1]== "dense"):
+                    self.obj_arch_rep.append(DenseLayer())
+                else:
+                    raise Exception
+            else:
+                pass
 
           
 

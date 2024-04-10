@@ -5,10 +5,10 @@ def read(fname):
 
 
 setup(
-    name = "dl_hls_engine",
+    name = "fpgai_engine",
     version = "0.0.1",
     author = "Umut Can Altin",
-    author_email = "umutcanaltin1@gmail.com",
+    author_email = "umut.altin@donders.ru.nl",
     description = ("An demonstration of how to create, document, and publish "
                                    "to the cheese shop a5 pypi.org."),
     license = "BSD",

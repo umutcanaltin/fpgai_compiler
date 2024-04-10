@@ -6,6 +6,7 @@ def get_model_weights(model):
     weight_list= []
     for weights in model.graph.initializer:
         #print(MessageToDict(weights))
+        print(numpy_helper.to_array(weights).shape)
         weight_list.append(numpy_helper.to_array(weights))
     return weight_list
 
@@ -17,7 +18,7 @@ def get_model_arch(model):
         
         not_a_layer = False
         dictionary_layer = MessageToDict(layers)
-        print(dictionary_layer)
+        
       
         try:
             if(not (dictionary_layer["output"][0][:2] == "co" or dictionary_layer["output"][0][:2]=="fc")):
@@ -25,13 +26,16 @@ def get_model_arch(model):
             if(not not_a_layer):
                 layer_weight = dictionary_layer["input"][1]
                 layer_bias = dictionary_layer["input"][2]
-                layer_info = [not_a_layer, layer_weight, layer_bias]
+                layer_type = "dense"
+                if(dictionary_layer["output"][0][:2] == "co"):
+                    layer_type = "conv"
+                layer_info = [not not_a_layer,layer_type, layer_weight, layer_bias]
             if(not_a_layer):
                 if(dictionary_layer["input"][0][:2] == "co" or dictionary_layer["input"][0][:2]=="fc"):
                     try:
                         if(dictionary_layer["output"][0][:4]=="relu"):
                             activation_func = "relu"
-                            layer_info = [not_a_layer, activation_func]
+                            layer_info = [not not_a_layer, activation_func]
                          
                     except:
                         raise Exception('Our tool does not support this activation function!')
