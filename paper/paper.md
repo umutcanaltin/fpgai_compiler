@@ -1,20 +1,19 @@
 ---
-title: 'FPGA Engine for Neural Network Training and Inference'
+title: 'fpgai, Engine for Neural Network Training and Inference'
 tags:
   - acceleration
   - fpga
   - deep learning
+  - engine
 authors:
  - name: Umut Can Altin
    orcid: 0000-0001-6841-1058
    affiliation: "1"
- - name: Ben Thorne
+ - name: Nasir
    orcid: 0000-0002-0457-0153
    affiliation: "2"
- - name: Nicoletta Krachmalnicoff
-   affiliation: "3,4,5"
- - name: Julian Borrill
-   affiliation: "6,7"
+ - name: Marcel
+   affiliation: "3"
 affiliations:
  - name: Donders Institute
    index: 1
@@ -25,41 +24,26 @@ bibliography: paper.bib
 
 # Statement of Need
 
-Designing an FPGA with VHDL presents significant challenges due to the complexity of both the language and the hardware. VHDL requires a deep understanding of digital logic and FPGA architecture, making it challenging to translate high-level design concepts into efficient VHDL code. Optimizing performance and minimizing power consumption involves intricate trade-offs between design complexity and resource utilization. Debugging FPGA designs written in VHDL can be challenging, as traditional software debugging techniques may not apply directly to hardware designs. Additionally, FPGA development requires a steep learning curve, demanding time and effort to acquire proficiency in VHDL programming and FPGA architecture. Overall, designing an FPGA with VHDL requires expertise, patience, and a systematic approach to overcome these challenges.
+Designing an FPGA with VHDL or HLS presents significant challenges due to the complexity of both the languages and the hardware. Requires a deep understanding of digital logic and FPGA architecture, making it challenging to translate high-level design concepts into efficient architecture. Optimizing performance and minimizing power consumption involves intricate trade-offs between design complexity and resource utilization. 
+
+Debugging FPGA designs also can be challenging, as traditional software debugging techniques may not apply directly to hardware designs. Additionally, FPGA development requires a steep learning curve, demanding time and effort to acquire proficiency in designing FPGA architecture. Overall, designing hardware on FPGA requires expertise, patience, and a systematic approach to overcome these challenges.
 
 In response to the widespread demand within academic and industrial spheres, there is an evident necessity for a simplified approach to deploying DL on FPGAs. We addresses this requirement by developing a engine capable of efficiently converting deep learning models from ONNX format to hardware design for FPGA execution. Leveraging the user-friendly ONNX format, renowned for its adaptability across diverse DL models.
 
 
 # Summary
 
-The Python Sky Model (PySM) is a Python package used by Cosmic Microwave Background (CMB) experiments to simulate maps, in HEALPix [@gorski05; @healpy09] pixelization, of the various diffuse astrophysical components of Galactic emission relevant at CMB frequencies (i.e., dust, synchrotron, free-free and Anomalous Microwave Emission), as well as the CMB itself. These maps may be integrated over a given instrument bandpass and smoothed with a given instrument beam.
-The template emission maps used by PySM are based on Planck [@planck18] and WMAP [@wmap13] data and are noise-dominated at small scales. Therefore, PySM simulation templates are smoothed to retain the large-scale information, and then supplemented with modulated Gaussian realizations at smaller scales. This strategy allows one to simulate data at higher resolution than the input maps.
-
-PySM 2 [@pysm17], released in 2016, has become the de-facto standard for simulating Galactic emission; it is used, for example, by CMB-S4, Simons Observatory, LiteBird, PICO, CLASS, POLARBEAR, and other CMB experiments, as shown by the [80+ citations of the PySM 2 publication](https://scholar.google.com/scholar?start=0&hl=en&as_sdt=2005&sciodt=0,5&cites=16628417670342266167&scipsc=).
-As the resolution of upcoming experiments increases, the PySM 2 software has started to show some limitations:
-
-* Emission templates are provided at 7.9 arcminutes resolution (HEALPix $N_{side}=512$), while the next generation of CMB experiments will require sub-arcminute resolution.
-* The software is implemented in pure `numpy`, meaning that it has significant memory overhead and is not multi-threaded, precluding simply replacing the current templates with higher-resolution versions.
-* Emission templates are included in the PySM 2 Python package, which is still practical when each of the roughly 40 input maps is ~10 Megabytes, but will not be if they are over 1 Gigabyte.
-
-The solution to these issues was to reimplement PySM from scratch focusing of these features:
-
-* Reimplement all the models with the `numba` [@numba] Just-In-Time compiler for Python to reduce memory overhead and optimize performance: the whole integration loop of a template map over the frequency response of an instrument is performed in a single pass in automatically compiled and multi-threaded Python code.
-* Use MPI through `mpi4py` to coordinate execution of PySM 3 across multiple nodes, this allows supporting template maps at a resolution up to 0.4 arcminutes (HEALPix $N_{side}=8192$).
-* Rely on `libsharp` [@libsharp], a distributed implementation of spherical harmonic transforms, to smooth the maps with the instrument beam when maps are distributed over multiple nodes with MPI.
-* Employ the data utilities infrastructure provided by `astropy` [@astropy2013; @astropy2018] to download the input templates and cache them when requested.
-
-At this stage we strive to maintain full compatibility with PySM 2, therefore we implement the exact same astrophysical emission models with the same naming scheme. In the extensive test suite we compare the output of each PySM 3 model with the results obtained by PySM 2.
 
 # Performance
 
-As an example of the performance improvements achieved with PySM 3 over PySM 2, we run the following configuration:
+As an example of the performance improvements achieved with fpgai, we run the following configuration:
 
-* An instrument with 3 channels, with different beams, and a top-hat bandpass defined numerically at 10 frequency samples.
-* A sky model with the simplest models of dust, synchrotron, free-free and AME [`a1,d1,s1,f1` in PySM terms].
-* Execute on a 12-core Intel processor with 12 GB of RAM.
+* A network model consist of 2 hidden layers with relu activation functions inside. (Inference and Training Results)
+* Anetwork model consist of 5 hidden layers with relu and linear activation functions (Inference and Training Results)
+* A network model consist of 2 convolutional layer and 3 hidden layers with relu and linear activation functions (Inference and Training Results)
 
-The following tables shows the walltime and peak memory usage of this simulation executed at the native PySM 2 resolution of $N_{side}=512$ and at two higher resolutions:
+
+The following tables shows the hardware components usage and timig results from simulation.
 
 | Output $N_{side}$ | PySM 3        | PySM 2        |
 |-------------------|---------------|---------------|
