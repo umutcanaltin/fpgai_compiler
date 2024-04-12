@@ -23,6 +23,8 @@ bibliography: paper.bib
 ---
 # Summary
 Deep learning (DL) has revolutionized diverse fields, but the computational demands of DL models present challenges for real-time inference and training. Field-programmable gate arrays (FPGAs) offer a solution due to their flexibility, yet designing for FPGAs is complex. We introduce a novel software framework converting ONNX models to FPGA implementations, optimized for on-chip inference and training. Leveraging ONNX's interoperability, our framework seamlessly integrates DL models with FPGA hardware, supporting various architectures.This advancement represents a comprehensive approach, addressing both inference and training, enabling DL practitioners to leverage FPGA hardware effectively.
+![See how a sphere is first split into 12 base
+pixels of equal area whose centers are aligned at three different latitudes. Then, each is further subdivided to achieve higher and higher resolution.](hls.jpg)
 
 # Statement of Need
 
