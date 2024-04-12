@@ -9,11 +9,8 @@ authors:
  - name: Umut Can Altin
    orcid: 0000-0001-6841-1058
    affiliation: "1"
- - name: Nasir Ahmad
-   orcid: 0000-0002-0457-0153
-   affiliation: "2"
  - name: Marcel van Gerven
-   affiliation: "3"
+   affiliation: "2"
 affiliations:
  - name: Donders Institute for Brain, Cognition and Behaviour
    index: 1
