@@ -68,6 +68,11 @@ torch_input = torch.randn(1, 1, 32, 32)
 onnx_program = torch.onnx.dynamo_export(torch_model, torch_input)
 ```
 
+```console
+foo@bar:~$ whoami
+foo
+```
+
 
 # Future work
 
