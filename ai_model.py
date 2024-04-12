@@ -1,4 +1,4 @@
-from onnx_handlers.onnx_reader import get_model_weights,get_model_arch,verify_model
+from onnx_handler.onnx_reader import get_model_weights,get_model_arch,verify_model
 from architectures.convolution_layer import ConvolutionLayer
 from architectures.dense_layer import DenseLayer
 import onnx
@@ -38,12 +38,12 @@ class AI_Model():
             if(i != 0):
                 if(self.layers[i-1][0]):
                     if(self.layers[i][0]):
+                        pass
                         
 
             
     
     def generate_obj_rep(self):
-       
         for i in range(len(self.layers)):
             if(self.layers[i][0]):
                 layer_weights = self.weights[i]
@@ -58,6 +58,7 @@ class AI_Model():
                     raise Exception
             else:
                 pass
+        return 0
 
           
 

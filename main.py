@@ -5,7 +5,6 @@ import argparse
 parser = argparse.ArgumentParser(description='fpgai ONNX to SoC Engine')
 parser.add_argument('--onnx-file-name', type=str, default='my_image_classifier.onnx',
                     help='ONNX file name with path')
-parser.add_argument('--ui', type=bool, default=False,help='ONNX file name with path')
 parser.add_argument('--precision', type=str, default="float64",help='ONNX file name with path')
 parser.add_argument('--vitis-hls-location', type=str, default='',help='location of vitis HLS files')
 parser.add_argument('--hls-project-name', type=str, default="new",help='usage of existing hls project')
