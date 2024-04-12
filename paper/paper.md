@@ -48,7 +48,7 @@ PySM 3 opens the way to implement a new category of models at much higher resolu
 
 # How to cite
 
-If you are using PySM 3 for your work, please cite this paper for the software itself; for the actual emission modeling please also cite the original PySM 2 paper [@pysm17]. There will be a future paper on the generation of new PySM 3 astrophysical models.
+If you are using fpgai for your work, please cite this paper for the software itself.
 
 # Acknowledgments
 
