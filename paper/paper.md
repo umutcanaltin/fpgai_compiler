@@ -9,13 +9,13 @@ authors:
  - name: Umut Can Altin
    orcid: 0000-0001-6841-1058
    affiliation: "1"
- - name: Nasir
+ - name: Nasir Ahmad
    orcid: 0000-0002-0457-0153
    affiliation: "2"
- - name: Marcel
+ - name: Marcel van Gerven
    affiliation: "3"
 affiliations:
- - name: Donders Institute
+ - name: Donders Institute for Brain, Cognition and Behaviour
    index: 1
 
 date: 22 July 2024
@@ -49,15 +49,13 @@ class MyModel(nn.Module):
 
     def __init__(self):
         super(MyModel, self).__init__()
-        self.conv1 = nn.Conv2d(1, 6, 5)
-        self.conv2 = nn.Conv2d(6, 16, 5)
-        self.fc1 = nn.Linear(16 * 5 * 5, 120)
+        self.conv1 = nn.Conv2d(1, 2, 3)
+        self.fc1 = nn.Linear(30*30*2, 120)
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, 10)
 
     def forward(self, x):
-        x = F.max_pool2d(F.relu(self.conv1(x)), (2, 2))
-        x = F.max_pool2d(F.relu(self.conv2(x)), 2)
+        x = F.relu(self.conv1(x))
         x = torch.flatten(x, 1)
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
@@ -66,11 +64,15 @@ class MyModel(nn.Module):
 torch_model = MyModel()
 torch_input = torch.randn(1, 1, 32, 32)
 onnx_program = torch.onnx.dynamo_export(torch_model, torch_input)
+onnx_program.save("my_image_classifier.onnx")
 ```
 
 ```console
 main.py --onnx-file deneme.onnx
 ```
+
+# Test Setup and Results
+The testing feature in the fpgai engine allows users to configure and customize their testing models according to their specific requirements. User can use our examples and define test model in test/test_model.py file with any framework. Engine will use this model to compare network outputs with compiled HLS implementation.
 
 
 # Future work
@@ -83,7 +85,7 @@ If you are using fpgai for your work, please cite this paper for the software it
 
 # Acknowledgments
 
-* This work was supported in part by DBI2 grant `80NSSC18K1487`.
+* This work was supported in part by DBI2 grant.
 
 
 # References
