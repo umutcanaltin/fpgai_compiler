@@ -40,26 +40,7 @@ Our engine supports DMA (Direct Memory Access) usage for efficient data (image s
 
 # Optimization
 
-# Performance
 
-As an example of the performance improvements achieved with fpgai, we run the following configuration:
-
-* A network model consist of 2 hidden layers with relu activation functions inside. (Inference and Training Results)
-* Anetwork model consist of 5 hidden layers with relu and linear activation functions (Inference and Training Results)
-* A network model consist of 2 convolutional layer and 3 hidden layers with relu and linear activation functions (Inference and Training Results)
-
-
-The following tables shows the hardware components usage and timig results from simulation.
-
-| Output $N_{side}$ | PySM 3        | PySM 2        |
-|-------------------|---------------|---------------|
-| 512               | 1m 0.7 GB     | 1m40s 1.45 GB |
-| 1024              | 3m30s 2.3 GB  | 7m20s 5.5 GB  |
-| 2048              | 16m10s 8.5 GB | Out of memory |
-
-The models at $N_{side}=512$ have been tested to be equal given a relative tolerance of `1e-5`.
-
-At the moment it is not very useful to run at resolutions higher than $N_{side}=512$ because there is no actual template signal at smaller scales. However, this demonstrates the performance improvements that will make working with higher resolution templates possible.
 
 # Future work
 
