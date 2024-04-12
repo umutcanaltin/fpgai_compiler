@@ -69,8 +69,9 @@ onnx_program = torch.onnx.dynamo_export(torch_model, torch_input)
 ```
 
 ```console
-foo@bar:~$ whoami
-foo
+cd \
+copy a b
+ping 192.168.0.1
 ```
 
 
