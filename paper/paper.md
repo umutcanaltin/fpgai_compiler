@@ -69,9 +69,7 @@ onnx_program = torch.onnx.dynamo_export(torch_model, torch_input)
 ```
 
 ```console
-cd \
-copy a b
-ping 192.168.0.1
+main.py --onnx-file deneme.onnx
 ```
 
 
