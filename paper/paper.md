@@ -32,7 +32,12 @@ Debugging FPGA designs also can be challenging, as traditional software debuggin
 
 In response to the widespread demand within academic and industrial spheres, there is an evident necessity for a simplified approach to deploying DL on FPGAs. We addresses this requirement by developing a engine capable of efficiently converting deep learning models from ONNX format to hardware design for FPGA execution. Leveraging the user-friendly ONNX format, renowned for its adaptability across diverse DL models.
 
+# Supported Features
+Our engine provides support for essential DL operations such as feedforward and convolution. Feedforward operations enable the flow of data through neural network layers from input to output, facilitating tasks like classification and regression. Convolution operations, on the other hand, are fundamental for tasks involving spatial relationships, such as image processing and feature extraction. With our support for these operations, users can efficiently implement a wide range of deep learning models and applications, empowering them to address complex tasks effectively.
 
+Our engine supports DMA (Direct Memory Access) usage for efficient data (image stream) transfer and BRAM (Block RAM) usage for storing weights and parameters of the model. DMA usage enables data transfers between different memory locations which is vital for accelerating data-intensive tasks. Meanwhile, BRAM usage ensures efficient utilization of on-chip memory resources, reducing access latency and improving overall performance. By leveraging DMA and BRAM usage, our engine optimizes resource utilization, maximizing hardware efficiency and facilitating faster and more efficient execution of deep learning tasks on FPGA platforms.
+
+# Optimization
 
 # Performance
 
