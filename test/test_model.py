@@ -24,3 +24,10 @@ class Test_Onnx_Model():
     def __init__(self, onnx_file_name = "default.onnx"):
         self.onnx_file_name = onnx_file_name
 
+
+
+class Test_Jax_to_Onnx_Model():
+     def __init__(self, onnx_file_name = "default.onnx"):
+        self.onnx_file_name = onnx_file_name
+
+   
