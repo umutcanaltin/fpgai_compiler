@@ -4,9 +4,11 @@ from architectures.dense_layer import DenseLayer
 import onnx
 
 class fpgai_engine():
-    def __init__(self,onnx_file_name = "my_image_classifier.onnx", precision = "float64",vitis_hls_location= "default",hls_project_name="default",hls_solution_name="default"
-                 ,hardware_optimization = False, use_BRAM = True, use_DMA = True,user_DDR= True,memory_option_weights="default"):
+    def __init__(self,mode="inference",onnx_file_name = "my_image_classifier.onnx", precision = "float64",vitis_hls_location= "default",
+                 hls_project_name="default",hls_solution_name="default",hardware_optimization = False, use_BRAM = True, 
+                 use_DMA = True,user_DDR= True,memory_option_weights="default"):
         self.use_BRAM = use_BRAM
+        self.mode = mode
         self.use_DMA = use_DMA
         self.hardware_optimization = hardware_optimization
         self.onnx_file_name = onnx_file_name
@@ -47,11 +49,8 @@ class fpgai_engine():
         return 0      
     
     def generate_obj_rep(self):
-        #print(self.layers)
-        
         for i in range(len(self.layers)):
             first_layer= False
-            #print(self.layers[i])
             if(self.layers[i][0]):
                 layer_weights = self.weights[i]
                 layer_bias = self.weights[i+1]
@@ -74,8 +73,16 @@ class fpgai_engine():
     def compile_hls_codes(self):
         return 0
     
-    def generate_hls_test_codes(self):
-        return 0
+    def generate_hls_codes(self, mode= "inference"):
+        generated_hls_codes = ""
+        if(mode == "inference"):
+            for i in range(len(self.obj_arch_rep)):
+                generated_hls_codes += self.obj_arch_rep[i].get_hls_file_string(mode="inference")
+        elif(mode == "training"):
+             for i in range(len(self.obj_arch_rep)):
+                generated_hls_codes += self.obj_arch_rep[i].get_hls_file_string(mode="training")           
+
+            
     
     def compile_hls_test(self):
         return 0
