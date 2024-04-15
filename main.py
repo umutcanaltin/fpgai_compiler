@@ -1,8 +1,18 @@
 from __future__ import print_function
-from ai_model import AI_Model
+from fpgai_engine import fpgai_engine
 import argparse
 
 parser = argparse.ArgumentParser(description='fpgai ONNX to SoC Engine')
+parser.add_argument('--mode', type=str, default='inference',
+                    help='ONNX file name with path')
+parser.add_argument('--learning-rate', type=float, default=0.1,
+                    help='ONNX file name with path')
+parser.add_argument('--learning-rate-type', type=str, default='fixed',
+                    help='ONNX file name with path')
+
+parser.add_argument('--training-mode', type=str, default='0',
+                    help='ONNX file name with path')
+
 parser.add_argument('--onnx-file-name', type=str, default='my_image_classifier.onnx',
                     help='ONNX file name with path')
 parser.add_argument('--precision', type=str, default="float64",help='ONNX file name with path')
@@ -21,7 +31,6 @@ args = parser.parse_args()
 
 if __name__ == "__main__":
     _onnx_file_name = args.onnx_file_name
-    _ui = args.ui
     _precision = args.precision
     _vitis_hls_location = args.vitis_hls_location
     _hls_project_name = args.hls_project_name
@@ -32,7 +41,7 @@ if __name__ == "__main__":
     _hardware_optimization = args.hardware_optimization
     hardware_optimization_option = args.hardware_optimization_option
 
-    ai_model = AI_Model(onnx_file_name=_onnx_file_name, precision = _precision,vitis_hls_location=_vitis_hls_location, hls_project_name= _hls_project_name,
+    ai_model = fpgai_engine(onnx_file_name=_onnx_file_name, precision = _precision,vitis_hls_location=_vitis_hls_location, hls_project_name= _hls_project_name,
                         hls_solution_name= _hls_solution_name,memory_option_weights=_memory_option_weights , use_DMA=_dma_usage,user_DDR=_ddr_usage)
 
 

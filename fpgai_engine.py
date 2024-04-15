@@ -3,7 +3,7 @@ from architectures.convolution_layer import ConvolutionLayer
 from architectures.dense_layer import DenseLayer
 import onnx
 
-class AI_Model():
+class fpgai_engine():
     def __init__(self,onnx_file_name = "my_image_classifier.onnx", precision = "float64",vitis_hls_location= "default",hls_project_name="default",hls_solution_name="default"
                  ,hardware_optimization = False, use_BRAM = True, use_DMA = True,user_DDR= True,memory_option_weights="default"):
         self.use_BRAM = use_BRAM
@@ -38,13 +38,12 @@ class AI_Model():
             if(i != 0):
                 if(self.layers[i-1][0]):
                     if(self.layers[i][0]):
-                        pass
-                        
-
-            
+                        pass      
     
     def generate_obj_rep(self):
+        print(self.layers)
         for i in range(len(self.layers)):
+            #print(self.layers[i])
             if(self.layers[i][0]):
                 layer_weights = self.weights[i]
                 layer_bias = self.weights[i+1]

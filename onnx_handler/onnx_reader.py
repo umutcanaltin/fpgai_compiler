@@ -14,12 +14,9 @@ def get_model_arch(model):
     layer_list= []
     is_first_layer = False
     for layers in model.graph.node:
-        
-        
         not_a_layer = False
         dictionary_layer = MessageToDict(layers)
-        
-      
+        #print(dictionary_layer)
         try:
             if(not (dictionary_layer["output"][0][:2] == "co" or dictionary_layer["output"][0][:2]=="fc")):
                 not_a_layer= True
@@ -30,22 +27,25 @@ def get_model_arch(model):
                 if(dictionary_layer["output"][0][:2] == "co"):
                     layer_type = "conv"
                 layer_info = [not not_a_layer,layer_type, layer_weight, layer_bias]
+                layer_list.append(layer_info)
             if(not_a_layer):
                 if(dictionary_layer["input"][0][:2] == "co" or dictionary_layer["input"][0][:2]=="fc"):
+                    
                     try:
                         if(dictionary_layer["output"][0][:4]=="relu"):
+                            print(dictionary_layer)
                             activation_func = "relu"
                             layer_info = [not not_a_layer, activation_func]
+                            layer_list.append(layer_info)
                          
                     except:
                         raise Exception('Our tool does not support this activation function!')
-            
-            layer_list.append(layer_info)
         except:
             #not in the scope for our tool!
             continue
         
         #layer_list.append(MessageToDict(layers)["input"])
+    print(layer_list)
     return layer_list
 
 def verify_model(model):
