@@ -1,5 +1,5 @@
 class ConvolutionLayer():
-    def __init__(self, number_of_kernels = None,input_shape = None, weights = None, decorelation=False, learning=False, bias = False, name_of_layer="dense_layer", is_first_layer= False):
+    def __init__(self, number_of_kernels = None,input_shape = None, weights = None, decorelation=False, learning=False, bias = False, name_of_layer="dense_layer", is_first_layer= False, activation_function = "linear"):
         self.number_of_kernels = number_of_kernels
         self.input_shape = input_shape
         self.decorelation = decorelation
@@ -8,6 +8,7 @@ class ConvolutionLayer():
         self.weigts = weights
         self.name_of_layer = name_of_layer
         self.is_first_layer = is_first_layer
+        self.activation_function = activation_function
 
     def set_first_layer_declerations(self):
         pass

@@ -6,7 +6,7 @@ def get_model_weights(model):
     weight_list= []
     for weights in model.graph.initializer:
         #print(MessageToDict(weights))
-        print(numpy_helper.to_array(weights).shape)
+        
         weight_list.append(numpy_helper.to_array(weights))
     return weight_list
 
@@ -16,7 +16,6 @@ def get_model_arch(model):
     for layers in model.graph.node:
         not_a_layer = False
         dictionary_layer = MessageToDict(layers)
-        #print(dictionary_layer)
         try:
             if(not (dictionary_layer["output"][0][:2] == "co" or dictionary_layer["output"][0][:2]=="fc")):
                 not_a_layer= True
@@ -33,7 +32,6 @@ def get_model_arch(model):
                     
                     try:
                         if(dictionary_layer["output"][0][:4]=="relu"):
-                            print(dictionary_layer)
                             activation_func = "relu"
                             layer_info = [not not_a_layer, activation_func]
                             layer_list.append(layer_info)
@@ -45,7 +43,7 @@ def get_model_arch(model):
             continue
         
         #layer_list.append(MessageToDict(layers)["input"])
-    print(layer_list)
+    
     return layer_list
 
 def verify_model(model):

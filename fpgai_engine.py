@@ -17,12 +17,17 @@ class fpgai_engine():
         self.layers = self.get_model_arch()
         self.weights= self.get_weights()
         self.obj_arch_rep = []
+        self.add_linear_activation()
+        print(self.layers)
         self.generate_obj_rep()
+        for i in range(len(self.obj_arch_rep)):
+            print(self.obj_arch_rep[i].activation_function)
       
-        
-        
     def verify_onnx_model(self):
         return verify_model(self.model)
+    
+    def create_test_branch_cpp(self):
+        pass
 
     def get_model_arch(self):
         return get_model_arch(self.model)
@@ -32,27 +37,31 @@ class fpgai_engine():
     
     def add_linear_activation(self):
      
-        if(not self.layers[-1][0]):
+        if(self.layers[-1][0]):
             self.layers.append([False,"linear"])
         for i in range(len(self.layers)):
             if(i != 0):
                 if(self.layers[i-1][0]):
                     if(self.layers[i][0]):
-                        pass      
+                        self.layers.insert(i,[False,"linear"])
+        return 0      
     
     def generate_obj_rep(self):
-        print(self.layers)
+        #print(self.layers)
+        
         for i in range(len(self.layers)):
+            first_layer= False
             #print(self.layers[i])
             if(self.layers[i][0]):
                 layer_weights = self.weights[i]
                 layer_bias = self.weights[i+1]
                 #skip the activation layer
                 if(self.layers[i][1] == "conv"):
-
-                    self.obj_arch_rep.append(ConvolutionLayer(weights=layer_weights,bias=layer_bias))
+                    if(i==0):
+                        first_layer = True
+                    self.obj_arch_rep.append(ConvolutionLayer(weights=layer_weights,bias=layer_bias,is_first_layer=first_layer, activation_function=self.layers[i+1][1]))
                 elif(self.layers[i][1]== "dense"):
-                    self.obj_arch_rep.append(DenseLayer())
+                    self.obj_arch_rep.append(DenseLayer(activation_function=self.layers[i+1][1]))
                 else:
                     raise Exception
             else:
