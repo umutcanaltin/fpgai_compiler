@@ -18,3 +18,9 @@ class Test_Model(nn.Module):
         x = self.fc3(x)
         return x
 
+
+
+class Test_Onnx_Model():
+    def __init__(self, onnx_file_name = "default.onnx"):
+        self.onnx_file_name = onnx_file_name
+
