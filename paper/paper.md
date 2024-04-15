@@ -10,7 +10,8 @@ authors:
    orcid: 0000-0001-6841-1058
    affiliation: "1"
  - name: Marcel van Gerven
-   affiliation: "2"
+   orcid: 0000-0002-2206-9098
+   affiliation: "1"
 affiliations:
  - name: Donders Institute for Brain, Cognition and Behaviour
    index: 1
