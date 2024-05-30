@@ -4,9 +4,7 @@ from onnx import numpy_helper
 
 def get_model_weights(model):
     weight_list= []
-    for weights in model.graph.initializer:
-        #print(MessageToDict(weights))
-        
+    for weights in model.graph.initializer:      
         weight_list.append(numpy_helper.to_array(weights))
     return weight_list
 

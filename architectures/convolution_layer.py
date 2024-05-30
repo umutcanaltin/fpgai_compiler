@@ -28,8 +28,8 @@ class ConvolutionLayer():
     def set_test_functions():
         pass
 
-    def get_hls_file_string(self,mode):
-        if(mode=="inference"):
-            hls_file_string +=
+    def get_hls_file_string(self):
+        if(self.mode=="inference"):
+            return 0
 
     

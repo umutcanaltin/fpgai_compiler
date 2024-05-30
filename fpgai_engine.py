@@ -4,10 +4,13 @@ from architectures.dense_layer import DenseLayer
 import onnx
 
 class fpgai_engine():
-    def __init__(self,mode="inference",onnx_file_name = "my_image_classifier.onnx", precision = "float64",vitis_hls_location= "default",
+    def __init__(self,learning_rate= 0.1,mode="inference",onnx_file_name = "my_image_classifier.onnx", precision = "float64",vitis_hls_location= "default",
                  hls_project_name="default",hls_solution_name="default",hardware_optimization = False, use_BRAM = True, 
                  use_DMA = True,user_DDR= True,memory_option_weights="default"):
         self.use_BRAM = use_BRAM
+        self.number_of_input_nodes = 4
+        self.number_of_output_nodes = 10
+        self.learning_rate = learning_rate
         self.mode = mode
         self.use_DMA = use_DMA
         self.hardware_optimization = hardware_optimization
@@ -22,8 +25,7 @@ class fpgai_engine():
         self.add_linear_activation()
         print(self.layers)
         self.generate_obj_rep()
-        for i in range(len(self.obj_arch_rep)):
-            print(self.obj_arch_rep[i].activation_function)
+        print(self.generate_hls_codes())
       
     def verify_onnx_model(self):
         return verify_model(self.model)
@@ -58,9 +60,9 @@ class fpgai_engine():
                 if(self.layers[i][1] == "conv"):
                     if(i==0):
                         first_layer = True
-                    self.obj_arch_rep.append(ConvolutionLayer(weights=layer_weights,bias=layer_bias,is_first_layer=first_layer, activation_function=self.layers[i+1][1]))
+                    #self.obj_arch_rep.append(ConvolutionLayer(weights=layer_weights,bias=layer_bias,is_first_layer=first_layer, activation_function=self.layers[i+1][1]))
                 elif(self.layers[i][1]== "dense"):
-                    self.obj_arch_rep.append(DenseLayer(activation_function=self.layers[i+1][1]))
+                    self.obj_arch_rep.append(DenseLayer(ai_model=self, activation_function=self.layers[i+1][1], weights=self.weights[i]))
                 else:
                     raise Exception
             else:
@@ -73,14 +75,11 @@ class fpgai_engine():
     def compile_hls_codes(self):
         return 0
     
-    def generate_hls_codes(self, mode= "inference"):
+    def generate_hls_codes(self):
         generated_hls_codes = ""
-        if(mode == "inference"):
-            for i in range(len(self.obj_arch_rep)):
-                generated_hls_codes += self.obj_arch_rep[i].get_hls_file_string(mode="inference")
-        elif(mode == "training"):
-             for i in range(len(self.obj_arch_rep)):
-                generated_hls_codes += self.obj_arch_rep[i].get_hls_file_string(mode="training")           
+        for i in range(len(self.obj_arch_rep)):
+            generated_hls_codes += self.obj_arch_rep[i].get_hls_file_string() 
+        return generated_hls_codes         
 
             
     

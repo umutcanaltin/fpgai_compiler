@@ -6,8 +6,10 @@
 #define POLY_MASK_32 0xB4BCD35C
 #define POLY_MASK_31 0x7A5BC2E3
 int lfsr32, lfsr31;
+
 #define number_of_inputs 2
 #define number_of_outputs 2
+
 const float lr = 0.1;
 int input_matrix[2];
 int real_output_matrix[2];
