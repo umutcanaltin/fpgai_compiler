@@ -1,7 +1,7 @@
 from onnx_handler.onnx_reader import get_model_weights,get_model_arch,verify_model
 from architectures.convolution_layer import ConvolutionLayer
 from architectures.dense_layer import DenseLayer
-from implementations import dense_layer_imp
+from implementations.implementations import dense_layer_imp, conv_layer_imp
 import onnx
 
 class fpgai_engine():
@@ -23,9 +23,10 @@ class fpgai_engine():
         self.layers = self.get_model_arch()
         self.weights= self.get_weights()
         self.obj_arch_rep = []
+        self.layer_function_implementations = ""
         self.add_linear_activation()
-        print(self.layers)
         self.generate_obj_rep()
+        print(self.layers)
         print(self.generate_hls_codes())
       
     def verify_onnx_model(self):
@@ -53,24 +54,26 @@ class fpgai_engine():
     
     def generate_obj_rep(self):
         for i in range(len(self.layers)):
-            first_layer= False
-            first_dense_layer = False
+            first_layer= True
+            first_dense_layer = True
+            first_conv_layer = True
             if(self.layers[i][0]):
+                if(i!=0):
+                    first_layer = False
                 layer_weights = self.weights[i]
                 layer_bias = self.weights[i+1]
                 #skip the activation layer
                 if(self.layers[i][1] == "conv"):
-                    if(i==0):
-                        first_layer = True
+                    if(first_conv_layer):
+                        new_implementation = conv_layer_imp().get_hls_function()
+                        self.layer_function_implementations += new_implementation
+                        first_conv_layer = False
                     #self.obj_arch_rep.append(ConvolutionLayer(weights=layer_weights,bias=layer_bias,is_first_layer=first_layer, activation_function=self.layers[i+1][1]))
                 elif(self.layers[i][1]== "dense"):
-                    new_implementation = dense_layer_imp()
-                    new_implementation.get_hls_functions()
-                    first_dense_layer = True
-                    if(i==0):
-                        first_layer = True
-                    
-                    
+                    if(first_dense_layer):
+                        new_implementation = dense_layer_imp().get_hls_function()
+                        self.layer_function_implementations += new_implementation
+                        first_dense_layer = False 
                     new_layer = DenseLayer(ai_model=self, activation_function=self.layers[i+1][1], weights=self.weights[i], is_first_layer=first_layer, name_of_layer="layer_"+str(int(i/2)))
                     self.obj_arch_rep.append(new_layer)
                 else:
@@ -86,7 +89,7 @@ class fpgai_engine():
         return 0
     
     def generate_hls_codes(self):
-        generated_hls_codes = ""
+        generated_hls_codes = self.layer_function_implementations
         for i in range(len(self.obj_arch_rep)):
             generated_hls_codes += self.obj_arch_rep[i].get_hls_file_string() 
         return generated_hls_codes         

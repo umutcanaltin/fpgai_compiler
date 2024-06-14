@@ -159,7 +159,42 @@ input_buffer = xlnk.cma_array(shape=(20,), dtype=np.uint32)
 output_buffer = xlnk.cma_array(shape=(5,), dtype=np.uint32) 
 
 ```
+## Python Driver for PYNQ model with modes(inject weughts or get trained weights)
+You can directly use this code structure inside PYNQ!
+```python
 
+
+class DeepLearnModeDriver(DefaultIP):
+    def __init__(self, description):
+        super().__init__(description=description)
+
+    bindto = ['Xilinx:hls:deeplearn:1.0']
+    @property
+    def mode(self):
+        return self.read(0x10)
+
+    @mode.setter
+    def mode(self, value):
+        self.write(0x10, value)
+
+from pynq import Xlnk
+import numpy as np
+
+xlnk = Xlnk()
+in_buffer = xlnk.cma_array(shape=(5,), dtype=np.uint32)
+out_buffer = xlnk.cma_array(shape=(5,), dtype=np.uint32)
+
+for i in range(5):
+    in_buffer[i] = i
+
+deeplearn.mode = 1
+dma.sendchannel.transfer(in_buffer)
+dma.recvchannel.transfer(out_buffer)
+dma.sendchannel.wait()
+dma.recvchannel.wait()
+
+out_buffer     
+```
 # Future work
 
 Our current engine supports basic architectures like feedforward and convolutional layers. Moving forward, we plan to include more complex models such as recurrent neural networks (RNNs). Additionally, our design is flexible enough to easily integrate new hardware optimization techniques. This adaptability ensures our engine remains at the forefront of FPGA-accelerated deep learning advancements in academia and industry.
