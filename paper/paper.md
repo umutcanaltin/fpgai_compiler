@@ -109,12 +109,12 @@ class My_Model():
       self.layers = []
       #Layers must be in order to compile codes!
       #Input and output shape information for the layer must be with weights argument!
-      self.layers.append(ConvolutionLayer(weights= weight_generator(layer_type = "convolution", input_shape=, shape=(5,10,10))))
+      self.layers.append(ConvolutionLayer(weights= weight_generator(layer_type = "convolution", input_shape=, shape=(5,10,10),precision = "float")))
       # Convolution Layer 1
-      self.layers.append(DenseLayer(activation_function = "relu", name_of_layer = 'my_first_dense_layer', weights= weight_generator(layer_type = "dense", input_shape= 100, output_shape = 10)))
+      self.layers.append(DenseLayer(activation_function = "relu", precision = "float",name_of_layer = 'my_first_dense_layer', weights= weight_generator(layer_type = "dense",precision = "float", input_shape= 100, output_shape = 10)))
       # Dense Layer 1 with relu activation
 
-      dense_layer_3 = DenseLayer(activation_function = "linear")
+      dense_layer_3 = DenseLayer(activation_function = "linear",precision = "float")
       random_generatad_weights = np.random(100,10)
       dense_layer_3.inject_weights(weights = random_generatad_weights)
       self.layers.append(dense_layer_3)
@@ -142,6 +142,22 @@ Add new activation funtion named Leaky Relu:
 ```python
         if(self.activation_function == "linear"):
             activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"+self.precision + " dactivate_"+self.name_of_layer+"( "+self.precision +" x) { return 1; }"
+```
+
+## How to Use After Compile the Model
+```python
+import numpy as np
+from pynq import Xlnk
+from pynq import Overlay
+
+
+#inference with integer 20 input and 5 output without any mode (weight injection)
+overlay = Overlay('deeplearn.bit')
+dma = overlay.axi_dma
+xlnk = Xlnk()
+input_buffer = xlnk.cma_array(shape=(20,), dtype=np.uint32)
+output_buffer = xlnk.cma_array(shape=(5,), dtype=np.uint32) 
+
 ```
 
 # Future work
