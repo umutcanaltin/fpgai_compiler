@@ -1,6 +1,7 @@
 from onnx_handler.onnx_reader import get_model_weights,get_model_arch,verify_model
 from architectures.convolution_layer import ConvolutionLayer
 from architectures.dense_layer import DenseLayer
+from implementations import dense_layer_imp
 import onnx
 
 class fpgai_engine():
@@ -53,6 +54,7 @@ class fpgai_engine():
     def generate_obj_rep(self):
         for i in range(len(self.layers)):
             first_layer= False
+            first_dense_layer = False
             if(self.layers[i][0]):
                 layer_weights = self.weights[i]
                 layer_bias = self.weights[i+1]
@@ -62,7 +64,15 @@ class fpgai_engine():
                         first_layer = True
                     #self.obj_arch_rep.append(ConvolutionLayer(weights=layer_weights,bias=layer_bias,is_first_layer=first_layer, activation_function=self.layers[i+1][1]))
                 elif(self.layers[i][1]== "dense"):
-                    self.obj_arch_rep.append(DenseLayer(ai_model=self, activation_function=self.layers[i+1][1], weights=self.weights[i]))
+                    new_implementation = dense_layer_imp()
+                    new_implementation.get_hls_functions()
+                    first_dense_layer = True
+                    if(i==0):
+                        first_layer = True
+                    
+                    
+                    new_layer = DenseLayer(ai_model=self, activation_function=self.layers[i+1][1], weights=self.weights[i], is_first_layer=first_layer, name_of_layer="layer_"+str(int(i/2)))
+                    self.obj_arch_rep.append(new_layer)
                 else:
                     raise Exception
             else:
