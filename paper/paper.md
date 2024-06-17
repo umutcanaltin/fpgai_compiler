@@ -195,7 +195,7 @@ for i in range(5):
     in_buffer[i] = i
 
 deeplearn.mode = 1
-dma.sendchannel.transfer(in_buffer)
+dma.sendchannel.transfer(in_buffer) #in_buffer can also be weighs for injection to BRAMs depends on the mode selection
 dma.recvchannel.transfer(out_buffer)
 dma.sendchannel.wait()
 dma.recvchannel.wait()
