@@ -196,7 +196,7 @@ for i in range(5):
 
 deeplearn.mode = 1
 dma.sendchannel.transfer(in_buffer) #in_buffer can also be weighs for injection to BRAMs depends on the mode selection
-dma.recvchannel.transfer(out_buffer)
+dma.recvchannel.transfer(out_buffer) #out_buffer can be trained weights from BRAMs to your local computer depends on mode selection
 dma.sendchannel.wait()
 dma.recvchannel.wait()
 
