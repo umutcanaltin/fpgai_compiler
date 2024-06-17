@@ -167,7 +167,7 @@ output_buffer = xlnk.cma_array(shape=(5,), dtype=np.uint32)
 
 ```
 ## Python Driver for PYNQ model with modes(inject weughts or get trained weights)
-You can directly use this code structure inside PYNQ!
+User can directly use this code structure inside PYNQ! 
 ```python
 
 
