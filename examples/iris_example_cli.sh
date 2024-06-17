@@ -1,0 +1,1 @@
+python3 main.py --onnx-file-name my_image_classifier.onnx --precision float
