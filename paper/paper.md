@@ -146,14 +146,14 @@ Add new activation function named Leaky Relu:
 ```python
         if(self.activation_function == "LRelu"):
             activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x)
-{
-if(0.01*x < x){
-return x;}
-else{
-return 0.01*x;
-}
-}
-\n"
+            {
+              if(0.01*x < x){
+                return x;}
+              else{
+                return 0.01*x;
+              }
+            }
+            \n"
 ```
 
 Users have to declare dactivate function for backpropagation!
