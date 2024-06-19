@@ -204,7 +204,7 @@ out_buffer
 ```
 
 # Results
-![alt text](https://github.com/umutcanaltin/fpgai_compiler/blob/main/results.png?raw=true)
+![Results Table](https://github.com/umutcanaltin/fpgai_compiler/blob/main/paper/results.png?raw=true)
 # Future work
 
 Our current engine supports basic architectures like feedforward and convolutional layers. Moving forward, we plan to include more complex models such as recurrent neural networks (RNNs). Additionally, our design is flexible enough to easily integrate new hardware optimization techniques. This adaptability ensures our engine remains at the forefront of FPGA-accelerated deep learning advancements in academia and industry.
