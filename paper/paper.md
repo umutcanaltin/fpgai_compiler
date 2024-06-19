@@ -207,6 +207,8 @@ out_buffer
 ![Results Table](https://github.com/umutcanaltin/fpgai_compiler/blob/main/paper/results.png?raw=true)
 
 Architecture Details for NN : 3 Neurons -> 3 Neurons -> 3 Neurons
+
+
 Architecture Details for CNN :28x28 input ->  2, 19x19 Convolution -> 10  Neurons
 
 
