@@ -230,7 +230,7 @@ Our current engine supports basic architectures like feedforward and convolution
 
 # How to cite
 
-If you are using FPGAI for your work, please cite this paper.
+If you are using FPGAI for your work, please cite this paper. The authors also welcome contributions and collaborations to accelerate the impact and use of our FPGAI engine.
 
 # Acknowledgments
 
