@@ -41,7 +41,7 @@ Our FPGAI engine provides support for essential DL operations such as feedforwar
 
 Our engine supports DMA (Direct Memory Access) usage for efficient data (image stream) transfer and BRAM (Block RAM) usage for storing weights and parameters of the model. DMA usage enables data transfer  between different memory locations, which is vital for accelerating data-intensive tasks. Meanwhile, BRAM usage ensures efficient utilization of on-chip memory resources, reducing access latency and improving overall performance. By leveraging DMA and BRAM usage, our engine optimizes resource utilization, maximizing hardware efficiency and facilitating faster and more efficient execution of deep learning tasks on FPGA platforms.
 
-## Conversion of ONNX files
+## Deployment of ONNX files via the console
 
 The following example shows how to convert a Pytorch model to ONNX. The ONNX file is subsequently converted for deployment on FPGA.
 
@@ -77,9 +77,9 @@ onnx_program.save("my_image_classifier.onnx")
 python3 main.py --onnx-file-name my_image_classifier.onnx --precision float  --dma-usage True
 ```
 
-## Usage of the FPGAI Python libary
+## Deployment of ONNX files in Python
 
-The following example shows how a model can be deployed using the FPGAI Python library.
+The following example shows how ONNX models can be deployed on FPGA in Python using the FPGAI engine.
 
 ```python
 from fpgai_engine import fpgai_engine
@@ -94,14 +94,9 @@ from fpgai_engine import fpgai_engine
 
 ```
 
-## Usage with Python library
+## Deployment of Pytorch models in Python
 
-Important notes for using Python library:
-- One has to create self.layers inside the model object and the list of the layers should be in order. The library will compile these layers in order.
-
-- The default activation function for a layer is a linear function. One should declare the defined activation function with an argument when calling the layer class.
-
-- The user can export cpp or HLS files from the model. HLS files include pragmas differently from cpp files.
+The following example shows how Pytorch models can be deployed on FPGA in Python using the FPGAI engine.
 
 ```python
 from architectures.convolution_layer import ConvolutionLayer
@@ -135,7 +130,14 @@ class My_Model():
 
 ```
 
+Important notes for using the Python library:
+- One has to create self.layers inside the model object and the list of the layers should be in order. The library will compile these layers in order.
+- The default activation function for a layer is a linear function. One should declare the defined activation function with an argument when calling the layer class.
+- The user can export cpp or HLS files from the model. HLS files include pragmas differently from cpp files.
+
 ## How to change or add functions
+
+The following example shows how functions can be changed or added.
 
 Linear Activation function without pointer declaration:
 location: /activation/activation_functions.py
@@ -144,7 +146,6 @@ location: /activation/activation_functions.py
             activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"+self.precision + " dactivate_"+self.name_of_layer+"( "+self.precision +" x) { return 1; }"
 ```
 Add new activation function named Leaky Relu:
-
 ```python
         if(self.activation_function == "LRelu"):
             activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x)
