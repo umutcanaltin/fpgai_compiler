@@ -1,8 +1,8 @@
 ---
-title: 'fpgai, Engine for Neural Network Training and Inference'
+title: 'FPGAI Engine for Neural Network Training and Inference'
 tags:
   - acceleration
-  - fpga
+  - FPGA
   - deep learning
   - system on chip
   - compilers
@@ -21,12 +21,12 @@ date: 22 July 2024
 bibliography: paper.bib
 ---
 # Summary
-Deep learning (DL) has revolutionized diverse fields, but the computational demands of DL models present challenges for real-time inference and training. Field-programmable gate arrays (FPGAs) offer a solution due to their flexibility, yet designing for FPGAs is complex. We introduce a novel software framework converting ONNX models to FPGA implementations, optimized for on-chip inference and training. Leveraging ONNX's interoperability, our framework integrates DL models with FPGA hardware, supporting various architectures. This advancement represents a comprehensive approach, addressing both inference and training, enabling DL practitioners to leverage FPGA hardware effectively.
+Deep learning (DL) has revolutionized diverse fields, but the computational demands of DL models present challenges for real-time inference and training. Field-programmable gate arrays (FPGAs) offer a solution due to their flexibility, yet designing for FPGAs is complex. We introduce introduce our FPGA for AI (FPGAI) engine as a novel software framework, converting ONNX models to FPGA implementations that are optimized for on-chip inference and training. Leveraging ONNX's interoperability, our framework integrates DL models with FPGA hardware, supporting various architectures. This advancement represents a comprehensive approach, addressing both inference and training, enabling DL practitioners to leverage FPGA hardware effectively.
 ![fpgai overview](hls.jpg)
 
 # Statement of Need
 
-Designing an FPGA with VHDL or HLS presents significant challenges due to the complexity of both the languages and the hardware. It requires a deep understanding of digital logic and FPGA architectures, making it challenging to translate high-level design concepts into efficient architecture. Optimizing performance and minimizing power consumption involves intricate trade-offs between design complexity and resource utilization. 
+Designing an FPGA with VHDL or HLS presents significant challenges due to the complexity of both the languages and the hardware. It requires a deep understanding of digital logic and FPGA architectures, making it challenging to translate high-level AI models and algorithms into efficient architectures. Optimizing performance and minimizing power consumption involves intricate trade-offs between design complexity and resource utilization. 
 
 Debugging FPGA designs can also be challenging, as traditional software debugging techniques may not apply directly to hardware designs. Additionally, FPGA development requires a steep learning curve, demanding time and effort to acquire proficiency in designing FPGA architecture. Overall, designing hardware on FPGA requires expertise, patience, and a systematic approach to overcome these challenges.
 
@@ -35,7 +35,7 @@ In the realm of FPGA-based deep learning engines, most tools[source:1] [source:2
 In response to the growing demand within academic and industrial circles, there is a clear need for a simplified method for deploying DL models on FPGAs. This need is increasingly evident when surveying[source:3] the existing literature and observing the challenges faced by researchers and practitioners alike in effectively utilizing FPGA-accelerated DL solutions.
 
 # Supported Features
-Our engine provides support for essential DL operations such as feedforward processing and convolution. Feedforward operations enable the flow of data through neural network layers from input to output, facilitating tasks like classification and regression. Convolution operations, on the other hand, are fundamental for tasks involving spatial relationships, such as image processing and feature extraction. With our support for these operations, users can efficiently implement a wide range of deep learning models and applications, empowering them to address complex tasks effectively.
+Our FPGAI engine provides support for essential DL operations such as feedforward processing and convolution. Feedforward operations enable the flow of data through neural network layers from input to output, facilitating tasks like classification and regression. Convolution operations, on the other hand, are fundamental for tasks involving spatial relationships, such as image processing and feature extraction. With our support for these operations, users can efficiently implement a wide range of deep learning models and applications, empowering them to address complex tasks effectively.
 
 Our engine supports DMA (Direct Memory Access) usage for efficient data (image stream) transfer and BRAM (Block RAM) usage for storing weights and parameters of the model. DMA usage enables data transfer  between different memory locations, which is vital for accelerating data-intensive tasks. Meanwhile, BRAM usage ensures efficient utilization of on-chip memory resources, reducing access latency and improving overall performance. By leveraging DMA and BRAM usage, our engine optimizes resource utilization, maximizing hardware efficiency and facilitating faster and more efficient execution of deep learning tasks on FPGA platforms.
 
@@ -76,7 +76,7 @@ python3 main.py --onnx-file-name my_image_classifier.onnx --precision float  --d
 # Modular Usage and Optimization Configuration
 
 
-## Usage with ONNX file
+## Example Usage with ONNX file
 
 ```python
 from fpgai_engine import fpgai_engine
@@ -95,11 +95,11 @@ from fpgai_engine import fpgai_engine
 ## Usage without ONNX file as python library
 
 Important notes for using Python library:
-- Have to create self.layers inside the model object and the list of the layers should be in order. The library will compile these layers in order.
+- One has to create self.layers inside the model object and the list of the layers should be in order. The library will compile these layers in order.
 
-- Default activation function for a layer is a linear function. You should declare the defined activation function with an argument when you call the layer class.
+- The default activation function for a layer is a linear function. One should declare the defined activation function with an argument when calling the layer class.
 
-- User can export cpp or HLS files from the model. HLS files include pragmas differently from cpp files.
+- The user can export cpp or HLS files from the model. HLS files include pragmas differently from cpp files.
 
 ```python
 from architectures.convolution_layer import ConvolutionLayer
@@ -133,7 +133,7 @@ class My_Model():
 
 ```
 
-## How to Change  or Add Functions (Activation example)
+## How to Change or Add Functions (Activation example)
 
 Linear Activation function without pointer declaration:
 location: /activation/activation_functions.py
@@ -229,7 +229,7 @@ Our current engine supports basic architectures like feedforward and convolution
 
 # How to cite
 
-If you are using fpgai for your work, please cite this paper.
+If you are using FPGAI for your work, please cite this paper.
 
 # Acknowledgments
 
