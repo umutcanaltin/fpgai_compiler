@@ -4,9 +4,10 @@ from utils.random_generator import Random_Matrix_Generator
 class DenseLayer():
     def __init__(self,ai_model, precision = "float",number_of_kernels = None, weights = None, mode="train", learning=False, bias = False, 
                  name_of_layer="dense_layer", is_first_layer= False, activation_function = "linear", inject_weights= False): 
+        
         self.learning = learning
         self.bias = bias
-        self.weigts = weights
+        self.weights = weights
         self.name_of_layer = name_of_layer
         self.is_first_layer = is_first_layer
         self.activation_function = activation_function
@@ -23,11 +24,12 @@ class DenseLayer():
             self.hls_file_string += self.get_hls_first_layer_initializer()
         self.hls_file_string += self.get_hls_layer_initializers()
         self.hls_file_string += self.activation_function_obj.get_activation_function()
+        #self.hls_file_string += self.get_functions()
         return(self.hls_file_string)
         
     def get_weigth_shape(self):
-         input_shape = self.weigts.shape[1]
-         output_shape = self.weigts.shape[0]
+         input_shape = self.weights.shape[1]
+         output_shape = self.weights.shape[0]
          return (input_shape, output_shape)
     
     def get_hls_learning_rate_initializer(self):
@@ -73,6 +75,9 @@ class DenseLayer():
     
 
     def get_input_shape(self):
-        return self.weigts.shape()
+        return self.weights.shape()
+    
+    def get_functions():
+        return ""
 
     

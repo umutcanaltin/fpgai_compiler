@@ -5,16 +5,14 @@ from implementations.implementations import dense_layer_imp, conv_layer_imp
 import onnx
 
 class fpgai_engine():
-    def __init__(self,learning_rate= 0.1,mode="inference",onnx_file_name = "my_image_classifier.onnx", precision = "float64",vitis_hls_location= "default",
-                 hls_project_name="default",hls_solution_name="default",hardware_optimization = False, use_BRAM = True, 
-                 use_DMA = True,user_DDR= True,memory_option_weights="default"):
-        self.use_BRAM = use_BRAM
+    def __init__(self,learning_rate= 0.1,mode="inference",onnx_file_name = "my_image_classifier.onnx", precision = "float",vitis_hls_location= "default",
+                 hls_project_name="default",hls_solution_name="default"):
+        self.main_func_name = "deeplearn"
+        self.precision = precision
         self.number_of_input_nodes = 4
         self.number_of_output_nodes = 10
         self.learning_rate = learning_rate
         self.mode = mode
-        self.use_DMA = use_DMA
-        self.hardware_optimization = hardware_optimization
         self.onnx_file_name = onnx_file_name
         self.model = onnx.load(self.onnx_file_name)
         verify_str = self.verify_onnx_model()
@@ -74,7 +72,7 @@ class fpgai_engine():
                         new_implementation = dense_layer_imp().get_hls_function()
                         self.layer_function_implementations += new_implementation
                         first_dense_layer = False 
-                    new_layer = DenseLayer(ai_model=self, activation_function=self.layers[i+1][1], weights=self.weights[i], is_first_layer=first_layer, name_of_layer="layer_"+str(int(i/2)))
+                    new_layer = DenseLayer(ai_model=self, activation_function=self.layers[i+1][1], weights=layer_weights,bias=layer_bias, is_first_layer=first_layer, name_of_layer="layer_"+str(int(i/2)))
                     self.obj_arch_rep.append(new_layer)
                 else:
                     raise Exception
@@ -91,10 +89,40 @@ class fpgai_engine():
     def generate_hls_codes(self):
         generated_hls_codes = self.layer_function_implementations
         for i in range(len(self.obj_arch_rep)):
-            generated_hls_codes += self.obj_arch_rep[i].get_hls_file_string() 
+            generated_hls_codes += self.obj_arch_rep[i].get_hls_file_string()
+       
+        generated_hls_codes += self.construct_main_function()
+        generated_hls_codes += self.get_pragmas()
         return generated_hls_codes         
 
             
+    def construct_main_function(self):
+        main_func_string = ""
+        main_func_string += "void " + self.main_func_name + "( "
+        for i in range(len(self.obj_arch_rep)):
+            if(isinstance(self.obj_arch_rep[i], ConvolutionLayer)):
+                main_func_string += self.precision + " MEM_"+ str(i) +"["+self.obj_arch_rep[i]
+                #dolacak
+
+            if(isinstance(self.obj_arch_rep[i], DenseLayer)):
+                main_func_string += self.precision + " MEM_"+ str(i) +"["+str(len(self.obj_arch_rep[i].weights)*len(self.obj_arch_rep[i].weights[0]) + len(self.obj_arch_rep[i].bias)) + "],"
+                
+        if(self.mode == "inference"):
+            main_func_string += self.precision+"& output_var){" + "\n"
+        if(self.mode == "training"):
+            main_func_string += " int mode_var, "
+            main_func_string += self.precision+"& output_var{"+ "\n"
+                    #todo list input eklenecek
+        return main_func_string
+    
+
+    def get_pragmas(self):
+        pragma_string = "#pragma HLS INTERFACE ap_ctrl_none port=return \n"
+        for i in range(len(self.obj_arch_rep)):
+            pragma_string += "#pragma HLS INTERFACE bram port =  MEM_" + str(i) + "\n"
+        return pragma_string
+
+
     
     def compile_hls_test(self):
         return 0

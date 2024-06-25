@@ -8,8 +8,8 @@ class Activation_functions():
         activation_string = ""
         if(self.activation_function == "linear"):
             self.used_activation_funcs.append("linear")
-            activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"+self.precision + " dactivate_"+self.name_of_layer+"( "+self.precision +" x) { return 1; }"
+            activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"+self.precision + " dactivate_"+self.name_of_layer+"( "+self.precision +" x) { return 1; }\n"
         if(self.activation_function == "relu"):
             self.used_activation_funcs.append("relu")
-            activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"+self.precision +" dactivate_"+self.name_of_layer+"( "+self.precision +" x) { return 1; }"
+            activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"+self.precision +" dactivate_"+self.name_of_layer+"( "+self.precision +" x) { return 1; }\n"
         return activation_string

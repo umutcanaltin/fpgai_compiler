@@ -108,8 +108,7 @@ void change_weights(float * layer_input,float * layer_delta, float * layer_weigh
 
 void deeplearn( int MEM_1[6],int input_var_1 ,int input_var_2 ,int mode_var ,int real_output_var ,int& output_var){
 #pragma HLS INTERFACE ap_ctrl_none port=return 
-
-    #pragma HLS INTERFACE s_axilite port= input_var_1
+#pragma HLS INTERFACE s_axilite port= input_var_1
 #pragma HLS INTERFACE s_axilite port= input_var_2
 #pragma HLS INTERFACE s_axilite port= mode_var
 #pragma HLS INTERFACE s_axilite port= real_output_var
