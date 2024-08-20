@@ -1,16 +1,30 @@
 from google.protobuf.json_format import MessageToDict
 import onnx
 from onnx import numpy_helper
+import numpy as np
 
-def get_model_weights(model):
+def quantize_weights(weights_list, scale_factor):
+    quantized_weights = []
+    for weight in weights_list:
+        # Scale and quantize weights
+        scaled_weights = weight * scale_factor
+        quantized_weights.append(np.round(scaled_weights).astype(np.int8))  # Convert to int8
+    
+    return quantized_weights
+
+def get_model_weights(model, quantization = False):
     weight_list= []
     for weights in model.graph.initializer:      
         weight_list.append(numpy_helper.to_array(weights))
+    
+    if(quantization):
+        weight_list = quantize_weights(weights_list=weight_list, scale_factor=127)
     return weight_list
 
 def get_model_arch(model):
     layer_list= []
-    is_first_layer = False
+    for layers in model.graph.node:
+        print(MessageToDict(layers))
     for layers in model.graph.node:
         not_a_layer = False
         dictionary_layer = MessageToDict(layers)
@@ -31,6 +45,10 @@ def get_model_arch(model):
                     try:
                         if(dictionary_layer["output"][0][:4]=="relu"):
                             activation_func = "relu"
+                            layer_info = [not not_a_layer, activation_func]
+                            layer_list.append(layer_info)
+                        if(dictionary_layer["output"][0][:3]=="sig"):
+                            activation_func = "sigmoid"
                             layer_info = [not not_a_layer, activation_func]
                             layer_list.append(layer_info)
                          

@@ -5,6 +5,8 @@ import argparse
 parser = argparse.ArgumentParser(description='fpgai ONNX to SoC Engine')
 parser.add_argument('--mode', type=str, default='inference',
                     help='ONNX file name with path')
+parser.add_argument('--quantization', type=bool, default=True  ,
+                    help='ONNX file name with path')
 parser.add_argument('--learning-rate', type=float, default=0.1,
                     help='ONNX file name with path')
 parser.add_argument('--learning-rate-type', type=str, default='fixed',
@@ -13,7 +15,7 @@ parser.add_argument('--learning-rate-type', type=str, default='fixed',
 parser.add_argument('--training-mode', type=str, default='0',
                     help='ONNX file name with path')
 
-parser.add_argument('--onnx-file-name', type=str, default='my_image_classifier.onnx',
+parser.add_argument('--onnx-file-name', type=str, default='image_classifier_1.onnx',
                     help='ONNX file name with path')
 parser.add_argument('--precision', type=str, default="float",help='ONNX file name with path')
 parser.add_argument('--vitis-hls-location', type=str, default='',help='location of vitis HLS files')
@@ -32,14 +34,14 @@ args = parser.parse_args()
 if __name__ == "__main__":
     _onnx_file_name = args.onnx_file_name
     _precision = args.precision
+    _quantization = args.quantization
     _vitis_hls_location = args.vitis_hls_location
     _hls_project_name = args.hls_project_name
     _hls_solution_name = args.hls_solution_name
    
     
 
-    ai_model = fpgai_engine(onnx_file_name=_onnx_file_name, precision = _precision,vitis_hls_location=_vitis_hls_location, hls_project_name= _hls_project_name,
-                        hls_solution_name= _hls_solution_name)
+    ai_model = fpgai_engine(onnx_file_name=_onnx_file_name, precision = _precision, quantization = _quantization)
 
 
     

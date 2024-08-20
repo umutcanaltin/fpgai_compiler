@@ -1,4 +1,4 @@
-architecture_ = [2,2]
+architecture_ = [2,2,3,4]
 activation_func = "linear" # linear etc.
 precision = "int"
 mode = 'training' #/ inference / training + inference
@@ -374,7 +374,7 @@ deeplearn_end_string = """
 }
 """
 file_string += deeplearn_end_string
-print(file_string)
+
 
 f = open("deneme.txt", "a")
 f.write(file_string)

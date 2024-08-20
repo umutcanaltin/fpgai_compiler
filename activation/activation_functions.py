@@ -4,12 +4,20 @@ class Activation_functions():
         self.precision = precision
         self.name_of_layer = name_of_layer
         self.used_activation_funcs=[]
-    def get_activation_function(self):
+    def get_activation_function(self,mode):
         activation_string = ""
         if(self.activation_function == "linear"):
             self.used_activation_funcs.append("linear")
-            activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"+self.precision + " dactivate_"+self.name_of_layer+"( "+self.precision +" x) { return 1; }\n"
+            if(mode == "inference"):
+                activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"
+            if(mode == "training"):
+                activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"+self.precision + " dactivate_"+self.name_of_layer+"( "+self.precision +" x) { return 1; }\n"
+
         if(self.activation_function == "relu"):
             self.used_activation_funcs.append("relu")
-            activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"+self.precision +" dactivate_"+self.name_of_layer+"( "+self.precision +" x) { return 1; }\n"
+            if(mode == "inference"):
+                activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"
+            if(mode == "training"):
+                activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"+self.precision +" dactivate_"+self.name_of_layer+"( "+self.precision +" x) { return 1; }\n"
+
         return activation_string
