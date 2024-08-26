@@ -42,7 +42,7 @@ class MLPModel(nn.Module):
       return output
 
 model = MLPModel()
-tensor_x = torch.rand((97, 8), dtype=torch.float32)
+tensor_x = torch.rand((1, 8), dtype=torch.float32)
 onnx_program = torch.onnx.dynamo_export(model, tensor_x)
 onnx_program.save("mlp.onnx")
 

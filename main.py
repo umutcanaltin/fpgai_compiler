@@ -15,7 +15,7 @@ parser.add_argument('--learning-rate-type', type=str, default='fixed',
 parser.add_argument('--training-mode', type=str, default='0',
                     help='ONNX file name with path')
 
-parser.add_argument('--onnx-file-name', type=str, default='image_classifier_1.onnx',
+parser.add_argument('--onnx-file-name', type=str, default='mlp.onnx',
                     help='ONNX file name with path')
 parser.add_argument('--precision', type=str, default="float",help='ONNX file name with path')
 parser.add_argument('--vitis-hls-location', type=str, default='',help='location of vitis HLS files')
