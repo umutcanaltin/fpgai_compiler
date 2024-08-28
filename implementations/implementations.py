@@ -6,14 +6,11 @@ class dense_layer_imp():
         
         forward_pass = "void dense_forward_"+self.name_of_layer+"( " +self.precision+" * layer_input, " + self.precision + "* layer_bias, "+self.precision+" * layer_weights , "+self.precision+""" * layer_output ,int number_of_input_nodes, int number_of_output_nodes){
 
-   for (int i=0; i<number_of_output_nodes; i++) {
-
-      int activation = *(layer_bias+i);
-      for (int j=0; j<number_of_input_nodes; j++) {
-
-         activation += *(layer_weights + number_of_output_nodes*i + j) * (*(layer_input + i));
-
-      }
+    for (int i = 0; i < number_of_output_nodes; i++) {
+        float activation = layer_bias[i];  // Apply bias to the activation
+        for (int j = 0; j < number_of_input_nodes; j++) {
+            activation += layer_weights[number_of_input_nodes * i + j] * layer_input[j];
+        }
       *(layer_output + i)= activate_"""+self.name_of_layer+"""(activation);
 
    }

@@ -17,7 +17,7 @@ from utils.add_linear_act import add_linear_activation
 #precisions = int , float
 
 class fpgai_engine():
-    def __init__(self,learning_rate= 0.1,mode="inference",onnx_file_name = "my_image_classifier.onnx", precision = "float", quantization=False):
+    def __init__(self,learning_rate= 0.1,mode="inference",onnx_file_name = "mlp.onnx", precision = "float", quantization=False):
         self.main_func_name = "deeplearn"
         self.quantization = quantization
         if(self.quantization):
@@ -32,6 +32,7 @@ class fpgai_engine():
         if (verify_str!= 1):
             raise Exception(verify_str)
         self.layers = self.get_model_arch()
+        print(self.layers)
         self.weights= self.get_weights()
         self.layer_function_implementations = ""
 
@@ -41,7 +42,6 @@ class fpgai_engine():
         self.number_of_input_nodes = get_number_of_input_nodes(self)
         self.number_of_output_nodes = get_number_of_output_nodes(self)
         generated_hls_code = self.generate_hls_codes()
-        print(generated_hls_code)
         write_cpp_file("new_cpp_file",generated_hls_code )
       
     def verify_onnx_model(self):

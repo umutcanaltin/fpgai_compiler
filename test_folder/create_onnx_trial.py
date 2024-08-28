@@ -28,22 +28,23 @@ onnx_program.save("my_image_classifier.onnx")
 import torch
 import torch.nn as nn
 
+import torch
+import torch.nn as nn
+
 class MLPModel(nn.Module):
-  def __init__(self):
-      super().__init__()
-      self.fc0 = nn.Linear(8, 8, bias=True)
-      self.fc1 = nn.Linear(8, 4, bias=True)
+    def __init__(self):
+        super().__init__()
+        self.fc0 = nn.Linear(8, 8, bias=True)
+        self.fc1 = nn.Linear(8, 4, bias=True)
 
+    def forward(self, tensor_x: torch.Tensor):
+        tensor_x = self.fc0(tensor_x)
+        output = self.fc1(tensor_x)
+        return output
 
-  def forward(self, tensor_x: torch.Tensor):
-      tensor_x = self.fc0(tensor_x)
-      tensor_x = torch.sigmoid(tensor_x)
-      output = self.fc1(tensor_x)
-      return output
-
-model = MLPModel()
-tensor_x = torch.rand((1, 8), dtype=torch.float32)
-onnx_program = torch.onnx.dynamo_export(model, tensor_x)
+torch_model = MLPModel()
+torch_input = torch.randn(1, 1, 1, 8)
+onnx_program = torch.onnx.dynamo_export(torch_model, torch_input)
 onnx_program.save("mlp.onnx")
 
 

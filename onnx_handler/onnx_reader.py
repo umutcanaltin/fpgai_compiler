@@ -14,19 +14,19 @@ def quantize_weights(weights_list, scale_factor):
 
 def get_model_weights(model, quantization = False):
     weight_list= []
-    for weights in model.graph.initializer:      
+    for weights in model.graph.initializer:   
         weight_list.append(numpy_helper.to_array(weights))
-    
+
     if(quantization):
         weight_list = quantize_weights(weights_list=weight_list, scale_factor=127)
     return weight_list
 
 def get_model_arch(model):
     layer_list= []
-    for layers in model.graph.node:
-        print(MessageToDict(layers))
+
     for layers in model.graph.node:
         not_a_layer = False
+        print(layers)
         dictionary_layer = MessageToDict(layers)
         try:
             if(not (dictionary_layer["output"][0][:2] == "co" or dictionary_layer["output"][0][:2]=="fc")):

@@ -4,11 +4,13 @@ from implementations.implementations import dense_layer_imp, conv_layer_imp
 def generate_obj_rep(model):
     first_layer= True
     last_layer = False
-    print(model.layers)
+
+    
     for i in range(len(model.layers)):
         if(model.layers[i][0]):
             if(i!=0):
                 first_layer = False
+         
             layer_weights = model.weights[i]
             layer_bias = model.weights[i+1]
             #skip the activation layer

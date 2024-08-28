@@ -5,7 +5,7 @@ import argparse
 parser = argparse.ArgumentParser(description='fpgai ONNX to SoC Engine')
 parser.add_argument('--mode', type=str, default='inference',
                     help='ONNX file name with path')
-parser.add_argument('--quantization', type=bool, default=True  ,
+parser.add_argument('--quantization', type=bool, default=False  ,
                     help='ONNX file name with path')
 parser.add_argument('--learning-rate', type=float, default=0.1,
                     help='ONNX file name with path')

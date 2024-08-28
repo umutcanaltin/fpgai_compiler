@@ -8,6 +8,7 @@ class DenseLayer():
         self.learning = learning
         self.bias = bias
         self.weights = weights
+
         self.name_of_layer = name_of_layer
         self.is_first_layer = is_first_layer
         self.is_last_layer = is_last_layer
@@ -61,7 +62,7 @@ class DenseLayer():
         if(self.mode =="inference"):
             layer_initializer = "int "+self.name_of_layer+"_input["+str(self.input_shape)+"];\n"
             layer_initializer += "int "+self.name_of_layer+"_output["+str(self.output_shape)+"];\n"
-            layer_initializer += self.precision +' '+ self.name_of_layer +'_weights[' + str(self.input_shape* self.output_shape) + "] = {" 
+            layer_initializer += self.precision +' '+ self.name_of_layer +'_weights[' + str(self.input_shape* self.output_shape) + "] = {"
             for i in range(len(self.weights)):
                 for k in range(len(self.weights[i])):
                     layer_initializer += str(self.weights[i][k])
