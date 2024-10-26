@@ -9,16 +9,15 @@ setup(
     version = "0.0.1",
     author = "Umut Can Altin",
     author_email = "umut.altin@donders.ru.nl",
-    description = ("An demonstration of how to create, document, and publish "
-                                   "to the cheese shop a5 pypi.org."),
-    license = "BSD",
-    keywords = "example documentation tutorial",
-    url = "http://packages.python.org/an_example_pypi_project",
+    description = ("FPGAI HLS Engine"),
+    license = "MIT",
+    keywords = "fpga,hls,deep learning",
+    url = "",
     packages=['dl_hls_engine', 'tests'],
     long_description=read('README'),
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Topic :: Utilities",
-        "License :: OSI Approved :: BSD License",
+        "License :: MIT License",
     ],
 )

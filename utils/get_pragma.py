@@ -14,5 +14,5 @@ def get_pragmas(model):
 #pragma HLS INTERFACE axis port=outStream \n
 #pragma HLS INTERFACE axis port=inStream  \n
 """
-    pragma_string += "#pragma HLS INTERFACE ap_ctrl_none port=return \n"
+        pragma_string += "#pragma HLS INTERFACE ap_ctrl_none port=return \n"
     return pragma_string

@@ -14,9 +14,10 @@ def quantize_weights(weights_list, scale_factor):
 
 def get_model_weights(model, quantization = False):
     weight_list= []
-    for weights in model.graph.initializer:   
-        weight_list.append(numpy_helper.to_array(weights))
-
+    for weights in model.graph.initializer:
+        wg = numpy_helper.to_array(weights)
+        weight_list.append(wg)
+        print(wg.shape)
     if(quantization):
         weight_list = quantize_weights(weights_list=weight_list, scale_factor=127)
     return weight_list
@@ -26,39 +27,55 @@ def get_model_arch(model):
 
     for layers in model.graph.node:
         not_a_layer = False
-        print(layers)
         dictionary_layer = MessageToDict(layers)
-        try:
-            if(not (dictionary_layer["output"][0][:2] == "co" or dictionary_layer["output"][0][:2]=="fc")):
-                not_a_layer= True
-            if(not not_a_layer):
+
+
+        if(not (dictionary_layer["output"][0][:3] == "/co" or dictionary_layer["output"][0][:3]=="/fc" or dictionary_layer["output"][0][:2] == "co" or dictionary_layer["output"][0][:2]=="fc" or dictionary_layer["name"][:3] == "/co" or dictionary_layer["name"][:3]=="/fc" or dictionary_layer["name"][:2] == "co" or dictionary_layer["name"][:2]=="fc")):
+            not_a_layer= True
+          
+        if(not not_a_layer):
+            layer_stride = []
+            layer_kernel_shape =[]
+            layer_type = "dense"
+            
+            
+            if(dictionary_layer["output"][0][:3] == "/co" or dictionary_layer["output"][0][:2] == "co"):
+                layer_type = "conv"
+                layer_attribute = dictionary_layer["attribute"]
+                for k in range(len(layer_attribute)):
+                    if(layer_attribute[k]["name"] == "strides"):
+                        layer_stride = layer_attribute[k]['ints']
+                    if(layer_attribute[k]["name"] == "kernel_shape"):
+                        layer_kernel_shape = layer_attribute[k]['ints']
+               
+            layer_bias = dictionary_layer["input"][2]
+            if(dictionary_layer["input"][1][:3]=="/co" or dictionary_layer["input"][1][:3]=="/fc" or dictionary_layer["input"][1][:2]=="co" or dictionary_layer["input"][1][:2]=="fc"  ):
                 layer_weight = dictionary_layer["input"][1]
-                layer_bias = dictionary_layer["input"][2]
-                layer_type = "dense"
-                if(dictionary_layer["output"][0][:2] == "co"):
-                    layer_type = "conv"
-                layer_info = [not not_a_layer,layer_type, layer_weight, layer_bias]
-                layer_list.append(layer_info)
-            if(not_a_layer):
-                if(dictionary_layer["input"][0][:2] == "co" or dictionary_layer["input"][0][:2]=="fc"):
+            else:
+                layer_weight = layer_bias[:-4]+"weight"
+
+            layer_info = [not not_a_layer,layer_type, layer_weight, layer_bias,layer_kernel_shape,layer_stride]
+            layer_list.append(layer_info)
+        if(not_a_layer):
+            if(dictionary_layer["input"][0][:3] == "/co" or dictionary_layer["input"][0][:3]=="/fc" or dictionary_layer["input"][0][:2] == "co" or dictionary_layer["input"][0][:2]=="fc"):
                     
-                    try:
-                        if(dictionary_layer["output"][0][:4]=="relu"):
-                            activation_func = "relu"
-                            layer_info = [not not_a_layer, activation_func]
-                            layer_list.append(layer_info)
-                        if(dictionary_layer["output"][0][:3]=="sig"):
-                            activation_func = "sigmoid"
-                            layer_info = [not not_a_layer, activation_func]
-                            layer_list.append(layer_info)
+                try:
+                    if(dictionary_layer["output"][0][:5]=="/Relu"):
+                        activation_func = "relu"
+                        layer_info = [not not_a_layer, activation_func]
+                        layer_list.append(layer_info)
+                    if(dictionary_layer["output"][0][:4]=="relu"):
+                        activation_func = "relu"
+                        layer_info = [not not_a_layer, activation_func]
+                        layer_list.append(layer_info)
+                    if(dictionary_layer["output"][0][:3]=="sig"):
+                        activation_func = "sigmoid"
+                        layer_info = [not not_a_layer, activation_func]
+                        layer_list.append(layer_info)
                          
-                    except:
-                        raise Exception('Our tool does not support this activation function!')
-        except:
-            #not in the scope for our tool!
-            continue
-        
-        #layer_list.append(MessageToDict(layers)["input"])
+                except:
+                    raise Exception('Our tool does not support this activation function!')
+
     
     return layer_list
 

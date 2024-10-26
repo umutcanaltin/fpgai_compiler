@@ -48,6 +48,9 @@ onnx_program = torch.onnx.dynamo_export(torch_model, torch_input)
 onnx_program.save("mlp.onnx")
 
 
+
+
+
 class MyModel1(nn.Module):
     def __init__(self):
         super(MyModel1, self).__init__()
