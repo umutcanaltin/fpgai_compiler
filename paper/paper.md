@@ -23,7 +23,7 @@ bibliography: paper/paper.bib
 # Summary
 Deep learning (DL) has revolutionized diverse fields, but the computational demands of DL models present challenges for real-time inference and training. Field-programmable gate arrays (FPGAs) offer a solution due to their flexibility, yet designing for FPGAs is complex. We introduce our FPGA for AI (FPGAI) engine as a novel software framework for converting AI models to FPGA implementations that are optimized for on-chip inference and training (see Figure 1). Leveraging ONNX's interoperability, our framework integrates DL models with FPGA hardware, supporting various architectures. This advancement represents a comprehensive approach, addressing both inference and training, enabling DL practitioners to leverage FPGA hardware effectively.
 
-![fpgai overview](hls.jpg)
+![fpgai overview](assets/hls.jpg)
 Figure 1: FPGAI Engine.
 
 # Statement of need
@@ -222,7 +222,7 @@ out_buffer
 ```
 
 # Results
-![Results Table](https://github.com/umutcanaltin/fpgai_compiler/blob/main/paper/results.png?raw=true)
+![Results Table](paper/assets/results.png?raw=true)
 Table 1: Performance and resource usage for running backpropagation on FPGA via the FPGAI engine.
 
 Table 1 provides validation results for our FPGAI engine. Results show performance and resource usage when running feedforward and convolutional neural networks on a ZYNQ FPGA board (UA: ADD PL DETAILS). The feedforward neural network consists of 3x3x3 neurons. The convolutional neural network consists of 28x28->2 and 19x19x2->10 convolutional layers.
