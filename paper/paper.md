@@ -222,7 +222,7 @@ out_buffer
 ```
 
 # Results
-![Results Table](https://github.com/umutcanaltin/fpgai_compiler/blob/main/paper/results.png?raw=true)
+![Results Table](https://github.com/umutcanaltin/fpgai_compiler/blob/main/paper/results.PNG?raw=true)
 Table 1: Performance and resource usage for running backpropagation on FPGA via the FPGAI engine.
 
 Table 1 provides validation results for our FPGAI engine. Results show performance and resource usage when running feedforward and convolutional neural networks on a ZYNQ FPGA board (UA: ADD PL DETAILS). The feedforward neural network consists of 3x3x3 neurons. The convolutional neural network consists of 28x28->2 and 19x19x2->10 convolutional layers.
