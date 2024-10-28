@@ -12,7 +12,7 @@ jobs:
         uses: openjournals/openjournals-draft-action@master
         with:
           journal: joss  # or 'jose' if submitting to JOSE
-          paper-path: paper.md  # Update this if your paper file has a different name
+          paper-path: paper/paper.md  # Update this if your paper file has a different name
 
       - name: Upload PDF
         uses: actions/upload-artifact@v4
