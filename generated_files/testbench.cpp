@@ -10,7 +10,7 @@ int main() {
     hls::stream<floatSdCh> outStream;
 
     // Initialize an array of input data as integers 
-int input_data[number_of_inputs+number_of_outputs+1] = {1000000,2000000,3000000,4000000,5000000,6000000,7000000,8000000,9000000,10000000,11000000,12000000,13000000,14000000,15000000,16000000,17000000,18000000,19000000,20000000,20999999,22000000,22999999,23999998,25000000,1000000,2000000,3000000,4000000,5000000,6000000,7000000,8000000,9000000,10000000,0};
+int input_data[number_of_inputs+number_of_outputs+1] = {1000000,2000000,3000000,4000000,5000000,6000000,7000000,8000000,1000000,2000000,3000000,4000000,5000000,6000000,7000000,8000000,9000000,10000000,0};
 
   // Write the integer input data to the stream
     for (int i = 0; i < number_of_inputs+number_of_outputs+1; i++) {
@@ -39,7 +39,7 @@ int input_data[number_of_inputs+number_of_outputs+1] = {1000000,2000000,3000000,
     }
 
     // Retrieve the output and convert to float
-    for (int i = 0; i <10; i++) {
+    for (int i = 0; i <108; i++) {
         floatSdCh valOut = outStream.read();  // Correctly read the output as floatSdCh
 
         // Convert integer output back to float

@@ -21,10 +21,8 @@ date: 28 August 2024
 bibliography: paper.bib
 ---
 # Summary
-Deep learning (DL) has revolutionized diverse fields, but the computational demands of DL models present challenges for real-time inference and training. Field-programmable gate arrays (FPGAs) offer a solution due to their flexibility, yet designing for FPGAs is complex. We introduce our FPGA for AI (FPGAI) engine as a novel software framework for converting AI models to FPGA implementations that are optimized for on-chip inference and training (see Figure 1). Leveraging ONNX's interoperability, our framework integrates DL models with FPGA hardware, supporting various architectures. This advancement represents a comprehensive approach, addressing both inference and training, enabling DL practitioners to leverage FPGA hardware effectively.
-
-![fpgai overview](assets/hls.jpg)
-Figure 1: FPGAI Engine.
+Deep learning (DL) has revolutionized diverse fields, but the computational demands of DL models present challenges for real-time inference and training. Field Programmable Gate Arrays (FPGAs) offer a solution due to their flexibility, yet designing for FPGAs is complex. We introduce our FPGA for AI (FPGAI) engine as a novel software framework for converting AI models to FPGA implementations that are optimized for on-chip inference and training (see Figure 1). Leveraging ONNX's interoperability, our framework integrates DL models with FPGA hardware, supporting various architectures. This advancement represents a comprehensive approach, addressing both inference and training, enabling DL practitioners to leverage FPGA hardware effectively.
+![Results Table](paper/assets/hls.jpg?raw=true)
 
 # Statement of need
 Designing an FPGA with VHDL or HLS presents significant challenges due to the complexity of both the languages and the hardware. It requires a deep understanding of digital logic and FPGA architectures, making it challenging to translate high-level AI models and algorithms into efficient architectures. Optimizing performance and minimizing power consumption involves intricate trade-offs between design complexity and resource utilization. 
@@ -72,76 +70,11 @@ onnx_program.save("my_image_classifier.onnx")
 ```
 
 ```console
-python3 main.py --onnx-file-name my_image_classifier.onnx --precision float  --dma-usage True
+python3 main.py --onnx-file-name my_image_classifier.onnx 
 ```
 
-## Deployment of ONNX files in Python
-The following example shows how ONNX models can be deployed on FPGA in Python using the FPGAI engine.
+User should modify input data and output data structure from main python file.
 
-```python
-from fpgai_engine import fpgai_engine
-
-# Read ONNX file
-fpgai_engine_object = fpgai_engine(onnx_file_name="my_onnx_file.onnx", precision = "float", vitis_hls_location="/tools/Xilinx/Vitis_HLS/2023.2",
-
-# Create project
-hls_project_name="trial_project", hls_solution_name="solution1", memory_option_weights="BRAM", use_DMA=True,user_DDR=True)
-
-# Generate HLS files for model inference and training
-fpgai_engine_object.generate_hls_file(mode="inference", file_location="/home/desktop/my_hls_project")
-fpgai_engine_object.generate_hls_file(mode="training", file_location="/home/desktop/my_hls_project")
-
-# Compile HLS files
-results = fpgai_engine_object.compile_hls_file(file_location="/home/desktop/my_hardware_project")
-
-# Create CPP files to BIT file
-fpgai_engine_object.compile_hardware_files(file_location="/home/desktop/my_hardware_project")
-```
-
-## Deployment of models via Python
-The following example shows how DL models can be deployed on FPGA in Python using the FPGAI engine.
-
-```python
-from architectures.convolution_layer import ConvolutionLayer
-from architectures.dense_layer import DenseLayer
-from implementations import dense_layer_imp, conv_layer_imp
-from utils.random_generator import weight_generator
-from utils.model_to import model_to_hls, model_to_cpp
-
-class MyModel():
-    def __init__(self):
-      self.layers = []
-
-      # Layers must be in order to compile code!
-      # Input and output shape information for the layer must be with weights argument!
-
-      # Convolution layer 1
-      self.layers.append(ConvolutionLayer(weights=weight_generator(layer_type="convolution", input_shape=10, shape=(5,10,10), precision="float")))
-
-      # Dense layer 1 with ReLU activation
-      self.layers.append(DenseLayer(activation_function="relu", precision="float", name_of_layer='my_first_dense_layer', weights=weight_generator(layer_type="dense", precision="float", input_shape=100, output_shape=10)))
-
-      # Dense layer 3 with linear activation
-      dense_layer_3 = DenseLayer(activation_function="linear", precision="float")
-      random_generated_weights = np.random(100,10)
-      dense_layer_3.inject_weights(weights=random_generated_weights)
-      self.layers.append(dense_layer_3)
-
-    def get_hls_codes(self):
-      return model_to_hls(self)
-    
-    def get_cpp_codes(self):
-      return model_to_cpp(self)
-
-# Create CPP files to BIT file
-model = MyModel()
-model.compile(file_location="/home/desktop/my_hardware_project")
-```
-
-Important notes for using the Python library:
-- One has to create self.layers inside the model object and the list of the layers should be in order. The library will compile these layers in order.
-- The default activation function for a layer is a linear function. One should declare the defined activation function with an argument when calling the layer class.
-- The user can export cpp or HLS files from the model. HLS files include pragmas differently from cpp files.
 
 ## How to change or add functions
 The following example shows how functions can be changed or added.
@@ -220,6 +153,13 @@ dma.recvchannel.wait()
 
 out_buffer     
 ```
+The engine generates 5 different files inside generate_files folder.
+1. deeplearn.h : Functions and parameter definitions inside the header file.
+2. main.cpp : main cpp file for Vitis HLS.
+3. testbench.cpp : test cpp file for Vitis HLS testing feature.
+4. tcl_for_vitis.tcl : run Vitis HLS without GUI and compile the code.
+5. tcl_for_vivado : run Vivado without GUI, create hardware setup such as DMA connections and create hardware files.
+
 
 # Results
 ![Results Table](paper/assets/results.png?raw=true)
@@ -228,7 +168,7 @@ Table 1: Performance and resource usage for running backpropagation on FPGA via 
 Table 1 provides validation results for our FPGAI engine. Results show performance and resource usage when running feedforward and convolutional neural networks on a ZYNQ FPGA board (UA: ADD PL DETAILS). The feedforward neural network consists of 3x3x3 neurons. The convolutional neural network consists of 28x28->2 and 19x19x2->10 convolutional layers.
 
 ## Report generation
-The output report generated by the HLS compiler will be parsed and presented to the user, providing visibility into the hardware components utilized by the engine. This feature enables users to understand the resource consumption of the engine, empowering them to make informed decisions regarding hardware allocation and optimization strategies.
+The output report generated by the HLS compiler will be parsed and presented to the user, providing visibility into the hardware components utilized by the engine. This feature enables users to understand the resource consumption of the engine, empowering them to make informed decisions regarding hardware allocation and optimization strategies. User can find this feature in connections tab.
 
 
 # Future work

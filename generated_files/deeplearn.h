@@ -9,8 +9,8 @@
         typedef ap_axis<32, 2, 5, 6> floatSdCh;
         int export_weihts;
 
-        #define number_of_inputs 25
-#define number_of_outputs 9
+        #define number_of_inputs 8
+#define number_of_outputs 4
 const float learning_rate = 0.1;
 void deeplearn(hls::stream<floatSdCh> &inStream, hls::stream<floatSdCh> &outStream);
 #endif 

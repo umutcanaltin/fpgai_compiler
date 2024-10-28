@@ -16,7 +16,7 @@ import numpy as np
 from onnx_inference import onnx_inference_pytorch, onnx_train_pytorch
 from loss_functions.loss import *
 class fpgai_engine():
-    def __init__(self,learning_rate= 0.1,mode="inference",onnx_file_name = "mlp.onnx", precision = "float"):
+    def __init__(self,input_data,first_layer_shape,output_shape,learning_rate= 0.1,mode="inference",onnx_file_name = "mlp.onnx", precision = "float"):
         self.main_func_name = "deeplearn"
         self.precision = precision
         self.loss_function = MeanSquaredError()
@@ -33,7 +33,7 @@ class fpgai_engine():
         self.kernels = []
         self.weights= self.get_weights()
         self.layer_function_implementations = ""
-        self.first_layer_shape= [5,5]
+        self.first_layer_shape= first_layer_shape
 
         add_linear_activation(self)
         generate_obj_rep(self)
@@ -47,15 +47,11 @@ class fpgai_engine():
         generated_vivado_tcl = self.generate_vivado_tcl_codes()
 
 
-        input_shape = (5, 5)
-        increment = 0.1
-        total_elements = np.prod(input_shape)
-        input_data = np.arange(0.1, total_elements * increment + 0.1, increment, dtype=np.float32)
-        input_data = input_data.reshape(1, 1, 5,5)
+
         onnx_inference_pytorch(onnx_file_name,input_data=input_data)
         
 
-        output_shape = (1, 10)
+        output_shape = output_shape
         increment = 0.1
         total_elements = np.prod(output_shape)
         target_output = np.arange(0.1, total_elements * increment + 0.1, increment, dtype=np.float32)
@@ -64,7 +60,8 @@ class fpgai_engine():
         target_output = target_output.flatten()
         input_data = input_data.flatten()
 
-
+        if(mode == "inference"):
+            target_output= None
         generated_testbench_code = generate_testbench_codes(input_data= input_data, output_file_dest= os.getcwd()+"/generated_files", target_output=target_output,model=self)
 
         write_cpp_file("generated_files/main",generated_hls_code )
