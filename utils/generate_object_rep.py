@@ -32,6 +32,7 @@ def generate_obj_rep(model):
                     new_implementation = conv_layer_imp(precision=model.precision,name_of_layer=new_layer.name_of_layer).get_forward_hls_function()
                     if(new_layer.is_last_layer):
                         new_implementation += conv_layer_imp(precision=model.precision,name_of_layer=new_layer.name_of_layer).get_last_delta_calc_hls_function()
+                        new_implementation += model.loss_function
                     else:
                         new_implementation += conv_layer_imp(precision=model.precision,name_of_layer=new_layer.name_of_layer).get_delta_calc_hls_function()
 
@@ -54,6 +55,7 @@ def generate_obj_rep(model):
                     new_implementation = dense_layer_imp(precision=model.precision,name_of_layer=new_layer.name_of_layer).get_forward_hls_function()
                     if(new_layer.is_last_layer):
                         new_implementation += dense_layer_imp(precision=model.precision,name_of_layer=new_layer.name_of_layer).get_last_delta_calc_hls_function()
+                        new_implementation += model.loss_function
                     else:
                         new_implementation += dense_layer_imp(precision=model.precision,name_of_layer=new_layer.name_of_layer).get_delta_calc_hls_function()
 

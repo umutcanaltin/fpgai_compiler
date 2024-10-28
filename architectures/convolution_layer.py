@@ -107,6 +107,7 @@ class ConvolutionLayer():
             if(self.is_first_layer):
                 layer_initializer = self.precision+" "+self.name_of_layer+"_input["+str(self.input_shape[0]*self.input_shape[1])+"];\n"
                 layer_initializer += self.precision+" target_output["+str(self.ai_model.number_of_output_nodes)+"];\n"
+                layer_initializer += self.precision+" error_buffer["+str(self.ai_model.number_of_output_nodes)+"];\n"
             else:
                 layer_initializer = ""
             layer_initializer += self.precision+" "+self.name_of_layer+"_delta["+str(self.output_shape[0]*self.output_shape[1])+"];\n"            
@@ -141,7 +142,8 @@ class ConvolutionLayer():
     def get_delta_calculation_func(self):
         calculate_delta_layer_string = ""
         if(self.is_last_layer):
-            calculate_delta_layer_string += "convolution_delta_"+self.name_of_layer + "("+self.name_of_layer+"_output, target_output ,"+self.name_of_layer+"_delta,"+str(self.output_shape[0]*self.output_shape[1])+");"+ '\n'
+            calculate_delta_layer_string += "calculate_loss("+self.name_of_layer+"_output, target_output, error_buffer,"+str(self.output_shape[0]*self.output_shape[1])+");"+ '\n'
+            calculate_delta_layer_string += "convolution_delta_"+self.name_of_layer + "(error_buffer,"+self.name_of_layer+"_output,"+self.name_of_layer+"_delta,"+str(self.output_shape[0]*self.output_shape[1])+");"+ '\n'
         else:
             calculate_delta_layer_string += "convolution_delta_"+self.name_of_layer + "("+self.ai_model.obj_arch_rep[self.layer_order+1].name_of_layer +"_delta,"+self.ai_model.obj_arch_rep[self.layer_order+1].name_of_layer+"_weights,"+self.name_of_layer+"_output,"+self.name_of_layer+"_delta,"+str(self.input_shape[0])+", "+str(self.input_shape[1])+", "+str(self.output_shape[0])+", "+str(self.output_shape[1])+", "+str(self.kernel_shape[0])+", "+str(self.kernel_shape[1])+");"+ '\n'
         return calculate_delta_layer_string
@@ -154,8 +156,3 @@ class ConvolutionLayer():
         return update_weights_layer_string
     
 
-
-
-
-
-    

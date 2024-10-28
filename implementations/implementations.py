@@ -22,10 +22,9 @@ class dense_layer_imp():
 
     def get_last_delta_calc_hls_function(self):
         
-        delta_calc = "void dense_delta_"+self.name_of_layer+"( " +self.precision+" * layer_output, " + self.precision + "* target_output, "+ self.precision+""" * layer_delta , int output_size){
+        delta_calc = "void dense_delta_"+self.name_of_layer+"( " +self.precision+" * error_buffer, " + self.precision + "* layer_output, "+ self.precision+""" * layer_delta , int output_size){
             for (int i = 0; i < output_size; i++) {
-                float error = target_output[i] - layer_output[i];
-                layer_delta[i] = error * dactivate_"""+self.name_of_layer+"""(layer_output[i]);
+                layer_delta[i] = -2 * error_buffer[i] * dactivate_"""+self.name_of_layer+"""(layer_output[i]);
             }
         }
         """
@@ -119,19 +118,14 @@ class conv_layer_imp():
 
     def get_last_delta_calc_hls_function(self):
         
-        delta_calc = "void convolution_delta_"+self.name_of_layer+"( " +self.precision+" * layer_output, " + self.precision + "* target_output, "+ self.precision+""" * layer_delta , int output_size){
+        delta_calc = "void convolution_delta_"+self.name_of_layer+"( " +self.precision+" * error_buffer, " + self.precision + "* layer_output, "+ self.precision+""" * layer_delta , int output_size){
             for (int i = 0; i < output_size; i++) {
-                float error = target_output[i] - layer_output[i];
-                layer_delta[i] = error * dactivate_"""+self.name_of_layer+"""(*layer_output+i);
+                layer_delta[i] = -2 * error_buffer[i] *  dactivate_"""+self.name_of_layer+"""(*layer_output+i);
             }
         }
         """
         return delta_calc
     
-
-
-
-
 
 
     def get_delta_calc_hls_function(self):

@@ -14,11 +14,12 @@ from utils.testbench import generate_testbench_codes
 import os
 import numpy as np
 from onnx_inference import onnx_inference_pytorch, onnx_train_pytorch
-
+from loss_functions.loss import *
 class fpgai_engine():
     def __init__(self,learning_rate= 0.1,mode="inference",onnx_file_name = "mlp.onnx", precision = "float"):
         self.main_func_name = "deeplearn"
         self.precision = precision
+        self.loss_function = MeanSquaredError()
         self.learning_rate = learning_rate
         self.mode = mode
         self.onnx_file_name = onnx_file_name
@@ -102,6 +103,7 @@ class fpgai_engine():
                 generated_hls_codes += self.obj_arch_rep[i].get_delta_calculation_func()
             for i in range(len(self.obj_arch_rep)-1, -1, -1):
                 generated_hls_codes += self.obj_arch_rep[i].get_update_weights_func()
+            
         generated_hls_codes += write_output_stream(self)
         return generated_hls_codes         
     

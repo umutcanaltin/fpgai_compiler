@@ -103,6 +103,7 @@ class DenseLayer():
             if(self.is_first_layer):
                 layer_initializer = self.precision+" "+self.name_of_layer+"_input["+str(self.input_shape)+"];\n"
                 layer_initializer += self.precision+" target_output["+str(self.ai_model.number_of_output_nodes)+"];\n"
+                layer_initializer += self.precision+" error_buffer["+str(self.ai_model.number_of_output_nodes)+"];\n"
             else:
                 layer_initializer = ""
             layer_initializer += self.precision+" "+self.name_of_layer+"_delta["+str(self.output_shape)+"];\n"
@@ -133,7 +134,9 @@ class DenseLayer():
     def get_delta_calculation_func(self):
         calculate_delta_layer_string = ""
         if(self.is_last_layer):
-            calculate_delta_layer_string += "dense_delta_"+self.name_of_layer + "("+self.name_of_layer+"_output, target_output ,"+self.name_of_layer+"_delta,"+str(self.output_shape)+");"+ '\n'
+
+            calculate_delta_layer_string += "calculate_loss("+self.name_of_layer+"_output, target_output, error_buffer,"+str(self.output_shape)+");"+ '\n'
+            calculate_delta_layer_string += "dense_delta_"+self.name_of_layer + "(error_buffer,"+self.name_of_layer+"_output,"+self.name_of_layer+"_delta,"+str(self.output_shape)+");"+ '\n'
         else:
             calculate_delta_layer_string += "dense_delta_"+self.name_of_layer + "("+self.ai_model.obj_arch_rep[self.layer_order+1].name_of_layer +"_delta,"+self.ai_model.obj_arch_rep[self.layer_order+1].name_of_layer+"_weights,"+self.name_of_layer+"_output,"+self.name_of_layer+"_delta,"+str(self.output_shape)+", "+str(self.ai_model.obj_arch_rep[self.layer_order+1].output_shape)+");"+ '\n'
         return calculate_delta_layer_string
