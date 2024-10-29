@@ -29,11 +29,11 @@ Designing an FPGA with VHDL or HLS presents significant challenges due to the co
 
 Debugging FPGA designs can also be challenging, as traditional software debugging techniques may not apply directly to hardware designs. Additionally, FPGA development requires a steep learning curve, demanding time and effort to acquire proficiency in designing FPGA architecture. Overall, designing hardware on FPGA requires expertise, patience, and a systematic approach to overcome these challenges.
 
-In the realm of FPGA-based deep learning engines, most tools[source:1] [source:2] rely on LLVM IR representation for optimization, limiting hardware-specific optimizations. However, our tool takes a different route, focusing on a software-driven approach to hardware design. This unique perspective makes it easier to implement future optimizations tailored to deep learning architectures. Additionally, our engine stands out by supporting on-chip training for deep learning models, expanding its capabilities beyond conventional inference tasks. This approach not only promises improved performance but also opens doors for advancing FPGA-based deep learning systems.
+In the realm of FPGA-based deep learning engines, most tools[@Noronha_et_al_2018] [@Umuroglu_et_al_2017] rely on LLVM IR representation for optimization, limiting hardware-specific optimizations. However, our tool takes a different route, focusing on a software-driven approach to hardware design. This unique perspective makes it easier to implement future optimizations tailored to deep learning architectures. Additionally, our engine stands out by supporting on-chip training for deep learning models, expanding its capabilities beyond conventional inference tasks. This approach not only promises improved performance but also opens doors for advancing FPGA-based deep learning systems.
 
-In response to the growing demand within academic and industrial circles, there is a clear need for a simplified method for deploying DL models on FPGAs. This need is increasingly evident when surveying[source:3] the existing literature and observing the challenges faced by researchers and practitioners alike in effectively utilizing FPGA-accelerated DL solutions.
+In response to the growing demand within academic and industrial circles, there is a clear need for a simplified method for deploying DL models on FPGAs. This need is increasingly evident when surveying[@Rahimifar_et_al_2022] the existing literature and observing the challenges faced by researchers and practitioners alike in effectively utilizing FPGA-accelerated DL solutions.
 
-# Supported features
+# Supported Features
 Our FPGAI engine provides support for essential DL operations such as feedforward processing and convolution. Feedforward operations enable the flow of data through neural network layers from input to output, facilitating tasks like classification and regression. Convolution operations, on the other hand, are fundamental for tasks involving spatial relationships, such as image processing and feature extraction. With our support for these operations, users can efficiently implement a wide range of deep learning models and applications, empowering them to address complex tasks effectively.
 
 Our engine supports DMA (Direct Memory Access) usage for efficient data (image stream) transfer and BRAM (Block RAM) usage for storing weights and parameters of the model. DMA usage enables data transfer  between different memory locations, which is vital for accelerating data-intensive tasks. Meanwhile, BRAM usage ensures efficient utilization of on-chip memory resources, reducing access latency and improving overall performance. By leveraging DMA and BRAM usage, our engine optimizes resource utilization, maximizing hardware efficiency and facilitating faster and more efficient execution of deep learning tasks on FPGA platforms.
@@ -60,6 +60,14 @@ $$
 $$
 
 where $y_i$ represents the true values, and $\hat{y}_i$ represents the predicted values.
+
+
+## Testing Feature for FPGA Inference and Testbench
+
+The testing feature of our engine integrates PyTorch for inference alongside an HLS testbench, allowing simultaneous validation of outputs.
+
+This setup enables users to execute inference on a neural network model within PyTorch while concurrently running an HLS-based testbench that mirrors the same computations. This dual approach facilitates real-time comparison of outputs from both environments, ensuring that the HLS implementation aligns with the PyTorch results. Users can easily identify discrepancies, optimize performance, and validate functionality across both platforms efficiently.
+
 
 ## Deployment of ONNX files via the console
 The following example shows how to convert a Pytorch model to ONNX. The ONNX file is subsequently converted for deployment on FPGA.
@@ -96,7 +104,7 @@ onnx_program.save("my_image_classifier.onnx")
 python3 main.py --onnx-file-name my_image_classifier.onnx 
 ```
 
-User should modify input data and output data structure from main python file.
+Before using the main.py file, the user must declare the input and output data types in the main file. This step is crucial for ensuring that the data passed to the model is correctly formatted, allowing for accurate inference and processing within the engine. By specifying these types, users can avoid runtime errors and enhance the compatibility of their data with the FPGA implementation.
 
 
 
@@ -153,12 +161,13 @@ dma.recvchannel.wait()
 
 out_buffer     
 ```
-The engine generates 5 different files inside generate_files folder.
-1. deeplearn.h : Functions and parameter definitions inside the header file.
-2. main.cpp : main cpp file for Vitis HLS.
-3. testbench.cpp : test cpp file for Vitis HLS testing feature.
-4. tcl_for_vitis.tcl : run Vitis HLS without GUI and compile the code.
-5. tcl_for_vivado : run Vivado without GUI, create hardware setup such as DMA connections and create hardware files.
+The engine systematically generates five distinct files within the generate_files directory:
+
+1. deeplearn.h: This header file encompasses the functions and parameter definitions essential for the engine's operation.
+2. main.cpp: This serves as the primary C++ file designed for integration with Vitis HLS.
+3. testbench.cpp: This file facilitates the testing features associated with Vitis HLS, enabling comprehensive output validation.
+4. tcl_for_vitis.tcl: A TCL script designed to execute Vitis HLS without the graphical user interface, streamlining the compilation process.
+5. tcl_for_vivado.tcl: This script automates the execution of Vivado, establishing necessary hardware configurations, such as Direct Memory Access (DMA) connections, and generating requisite hardware files.
 
 
 # Results
