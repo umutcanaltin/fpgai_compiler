@@ -168,7 +168,7 @@ The engine systematically generates five distinct files within the generate_file
 2. main.cpp: This serves as the primary C++ file designed for integration with Vitis HLS.
 3. testbench.cpp: This file facilitates the testing features associated with Vitis HLS, enabling comprehensive output validation.
 4. tcl_for_vitis.tcl: A TCL script designed to execute Vitis HLS without the graphical user interface, streamlining the compilation process.
-5. tcl_for_vivado.tcl: This script automates the execution of Vivado, establishing necessary hardware configurations, such as Direct Memory Access (DMA) connections, and generating requisite hardware files.
+5. tcl_for_vivado.tcl: This script automates the execution of Vivado, establishing necessary hardware configurations, such as Direct Memory Access (DMA) connections, and generating requisite hardware configurations.
 
 
 # Results
