@@ -45,7 +45,7 @@ Our engine currently supports two primary activation functions essential for dee
 
 1. **Linear Activation**: A straightforward function where the output is a scaled version of the input, useful for maintaining linearity in layers or during output generation.
 
-2. **ReLU (Rectified Linear Unit)**: A widely used non-linear activation function defined as $ f(x) = \max(0, x) %, effectively introducing non-linearity to the network and helping mitigate vanishing gradients during training. 
+2. **ReLU (Rectified Linear Unit)**: A widely used non-linear activation function defined as $ f(x) = \max(0, x) $, effectively introducing non-linearity to the network and helping mitigate vanishing gradients during training. 
 
 These activation functions are optimized for hardware efficiency, ensuring low latency and resource utilization on FPGA platforms. Further support for additional functions is planned in future iterations of our engine.
 
