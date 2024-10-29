@@ -45,7 +45,7 @@ Our engine currently supports two primary activation functions essential for dee
 
 1. **Linear Activation**: A straightforward function where the output is a scaled version of the input, useful for maintaining linearity in layers or during output generation.
 
-2. **ReLU (Rectified Linear Unit)**: A widely used non-linear activation function defined as \( f(x) = \max(0, x) \), effectively introducing non-linearity to the network and helping mitigate vanishing gradients during training.
+2. **ReLU (Rectified Linear Unit)**: A widely used non-linear activation function defined as $f(x) = \max(0, x)$, effectively introducing non-linearity to the network and helping mitigate vanishing gradients during training.
 
 These activation functions are optimized for hardware efficiency, ensuring low latency and resource utilization on FPGA platforms. Further support for additional functions is planned in future iterations of our engine.
 
@@ -59,8 +59,7 @@ $$
 \text{MSE} = \frac{1}{n} \sum_{i=1}^{n} (y_i - \hat{y}_i)^2
 $$
 
-where \( y_i \) represents the true values, and \( \hat{y}_i \) represents the predicted values.
-
+where $y_i$ represents the true values, and $\hat{y}_i$ represents the predicted values.
 
 ## Deployment of ONNX files via the console
 The following example shows how to convert a Pytorch model to ONNX. The ONNX file is subsequently converted for deployment on FPGA.
