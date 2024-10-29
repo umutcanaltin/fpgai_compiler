@@ -22,7 +22,8 @@ bibliography: paper.bib
 ---
 # Summary
 Deep learning (DL) has revolutionized diverse fields, but the computational demands of DL models present challenges for real-time inference and training. Field Programmable Gate Arrays (FPGAs) offer a solution due to their flexibility, yet designing for FPGAs is complex. We introduce our FPGA for AI (FPGAI) engine as a novel software framework for converting AI models to FPGA implementations that are optimized for on-chip inference and training (see Figure 1). Leveraging ONNX's interoperability, our framework integrates DL models with FPGA hardware, supporting various architectures. This advancement represents a comprehensive approach, addressing both inference and training, enabling DL practitioners to leverage FPGA hardware effectively.
-![Results Table](paper/assets/hls.jpg?raw=true)
+![Figure](https://github.com/umutcanaltin/fpgai_compiler/tree/main/paper/assets/hls.jpg)
+
 
 # Statement of need
 Designing an FPGA with VHDL or HLS presents significant challenges due to the complexity of both the languages and the hardware. It requires a deep understanding of digital logic and FPGA architectures, making it challenging to translate high-level AI models and algorithms into efficient architectures. Optimizing performance and minimizing power consumption involves intricate trade-offs between design complexity and resource utilization. 
@@ -171,7 +172,7 @@ The engine systematically generates five distinct files within the generate_file
 
 
 # Results
-![Results Table](paper/assets/results.png?raw=true)
+![Figure](https://github.com/umutcanaltin/fpgai_compiler/tree/main/paper/assets/results.png)
 Table 1: Performance and resource usage for running backpropagation on FPGA via the FPGAI engine.
 
 Table 1 provides validation results for our FPGAI engine. Results show performance and resource usage when running feedforward and convolutional neural networks on a ZYNQ FPGA board (UA: ADD PL DETAILS). The feedforward neural network consists of 3x3x3 neurons. The convolutional neural network consists of 28x28->2 and 19x19x2->10 convolutional layers.
