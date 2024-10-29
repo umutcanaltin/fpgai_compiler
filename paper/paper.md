@@ -38,6 +38,30 @@ Our FPGAI engine provides support for essential DL operations such as feedforwar
 
 Our engine supports DMA (Direct Memory Access) usage for efficient data (image stream) transfer and BRAM (Block RAM) usage for storing weights and parameters of the model. DMA usage enables data transfer  between different memory locations, which is vital for accelerating data-intensive tasks. Meanwhile, BRAM usage ensures efficient utilization of on-chip memory resources, reducing access latency and improving overall performance. By leveraging DMA and BRAM usage, our engine optimizes resource utilization, maximizing hardware efficiency and facilitating faster and more efficient execution of deep learning tasks on FPGA platforms.
 
+
+## Supported Activation Functions
+
+Our engine currently supports two primary activation functions essential for deep learning inference and training: **Linear** and **ReLU (Rectified Linear Unit)**.
+
+1. **Linear Activation**: A straightforward function where the output is a scaled version of the input, useful for maintaining linearity in layers or during output generation.
+
+2. **ReLU (Rectified Linear Unit)**: A widely used non-linear activation function defined as \( f(x) = \max(0, x) \), effectively introducing non-linearity to the network and helping mitigate vanishing gradients during training. 
+
+These activation functions are optimized for hardware efficiency, ensuring low latency and resource utilization on FPGA platforms. Further support for additional functions is planned in future iterations of our engine.
+
+
+## Supported Loss Functions
+
+Our FPGA-based engine currently supports the **Mean Squared Error (MSE) Loss** function, a core metric for regression tasks that calculates the average squared differences between predicted and actual values. This function provides a smooth gradient, ideal for backpropagation and optimized for FPGA implementation, ensuring minimal latency and efficient resource usage.
+
+The MSE Loss function is defined by:
+
+\[
+\text{MSE} = \frac{1}{n} \sum_{i=1}^{n} (y_i - \hat{y}_i)^2
+\]
+
+where \( y_i \) represents the true values, and \( \hat{y}_i \) represents the predicted values.
+
 ## Deployment of ONNX files via the console
 The following example shows how to convert a Pytorch model to ONNX. The ONNX file is subsequently converted for deployment on FPGA.
 
@@ -76,30 +100,7 @@ python3 main.py --onnx-file-name my_image_classifier.onnx
 User should modify input data and output data structure from main python file.
 
 
-## How to change or add functions
-The following example shows how functions can be changed or added.
 
-Linear Activation function without pointer declaration:
-location: /activation/activation_functions.py
-```python
-if(self.activation_function == "linear"):
-  activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"+self.precision + " dactivate_"+self.name_of_layer+"( "+self.precision +" x) { return 1; }"
-```
-Add new activation function named Leaky Relu:
-```python
-if(self.activation_function == "LRelu"):
-  activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x)
-  {
-    if(0.01*x < x){
-      return x;}
-    else{
-      return 0.01*x;
-    }
-  }
-  \n"
-```
-
-Users have to declare the derivative of the activation function for backpropagation!
 
 ## FPGA deployment
 The following example shows how to use the BIT file inside PYNQ for inference.
