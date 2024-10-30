@@ -16,8 +16,8 @@ class Activation_functions():
         if(self.activation_function == "relu"):
             self.used_activation_funcs.append("relu")
             if(mode == "inference"):
-                activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"
+                activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x > 0 ? x : 0; } \n"
             if(mode == "training"):
-                activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"+self.precision +" dactivate_"+self.name_of_layer+"( "+self.precision +" x) { return 1; }\n"
+                activation_string = self.precision + " activate_"+self.name_of_layer+ "( "+self.precision +" x) { return x; } \n"+self.precision +" dactivate_"+self.name_of_layer+"( "+self.precision +" x) { return x > 0 ? 1.0 : 0.0; }\n"
 
         return activation_string
