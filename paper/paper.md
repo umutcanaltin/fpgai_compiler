@@ -23,6 +23,7 @@ bibliography: paper.bib
 # Summary
 Deep learning (DL) has revolutionized diverse fields, but the computational demands of DL models present challenges for real-time inference and training. Field Programmable Gate Arrays (FPGAs) offer a solution due to their flexibility, yet designing for FPGAs is complex. We introduce our FPGA for AI (FPGAI) engine as a novel software framework for converting AI models to FPGA implementations that are optimized for on-chip inference and training (see Figure 1). Leveraging ONNX's interoperability, our framework integrates DL models with FPGA hardware, supporting various architectures. This advancement represents a comprehensive approach, addressing both inference and training, enabling DL practitioners to leverage FPGA hardware effectively.
 ![Visualisation of the engine structure](assets/hls.pdf)
+
 # Statement of need
 Designing an FPGA with VHDL or HLS presents significant challenges due to the complexity of both the languages and the hardware. It requires a deep understanding of digital logic and FPGA architectures, making it challenging to translate high-level AI models and algorithms into efficient architectures. Optimizing performance and minimizing power consumption involves intricate trade-offs between design complexity and resource utilization. 
 
