@@ -1,0 +1,76 @@
+version: 1
+
+project:
+  name: fpgai_example_dense
+  out_dir: build/fpgai_example_dense
+  clean: true
+
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+      - name: pl_clk0
+        target_mhz: 200
+
+operators:
+  supported:
+    - Dense
+    - Conv
+    - MaxPool
+    - AvgPool
+    - Add
+    - Relu
+    - LeakyRelu
+    - Sigmoid
+    - Softmax
+    - BatchNormalization
+    - Flatten
+    - Reshape
+
+  defaults:
+    activation_insert:
+      kind: none     # none | leakyrelu
+      alpha: 0.1
+      except_last: true
+
+model:
+  format: onnx
+  path: models/cnn_mnist.onnx
+
+numerics:
+  defaults:
+    activation: { type: ap_fixed, total_bits: 16, int_bits: 6 }
+    weight:      { type: ap_fixed, total_bits: 16, int_bits: 6 }
+    bias:        { type: ap_fixed, total_bits: 24, int_bits: 10 }
+    accum:       { type: ap_fixed, total_bits: 24, int_bits: 10 }
+
+data_movement:
+  ps_pl:
+    compression:
+      enabled: true
+    weights:
+      mode: embedded   # embedded | stream | dma_ddr (dma_ddr reserved)
+
+backends:
+  hls:
+    vitis:
+      enabled: true
+      mode: csim        # csim | cosim
+      exe: vitis_hls     
+
+
+debug:
+  verbose: false
+
+toolchain:
+  vitis_hls:
+    enabled: true
+    root: /tools/Xilinx/Vitis_HLS/2023.2
+    settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
+    install_dir: /tools/Xilinx/Vitis_HLS/2023.2

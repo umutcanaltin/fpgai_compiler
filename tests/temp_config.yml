@@ -1,0 +1,31 @@
+
+project:
+  name: test_softmax
+  out_dir: build/test_softmax
+model:
+  format: onnx
+  path: tests/models/Softmax.onnx
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clock_mhz: 200
+precision:
+  activation: "ap_fixed<16,8>"
+  weight: "ap_fixed<16,8>"
+  bias: "ap_fixed<24,12>"
+  accum: "ap_fixed<24,12>"
+operators:
+  supported:
+    - Dense
+    - Conv
+    - MaxPool
+    - AvgPool
+    - Add
+    - Relu
+    - Softmax
+    - Flatten
+    - Reshape
+toolchain:
+  vitis_hls: true
+  settings64: "/tools/Xilinx/Vitis_HLS/2023.2/settings64.sh"

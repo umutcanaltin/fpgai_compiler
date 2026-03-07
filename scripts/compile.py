@@ -7,14 +7,11 @@ from fpgai.config.loader import load_config, print_summary, ConfigError
 from fpgai.engine.compiler import Compiler
 
 
-def parse_args():
-    p = argparse.ArgumentParser("FPGAI compiler (v1)")
-    p.add_argument("--config", required=True, help="Path to fpgai.yml")
-    return p.parse_args()
+def main() -> None:
+    ap = argparse.ArgumentParser(description="FPGAI compiler entrypoint")
+    ap.add_argument("--config", required=True, help="Path to fpgai.yml")
+    args = ap.parse_args()
 
-
-def main():
-    args = parse_args()
     try:
         cfg = load_config(args.config)
         print_summary(cfg)
@@ -22,11 +19,9 @@ def main():
         print(str(e), file=sys.stderr)
         raise SystemExit(2)
 
-    compiler = Compiler(cfg)
-    result = compiler.compile()
-
+    comp = Compiler(cfg)
+    result = comp.compile()
     print(result.summary())
-    print(f"[OK] Wrote artifacts to: {result.out_dir}")
 
 
 if __name__ == "__main__":

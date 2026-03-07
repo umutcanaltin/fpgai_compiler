@@ -1,25 +1,13 @@
-# Contributing Guidelines
+## Where to add features
 
-Contributions are welcome!
+### New ONNX operator support
+- Map to canonical ops in: `fpgai/frontend/onnx/canonicalize.py`
+- Add fusions in: `fpgai/frontend/onnx/patterns.py`
 
-## How to Contribute
+### New compiler graph transformation
+- Add a pass in: `fpgai/ir/passes/`
+- Wire it in: `fpgai/engine/compiler.py`
 
-### Asking Questions
-You can feel free to send a mail to umut.altin@donders.ru.nl
-
-### Opening an Issue
-Before creating an issue, ensure you are using the latest version.
-
-### Submitting Pull Requests
-1. Fork the repo.
-2. Create a new branch.
-3. Make changes and submit a pull request.
-4. Include tests and update documentation if necessary.
-
-### Code Style
-Follow existing conventions. Consistency is key!
-
-### Writing Commit Messages
-- Limit the subject to 50 characters.
-- Capitalize the subject line.
-- Use the imperative mood.
+### New backend
+- Create a backend under: `fpgai/backends/<name>/`
+- Call it from: `fpgai/engine/compiler.py`
