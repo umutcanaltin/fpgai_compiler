@@ -55,7 +55,7 @@ data_movement:
     compression:
       enabled: true
     weights:
-      mode: embedded   # embedded | stream | dma_ddr (dma_ddr reserved)
+      mode: stream   # embedded | stream | dma_ddr (dma_ddr reserved)
 
 backends:
   hls:

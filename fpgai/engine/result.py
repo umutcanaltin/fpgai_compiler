@@ -14,6 +14,13 @@ class CompileResult:
     hls_project_dir: Optional[Path] = None
     host_project_dir: Optional[Path] = None
 
+    hls_ran: bool = False
+    hls_ok: Optional[bool] = None
+    hls_returncode: Optional[int] = None
+    hls_stdout_log: Optional[str] = None
+    hls_stderr_log: Optional[str] = None
+    hls_csynth_report: Optional[str] = None
+
     def summary(self) -> str:
         lines = []
         lines.append("\n=============== FPGAI Compile Result ===============")
@@ -25,5 +32,12 @@ class CompileResult:
         lines.append("---------------------------------------------------")
         lines.append(f"HLS project dir   : {self.hls_project_dir}")
         lines.append(f"Host C++ dir      : {self.host_project_dir}")
+        lines.append("---------------------------------------------------")
+        lines.append(f"HLS ran           : {self.hls_ran}")
+        lines.append(f"HLS ok            : {self.hls_ok}")
+        lines.append(f"HLS returncode    : {self.hls_returncode}")
+        lines.append(f"HLS stdout log    : {self.hls_stdout_log}")
+        lines.append(f"HLS stderr log    : {self.hls_stderr_log}")
+        lines.append(f"HLS csynth report : {self.hls_csynth_report}")
         lines.append("===================================================")
         return "\n".join(lines)
