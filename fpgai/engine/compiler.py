@@ -210,6 +210,12 @@ class Compiler:
         )
 
     def _emit_dummy_input(self, out_dir: Path, g) -> Path:
+        p = out_dir / "input.bin"
+
+        # If benchmark or external preprocessing already created input.bin, keep it.
+        if p.exists():
+            return p
+
         x_name = g.inputs[0]
         x_spec = g.get_tensor(x_name)
 
@@ -221,7 +227,6 @@ class Compiler:
             in_words = 1
 
         x = (np.arange(in_words, dtype=np.float32) + 1.0) * 0.1
-        p = out_dir / "input.bin"
         write_f32_bin(p, x)
         return p
 

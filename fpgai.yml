@@ -55,7 +55,7 @@ data_movement:
     compression:
       enabled: true
     weights:
-      mode: stream   # embedded | stream | dma_ddr (dma_ddr reserved)
+      mode: embedded   # embedded | stream | dma_ddr (dma_ddr reserved)
 
 backends:
   hls:
@@ -74,3 +74,21 @@ toolchain:
     root: /tools/Xilinx/Vitis_HLS/2023.2
     settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
     install_dir: /tools/Xilinx/Vitis_HLS/2023.2
+
+
+benchmark:
+  enabled: true
+  fail_on_mismatch: true
+  seed: 0
+
+  reference:
+    kind: onnx   # for now only onnx
+
+  compare:
+    atol: 0.05
+    rtol: 0.05
+    max_abs_error: 0.10
+    mean_abs_error: 0.02
+    rmse: 0.03
+    require_argmax_match: true
+    min_cosine_similarity: 0.99
