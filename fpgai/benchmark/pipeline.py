@@ -9,6 +9,8 @@ import numpy as np
 
 from fpgai.benchmark.reference import run_onnx_reference
 from fpgai.benchmark.compare import compare_outputs, write_metrics
+from fpgai.benchmark.reference_intermediate import run_onnx_intermediate_reference
+from fpgai.benchmark.intermediate_compare import compare_intermediate_layers
 from fpgai.engine.compiler import Compiler
 
 
@@ -68,11 +70,8 @@ def run_compile_correctness_benchmark(
     out_dir = Path(raw["project"]["out_dir"]).resolve()
     bench_dir = out_dir / "bench"
 
-    # Start fresh for benchmark artifacts only if build dir already exists.
     if bench_dir.exists():
         shutil.rmtree(bench_dir)
-
-    # Create reference first.
     bench_dir.mkdir(parents=True, exist_ok=True)
 
     seed = int(_cfg_get(raw, "benchmark.seed", 0))
@@ -86,6 +85,9 @@ def run_compile_correctness_benchmark(
     min_cosine_similarity = _cfg_get(raw, "benchmark.compare.min_cosine_similarity", None)
 
     fail_on_mismatch = bool(_cfg_get(raw, "benchmark.fail_on_mismatch", False))
+    intermediate_enabled = bool(_cfg_get(raw, "benchmark.intermediate.enabled", False))
+    fail_on_layer_mismatch = bool(_cfg_get(raw, "benchmark.intermediate.fail_on_layer_mismatch", False))
+    stop_on_first_bad_layer = bool(_cfg_get(raw, "benchmark.intermediate.stop_on_first_bad_layer", False))
 
     # 1) ONNX reference
     ref = run_onnx_reference(
@@ -94,10 +96,10 @@ def run_compile_correctness_benchmark(
         seed=seed,
     )
 
-    # 2) Write exact same input as input.bin BEFORE compile/HLS run
+    # 2) Write exact input BEFORE compile
     _write_input_bin_from_npy(ref.input_npy, out_dir)
 
-    # 3) Prevent compile() from deleting benchmark artifacts / input.bin
+    # 3) Prevent compile() from deleting bench/input
     old_clean = raw.get("project", {}).get("clean", True)
     raw["project"]["clean"] = False
 
@@ -113,7 +115,7 @@ def run_compile_correctness_benchmark(
             f"Benchmark requested but HLS run failed. See {compile_result.hls_stdout_log} and {compile_result.hls_stderr_log}"
         )
 
-    # 4) Load HLS output produced from the same input
+    # 4) Final output compare
     output_bin = _find_output_bin(out_dir)
 
     ref_y = np.load(ref.output_npy).astype(np.float32)
@@ -122,7 +124,6 @@ def run_compile_correctness_benchmark(
     hls_output_npy = bench_dir / "hls_output.npy"
     np.save(hls_output_npy, hls_y)
 
-    # 5) Compare
     metrics = compare_outputs(
         ref_y,
         hls_y,
@@ -136,6 +137,48 @@ def run_compile_correctness_benchmark(
     )
     write_metrics(metrics, bench_dir)
 
+    # 5) Intermediate compare
+    intermediate_summary = None
+    if intermediate_enabled:
+        ref_input = np.load(ref.input_npy).astype(np.float32)
+
+        ref_layers_dir = bench_dir / "reference_layers"
+        run_onnx_intermediate_reference(
+            model_path=model_path,
+            input_array=ref_input,
+            graph=compile_result.graph,
+            out_dir=ref_layers_dir,
+        )
+
+        csim_build_dir = out_dir / "hls" / "fpgai_hls_proj" / "sol1" / "csim" / "build"
+        intermediate_out_dir = bench_dir / "intermediate"
+
+        intermediate_summary = compare_intermediate_layers(
+            graph=compile_result.graph,
+            reference_dir=ref_layers_dir,
+            csim_build_dir=csim_build_dir,
+            out_dir=intermediate_out_dir,
+            atol=atol,
+            rtol=rtol,
+            max_abs_error_limit=max_abs_error_limit,
+            mean_abs_error_limit=mean_abs_error_limit,
+            rmse_limit=rmse_limit,
+            require_argmax_match=False,  # layerwise argmax is rarely useful
+            min_cosine_similarity=min_cosine_similarity,
+        )
+
+        if fail_on_layer_mismatch and intermediate_summary["first_bad_layer"] is not None:
+            raise RuntimeError(
+                f"Intermediate benchmark failed first at layer {intermediate_summary['first_bad_layer']}. "
+                f"See {intermediate_out_dir / 'intermediate_summary.txt'}"
+            )
+
+        if stop_on_first_bad_layer and intermediate_summary["first_bad_layer"] is not None:
+            raise RuntimeError(
+                f"Stopped on first bad layer: {intermediate_summary['first_bad_layer']}. "
+                f"See {intermediate_out_dir / 'intermediate_summary.txt'}"
+            )
+
     manifest_patch = {
         "benchmark": {
             "passed": metrics.passed,
@@ -146,6 +189,10 @@ def run_compile_correctness_benchmark(
             "hls_stdout_log": compile_result.hls_stdout_log,
             "hls_stderr_log": compile_result.hls_stderr_log,
             "hls_csynth_report": compile_result.hls_csynth_report,
+            "intermediate_enabled": intermediate_enabled,
+            "intermediate_first_bad_layer": (
+                None if intermediate_summary is None else intermediate_summary["first_bad_layer"]
+            ),
         }
     }
     (bench_dir / "benchmark_manifest.json").write_text(

@@ -82,7 +82,7 @@ class Compiler:
             communication_plan,
         )
 
-        # 7) Emit dummy input.bin
+        # 7) Emit input.bin only if not already externally prepared
         self._emit_dummy_input(out_dir, g)
 
         # 8) Emit backends
@@ -212,7 +212,7 @@ class Compiler:
     def _emit_dummy_input(self, out_dir: Path, g) -> Path:
         p = out_dir / "input.bin"
 
-        # If benchmark or external preprocessing already created input.bin, keep it.
+        # Keep externally prepared input.bin (e.g. benchmark pipeline)
         if p.exists():
             return p
 
@@ -246,6 +246,7 @@ class Compiler:
         raw = self.cfg.raw
         part = str(_cfg_get(raw, "targets.platform.part", "xck26-sfvc784-2LV-c"))
         clk_mhz = float(_cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200))
+        intermediate_dump = bool(_cfg_get(raw, "benchmark.intermediate.enabled", False))
 
         proj = emit_hls_stub(
             graph=g,
@@ -256,6 +257,7 @@ class Compiler:
                 "part": part,
                 "clk_mhz": int(clk_mhz),
                 "proj_name": "fpgai_hls_proj",
+                "intermediate_dump": intermediate_dump,
             },
             compile_plan=compile_plan,
             memory_plan=memory_plan,

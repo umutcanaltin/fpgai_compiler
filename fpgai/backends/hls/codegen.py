@@ -31,6 +31,7 @@ def _safe_last_dim(shape: Optional[Tuple[int, ...]]) -> Optional[int]:
     d = shape[-1]
     return int(d) if d else None
 
+
 def _infer_weight_words(graph: Graph) -> int:
     total = 0
     for op in graph.ops:
@@ -48,6 +49,7 @@ def _infer_weight_words(graph: Graph) -> int:
                     for d in graph.constants[w_name].shape:
                         n *= int(d)
                     total += n
+
             if len(op.inputs) > 2:
                 b_name = op.inputs[2]
                 b_t = graph.get_tensor(b_name)
@@ -70,6 +72,8 @@ def _infer_weight_words(graph: Graph) -> int:
                 total += out_f
 
     return total
+
+
 def _infer_in_out_words(graph: Graph) -> Tuple[int, int]:
     in_words = None
     out_words = None
@@ -113,6 +117,7 @@ def _emit_hls_metadata(
     compile_plan: Any = None,
     memory_plan: Any = None,
     communication_plan: Any = None,
+    intermediate_dump: bool = False,
 ) -> None:
     meta_dir = proj.hls_dir / "metadata"
     meta_dir.mkdir(parents=True, exist_ok=True)
@@ -136,6 +141,7 @@ def _emit_hls_metadata(
         "weights_mode": weights_mode,
         "part": part,
         "clk_mhz": clk_mhz,
+        "intermediate_dump": bool(intermediate_dump),
         "graph_summary": graph_summary,
         "compile_plan_present": bool(compile_plan_dict),
         "memory_plan_present": bool(memory_plan_dict),
@@ -176,6 +182,7 @@ def _emit_hls_metadata(
     lines.append(f"Weights mode  : {weights_mode}")
     lines.append(f"Part          : {part}")
     lines.append(f"Clock (MHz)   : {clk_mhz}")
+    lines.append(f"Intermediate  : {intermediate_dump}")
     lines.append(f"Ops           : {len(graph.ops)}")
     lines.append(f"Inputs        : {', '.join(graph.inputs) if graph.inputs else '-'}")
     lines.append(f"Outputs       : {', '.join(graph.outputs) if graph.outputs else '-'}")
@@ -218,6 +225,8 @@ def emit_hls_stub(
     weights_mode = str(hls_options.get("weights_mode", "embedded")).lower()
     part = str(hls_options.get("part", "xck26-sfvc784-2LV-c"))
     clk_mhz = float(hls_options.get("clk_mhz", 200))
+    intermediate_dump = bool(hls_options.get("intermediate_dump", False))
+
     proj = HLSProject(out_dir=out_dir, top_name=top_name)
 
     # Clean directories
@@ -238,6 +247,7 @@ def emit_hls_stub(
         compile_plan=compile_plan,
         memory_plan=memory_plan,
         communication_plan=communication_plan,
+        intermediate_dump=intermediate_dump,
     )
 
     # 1. Core headers
@@ -245,7 +255,8 @@ def emit_hls_stub(
     write_text(
         proj.include_dir / "fpgai_params.h",
         emit_params_h_stub(graph, weights_mode=weights_mode),
-        )
+    )
+
     # 2. Layers
     write_text(proj.include_layers_dir / "dense.h", emit_dense_h())
     write_text(proj.src_layers_dir / "dense.cpp", emit_dense_cpp())
@@ -313,6 +324,7 @@ def emit_hls_stub(
             part=part,
             input_bin_path=str(input_bin_path),
             weights_mode=weights_mode,
+            intermediate_dump=intermediate_dump,
         ),
     )
 

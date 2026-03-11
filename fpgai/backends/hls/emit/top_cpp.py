@@ -151,6 +151,9 @@ def emit_top_cpp(
     lines.append('#include "layers/conv.h"')
     lines.append('#include "layers/pool.h"')
     lines.append('#include "layers/activations.h"')
+    lines.append('#if defined(FPGAI_DEBUG_DUMP) && !defined(__SYNTHESIS__)')
+    lines.append('#include <fstream>')
+    lines.append('#endif')
     lines.append("")
     lines.append("typedef ap_axis<32, 0, 0, 0> axis_t;")
     lines.append("using namespace fpgai;")
@@ -158,38 +161,15 @@ def emit_top_cpp(
     lines.append("inline act_t bits_to_act(unsigned int bits) { union { unsigned int i; float f; } c; c.i = bits; return (act_t)c.f; }")
     lines.append("inline unsigned int act_to_bits(act_t val) { union { unsigned int i; float f; } c; c.f = (float)val; return c.i; }")
     lines.append("")
-
-    lines.append("// ------------------------------------------------------------")
-    lines.append("// FPGAI generated top")
-    lines.append(f"// top_name    : {top_name}")
-    lines.append(f"// weights_mode: {weights_mode}")
-
-    if graph.inputs:
-        in_name = graph.inputs[0]
-        if in_name in comm_by_tensor:
-            c = comm_by_tensor[in_name]
-            lines.append(f"// input_comm  : {c.get('direction')} / {c.get('encoding')} / axi={c.get('axi_word_bits')}")
-        if in_name in mem_by_tensor:
-            m = mem_by_tensor[in_name]
-            lines.append(f"// input_mem   : {m.get('region')} ({m.get('size_bytes')} bytes)")
-
-    if graph.outputs:
-        out_name = graph.outputs[0]
-        if out_name in comm_by_tensor:
-            c = comm_by_tensor[out_name]
-            lines.append(f"// output_comm : {c.get('direction')} / {c.get('encoding')} / axi={c.get('axi_word_bits')}")
-        if out_name in mem_by_tensor:
-            m = mem_by_tensor[out_name]
-            lines.append(f"// output_mem  : {m.get('region')} ({m.get('size_bytes')} bytes)")
-
-    if runtime_weights:
-        lines.append("// runtime weights: enabled")
-        lines.append("// mode == 0 : preload weights from weight_stream")
-        lines.append("// mode == 1 : run inference")
-    else:
-        lines.append("// runtime weights: disabled (embedded parameters)")
-
-    lines.append("// ------------------------------------------------------------")
+    lines.append("#if defined(FPGAI_DEBUG_DUMP) && !defined(__SYNTHESIS__)")
+    lines.append("static inline void fpgai_dump_tensor(const char* path, const act_t* data, int n) {")
+    lines.append("    std::ofstream f(path, std::ios::binary);")
+    lines.append("    for (int i = 0; i < n; i++) {")
+    lines.append("        float v = (float)data[i];")
+    lines.append("        f.write(reinterpret_cast<const char*>(&v), sizeof(float));")
+    lines.append("    }")
+    lines.append("}")
+    lines.append("#endif")
     lines.append("")
 
     if runtime_weights:
@@ -205,13 +185,10 @@ def emit_top_cpp(
         lines.append(f'#pragma HLS INTERFACE s_axilite port=mode bundle=control')
         lines.append(f'#pragma HLS INTERFACE s_axilite port=return bundle=control')
         lines.append("")
-        lines.append("    // mode 0: preload runtime weights")
         lines.append("    if (mode == 0) {")
         lines.append("        fpgai_load_weights_from_stream(weight_stream);")
         lines.append("        return;")
         lines.append("    }")
-        lines.append("")
-        lines.append("    // mode 1: inference")
         lines.append("")
     else:
         lines.append(f'extern "C" void {top_name}(hls::stream<axis_t>& in_stream, hls::stream<axis_t>& out_stream) {{')
@@ -242,6 +219,18 @@ def emit_top_cpp(
 
     for i, op in enumerate(graph.ops):
         lp = plan_by_name.get(op.name, {})
+
+        out_name = op.outputs[0]
+        out_spec = graph.get_tensor(out_name)
+        out_shape = _strip_batch(tuple(int(v) for v in out_spec.shape))
+        out_flat_size = _flat_size(out_shape)
+
+        if op.op_type in ["Flatten", "Reshape"]:
+            curr_flat_size = _flat_size(curr_shape)
+            if out_flat_size <= 1:
+                out_flat_size = curr_flat_size
+
+        next_buf = f"layer_{i}_out"
         lines.append(f"    // Layer {i}: {op.op_type} ({op.name})")
 
         if lp:
@@ -255,16 +244,6 @@ def emit_top_cpp(
             lines.append(f"    //   activation_mode: {lp.get('activation_mode')}")
             lines.append(f"    //   buffering      : {lp.get('buffering')}")
 
-        out_name = op.outputs[0]
-        out_spec = graph.get_tensor(out_name)
-        out_shape = _strip_batch(tuple(int(v) for v in out_spec.shape))
-        out_flat_size = _flat_size(out_shape)
-
-        if op.op_type in ["Flatten", "Reshape"]:
-            curr_flat_size = _flat_size(curr_shape)
-            if out_flat_size <= 1:
-                out_flat_size = curr_flat_size
-
         if out_name in mem_by_tensor:
             m = mem_by_tensor[out_name]
             lines.append(f"    //   output placement: {m.get('region')} / size={m.get('size_bytes')} bytes")
@@ -272,7 +251,6 @@ def emit_top_cpp(
             c = comm_by_tensor[out_name]
             lines.append(f"    //   output communication: {c.get('direction')} / {c.get('encoding')}")
 
-        next_buf = f"layer_{i}_out"
         lines.append(f"    act_t {next_buf}[{out_flat_size}];")
 
         if op.op_type == "Dense":
@@ -280,7 +258,6 @@ def emit_top_cpp(
             out_flat = _flat_size(out_shape)
             cast_str = f"(const wgt_t (*)[{in_flat}])"
 
-            lines.append(f"    // dense weights source index: W{weight_idx}, B{weight_idx}")
             if lp:
                 lines.append(f"    // dense planned tiling: in={lp.get('tile', {}).get('in')} out={lp.get('tile', {}).get('out')}")
 
@@ -294,16 +271,9 @@ def emit_top_cpp(
             pads = op.attrs.get("pads", [0, 0, 0, 0])
             stride = int(op.attrs.get("strides", [1, 1])[0])
 
-            if len(curr_shape) != 3 or len(out_shape) != 3:
-                raise ValueError(
-                    f"Conv op {op.name} expects 3D feature maps after batch strip, got curr_shape={curr_shape}, out_shape={out_shape}"
-                )
-
             H, W, C = _as_hwc_for_kernel(curr_shape)
             Ho, Wo, Co = _as_hwc_for_kernel(out_shape)
 
-            lines.append(f"    // conv weights source index: W{weight_idx}, B{weight_idx}")
-            lines.append(f"    // conv tensor order: source CHW={curr_shape} -> kernel HWC=({H}, {W}, {C})")
             if lp:
                 lines.append(
                     f"    // conv planned tiling: oh={lp.get('tile', {}).get('oh')} "
@@ -314,24 +284,19 @@ def emit_top_cpp(
             lines.append(f"          ({curr_buf}, {next_buf}, W{weight_idx}, B{weight_idx});")
             weight_idx += 1
 
-        elif op.op_type in ["MaxPool", "AvgPool"]:
+        elif op.op_type == "MaxPool":
             k = int(op.attrs.get("kernel_shape", [2, 2])[0])
             stride = int(op.attrs.get("strides", [2, 2])[0])
-
-            if len(curr_shape) != 3 or len(out_shape) != 3:
-                raise ValueError(
-                    f"{op.op_type} op {op.name} expects 3D feature maps after batch strip, got curr_shape={curr_shape}, out_shape={out_shape}"
-                )
-
             H, W, C = _as_hwc_for_kernel(curr_shape)
             Ho, Wo, Co = _as_hwc_for_kernel(out_shape)
+            lines.append(f"    maxpool2d<{H}, {W}, {C}, {k}, {stride}, {Ho}, {Wo}>({curr_buf}, {next_buf});")
 
-            lines.append(f"    // pool tensor order: source CHW={curr_shape} -> kernel HWC=({H}, {W}, {C})")
-
-            if op.op_type == "MaxPool":
-                lines.append(f"    maxpool2d<{H}, {W}, {C}, {k}, {stride}, {Ho}, {Wo}>({curr_buf}, {next_buf});")
-            else:
-                lines.append(f"    avgpool2d<{H}, {W}, {C}, {k}, {stride}, {Ho}, {Wo}>({curr_buf}, {next_buf});")
+        elif op.op_type == "AvgPool":
+            k = int(op.attrs.get("kernel_shape", [2, 2])[0])
+            stride = int(op.attrs.get("strides", [2, 2])[0])
+            H, W, C = _as_hwc_for_kernel(curr_shape)
+            Ho, Wo, Co = _as_hwc_for_kernel(out_shape)
+            lines.append(f"    avgpool2d<{H}, {W}, {C}, {k}, {stride}, {Ho}, {Wo}>({curr_buf}, {next_buf});")
 
         elif op.op_type == "Relu":
             lines.append(f"    for(int j=0; j<{out_flat_size}; j++) {next_buf}[j] = {curr_buf}[j];")
@@ -342,14 +307,31 @@ def emit_top_cpp(
             lines.append(f"    softmax_inplace<{out_flat_size}>({next_buf});")
 
         elif op.op_type in ["Flatten", "Reshape"]:
-            lines.append(f"    for(int j=0; j<{out_flat_size}; j++) {next_buf}[j] = {curr_buf}[j];")
+            # Convert internal HWC-flat order into ONNX/Dense-expected CHW-flat order.
+            if len(curr_shape) == 3:
+                H, W, C = _as_hwc_for_kernel(curr_shape)
+                lines.append(f"    for(int c=0; c<{C}; c++) {{")
+                lines.append(f"        for(int h=0; h<{H}; h++) {{")
+                lines.append(f"            for(int w=0; w<{W}; w++) {{")
+                lines.append(f"                int src_idx = (h * {W} + w) * {C} + c;")
+                lines.append(f"                int dst_idx = (c * {H} + h) * {W} + w;")
+                lines.append(f"                {next_buf}[dst_idx] = {curr_buf}[src_idx];")
+                lines.append("            }")
+                lines.append("        }")
+                lines.append("    }")
+            else:
+                lines.append(f"    for(int j=0; j<{out_flat_size}; j++) {next_buf}[j] = {curr_buf}[j];")
 
         else:
             lines.append(f"    // WARNING: Unknown Op {op.op_type}, skipping...")
 
+        lines.append("#if defined(FPGAI_DEBUG_DUMP) && !defined(__SYNTHESIS__)")
+        lines.append(f'    fpgai_dump_tensor("{op.name}.bin", {next_buf}, {out_flat_size});')
+        lines.append("#endif")
+        lines.append("")
+
         curr_buf = next_buf
         curr_shape = out_shape
-        lines.append("")
 
     out_final_size = _flat_size(curr_shape)
 
@@ -362,11 +344,10 @@ def emit_top_cpp(
             m = mem_by_tensor[out_name]
             lines.append(f"    // output placement: {m.get('region')} / size={m.get('size_bytes')} bytes")
 
-    lines.append(f"    // Write Outputs")
     lines.append(f"    for(int i=0; i<{out_final_size}; i++) {{")
     lines.append("        axis_t temp;")
     lines.append(f"        temp.data = act_to_bits({curr_buf}[i]);")
-    lines.append(f"        temp.keep = -1; temp.strb = -1;")
+    lines.append("        temp.keep = -1; temp.strb = -1;")
     lines.append(f"        temp.last = (i == {out_final_size}-1);")
     lines.append("        out_stream.write(temp);")
     lines.append("    }")

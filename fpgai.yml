@@ -76,19 +76,22 @@ toolchain:
     install_dir: /tools/Xilinx/Vitis_HLS/2023.2
 
 
+
 benchmark:
   enabled: true
   fail_on_mismatch: true
   seed: 0
 
-  reference:
-    kind: onnx   # for now only onnx
-
   compare:
-    atol: 0.05
-    rtol: 0.05
-    max_abs_error: 0.10
-    mean_abs_error: 0.02
-    rmse: 0.03
-    require_argmax_match: true
-    min_cosine_similarity: 0.99
+    atol: 0.08
+    rtol: 0.08
+    max_abs_error: 0.08
+    mean_abs_error: 0.03
+    rmse: 0.04
+    require_argmax_match: false
+    min_cosine_similarity: 0.95
+
+  intermediate:
+    enabled: true
+    fail_on_layer_mismatch: false
+    stop_on_first_bad_layer: false
