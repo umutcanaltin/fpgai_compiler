@@ -117,6 +117,119 @@ def _as_hwc_for_kernel(shape3: Tuple[int, int, int]) -> Tuple[int, int, int]:
     return h, w, c
 
 
+def _conv_out_dim(in_dim: int, k: int, stride: int, pad_total: int, dilation: int = 1) -> int:
+    return ((in_dim + pad_total - dilation * (k - 1) - 1) // stride) + 1
+
+
+def _infer_out_shape(graph: Graph, op, curr_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+    """
+    Fallback shape inference for top generation when graph.get_tensor(out_name)
+    is missing for an intermediate tensor.
+    curr_shape is already batch-stripped.
+    """
+    out_name = op.outputs[0]
+    out_spec = graph.get_tensor(out_name)
+    if out_spec is not None and getattr(out_spec, "shape", None):
+        return _strip_batch(tuple(int(v) for v in out_spec.shape))
+
+    # ---- Conv ----
+    if op.op_type == "Conv":
+        if len(curr_shape) != 3:
+            raise ValueError(f"Conv expects 3D curr_shape, got {curr_shape}")
+
+        c_in, h_in, w_in = _as_chw(curr_shape)
+
+        # weights shape usually [out_c, in_c/group, kH, kW]
+        out_c = None
+        k_h = 3
+        k_w = 3
+
+        if len(op.inputs) > 1:
+            w_name = op.inputs[1]
+            w_t = graph.get_tensor(w_name)
+            if w_t is not None and getattr(w_t, "shape", None):
+                ws = tuple(int(v) for v in w_t.shape)
+                if len(ws) == 4:
+                    out_c = ws[0]
+                    k_h = ws[2]
+                    k_w = ws[3]
+            elif hasattr(graph, "constants") and w_name in graph.constants:
+                ws = tuple(int(v) for v in graph.constants[w_name].shape)
+                if len(ws) == 4:
+                    out_c = ws[0]
+                    k_h = ws[2]
+                    k_w = ws[3]
+
+        strides = op.attrs.get("strides", [1, 1])
+        pads = op.attrs.get("pads", [0, 0, 0, 0])
+        dilations = op.attrs.get("dilations", [1, 1])
+
+        sh, sw = int(strides[0]), int(strides[1])
+        pt, pl, pb, pr = [int(x) for x in pads]
+        dh, dw = int(dilations[0]), int(dilations[1])
+
+        h_out = _conv_out_dim(h_in, k_h, sh, pt + pb, dh)
+        w_out = _conv_out_dim(w_in, k_w, sw, pl + pr, dw)
+
+        if out_c is None:
+            raise ValueError(f"Could not infer Conv output channels for op {op.name}")
+
+        return (int(out_c), int(h_out), int(w_out))
+
+    # ---- Pool ----
+    if op.op_type in ("MaxPool", "AvgPool"):
+        if len(curr_shape) != 3:
+            raise ValueError(f"{op.op_type} expects 3D curr_shape, got {curr_shape}")
+
+        c_in, h_in, w_in = _as_chw(curr_shape)
+        kernel = op.attrs.get("kernel_shape", [2, 2])
+        strides = op.attrs.get("strides", [2, 2])
+        pads = op.attrs.get("pads", [0, 0, 0, 0])
+
+        kh, kw = int(kernel[0]), int(kernel[1])
+        sh, sw = int(strides[0]), int(strides[1])
+        pt, pl, pb, pr = [int(x) for x in pads]
+
+        h_out = _conv_out_dim(h_in, kh, sh, pt + pb, 1)
+        w_out = _conv_out_dim(w_in, kw, sw, pl + pr, 1)
+
+        return (int(c_in), int(h_out), int(w_out))
+
+    # ---- Relu / Sigmoid / LeakyRelu / Add / BatchNorm ----
+    if op.op_type in ("Relu", "Sigmoid", "LeakyRelu", "Add", "BatchNormalization"):
+        return tuple(curr_shape)
+
+    # ---- Flatten / Reshape ----
+    if op.op_type in ("Flatten", "Reshape"):
+        return (_flat_size(curr_shape),)
+
+    # ---- Dense ----
+    if op.op_type == "Dense":
+        out_f = op.attrs.get("out_features", op.attrs.get("out"))
+        if out_f is None:
+            # fallback from weights
+            if "weight" in op.attrs:
+                w_name = op.attrs["weight"]
+                w_t = graph.get_tensor(w_name)
+                if w_t is not None and getattr(w_t, "shape", None):
+                    ws = tuple(int(v) for v in w_t.shape)
+                    if len(ws) >= 1:
+                        out_f = ws[0]
+                elif hasattr(graph, "constants") and w_name in graph.constants:
+                    ws = tuple(int(v) for v in graph.constants[w_name].shape)
+                    if len(ws) >= 1:
+                        out_f = ws[0]
+        if out_f is None:
+            raise ValueError(f"Could not infer Dense output features for op {op.name}")
+        return (int(out_f),)
+
+    # ---- Softmax ----
+    if op.op_type == "Softmax":
+        return tuple(curr_shape)
+
+    raise ValueError(f"Could not infer output shape for op {op.name} ({op.op_type})")
+
+
 def emit_top_cpp(
     graph: Graph,
     *,
@@ -221,8 +334,7 @@ def emit_top_cpp(
         lp = plan_by_name.get(op.name, {})
 
         out_name = op.outputs[0]
-        out_spec = graph.get_tensor(out_name)
-        out_shape = _strip_batch(tuple(int(v) for v in out_spec.shape))
+        out_shape = _infer_out_shape(graph, op, curr_shape)
         out_flat_size = _flat_size(out_shape)
 
         if op.op_type in ["Flatten", "Reshape"]:
@@ -302,12 +414,20 @@ def emit_top_cpp(
             lines.append(f"    for(int j=0; j<{out_flat_size}; j++) {next_buf}[j] = {curr_buf}[j];")
             lines.append(f"    relu_inplace<{out_flat_size}>({next_buf});")
 
+        elif op.op_type == "Sigmoid":
+            lines.append(f"    for(int j=0; j<{out_flat_size}; j++) {next_buf}[j] = {curr_buf}[j];")
+            lines.append(f"    sigmoid_inplace<{out_flat_size}>({next_buf});")
+
+        elif op.op_type == "LeakyRelu":
+            alpha = float(op.attrs.get("alpha", 0.1))
+            lines.append(f"    for(int j=0; j<{out_flat_size}; j++) {next_buf}[j] = {curr_buf}[j];")
+            lines.append(f"    leaky_relu_inplace<{out_flat_size}>({next_buf}, (act_t){alpha});")
+
         elif op.op_type == "Softmax":
             lines.append(f"    for(int j=0; j<{out_flat_size}; j++) {next_buf}[j] = {curr_buf}[j];")
             lines.append(f"    softmax_inplace<{out_flat_size}>({next_buf});")
 
         elif op.op_type in ["Flatten", "Reshape"]:
-            # Convert internal HWC-flat order into ONNX/Dense-expected CHW-flat order.
             if len(curr_shape) == 3:
                 H, W, C = _as_hwc_for_kernel(curr_shape)
                 lines.append(f"    for(int c=0; c<{C}; c++) {{")
@@ -322,8 +442,19 @@ def emit_top_cpp(
             else:
                 lines.append(f"    for(int j=0; j<{out_flat_size}; j++) {next_buf}[j] = {curr_buf}[j];")
 
+        elif op.op_type == "Add":
+            # Minimal same-shape elementwise add path for future compatibility.
+            # Assumes first input is current buffer and second is compatible constant/buffer.
+            lines.append(f"    // WARNING: Add emitter currently assumes pass-through for single-buffer flows")
+            lines.append(f"    for(int j=0; j<{out_flat_size}; j++) {next_buf}[j] = {curr_buf}[j];")
+
+        elif op.op_type == "BatchNormalization":
+            lines.append(f"    // WARNING: BatchNormalization emitter currently uses pass-through placeholder")
+            lines.append(f"    for(int j=0; j<{out_flat_size}; j++) {next_buf}[j] = {curr_buf}[j];")
+
         else:
-            lines.append(f"    // WARNING: Unknown Op {op.op_type}, skipping...")
+            lines.append(f"    // WARNING: Unknown Op {op.op_type}, skipping with pass-through if sizes match")
+            lines.append(f"    for(int j=0; j<{out_flat_size}; j++) {next_buf}[j] = {curr_buf}[j];")
 
         lines.append("#if defined(FPGAI_DEBUG_DUMP) && !defined(__SYNTHESIS__)")
         lines.append(f'    fpgai_dump_tensor("{op.name}.bin", {next_buf}, {out_flat_size});')

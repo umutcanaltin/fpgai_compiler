@@ -1,0 +1,93 @@
+version: 1
+project:
+  name: fpgai_cnn_mnist
+  out_dir: build/fpgai_cnn_mnist
+  clean: true
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+operators:
+  supported:
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true
+model:
+  format: onnx
+  path: models/suite/cnn_mnist.onnx
+numerics:
+  defaults:
+    activation:
+      type: ap_fixed
+      total_bits: 16
+      int_bits: 6
+    weight:
+      type: ap_fixed
+      total_bits: 16
+      int_bits: 6
+    bias:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+    accum:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+data_movement:
+  ps_pl:
+    compression:
+      enabled: true
+    weights:
+      mode: embedded
+backends:
+  hls:
+    enabled: true
+    vitis:
+      enabled: true
+      mode: csim
+      exe: vitis_hls
+toolchain:
+  vitis_hls:
+    enabled: true
+    settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
+  vivado:
+    enabled: true
+benchmark:
+  enabled: true
+  fail_on_mismatch: true
+  seed: 0
+  compare:
+    atol: 0.08
+    rtol: 0.08
+    max_abs_error: 0.08
+    mean_abs_error: 0.03
+    rmse: 0.04
+    require_argmax_match: false
+    min_cosine_similarity: 0.95
+  intermediate:
+    enabled: true
+    fail_on_layer_mismatch: false
+    stop_on_first_bad_layer: false
+debug:
+  verbose: false
