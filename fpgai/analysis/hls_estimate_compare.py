@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 import json
 import re
 import xml.etree.ElementTree as ET
@@ -24,9 +24,39 @@ def _safe_float(x, default=0.0):
         return default
 
 
+def _find_best_report_path(report_path: str | Path) -> Path:
+    p = Path(report_path)
+    parent = p.parent
+
+    preferred = [
+        parent / "deeplearn_csynth.xml",
+        parent / "csynth.xml",
+        parent / "deeplearn_csynth.rpt",
+        parent / "csynth.rpt",
+    ]
+
+    for cand in preferred:
+        if cand.exists():
+            return cand
+
+    if p.exists():
+        return p
+
+    return p
+
+
+def _extract_xml_tag(text: str, tag: str, default=0):
+    m = re.search(rf"<{tag}>([^<]+)</{tag}>", text)
+    if not m:
+        return default
+    val = m.group(1)
+    if isinstance(default, float):
+        return _safe_float(val, default)
+    return _safe_int(val, default)
+
+
 def _extract_from_xml(xml_path: Path) -> Dict[str, float]:
-    root = ET.parse(xml_path).getroot()
-    text = ET.tostring(root, encoding="unicode")
+    txt = xml_path.read_text(encoding="utf-8", errors="ignore")
 
     out = {
         "actual_lut": 0,
@@ -36,23 +66,69 @@ def _extract_from_xml(xml_path: Path) -> Dict[str, float]:
         "actual_latency_cycles": 0.0,
     }
 
-    patterns = {
-        "actual_lut": r"<LUT>([^<]+)</LUT>",
-        "actual_ff": r"<FF>([^<]+)</FF>",
-        "actual_dsp": r"<DSP>([^<]+)</DSP>",
-        "actual_bram18": r"<BRAM_18K>([^<]+)</BRAM_18K>",
-        "actual_latency_cycles": r"<Average-caseLatency>([^<]+)</Average-caseLatency>",
-    }
+    # Common HLS XML tags
+    out["actual_lut"] = _extract_xml_tag(txt, "LUT", 0)
+    out["actual_ff"] = _extract_xml_tag(txt, "FF", 0)
+    out["actual_dsp"] = _extract_xml_tag(txt, "DSP", 0)
+    out["actual_bram18"] = _extract_xml_tag(txt, "BRAM_18K", 0)
 
-    for k, pat in patterns.items():
-        m = re.search(pat, text)
+    # Latency tags vary slightly between reports
+    lat_patterns = [
+        r"<Average-caseLatency>([^<]+)</Average-caseLatency>",
+        r"<Best-caseLatency>([^<]+)</Best-caseLatency>",
+        r"<Worst-caseLatency>([^<]+)</Worst-caseLatency>",
+        r"<Latency>([^<]+)</Latency>",
+    ]
+    for pat in lat_patterns:
+        m = re.search(pat, txt)
         if m:
-            if "latency" in k:
-                out[k] = _safe_float(m.group(1), 0.0)
-            else:
-                out[k] = _safe_int(m.group(1), 0)
+            out["actual_latency_cycles"] = _safe_float(m.group(1), 0.0)
+            break
 
     return out
+
+
+def _parse_total_row(txt: str) -> Dict[str, float]:
+    out = {
+        "actual_lut": 0,
+        "actual_ff": 0,
+        "actual_dsp": 0,
+        "actual_bram18": 0,
+        "actual_latency_cycles": 0.0,
+    }
+
+    m = re.search(
+        r"\|Total\s*\|\s*([0-9,]+)\s*\|\s*([0-9,]+)\s*\|\s*([0-9,]+)\s*\|\s*([0-9,]+)\s*\|",
+        txt,
+        flags=re.IGNORECASE,
+    )
+    if m:
+        out["actual_bram18"] = _safe_int(m.group(1), 0)
+        out["actual_dsp"] = _safe_int(m.group(2), 0)
+        out["actual_ff"] = _safe_int(m.group(3), 0)
+        out["actual_lut"] = _safe_int(m.group(4), 0)
+
+    return out
+
+
+def _parse_latency(txt: str) -> float:
+    patterns = [
+        r"Latency.*?min\s*=\s*([0-9,]+)",
+        r"\|\s*Latency\s*\|\s*([0-9,]+)\s*\|",
+        r"Average-caseLatency.*?([0-9,]+)",
+    ]
+    for pat in patterns:
+        m = re.search(pat, txt, flags=re.IGNORECASE | re.DOTALL)
+        if m:
+            return _safe_float(m.group(1), 0.0)
+    return 0.0
+
+
+def _count_dsp_bindings(txt: str) -> int:
+    names = set()
+    for m in re.finditer(r"^\|\s*([A-Za-z0-9_]+)\s*\|.*?\|\s*dsp_slice\s*\|", txt, flags=re.MULTILINE):
+        names.add(m.group(1).strip())
+    return len(names)
 
 
 def _extract_from_rpt(rpt_path: Path) -> Dict[str, float]:
@@ -66,27 +142,18 @@ def _extract_from_rpt(rpt_path: Path) -> Dict[str, float]:
         "actual_latency_cycles": 0.0,
     }
 
-    patterns = [
-        ("actual_lut", r"\|\s*LUT\s*\|\s*([0-9,]+)\s*\|"),
-        ("actual_ff", r"\|\s*FF\s*\|\s*([0-9,]+)\s*\|"),
-        ("actual_dsp", r"\|\s*DSP\s*\|\s*([0-9,]+)\s*\|"),
-        ("actual_bram18", r"\|\s*BRAM_18K\s*\|\s*([0-9,]+)\s*\|"),
-        ("actual_latency_cycles", r"Latency.*?min\s*=\s*([0-9,]+)"),
-    ]
+    out.update(_parse_total_row(txt))
+    out["actual_latency_cycles"] = _parse_latency(txt)
 
-    for k, pat in patterns:
-        m = re.search(pat, txt, flags=re.IGNORECASE | re.DOTALL)
-        if m:
-            if "latency" in k:
-                out[k] = _safe_float(m.group(1), 0.0)
-            else:
-                out[k] = _safe_int(m.group(1), 0)
+    if out["actual_dsp"] == 0:
+        out["actual_dsp"] = _count_dsp_bindings(txt)
 
     return out
 
 
 def parse_hls_csynth_report(report_path: str | Path) -> Dict[str, float]:
-    p = Path(report_path)
+    p = _find_best_report_path(report_path)
+
     if not p.exists():
         return {
             "actual_lut": 0,
@@ -98,6 +165,7 @@ def parse_hls_csynth_report(report_path: str | Path) -> Dict[str, float]:
 
     if p.suffix.lower() == ".xml":
         return _extract_from_xml(p)
+
     return _extract_from_rpt(p)
 
 
@@ -130,9 +198,8 @@ def run_estimate_vs_hls_compare(
     if not csynth_report_path:
         terminal = (
             "=============== FPGAI Estimate vs HLS ===============\n"
-            "HLS csynth report unavailable. Current run appears to be csim-only,\n"
-            "so only analytical estimates are available.\n"
-            "======================================================"
+            "HLS csynth report unavailable.\n"
+            "====================================================="
         )
         summary_txt = cdir / "summary.txt"
         results_json = cdir / "results.json"
@@ -151,11 +218,14 @@ def run_estimate_vs_hls_compare(
             terminal_summary=terminal,
         )
 
-    actual = parse_hls_csynth_report(csynth_report_path)
+    best_path = _find_best_report_path(csynth_report_path)
+    actual = parse_hls_csynth_report(best_path)
     actual_latency_ms = (actual["actual_latency_cycles"] / (clock_mhz * 1e3)) if actual["actual_latency_cycles"] > 0 else 0.0
 
     payload = {
         "available": True,
+        "csynth_report_path_requested": str(csynth_report_path),
+        "csynth_report_path_used": str(best_path),
         "estimated": design_space_summary,
         "actual": {
             **actual,
@@ -172,6 +242,7 @@ def run_estimate_vs_hls_compare(
 
     terminal = "\n".join([
         "=============== FPGAI Estimate vs HLS ===============",
+        f"Report   used={best_path.name}",
         f"LUT      pred={design_space_summary.get('predicted_lut', 0)}  actual={actual['actual_lut']}",
         f"FF       pred={design_space_summary.get('predicted_ff', 0)}  actual={actual['actual_ff']}",
         f"DSP      pred={design_space_summary.get('predicted_dsp', 0)}  actual={actual['actual_dsp']}",
