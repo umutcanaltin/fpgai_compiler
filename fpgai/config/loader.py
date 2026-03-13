@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 import os
 import yaml
 
@@ -20,7 +20,7 @@ class ConfigError(Exception):
     def __str__(self) -> str:
         lines = ["FPGAI config validation failed:"]
         for it in self.issues:
-            lines.append(f"  - {it.path}: {it.message}")
+            lines.append(f" - {it.path}: {it.message}")
         return "\n".join(lines)
 
 
@@ -58,6 +58,26 @@ class FPGAIConfig:
 
 
 PIPELINE_MODES_V1 = {"inference", "training_on_device"}
+
+
+def _is_valid_precision_spec(x: Any) -> bool:
+    if not isinstance(x, dict):
+        return False
+    if x.get("type") != "ap_fixed":
+        return False
+    tb = x.get("total_bits")
+    ib = x.get("int_bits")
+    if not isinstance(tb, int) or not isinstance(ib, int):
+        return False
+    if tb <= 0 or ib <= 0 or ib > tb:
+        return False
+    return True
+
+
+def _ap_str(node: Any) -> str:
+    if isinstance(node, dict) and node.get("type") == "ap_fixed":
+        return f"ap_fixed<{int(node.get('total_bits', 16))},{int(node.get('int_bits', 6))}>"
+    return "float"
 
 
 def load_config(path: str) -> FPGAIConfig:
@@ -99,10 +119,59 @@ def load_config(path: str) -> FPGAIConfig:
         ops = []
     ops = [x.strip() for x in ops]
 
-    # Required for dense-only baseline
-    if ("Dense" not in ops) and (("Gemm" in ops) or ("MatMul" in ops)):
-        # you moved to canonical ops; encourage Dense
-        issues.append(ConfigIssue("operators.supported", "Use canonical op names (include 'Dense')."))
+    for key in ["activation", "weight", "bias", "accum"]:
+        spec = _deep_get(raw, f"numerics.defaults.{key}", None)
+        if spec is not None and not _is_valid_precision_spec(spec):
+            issues.append(
+                ConfigIssue(
+                    f"numerics.defaults.{key}",
+                    "Expected {type: ap_fixed, total_bits: int, int_bits: int} with int_bits <= total_bits",
+                )
+            )
+
+    layer_rules = _deep_get(raw, "numerics.layers", [])
+    if layer_rules is not None:
+        if not isinstance(layer_rules, list):
+            issues.append(ConfigIssue("numerics.layers", "Expected a list of layer precision rules"))
+        else:
+            for i, rule in enumerate(layer_rules):
+                p = f"numerics.layers[{i}]"
+                if not isinstance(rule, dict):
+                    issues.append(ConfigIssue(p, "Each entry must be a mapping"))
+                    continue
+                match = rule.get("match")
+                if not isinstance(match, dict):
+                    issues.append(ConfigIssue(f"{p}.match", "Missing/invalid match mapping"))
+                else:
+                    if not any(k in match for k in ("name", "op_type", "index")):
+                        issues.append(
+                            ConfigIssue(
+                                f"{p}.match",
+                                "At least one of {name, op_type, index} must be provided",
+                            )
+                        )
+                for key in ["activation", "weight", "bias", "accum"]:
+                    if key in rule and not _is_valid_precision_spec(rule[key]):
+                        issues.append(
+                            ConfigIssue(
+                                f"{p}.{key}",
+                                "Expected {type: ap_fixed, total_bits: int, int_bits: int} with int_bits <= total_bits",
+                            )
+                        )
+
+    qrep = _deep_get(raw, "analysis.quantization_report", None)
+    if qrep is not None and not isinstance(qrep, dict):
+        issues.append(ConfigIssue("analysis.quantization_report", "Expected a mapping"))
+
+    if isinstance(qrep, dict):
+        num_samples = qrep.get("num_samples", 1)
+        if not isinstance(num_samples, int) or num_samples <= 0:
+            issues.append(ConfigIssue("analysis.quantization_report.num_samples", "Must be a positive integer"))
+
+        if "metrics" in qrep:
+            metrics = qrep["metrics"]
+            if not isinstance(metrics, list) or not all(isinstance(x, str) for x in metrics):
+                issues.append(ConfigIssue("analysis.quantization_report.metrics", "Must be a list of metric names"))
 
     if issues:
         raise ConfigError(issues)
@@ -118,27 +187,25 @@ def load_config(path: str) -> FPGAIConfig:
 
 def print_summary(cfg: FPGAIConfig) -> None:
     raw = cfg.raw
-    def g(p, d=None): return _deep_get(raw, p, d)
+
+    def g(p, d=None):
+        return _deep_get(raw, p, d)
 
     board = g("targets.platform.board", "kv260")
     part = g("targets.platform.part", "xck26-sfvc784-2LV-c")
     clk = g("targets.platform.clocks.0.target_mhz", 200)
 
-    # numerics summary
     act = g("numerics.defaults.activation", {})
     wgt = g("numerics.defaults.weight", {})
     bias = g("numerics.defaults.bias", {})
     acc = g("numerics.defaults.accum", {})
-
-    def ap(node):
-        if isinstance(node, dict) and node.get("type") == "ap_fixed":
-            return f"ap_fixed<{int(node.get('total_bits', 16))},{int(node.get('int_bits', 6))}>"
-        return "float"
+    layer_rules = g("numerics.layers", []) or []
 
     compression = bool(g("data_movement.ps_pl.compression.enabled", False))
     vitis = bool(g("toolchain.vitis_hls.enabled", True))
     vivado = bool(g("toolchain.vivado.enabled", True))
     verbose = bool(g("debug.verbose", False))
+    qrep_enabled = bool(g("analysis.quantization_report.enabled", False))
 
     print("\n================ FPGAI Config Summary ================")
     print(f"Config version        : {cfg.version}")
@@ -150,16 +217,18 @@ def print_summary(cfg: FPGAIConfig) -> None:
     print(f"Target clock (MHz)    : {clk}")
     print("------------------------------------------------------")
     print("Precision kind        : fixed")
-    print(f"  activation          : {ap(act)}")
-    print(f"  weight              : {ap(wgt)}")
-    print(f"  bias                : {ap(bias)}")
-    print(f"  accum               : {ap(acc)}")
+    print(f"  activation          : {_ap_str(act)}")
+    print(f"  weight              : {_ap_str(wgt)}")
+    print(f"  bias                : {_ap_str(bias)}")
+    print(f"  accum               : {_ap_str(acc)}")
+    print(f"Layerwise overrides   : {len(layer_rules)}")
     print("------------------------------------------------------")
     print("Operator allowlist    :")
     for op in cfg.operators.supported:
         print(f"  - {op}")
     print("------------------------------------------------------")
     print(f"Compression enabled   : {compression}")
+    print(f"Quant report enabled  : {qrep_enabled}")
     print("------------------------------------------------------")
     print(f"Toolchain.vitis_hls   : {vitis}")
     print(f"Toolchain.vivado      : {vivado}")

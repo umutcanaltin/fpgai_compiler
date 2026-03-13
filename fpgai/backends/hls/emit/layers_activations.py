@@ -6,38 +6,41 @@ def emit_activations_h() -> str:
 
 namespace fpgai {
 
-template<int N>
-void relu_inplace(act_t x[N]) {
+// -----------------------------------------------------------------------------
+// New typed kernels
+// -----------------------------------------------------------------------------
+template<typename ACT_T, int N>
+void relu_inplace_typed(ACT_T x[N]) {
     for (int i = 0; i < N; i++) {
 #pragma HLS PIPELINE II=1
-        if (x[i] < (act_t)0) {
-            x[i] = (act_t)0;
+        if (x[i] < (ACT_T)0) {
+            x[i] = (ACT_T)0;
         }
     }
 }
 
-template<int N>
-void leaky_relu_inplace(act_t x[N], act_t alpha) {
+template<typename ACT_T, int N>
+void leaky_relu_inplace_typed(ACT_T x[N], ACT_T alpha) {
     for (int i = 0; i < N; i++) {
 #pragma HLS PIPELINE II=1
-        if (x[i] <= (act_t)0) {
-            x[i] = (act_t)(x[i] * alpha);
+        if (x[i] <= (ACT_T)0) {
+            x[i] = (ACT_T)(x[i] * alpha);
         }
     }
 }
 
-template<int N>
-void sigmoid_inplace(act_t x[N]) {
+template<typename ACT_T, int N>
+void sigmoid_inplace_typed(ACT_T x[N]) {
     for (int i = 0; i < N; i++) {
 #pragma HLS PIPELINE II=1
         float xf = (float)x[i];
         float yf = 1.0f / (1.0f + hls::expf(-xf));
-        x[i] = (act_t)yf;
+        x[i] = (ACT_T)yf;
     }
 }
 
-template<int N>
-void softmax_inplace(act_t x[N]) {
+template<typename ACT_T, int N>
+void softmax_inplace_typed(ACT_T x[N]) {
     float tmp[N];
     float max_val = -1e30f;
 
@@ -60,8 +63,31 @@ void softmax_inplace(act_t x[N]) {
     float inv_sum = 1.0f / sum;
     for (int i = 0; i < N; i++) {
 #pragma HLS PIPELINE II=1
-        x[i] = (act_t)(tmp[i] * inv_sum);
+        x[i] = (ACT_T)(tmp[i] * inv_sum);
     }
+}
+
+// -----------------------------------------------------------------------------
+// Backward-compatible wrappers for old top emitter
+// -----------------------------------------------------------------------------
+template<int N>
+void relu_inplace(act_t x[N]) {
+    relu_inplace_typed<act_t, N>(x);
+}
+
+template<int N>
+void leaky_relu_inplace(act_t x[N], act_t alpha) {
+    leaky_relu_inplace_typed<act_t, N>(x, alpha);
+}
+
+template<int N>
+void sigmoid_inplace(act_t x[N]) {
+    sigmoid_inplace_typed<act_t, N>(x);
+}
+
+template<int N>
+void softmax_inplace(act_t x[N]) {
+    softmax_inplace_typed<act_t, N>(x);
 }
 
 } // namespace fpgai

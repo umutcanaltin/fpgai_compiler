@@ -21,28 +21,7 @@ def _tensor_total(graph: Graph, name: str) -> int:
 
 
 def emit_params_h_stub(graph: Graph, weights_mode: str = "embedded") -> str:
-    """
-    Emit parameter declarations for generated HLS code.
-
-    - embedded mode:
-        extern const wgt_t W0[...];
-        extern const bias_t B0[...];
-
-    - stream / ddr mode:
-        extern wgt_t W0[...];
-        extern bias_t B0[...];
-
-    Arrays are emitted as flat 1D buffers to keep declarations compatible
-    across Conv and Dense. Dense call sites can cast flat storage to 2D.
-    """
     runtime_weights = str(weights_mode).lower() in ("stream", "ddr")
-
-    if runtime_weights:
-        w_prefix = "    extern wgt_t"
-        b_prefix = "    extern bias_t"
-    else:
-        w_prefix = "    extern const wgt_t"
-        b_prefix = "    extern const bias_t"
 
     lines = []
     lines.append("#pragma once")
@@ -51,39 +30,46 @@ def emit_params_h_stub(graph: Graph, weights_mode: str = "embedded") -> str:
     lines.append("")
 
     weight_idx = 0
-
-    for op in graph.ops:
-        if op.op_type not in ["Conv", "Dense"]:
+    for op_idx, op in enumerate(graph.ops):
+        if op.op_type not in ["Conv", "Dense", "Gemm"]:
             continue
+
+        tag = op.attrs.get("precision_tag", f"op{op_idx}")
+        w_t = f"{tag}_wgt_t"
+        b_t = f"{tag}_bias_t"
+
+        w_prefix = f"extern {w_t}" if runtime_weights else f"extern const {w_t}"
+        b_prefix = f"extern {b_t}" if runtime_weights else f"extern const {b_t}"
 
         w_name = None
         b_name = None
 
-        if op.op_type == "Dense":
+        if op.op_type in ("Dense", "Gemm"):
             w_name = op.attrs.get("weight")
             b_name = op.attrs.get("bias")
+            if w_name is None and len(op.inputs) > 1:
+                w_name = op.inputs[1]
+            if b_name is None and len(op.inputs) > 2:
+                b_name = op.inputs[2]
         elif op.op_type == "Conv":
             if len(op.inputs) > 1:
                 w_name = op.inputs[1]
             if len(op.inputs) > 2:
                 b_name = op.inputs[2]
 
-        # Weights
         if w_name:
             w_total = _tensor_total(graph, w_name)
             lines.append(f"{w_prefix} W{weight_idx}[{w_total}];")
 
-        # Bias
         if b_name:
             b_total = _tensor_total(graph, b_name)
             lines.append(f"{b_prefix} B{weight_idx}[{b_total}];")
         else:
-            # dummy bias symbol if missing
             lines.append(f"{b_prefix} B{weight_idx}[1];")
 
+        lines.append("")
         weight_idx += 1
 
-    lines.append("")
     lines.append("} // namespace fpgai")
     lines.append("")
     return "\n".join(lines)

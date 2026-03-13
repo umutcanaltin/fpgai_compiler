@@ -35,7 +35,7 @@ operators:
 
   defaults:
     activation_insert:
-      kind: none     # none | leakyrelu
+      kind: none
       alpha: 0.1
       except_last: true
 
@@ -46,9 +46,33 @@ model:
 numerics:
   defaults:
     activation: { type: ap_fixed, total_bits: 16, int_bits: 6 }
-    weight:      { type: ap_fixed, total_bits: 16, int_bits: 6 }
-    bias:        { type: ap_fixed, total_bits: 24, int_bits: 10 }
-    accum:       { type: ap_fixed, total_bits: 24, int_bits: 10 }
+    weight:     { type: ap_fixed, total_bits: 16, int_bits: 6 }
+    bias:       { type: ap_fixed, total_bits: 24, int_bits: 10 }
+    accum:      { type: ap_fixed, total_bits: 24, int_bits: 10 }
+
+  # Optional per-layer overrides.
+  # You can match by index, op_type, or exact layer name.
+  # Remove or edit these as needed.
+  layers:
+    - match: { op_type: "Conv" }
+      weight: { type: ap_fixed, total_bits: 14, int_bits: 5 }
+      bias:   { type: ap_fixed, total_bits: 20, int_bits: 8 }
+      accum:  { type: ap_fixed, total_bits: 24, int_bits: 10 }
+
+    - match: { op_type: "Dense" }
+      weight: { type: ap_fixed, total_bits: 12, int_bits: 4 }
+      bias:   { type: ap_fixed, total_bits: 20, int_bits: 8 }
+      accum:  { type: ap_fixed, total_bits: 24, int_bits: 10 }
+
+    - match: { op_type: "Sigmoid" }
+      activation: { type: ap_fixed, total_bits: 16, int_bits: 4 }
+
+analysis:
+  quantization_report:
+    enabled: true
+    seed: 0
+    # optional: input_npy: data/sample_input.npy
+    # If input_npy is not provided, a deterministic random input is generated.
 
 data_movement:
   ps_pl:
@@ -59,11 +83,14 @@ data_movement:
 
 backends:
   hls:
+    enabled: true
     vitis:
       enabled: true
-      mode: csim        # csim | cosim
-      exe: vitis_hls     
+      mode: csim
+      exe: vitis_hls
 
+  host_cpp:
+    enabled: true
 
 debug:
   verbose: false
@@ -74,8 +101,6 @@ toolchain:
     root: /tools/Xilinx/Vitis_HLS/2023.2
     settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
     install_dir: /tools/Xilinx/Vitis_HLS/2023.2
-
-
 
 benchmark:
   enabled: true

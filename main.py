@@ -37,6 +37,10 @@ def main():
             print(f"Benchmark passed : {bench.passed}")
             print(f"Metrics JSON     : {bench.metrics_json}")
             print(f"Summary TXT      : {bench.summary_txt}")
+            if bench.quant_metrics_json is not None:
+                print(f"Quant JSON       : {bench.quant_metrics_json}")
+            if bench.quant_summary_txt is not None:
+                print(f"Quant Summary    : {bench.quant_summary_txt}")
             print("==============================================")
             if bench.passed:
                 print("[OK] Benchmark completed successfully.")
@@ -47,7 +51,6 @@ def main():
             result = compiler.compile()
             print(result.summary())
             print(f"[OK] Wrote artifacts to: {result.out_dir}")
-
     except RuntimeError as e:
         print(f"[ERROR] {e}", file=sys.stderr)
         raise SystemExit(1)
