@@ -25,6 +25,8 @@ class BenchmarkResult:
     hls_output_npy: Path
     quant_metrics_json: Path | None = None
     quant_summary_txt: Path | None = None
+    precision_sweep_results_json: Path | None = None
+    precision_sweep_summary_txt: Path | None = None
 
 
 def _cfg_get(raw: dict, path: str, default=None):
@@ -194,6 +196,12 @@ def run_compile_correctness_benchmark(
             "quant_summary_txt": (
                 None if compile_result.quant_summary_txt is None else str(compile_result.quant_summary_txt.resolve())
             ),
+            "precision_sweep_results_json": (
+                None if compile_result.precision_sweep_results_json is None else str(compile_result.precision_sweep_results_json.resolve())
+            ),
+            "precision_sweep_summary_txt": (
+                None if compile_result.precision_sweep_summary_txt is None else str(compile_result.precision_sweep_summary_txt.resolve())
+            ),
         }
     }
     (bench_dir / "benchmark_manifest.json").write_text(
@@ -217,4 +225,6 @@ def run_compile_correctness_benchmark(
         hls_output_npy=hls_output_npy,
         quant_metrics_json=compile_result.quant_metrics_json,
         quant_summary_txt=compile_result.quant_summary_txt,
+        precision_sweep_results_json=compile_result.precision_sweep_results_json,
+        precision_sweep_summary_txt=compile_result.precision_sweep_summary_txt,
     )

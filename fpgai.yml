@@ -71,8 +71,37 @@ analysis:
   quantization_report:
     enabled: true
     seed: 0
-    # optional: input_npy: data/sample_input.npy
-    # If input_npy is not provided, a deterministic random input is generated.
+
+  precision_sweep:
+    enabled: true
+    candidates:
+      - name: fx8_3
+        defaults:
+          activation: { type: ap_fixed, total_bits: 8, int_bits: 3 }
+          weight:     { type: ap_fixed, total_bits: 8, int_bits: 3 }
+          bias:       { type: ap_fixed, total_bits: 16, int_bits: 6 }
+          accum:      { type: ap_fixed, total_bits: 16, int_bits: 6 }
+
+      - name: fx10_4
+        defaults:
+          activation: { type: ap_fixed, total_bits: 10, int_bits: 4 }
+          weight:     { type: ap_fixed, total_bits: 10, int_bits: 4 }
+          bias:       { type: ap_fixed, total_bits: 18, int_bits: 7 }
+          accum:      { type: ap_fixed, total_bits: 20, int_bits: 8 }
+
+      - name: fx12_4
+        defaults:
+          activation: { type: ap_fixed, total_bits: 12, int_bits: 4 }
+          weight:     { type: ap_fixed, total_bits: 12, int_bits: 4 }
+          bias:       { type: ap_fixed, total_bits: 20, int_bits: 8 }
+          accum:      { type: ap_fixed, total_bits: 24, int_bits: 10 }
+
+      - name: fx16_6
+        defaults:
+          activation: { type: ap_fixed, total_bits: 16, int_bits: 6 }
+          weight:     { type: ap_fixed, total_bits: 16, int_bits: 6 }
+          bias:       { type: ap_fixed, total_bits: 24, int_bits: 10 }
+          accum:      { type: ap_fixed, total_bits: 24, int_bits: 10 }
 
 data_movement:
   ps_pl:

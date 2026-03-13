@@ -18,33 +18,44 @@ class CompileResult:
     hls_stdout_log: Optional[str] = None
     hls_stderr_log: Optional[str] = None
     hls_csynth_report: Optional[str] = None
+
     quant_report_dir: Optional[Path] = None
     quant_metrics_json: Optional[Path] = None
     quant_summary_txt: Optional[Path] = None
     quant_layerwise_csv: Optional[Path] = None
 
+    precision_sweep_dir: Optional[Path] = None
+    precision_sweep_results_json: Optional[Path] = None
+    precision_sweep_summary_txt: Optional[Path] = None
+    precision_sweep_results_csv: Optional[Path] = None
+
     def summary(self) -> str:
         lines = []
         lines.append("\n=============== FPGAI Compile Result ===============")
-        lines.append(f"Out dir            : {self.out_dir}")
-        lines.append(f"Ops                : {len(self.graph.ops)}")
-        lines.append(f"Params             : {len(self.graph.params)}")
-        lines.append(f"Inputs             : {self.graph.inputs}")
-        lines.append(f"Outputs            : {self.graph.outputs}")
+        lines.append(f"Out dir              : {self.out_dir}")
+        lines.append(f"Ops                  : {len(self.graph.ops)}")
+        lines.append(f"Params               : {len(self.graph.params)}")
+        lines.append(f"Inputs               : {self.graph.inputs}")
+        lines.append(f"Outputs              : {self.graph.outputs}")
         lines.append("---------------------------------------------------")
-        lines.append(f"HLS project dir    : {self.hls_project_dir}")
-        lines.append(f"Host C++ dir       : {self.host_project_dir}")
+        lines.append(f"HLS project dir      : {self.hls_project_dir}")
+        lines.append(f"Host C++ dir         : {self.host_project_dir}")
         lines.append("---------------------------------------------------")
-        lines.append(f"HLS ran            : {self.hls_ran}")
-        lines.append(f"HLS ok             : {self.hls_ok}")
-        lines.append(f"HLS returncode     : {self.hls_returncode}")
-        lines.append(f"HLS stdout log     : {self.hls_stdout_log}")
-        lines.append(f"HLS stderr log     : {self.hls_stderr_log}")
-        lines.append(f"HLS csynth report  : {self.hls_csynth_report}")
+        lines.append(f"HLS ran              : {self.hls_ran}")
+        lines.append(f"HLS ok               : {self.hls_ok}")
+        lines.append(f"HLS returncode       : {self.hls_returncode}")
+        lines.append(f"HLS stdout log       : {self.hls_stdout_log}")
+        lines.append(f"HLS stderr log       : {self.hls_stderr_log}")
+        lines.append(f"HLS csynth report    : {self.hls_csynth_report}")
         lines.append("---------------------------------------------------")
-        lines.append(f"Quant report dir   : {self.quant_report_dir}")
-        lines.append(f"Quant metrics JSON : {self.quant_metrics_json}")
-        lines.append(f"Quant summary TXT  : {self.quant_summary_txt}")
-        lines.append(f"Quant layerwise CSV: {self.quant_layerwise_csv}")
+        lines.append(f"Quant report dir     : {self.quant_report_dir}")
+        lines.append(f"Quant metrics JSON   : {self.quant_metrics_json}")
+        lines.append(f"Quant summary TXT    : {self.quant_summary_txt}")
+        lines.append(f"Quant layerwise CSV  : {self.quant_layerwise_csv}")
+        lines.append("---------------------------------------------------")
+        lines.append(f"Precision sweep dir  : {self.precision_sweep_dir}")
+        lines.append(f"Sweep results JSON   : {self.precision_sweep_results_json}")
+        lines.append(f"Sweep summary TXT    : {self.precision_sweep_summary_txt}")
+        lines.append(f"Sweep results CSV    : {self.precision_sweep_results_csv}")
         lines.append("===================================================")
         return "\n".join(lines)

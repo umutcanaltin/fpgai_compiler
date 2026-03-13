@@ -17,6 +17,7 @@ from fpgai.engine.result import CompileResult
 from fpgai.engine.partition import single_device_plan
 from fpgai.engine.layerwise_precision import resolve_layerwise_precision
 from fpgai.analysis.quantization_report import run_quantization_report
+from fpgai.analysis.precision_sweep import run_precision_sweep
 from fpgai.util.fs import ensure_clean_dir, write_text
 from fpgai.util.binio import write_f32_bin
 
@@ -50,6 +51,7 @@ class Compiler:
         enable_hls = bool(_cfg_get(raw, "backends.hls.enabled", True))
         enable_host = bool(_cfg_get(raw, "backends.host_cpp.enabled", True))
         enable_quant_report = bool(_cfg_get(raw, "analysis.quantization_report.enabled", False))
+        enable_precision_sweep = bool(_cfg_get(raw, "analysis.precision_sweep.enabled", False))
 
         act_kind, act_alpha, act_except_last = self._read_activation_insert_cfg(raw)
         weights_mode = str(_cfg_get(raw, "data_movement.ps_pl.weights.mode", "embedded")).lower()
@@ -81,6 +83,14 @@ class Compiler:
         quant_result = None
         if enable_quant_report:
             quant_result = run_quantization_report(
+                model_path=self.cfg.model.path,
+                raw_cfg=raw,
+                out_dir=out_dir,
+            )
+
+        sweep_result = None
+        if enable_precision_sweep:
+            sweep_result = run_precision_sweep(
                 model_path=self.cfg.model.path,
                 raw_cfg=raw,
                 out_dir=out_dir,
@@ -118,6 +128,7 @@ class Compiler:
                 communication_plan=communication_plan,
                 hls_run=hls_run,
                 quant_result=quant_result,
+                sweep_result=sweep_result,
                 seconds=time.time() - t0,
             )
 
@@ -132,6 +143,8 @@ class Compiler:
             print("[FPGAI] communication edges:", len(communication_plan.edges))
             if quant_result is not None:
                 print("[FPGAI] quant_report:", quant_result.summary_txt)
+            if sweep_result is not None:
+                print("[FPGAI] precision_sweep:", sweep_result.summary_txt)
             if hls_run is not None:
                 print("[FPGAI] vitis_hls ok:", hls_run.ok)
                 print("[FPGAI] vitis_hls stdout:", hls_run.stdout_log)
@@ -148,10 +161,16 @@ class Compiler:
             hls_stdout_log=(hls_run.stdout_log if hls_run is not None else None),
             hls_stderr_log=(hls_run.stderr_log if hls_run is not None else None),
             hls_csynth_report=(hls_run.csynth_report if hls_run is not None else None),
+
             quant_report_dir=(quant_result.out_dir if quant_result is not None else None),
             quant_metrics_json=(quant_result.metrics_json if quant_result is not None else None),
             quant_summary_txt=(quant_result.summary_txt if quant_result is not None else None),
             quant_layerwise_csv=(quant_result.layerwise_csv if quant_result is not None else None),
+
+            precision_sweep_dir=(sweep_result.out_dir if sweep_result is not None else None),
+            precision_sweep_results_json=(sweep_result.results_json if sweep_result is not None else None),
+            precision_sweep_summary_txt=(sweep_result.summary_txt if sweep_result is not None else None),
+            precision_sweep_results_csv=(sweep_result.results_csv if sweep_result is not None else None),
         )
 
     def _prepare_out_dir(self, raw: Dict[str, Any]) -> Path:
@@ -306,6 +325,7 @@ class Compiler:
         communication_plan,
         hls_run,
         quant_result,
+        sweep_result,
         seconds: float,
     ) -> None:
         manifest = {
@@ -331,13 +351,17 @@ class Compiler:
                 }
                 for op in graph.ops
             ],
-            "quant_report": None
-            if quant_result is None
-            else {
+            "quant_report": None if quant_result is None else {
                 "out_dir": str(quant_result.out_dir),
                 "metrics_json": str(quant_result.metrics_json),
                 "summary_txt": str(quant_result.summary_txt),
                 "layerwise_csv": str(quant_result.layerwise_csv),
+            },
+            "precision_sweep": None if sweep_result is None else {
+                "out_dir": str(sweep_result.out_dir),
+                "results_json": str(sweep_result.results_json),
+                "summary_txt": str(sweep_result.summary_txt),
+                "results_csv": str(sweep_result.results_csv),
             },
             "hls_ran": hls_run is not None,
             "hls_ok": (hls_run.ok if hls_run is not None else None),

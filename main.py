@@ -41,6 +41,10 @@ def main():
                 print(f"Quant JSON       : {bench.quant_metrics_json}")
             if bench.quant_summary_txt is not None:
                 print(f"Quant Summary    : {bench.quant_summary_txt}")
+            if getattr(bench, "precision_sweep_results_json", None) is not None:
+                print(f"Sweep JSON       : {bench.precision_sweep_results_json}")
+            if getattr(bench, "precision_sweep_summary_txt", None) is not None:
+                print(f"Sweep Summary    : {bench.precision_sweep_summary_txt}")
             print("==============================================")
             if bench.passed:
                 print("[OK] Benchmark completed successfully.")

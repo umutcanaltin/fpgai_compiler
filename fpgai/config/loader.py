@@ -163,15 +163,33 @@ def load_config(path: str) -> FPGAIConfig:
     if qrep is not None and not isinstance(qrep, dict):
         issues.append(ConfigIssue("analysis.quantization_report", "Expected a mapping"))
 
-    if isinstance(qrep, dict):
-        num_samples = qrep.get("num_samples", 1)
-        if not isinstance(num_samples, int) or num_samples <= 0:
-            issues.append(ConfigIssue("analysis.quantization_report.num_samples", "Must be a positive integer"))
-
-        if "metrics" in qrep:
-            metrics = qrep["metrics"]
-            if not isinstance(metrics, list) or not all(isinstance(x, str) for x in metrics):
-                issues.append(ConfigIssue("analysis.quantization_report.metrics", "Must be a list of metric names"))
+    psweep = _deep_get(raw, "analysis.precision_sweep", None)
+    if psweep is not None and not isinstance(psweep, dict):
+        issues.append(ConfigIssue("analysis.precision_sweep", "Expected a mapping"))
+    if isinstance(psweep, dict):
+        candidates = psweep.get("candidates", [])
+        if psweep.get("enabled", False):
+            if not isinstance(candidates, list) or not candidates:
+                issues.append(ConfigIssue("analysis.precision_sweep.candidates", "Must be a non-empty list when enabled"))
+            else:
+                for i, cand in enumerate(candidates):
+                    p = f"analysis.precision_sweep.candidates[{i}]"
+                    if not isinstance(cand, dict):
+                        issues.append(ConfigIssue(p, "Each candidate must be a mapping"))
+                        continue
+                    defaults = cand.get("defaults", {})
+                    if not isinstance(defaults, dict):
+                        issues.append(ConfigIssue(f"{p}.defaults", "Must be a mapping"))
+                        continue
+                    for key in ["activation", "weight", "bias", "accum"]:
+                        spec = defaults.get(key)
+                        if spec is None or not _is_valid_precision_spec(spec):
+                            issues.append(
+                                ConfigIssue(
+                                    f"{p}.defaults.{key}",
+                                    "Expected valid ap_fixed precision spec",
+                                )
+                            )
 
     if issues:
         raise ConfigError(issues)
@@ -206,6 +224,7 @@ def print_summary(cfg: FPGAIConfig) -> None:
     vivado = bool(g("toolchain.vivado.enabled", True))
     verbose = bool(g("debug.verbose", False))
     qrep_enabled = bool(g("analysis.quantization_report.enabled", False))
+    psweep_enabled = bool(g("analysis.precision_sweep.enabled", False))
 
     print("\n================ FPGAI Config Summary ================")
     print(f"Config version        : {cfg.version}")
@@ -229,6 +248,7 @@ def print_summary(cfg: FPGAIConfig) -> None:
     print("------------------------------------------------------")
     print(f"Compression enabled   : {compression}")
     print(f"Quant report enabled  : {qrep_enabled}")
+    print(f"Precision sweep       : {psweep_enabled}")
     print("------------------------------------------------------")
     print(f"Toolchain.vitis_hls   : {vitis}")
     print(f"Toolchain.vivado      : {vivado}")
