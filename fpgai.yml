@@ -72,6 +72,16 @@ analysis:
     enabled: true
     seed: 0
 
+    
+  design_space:
+    enabled: true
+    print_terminal_summary: true
+    recommendation:
+      require_prediction_match: true
+      min_cosine: 0.999
+    performance:
+      baseline_cpu_latency_ms: 1.6
+
   precision_sweep:
     enabled: true
     candidates:

@@ -18,6 +18,7 @@ from fpgai.engine.partition import single_device_plan
 from fpgai.engine.layerwise_precision import resolve_layerwise_precision
 from fpgai.analysis.quantization_report import run_quantization_report
 from fpgai.analysis.precision_sweep import run_precision_sweep
+from fpgai.analysis.design_space_report import run_design_space_report
 from fpgai.util.fs import ensure_clean_dir, write_text
 from fpgai.util.binio import write_f32_bin
 
@@ -52,6 +53,7 @@ class Compiler:
         enable_host = bool(_cfg_get(raw, "backends.host_cpp.enabled", True))
         enable_quant_report = bool(_cfg_get(raw, "analysis.quantization_report.enabled", False))
         enable_precision_sweep = bool(_cfg_get(raw, "analysis.precision_sweep.enabled", False))
+        enable_design_space = bool(_cfg_get(raw, "analysis.design_space.enabled", False))
 
         act_kind, act_alpha, act_except_last = self._read_activation_insert_cfg(raw)
         weights_mode = str(_cfg_get(raw, "data_movement.ps_pl.weights.mode", "embedded")).lower()
@@ -96,6 +98,19 @@ class Compiler:
                 out_dir=out_dir,
             )
 
+        design_result = None
+        if enable_design_space:
+            design_result = run_design_space_report(
+                graph=g,
+                model_path=self.cfg.model.path,
+                raw_cfg=raw,
+                out_dir=out_dir,
+            )
+            if bool(_cfg_get(raw, "analysis.design_space.print_terminal_summary", True)):
+                print("")
+                print(design_result.terminal_summary)
+                print("")
+
         hls_dir: Optional[Path] = None
         if enable_hls:
             hls_dir = self._emit_hls(
@@ -129,26 +144,17 @@ class Compiler:
                 hls_run=hls_run,
                 quant_result=quant_result,
                 sweep_result=sweep_result,
+                design_result=design_result,
                 seconds=time.time() - t0,
             )
 
         if verbose:
-            print("[FPGAI] out_dir:", out_dir)
-            print("[FPGAI] top_name:", top_name)
-            print("[FPGAI] weights_mode:", weights_mode)
-            print("[FPGAI] ops:", [op.op_type for op in g.ops])
-            print("[FPGAI] descriptors:", len(descriptors))
-            print("[FPGAI] planned layers:", len(compile_plan.layer_plans))
-            print("[FPGAI] memory placements:", len(memory_plan.placements))
-            print("[FPGAI] communication edges:", len(communication_plan.edges))
             if quant_result is not None:
                 print("[FPGAI] quant_report:", quant_result.summary_txt)
             if sweep_result is not None:
                 print("[FPGAI] precision_sweep:", sweep_result.summary_txt)
-            if hls_run is not None:
-                print("[FPGAI] vitis_hls ok:", hls_run.ok)
-                print("[FPGAI] vitis_hls stdout:", hls_run.stdout_log)
-                print("[FPGAI] vitis_hls stderr:", hls_run.stderr_log)
+            if design_result is not None:
+                print("[FPGAI] design_space:", design_result.summary_txt)
 
         return CompileResult(
             out_dir=out_dir,
@@ -161,16 +167,19 @@ class Compiler:
             hls_stdout_log=(hls_run.stdout_log if hls_run is not None else None),
             hls_stderr_log=(hls_run.stderr_log if hls_run is not None else None),
             hls_csynth_report=(hls_run.csynth_report if hls_run is not None else None),
-
             quant_report_dir=(quant_result.out_dir if quant_result is not None else None),
             quant_metrics_json=(quant_result.metrics_json if quant_result is not None else None),
             quant_summary_txt=(quant_result.summary_txt if quant_result is not None else None),
             quant_layerwise_csv=(quant_result.layerwise_csv if quant_result is not None else None),
-
             precision_sweep_dir=(sweep_result.out_dir if sweep_result is not None else None),
             precision_sweep_results_json=(sweep_result.results_json if sweep_result is not None else None),
             precision_sweep_summary_txt=(sweep_result.summary_txt if sweep_result is not None else None),
             precision_sweep_results_csv=(sweep_result.results_csv if sweep_result is not None else None),
+            design_space_dir=(design_result.out_dir if design_result is not None else None),
+            design_space_results_json=(design_result.results_json if design_result is not None else None),
+            design_space_summary_txt=(design_result.summary_txt if design_result is not None else None),
+            design_space_results_csv=(design_result.results_csv if design_result is not None else None),
+            design_space_terminal_summary=(design_result.terminal_summary if design_result is not None else None),
         )
 
     def _prepare_out_dir(self, raw: Dict[str, Any]) -> Path:
@@ -199,15 +208,7 @@ class Compiler:
         validate_allowlist(g, self.cfg.operators.supported)
         return g
 
-    def _emit_ir_artifacts(
-        self,
-        out_dir: Path,
-        g,
-        descriptors,
-        compile_plan,
-        memory_plan,
-        communication_plan,
-    ) -> None:
+    def _emit_ir_artifacts(self, out_dir: Path, g, descriptors, compile_plan, memory_plan, communication_plan) -> None:
         write_text(out_dir / "ir_summary.txt", g.summary())
 
         part_plan = single_device_plan(g, device_id="fpga0")
@@ -251,17 +252,7 @@ class Compiler:
         write_f32_bin(p, x)
         return p
 
-    def _emit_hls(
-        self,
-        out_dir: Path,
-        g,
-        *,
-        top_name: str,
-        weights_mode: str,
-        compile_plan=None,
-        memory_plan=None,
-        communication_plan=None,
-    ) -> Path:
+    def _emit_hls(self, out_dir: Path, g, *, top_name: str, weights_mode: str, compile_plan=None, memory_plan=None, communication_plan=None) -> Path:
         from fpgai.backends.hls.codegen import emit_hls_stub
 
         raw = self.cfg.raw
@@ -326,6 +317,7 @@ class Compiler:
         hls_run,
         quant_result,
         sweep_result,
+        design_result,
         seconds: float,
     ) -> None:
         manifest = {
@@ -362,6 +354,12 @@ class Compiler:
                 "results_json": str(sweep_result.results_json),
                 "summary_txt": str(sweep_result.summary_txt),
                 "results_csv": str(sweep_result.results_csv),
+            },
+            "design_space": None if design_result is None else {
+                "out_dir": str(design_result.out_dir),
+                "results_json": str(design_result.results_json),
+                "summary_txt": str(design_result.summary_txt),
+                "results_csv": str(design_result.results_csv),
             },
             "hls_ran": hls_run is not None,
             "hls_ok": (hls_run.ok if hls_run is not None else None),
