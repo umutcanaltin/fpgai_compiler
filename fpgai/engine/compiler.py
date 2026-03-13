@@ -19,6 +19,7 @@ from fpgai.engine.layerwise_precision import resolve_layerwise_precision
 from fpgai.analysis.quantization_report import run_quantization_report
 from fpgai.analysis.precision_sweep import run_precision_sweep
 from fpgai.analysis.design_space_report import run_design_space_report
+from fpgai.analysis.hls_estimate_compare import run_estimate_vs_hls_compare
 from fpgai.util.fs import ensure_clean_dir, write_text
 from fpgai.util.binio import write_f32_bin
 
@@ -131,6 +132,30 @@ class Compiler:
         if enable_hls and hls_dir is not None:
             hls_run = self._maybe_run_vitis_hls(hls_dir)
 
+        estimate_vs_hls_result = None
+        if design_result is not None:
+            best = None
+            try:
+                ds_payload = json.loads(design_result.results_json.read_text(encoding="utf-8"))
+                best = (
+                    ds_payload.get("recommended_balanced")
+                    or ds_payload.get("recommended_smallest_valid")
+                    or ds_payload.get("recommended_best_accuracy")
+                )
+            except Exception:
+                best = None
+
+            if best is not None:
+                estimate_vs_hls_result = run_estimate_vs_hls_compare(
+                    out_dir=out_dir,
+                    design_space_summary=best,
+                    csynth_report_path=(hls_run.csynth_report if hls_run is not None else None),
+                    clock_mhz=float(_cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0)),
+                )
+                print("")
+                print(estimate_vs_hls_result.terminal_summary)
+                print("")
+
         if emit_manifest:
             self._emit_manifest(
                 out_dir=out_dir,
@@ -145,6 +170,7 @@ class Compiler:
                 quant_result=quant_result,
                 sweep_result=sweep_result,
                 design_result=design_result,
+                estimate_vs_hls_result=estimate_vs_hls_result,
                 seconds=time.time() - t0,
             )
 
@@ -155,6 +181,8 @@ class Compiler:
                 print("[FPGAI] precision_sweep:", sweep_result.summary_txt)
             if design_result is not None:
                 print("[FPGAI] design_space:", design_result.summary_txt)
+            if estimate_vs_hls_result is not None:
+                print("[FPGAI] estimate_vs_hls:", estimate_vs_hls_result.summary_txt)
 
         return CompileResult(
             out_dir=out_dir,
@@ -167,14 +195,17 @@ class Compiler:
             hls_stdout_log=(hls_run.stdout_log if hls_run is not None else None),
             hls_stderr_log=(hls_run.stderr_log if hls_run is not None else None),
             hls_csynth_report=(hls_run.csynth_report if hls_run is not None else None),
+
             quant_report_dir=(quant_result.out_dir if quant_result is not None else None),
             quant_metrics_json=(quant_result.metrics_json if quant_result is not None else None),
             quant_summary_txt=(quant_result.summary_txt if quant_result is not None else None),
             quant_layerwise_csv=(quant_result.layerwise_csv if quant_result is not None else None),
+
             precision_sweep_dir=(sweep_result.out_dir if sweep_result is not None else None),
             precision_sweep_results_json=(sweep_result.results_json if sweep_result is not None else None),
             precision_sweep_summary_txt=(sweep_result.summary_txt if sweep_result is not None else None),
             precision_sweep_results_csv=(sweep_result.results_csv if sweep_result is not None else None),
+
             design_space_dir=(design_result.out_dir if design_result is not None else None),
             design_space_results_json=(design_result.results_json if design_result is not None else None),
             design_space_summary_txt=(design_result.summary_txt if design_result is not None else None),
@@ -208,7 +239,15 @@ class Compiler:
         validate_allowlist(g, self.cfg.operators.supported)
         return g
 
-    def _emit_ir_artifacts(self, out_dir: Path, g, descriptors, compile_plan, memory_plan, communication_plan) -> None:
+    def _emit_ir_artifacts(
+        self,
+        out_dir: Path,
+        g,
+        descriptors,
+        compile_plan,
+        memory_plan,
+        communication_plan,
+    ) -> None:
         write_text(out_dir / "ir_summary.txt", g.summary())
 
         part_plan = single_device_plan(g, device_id="fpga0")
@@ -252,7 +291,17 @@ class Compiler:
         write_f32_bin(p, x)
         return p
 
-    def _emit_hls(self, out_dir: Path, g, *, top_name: str, weights_mode: str, compile_plan=None, memory_plan=None, communication_plan=None) -> Path:
+    def _emit_hls(
+        self,
+        out_dir: Path,
+        g,
+        *,
+        top_name: str,
+        weights_mode: str,
+        compile_plan=None,
+        memory_plan=None,
+        communication_plan=None,
+    ) -> Path:
         from fpgai.backends.hls.codegen import emit_hls_stub
 
         raw = self.cfg.raw
@@ -318,6 +367,7 @@ class Compiler:
         quant_result,
         sweep_result,
         design_result,
+        estimate_vs_hls_result,
         seconds: float,
     ) -> None:
         manifest = {
@@ -360,6 +410,11 @@ class Compiler:
                 "results_json": str(design_result.results_json),
                 "summary_txt": str(design_result.summary_txt),
                 "results_csv": str(design_result.results_csv),
+            },
+            "estimate_vs_hls": None if estimate_vs_hls_result is None else {
+                "out_dir": str(estimate_vs_hls_result.out_dir),
+                "results_json": str(estimate_vs_hls_result.results_json),
+                "summary_txt": str(estimate_vs_hls_result.summary_txt),
             },
             "hls_ran": hls_run is not None,
             "hls_ok": (hls_run.ok if hls_run is not None else None),

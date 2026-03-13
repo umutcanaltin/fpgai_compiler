@@ -72,17 +72,34 @@ def _estimate_layer_resources(desc, idx: int, raw_cfg: Dict[str, Any]) -> Dict[s
     param_bits = param_bytes * 8
     act_bits_total = (act_in + act_out) * 8
 
-    width_factor = (act_bits + wgt_bits + acc_bits) / 48.0
-    storage_factor = (param_bits + act_bits_total) / 8.0
+    datapath_scale = (act_bits + wgt_bits + acc_bits) / 48.0
+    storage_scale = (param_bits + act_bits_total) / 8.0
 
-    predicted_lut = int(max(50, 100 + 0.0009 * macs * (act_bits + wgt_bits) + 0.002 * storage_factor))
-    predicted_ff = int(max(80, 120 + 0.0012 * macs * (act_bits + acc_bits) + 0.003 * storage_factor))
+    # Stronger LUT/FF separation across precisions
+    predicted_lut = int(max(
+        80,
+        120
+        + 0.0018 * macs * (act_bits + wgt_bits)
+        + 0.0035 * storage_scale
+        + 12.0 * datapath_scale
+    ))
 
+    predicted_ff = int(max(
+        120,
+        160
+        + 0.0024 * macs * (act_bits + acc_bits)
+        + 0.0045 * storage_scale
+        + 16.0 * datapath_scale
+    ))
+
+    # DSP: ensure nonzero for MAC-heavy layers and grow with bit-width
     predicted_dsp = 0
-    if desc.op_type in ("Conv", "Dense", "Gemm", "MatMul"):
-        dsp_scale = max(0.25, (act_bits * wgt_bits) / 256.0)
-        predicted_dsp = int(max(1, macs // 4096) * dsp_scale)
+    if desc.op_type in ("Conv", "Dense", "Gemm", "MatMul") and macs > 0:
+        width_pressure = max(0.5, (act_bits * wgt_bits) / 128.0)
+        base_dsp = macs / 50000.0
+        predicted_dsp = max(1, int(base_dsp * width_pressure))
 
+    # BRAM: based on parameter + activation storage
     predicted_bram18 = int(max(0, round((param_bits + act_bits_total) / 18432.0)))
 
     return {

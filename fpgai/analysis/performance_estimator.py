@@ -25,9 +25,11 @@ def estimate_performance(
     lut = max(1, int(resource_estimate["totals"]["predicted_lut"]))
     bram = max(1, int(resource_estimate["totals"]["predicted_bram18"]))
 
-    parallel_macs = max(1.0, min(dsp * 2.0, lut / 300.0))
+    # More aggressive bit/resource dependence
+    parallel_macs = max(1.0, min(dsp * 4.0, lut / 180.0))
     compute_cycles = total_macs / parallel_macs
-    memory_cycles = 800.0 + 0.02 * lut + 8.0 * bram
+
+    memory_cycles = 1200.0 + 0.03 * lut + 10.0 * bram
     total_cycles = compute_cycles + memory_cycles
 
     latency_ms = total_cycles / (clk_mhz * 1e3)
