@@ -21,14 +21,14 @@ def _numerics_defaults(cfg) -> Dict[str, Any]:
 
 def _default_precision_info(cfg) -> Dict[str, Any]:
     numerics = _numerics_defaults(cfg)
-
     act = numerics.get("activation", {}) or {}
     weight = numerics.get("weight", {}) or {}
+    bias = numerics.get("bias", {}) or {}
+    accum = numerics.get("accum", {}) or {}
 
     act_type = str(act.get("type", "float")).lower()
     weight_type = str(weight.get("type", "float")).lower()
 
-    # pick a single high-level mode for now
     if act_type.startswith("ap_fixed") or weight_type.startswith("ap_fixed") or act_type == "ap_fixed" or weight_type == "ap_fixed":
         precision_mode = "fixed"
     else:
@@ -38,15 +38,57 @@ def _default_precision_info(cfg) -> Dict[str, Any]:
         "precision_mode": precision_mode,
         "act_bits": int(act["total_bits"]) if "total_bits" in act else None,
         "weight_bits": int(weight["total_bits"]) if "total_bits" in weight else None,
+        "bias_bits": int(bias["total_bits"]) if "total_bits" in bias else None,
+        "accum_bits": int(accum["total_bits"]) if "total_bits" in accum else None,
         "act_int_bits": int(act["int_bits"]) if "int_bits" in act else None,
         "weight_int_bits": int(weight["int_bits"]) if "int_bits" in weight else None,
+        "bias_int_bits": int(bias["int_bits"]) if "int_bits" in bias else None,
+        "accum_int_bits": int(accum["int_bits"]) if "int_bits" in accum else None,
         "act_type": act_type,
         "weight_type": weight_type,
     }
 
 
+def _parallel_policy_info(cfg) -> Dict[str, Any]:
+    raw = cfg.raw
+
+    policy_name = str(_cfg_get(raw, "optimization.parallel_policy", "Balanced"))
+    pe = int(_cfg_get(raw, "optimization.parallel.pe", 2))
+    simd = int(_cfg_get(raw, "optimization.parallel.simd", 2))
+    unroll_factor = int(_cfg_get(raw, "optimization.parallel.unroll_factor", 2))
+    partition_factor = int(_cfg_get(raw, "optimization.parallel.partition_factor", 2))
+    pipeline_style = str(_cfg_get(raw, "optimization.parallel.pipeline_style", "balanced"))
+
+    if policy_name == "Resource-First":
+        pe = 1
+        simd = 1
+        unroll_factor = 1
+        partition_factor = 1
+        pipeline_style = "conservative"
+    elif policy_name == "Latency-First":
+        pe = max(pe, 4)
+        simd = max(simd, 4)
+        unroll_factor = max(unroll_factor, 4)
+        partition_factor = max(partition_factor, 4)
+        pipeline_style = "aggressive"
+    else:
+        pe = max(pe, 2)
+        simd = max(simd, 2)
+        unroll_factor = max(unroll_factor, 2)
+        partition_factor = max(partition_factor, 2)
+        pipeline_style = "balanced"
+
+    return {
+        "policy_name": policy_name,
+        "pe": max(1, pe),
+        "simd": max(1, simd),
+        "unroll_factor": max(1, unroll_factor),
+        "partition_factor": max(1, partition_factor),
+        "pipeline_style": pipeline_style,
+    }
+
+
 def _choose_weight_mode(desc: LayerDescriptor, global_weights_mode: str) -> str:
-    # normalize aliases
     if global_weights_mode == "dma_ddr":
         global_weights_mode = "ddr"
 
@@ -64,56 +106,103 @@ def _choose_weight_mode(desc: LayerDescriptor, global_weights_mode: str) -> str:
     return "ddr"
 
 
-def _plan_conv(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: str) -> LayerPlan:
+def _buffering_for(weights_mode: str) -> str:
+    return "double" if weights_mode in ("stream", "ddr") else "single"
+
+
+def _pipeline_ii_for(par: Dict[str, Any], compute_hint: str = "") -> int:
+    style = par["pipeline_style"]
+    if style == "aggressive":
+        return 1
+    if style == "conservative":
+        return 2 if compute_hint == "memory_bound" else 1
+    return 1
+
+
+def _conv_tile(par: Dict[str, Any]) -> Dict[str, int]:
+    spatial = 4 if par["pipeline_style"] == "conservative" else 8
+    oc = 2 if par["pipeline_style"] == "conservative" else 4 if par["pipeline_style"] == "balanced" else 8
+    return {"oh": spatial, "ow": spatial, "oc": oc}
+
+
+def _conv_unroll(par: Dict[str, Any]) -> Dict[str, int]:
+    if par["pipeline_style"] == "conservative":
+        return {"ic": 1, "oc": 1}
+    if par["pipeline_style"] == "aggressive":
+        return {"ic": min(4, par["simd"]), "oc": min(8, par["pe"])}
+    return {"ic": min(2, par["simd"]), "oc": min(4, par["pe"])}
+
+
+def _dense_tile(desc: LayerDescriptor, par: Dict[str, Any]) -> Dict[str, int]:
+    out_features = int(desc.attrs.get("out_features", 1) or 1)
+    in_features = int(desc.attrs.get("in_features", 1) or 1)
+
+    if par["pipeline_style"] == "conservative":
+        out_tile = min(out_features, 8)
+        in_tile = min(in_features, 32)
+    elif par["pipeline_style"] == "aggressive":
+        out_tile = min(out_features, 32)
+        in_tile = min(in_features, 128)
+    else:
+        out_tile = min(out_features, 16)
+        in_tile = min(in_features, 64)
+
+    return {"in": max(1, in_tile), "out": max(1, out_tile)}
+
+
+def _dense_unroll(par: Dict[str, Any]) -> Dict[str, int]:
+    if par["pipeline_style"] == "conservative":
+        return {"in": 1, "out": 1}
+    if par["pipeline_style"] == "aggressive":
+        return {"in": min(8, par["simd"]), "out": min(8, par["pe"])}
+    return {"in": min(4, par["simd"]), "out": min(4, par["pe"])}
+
+
+def _plan_conv(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: str, par: Dict[str, Any]) -> LayerPlan:
     return LayerPlan(
         node_name=desc.node_name,
         op_type=desc.op_type,
         precision_mode=precision["precision_mode"],
         act_bits=precision["act_bits"],
         weight_bits=precision["weight_bits"],
-        tile={"oh": 8, "ow": 8, "oc": 4},
-        unroll={"ic": 1, "oc": 2},
-        pipeline_ii=1,
+        tile=_conv_tile(par),
+        unroll=_conv_unroll(par),
+        pipeline_ii=_pipeline_ii_for(par, desc.compute_hint),
         weight_mode=weights_mode,
         activation_mode="stream",
-        buffering="double" if weights_mode in ("stream", "ddr") else "single",
+        buffering=_buffering_for(weights_mode),
         backend_kernel=desc.backend_kernel or "conv",
     )
 
 
-def _plan_dense(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: str) -> LayerPlan:
-    out_features = int(desc.attrs.get("out_features", 1) or 1)
-    in_features = int(desc.attrs.get("in_features", 1) or 1)
-
-    out_tile = min(out_features, 16)
-    in_tile = min(in_features, 64)
-
+def _plan_dense(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: str, par: Dict[str, Any]) -> LayerPlan:
     return LayerPlan(
         node_name=desc.node_name,
         op_type=desc.op_type,
         precision_mode=precision["precision_mode"],
         act_bits=precision["act_bits"],
         weight_bits=precision["weight_bits"],
-        tile={"in": in_tile, "out": out_tile},
-        unroll={"in": 2, "out": 2},
-        pipeline_ii=1,
+        tile=_dense_tile(desc, par),
+        unroll=_dense_unroll(par),
+        pipeline_ii=_pipeline_ii_for(par, desc.compute_hint),
         weight_mode=weights_mode,
         activation_mode="stream",
-        buffering="double" if weights_mode in ("stream", "ddr") else "single",
+        buffering=_buffering_for(weights_mode),
         backend_kernel=desc.backend_kernel or "dense",
     )
 
 
-def _plan_pool(desc: LayerDescriptor, precision: Dict[str, Any]) -> LayerPlan:
+def _plan_pool(desc: LayerDescriptor, precision: Dict[str, Any], par: Dict[str, Any]) -> LayerPlan:
+    spatial = 4 if par["pipeline_style"] == "conservative" else 8
     return LayerPlan(
         node_name=desc.node_name,
         op_type=desc.op_type,
         precision_mode=precision["precision_mode"],
         act_bits=precision["act_bits"],
         weight_bits=precision["weight_bits"],
-        tile={"oh": 8, "ow": 8},
+        tile={"oh": spatial, "ow": spatial},
         unroll={},
-        pipeline_ii=1,
+        pipeline_ii=_pipeline_ii_for(par, desc.compute_hint),
         weight_mode="embedded",
         activation_mode="stream",
         buffering="single",
@@ -121,7 +210,7 @@ def _plan_pool(desc: LayerDescriptor, precision: Dict[str, Any]) -> LayerPlan:
     )
 
 
-def _plan_elementwise(desc: LayerDescriptor, precision: Dict[str, Any]) -> LayerPlan:
+def _plan_elementwise(desc: LayerDescriptor, precision: Dict[str, Any], par: Dict[str, Any]) -> LayerPlan:
     return LayerPlan(
         node_name=desc.node_name,
         op_type=desc.op_type,
@@ -130,7 +219,7 @@ def _plan_elementwise(desc: LayerDescriptor, precision: Dict[str, Any]) -> Layer
         weight_bits=precision["weight_bits"],
         tile={},
         unroll={},
-        pipeline_ii=1,
+        pipeline_ii=_pipeline_ii_for(par, desc.compute_hint),
         weight_mode="embedded",
         activation_mode="stream",
         buffering="single",
@@ -138,7 +227,7 @@ def _plan_elementwise(desc: LayerDescriptor, precision: Dict[str, Any]) -> Layer
     )
 
 
-def _plan_generic(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: str) -> LayerPlan:
+def _plan_generic(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: str, par: Dict[str, Any]) -> LayerPlan:
     return LayerPlan(
         node_name=desc.node_name,
         op_type=desc.op_type,
@@ -147,10 +236,10 @@ def _plan_generic(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode
         weight_bits=precision["weight_bits"],
         tile={},
         unroll={},
-        pipeline_ii=1,
+        pipeline_ii=_pipeline_ii_for(par, desc.compute_hint),
         weight_mode=weights_mode,
         activation_mode="stream",
-        buffering="single",
+        buffering=_buffering_for(weights_mode),
         backend_kernel=desc.backend_kernel or desc.op_type.lower(),
     )
 
@@ -158,6 +247,7 @@ def _plan_generic(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode
 def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
     raw = cfg.raw
     precision = _default_precision_info(cfg)
+    parallel = _parallel_policy_info(cfg)
 
     target_board = str(_cfg_get(raw, "targets.platform.board", "unknown"))
     target_part = str(_cfg_get(raw, "targets.platform.part", "unknown"))
@@ -172,15 +262,15 @@ def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
         weights_mode = _choose_weight_mode(desc, global_weights_mode)
 
         if desc.op_type == "Conv":
-            plan = _plan_conv(desc, precision, weights_mode)
+            plan = _plan_conv(desc, precision, weights_mode, parallel)
         elif desc.op_type == "Dense":
-            plan = _plan_dense(desc, precision, weights_mode)
+            plan = _plan_dense(desc, precision, weights_mode, parallel)
         elif desc.op_type in ("MaxPool", "AvgPool"):
-            plan = _plan_pool(desc, precision)
+            plan = _plan_pool(desc, precision, parallel)
         elif desc.op_type in ("Relu", "LeakyRelu", "Sigmoid", "Softmax", "Add", "Reshape", "Flatten"):
-            plan = _plan_elementwise(desc, precision)
+            plan = _plan_elementwise(desc, precision, parallel)
         else:
-            plan = _plan_generic(desc, precision, weights_mode)
+            plan = _plan_generic(desc, precision, weights_mode, parallel)
 
         layer_plans.append(plan)
 
@@ -200,12 +290,22 @@ def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
             "total_activation_bytes_out": total_activation_out,
         },
         notes={
-            "planner": "heuristic_v1",
+            "planner": "heuristic_v2_policy_aware",
             "global_weights_mode_requested": global_weights_mode,
             "precision_mode": precision["precision_mode"],
             "act_bits": precision["act_bits"],
             "weight_bits": precision["weight_bits"],
+            "bias_bits": precision["bias_bits"],
+            "accum_bits": precision["accum_bits"],
             "act_int_bits": precision["act_int_bits"],
             "weight_int_bits": precision["weight_int_bits"],
+            "bias_int_bits": precision["bias_int_bits"],
+            "accum_int_bits": precision["accum_int_bits"],
+            "parallel_policy": parallel["policy_name"],
+            "parallel_pe": parallel["pe"],
+            "parallel_simd": parallel["simd"],
+            "parallel_unroll_factor": parallel["unroll_factor"],
+            "parallel_partition_factor": parallel["partition_factor"],
+            "parallel_pipeline_style": parallel["pipeline_style"],
         },
     )
