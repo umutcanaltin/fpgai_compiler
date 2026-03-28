@@ -3,155 +3,57 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import re
-import shutil
 import subprocess
 import sys
 import tempfile
-import time
-import xml.etree.ElementTree as ET
-from copy import deepcopy
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import yaml
 
 
-PRECISION_POLICIES: Dict[str, Dict[str, Dict[str, Any]]] = {
-    "Uniform-8": {
-        "activation": {"type": "ap_fixed", "total_bits": 8, "int_bits": 3},
-        "weight": {"type": "ap_fixed", "total_bits": 8, "int_bits": 3},
-        "bias": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
-        "accum": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
-    },
-    "Uniform-12": {
-        "activation": {"type": "ap_fixed", "total_bits": 12, "int_bits": 4},
-        "weight": {"type": "ap_fixed", "total_bits": 12, "int_bits": 4},
-        "bias": {"type": "ap_fixed", "total_bits": 20, "int_bits": 8},
-        "accum": {"type": "ap_fixed", "total_bits": 20, "int_bits": 8},
-    },
-    "Uniform-16": {
-        "activation": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
-        "weight": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
-        "bias": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
-        "accum": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
-    },
-    "Mixed-Conservative": {
-        "activation": {"type": "ap_fixed", "total_bits": 12, "int_bits": 4},
-        "weight": {"type": "ap_fixed", "total_bits": 12, "int_bits": 4},
-        "bias": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
-        "accum": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
-    },
-    "Mixed-Aggressive": {
-        "activation": {"type": "ap_fixed", "total_bits": 8, "int_bits": 3},
-        "weight": {"type": "ap_fixed", "total_bits": 8, "int_bits": 3},
-        "bias": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
-        "accum": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
-    },
-}
-
-PARALLEL_POLICIES: Dict[str, Dict[str, Any]] = {
-    "Resource-First": {
-        "pe": 1,
-        "simd": 1,
-        "unroll_factor": 1,
-        "partition_factor": 1,
-        "pipeline_style": "conservative",
-        "target_clock_mhz": None,
-    },
-    "Balanced": {
-        "pe": 2,
-        "simd": 2,
-        "unroll_factor": 2,
-        "partition_factor": 1,
-        "pipeline_style": "balanced",
-        "target_clock_mhz": None,
-    },
-    "Latency-First": {
-        "pe": 4,
-        "simd": 4,
-        "unroll_factor": 4,
-        "partition_factor": 1,
-        "pipeline_style": "aggressive",
-        "target_clock_mhz": None,
-    },
-}
+REPO_ROOT = Path(__file__).resolve().parents[1]
+MAIN_PY = REPO_ROOT / "main.py"
 
 DEFAULT_MODELS = [
     "models/suite/mlp_mnist.onnx",
     "models/cnn_mnist.onnx",
 ]
 
-CSV_COLUMNS = [
-    "timestamp",
-    "run_id",
-    "model_name",
-    "model_path",
-    "project_name",
-    "out_dir",
-    "precision_policy",
-    "parallel_policy",
-    "activation_bits",
-    "activation_int_bits",
-    "weight_bits",
-    "weight_int_bits",
-    "bias_bits",
-    "bias_int_bits",
-    "accum_bits",
-    "accum_int_bits",
-    "pe",
-    "simd",
-    "unroll_factor",
-    "partition_factor",
-    "pipeline_style",
-    "target_clock_mhz",
-    "compile_returncode",
-    "compile_ok",
-    "benchmark_passed",
-    "hls_ok",
-    "max_abs_error",
-    "mean_abs_error",
-    "rmse",
-    "cosine_similarity",
-    "argmax_match",
-    "first_bad_layer",
-    "latency_cycles_min",
-    "latency_cycles_max",
-    "latency_seconds_min",
-    "latency_seconds_max",
-    "ii",
-    "estimated_clock_ns",
-    "estimated_clock_uncertainty_ns",
-    "lut",
-    "ff",
-    "dsp",
-    "bram_18k",
-    "uram",
-    "csynth_report_path",
-    "hls_metrics_json",
-    "metrics_json",
-    "benchmark_manifest_json",
-    "compile_plan_json",
-    "manifest_json",
+DEFAULT_PRECISIONS = [
+    "Uniform-12",
+    "Uniform-16",
+    "Mixed-Conservative",
 ]
+
+DEFAULT_POLICIES = [
+    "Balanced",
+    "Throughput-First",
+    "Latency-First",
+]
+
+
+@dataclass
+class SweepCase:
+    model_path: str
+    precision_policy: str
+    parallel_policy: str
 
 
 def load_yaml(path: Path) -> Dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"YAML root must be a mapping: {path}")
-    return data
+        return yaml.safe_load(f)
 
 
-def dump_yaml(path: Path, data: Dict[str, Any]) -> None:
+def dump_yaml(data: Dict[str, Any], path: Path) -> None:
     with path.open("w", encoding="utf-8") as f:
         yaml.safe_dump(data, f, sort_keys=False)
 
 
-def deep_set(root: Dict[str, Any], dotted_path: str, value: Any) -> None:
-    cur = root
-    keys = dotted_path.split(".")
+def set_nested(d: Dict[str, Any], keys: List[str], value: Any) -> None:
+    cur = d
     for k in keys[:-1]:
         if k not in cur or not isinstance(cur[k], dict):
             cur[k] = {}
@@ -159,452 +61,454 @@ def deep_set(root: Dict[str, Any], dotted_path: str, value: Any) -> None:
     cur[keys[-1]] = value
 
 
-def deep_get(root: Dict[str, Any], dotted_path: str, default: Any = None) -> Any:
-    cur: Any = root
-    for k in dotted_path.split("."):
+def get_nested(d: Dict[str, Any], keys: List[str], default: Any = None) -> Any:
+    cur: Any = d
+    for k in keys:
         if not isinstance(cur, dict) or k not in cur:
             return default
         cur = cur[k]
     return cur
 
 
-def sanitize_name(s: str) -> str:
-    return re.sub(r"[^a-zA-Z0-9._-]+", "_", s)
-
-
-def model_name_from_path(model_path: str) -> str:
-    return Path(model_path).stem
-
-
-def ensure_list(x: Optional[Iterable[str]]) -> List[str]:
-    if x is None:
-        return []
-    return list(x)
-
-
-def safe_float(x: Any) -> Optional[float]:
-    try:
-        if x is None:
-            return None
-        s = str(x).strip()
-        if s == "" or s.lower() == "none":
-            return None
-        return float(s)
-    except Exception:
-        return None
-
-
-def safe_int(x: Any) -> Optional[int]:
-    try:
-        if x is None:
-            return None
-        s = str(x).strip()
-        if s == "" or s.lower() == "none":
-            return None
-        return int(float(s))
-    except Exception:
-        return None
-
-
-def read_json_if_exists(path: Path) -> Optional[Dict[str, Any]]:
-    if not path.exists():
-        return None
-    with path.open("r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _is_bad_report_name(name: str) -> bool:
-    n = name.lower()
-    return "design_size" in n
-
-
-def find_hls_report(out_dir: Path) -> Optional[Path]:
-    report_dir = out_dir / "hls" / "fpgai_hls_proj" / "sol1" / "syn" / "report"
-
-    preferred = [
-        report_dir / "csynth.xml",
-        report_dir / "deeplearn_csynth.xml",
-        report_dir / "csynth.rpt",
-        report_dir / "deeplearn_csynth.rpt",
-    ]
-    for p in preferred:
-        if p.exists() and not _is_bad_report_name(p.name):
-            return p
-
-    hls_dir = out_dir / "hls"
-    if not hls_dir.exists():
-        return None
-
-    candidates = []
-    for p in hls_dir.rglob("*csynth*.xml"):
-        if not _is_bad_report_name(p.name):
-            candidates.append(p)
-    for p in hls_dir.rglob("*csynth*.rpt"):
-        if not _is_bad_report_name(p.name):
-            candidates.append(p)
-
-    if not candidates:
-        return None
-
-    def rank(p: Path) -> Tuple[int, int]:
-        name_rank = {
-            "csynth.xml": 0,
-            "deeplearn_csynth.xml": 1,
-            "csynth.rpt": 2,
-            "deeplearn_csynth.rpt": 3,
-        }.get(p.name, 10)
-        return (name_rank, len(str(p)))
-
-    candidates.sort(key=rank)
-    return candidates[0]
-
-
-def parse_hls_report(report_path: Optional[Path], clock_mhz: Optional[float]) -> Dict[str, Any]:
-    out: Dict[str, Any] = {
-        "latency_cycles_min": None,
-        "latency_cycles_max": None,
-        "latency_seconds_min": None,
-        "latency_seconds_max": None,
-        "ii": None,
-        "estimated_clock_ns": None,
-        "estimated_clock_uncertainty_ns": None,
-        "lut": None,
-        "ff": None,
-        "dsp": None,
-        "bram_18k": None,
-        "uram": None,
-    }
-
-    if report_path is None or not report_path.exists():
-        return out
-
-    if report_path.suffix.lower() == ".xml":
-        try:
-            tree = ET.parse(report_path)
-            root = tree.getroot()
-
-            def find_text(tag_name: str) -> Optional[str]:
-                elem = root.find(f".//{tag_name}")
-                if elem is not None and elem.text is not None:
-                    s = elem.text.strip()
-                    return s if s != "" else None
-                return None
-
-            out["latency_cycles_min"] = safe_int(find_text("Best-caseLatency"))
-            out["latency_cycles_max"] = safe_int(find_text("Worst-caseLatency"))
-            out["ii"] = safe_int(find_text("Interval-min"))
-            out["estimated_clock_ns"] = safe_float(find_text("EstimatedClockPeriod"))
-            out["estimated_clock_uncertainty_ns"] = safe_float(find_text("ClockUncertainty"))
-            out["lut"] = safe_int(find_text("LUT"))
-            out["ff"] = safe_int(find_text("FF"))
-            out["dsp"] = safe_int(find_text("DSP"))
-            out["bram_18k"] = safe_int(find_text("BRAM_18K"))
-            out["uram"] = safe_int(find_text("URAM"))
-        except Exception as e:
-            print(f"[WARN] Failed to parse XML report {report_path}: {e}")
-            return out
-    else:
-        text = report_path.read_text(encoding="utf-8", errors="ignore")
-
-        def rx(pattern: str) -> Optional[str]:
-            m = re.search(pattern, text, flags=re.IGNORECASE | re.DOTALL)
-            return m.group(1).strip() if m else None
-
-        out["latency_cycles_min"] = safe_int(rx(r"Latency.*?min.*?([0-9][0-9,]*)"))
-        out["latency_cycles_max"] = safe_int(rx(r"Latency.*?max.*?([0-9][0-9,]*)"))
-        out["ii"] = safe_int(rx(r"(?:Initiation\s*Interval|Interval).*?([0-9][0-9,]*)"))
-        out["estimated_clock_ns"] = safe_float(rx(r"Estimated\s*Clock\s*Period.*?([0-9]+(?:\.[0-9]+)?)"))
-        out["estimated_clock_uncertainty_ns"] = safe_float(rx(r"Clock\s*Uncertainty.*?([0-9]+(?:\.[0-9]+)?)"))
-        out["lut"] = safe_int(rx(r"\bLUT\b.*?([0-9][0-9,]*)"))
-        out["ff"] = safe_int(rx(r"\bFF\b.*?([0-9][0-9,]*)"))
-        out["dsp"] = safe_int(rx(r"\bDSP\b.*?([0-9][0-9,]*)"))
-        out["bram_18k"] = safe_int(rx(r"\bBRAM(?:_18K)?\b.*?([0-9][0-9,]*)"))
-        out["uram"] = safe_int(rx(r"\bURAM\b.*?([0-9][0-9,]*)"))
-
-    clk_ns = out["estimated_clock_ns"]
-    if clk_ns is None and clock_mhz:
-        clk_ns = 1000.0 / float(clock_mhz)
-
-    if clk_ns is not None:
-        if out["latency_cycles_min"] is not None:
-            out["latency_seconds_min"] = out["latency_cycles_min"] * clk_ns * 1e-9
-        if out["latency_cycles_max"] is not None:
-            out["latency_seconds_max"] = out["latency_cycles_max"] * clk_ns * 1e-9
-
+def sanitize_name(x: str) -> str:
+    out = x.replace("/", "_").replace("\\", "_").replace(" ", "_")
+    out = out.replace(".onnx", "")
+    out = out.replace(":", "_")
+    out = out.replace("-", "_")
     return out
 
 
-def apply_precision_policy(cfg: Dict[str, Any], policy_name: str) -> None:
-    pol = deepcopy(PRECISION_POLICIES[policy_name])
-    deep_set(cfg, "numerics.defaults.activation", pol["activation"])
-    deep_set(cfg, "numerics.defaults.weight", pol["weight"])
-    deep_set(cfg, "numerics.defaults.bias", pol["bias"])
-    deep_set(cfg, "numerics.defaults.accum", pol["accum"])
-    deep_set(cfg, "optimization.precision_policy", policy_name)
+def parse_json_if_exists(path: Path) -> Optional[Dict[str, Any]]:
+    if not path.exists():
+        return None
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
-def apply_parallel_policy(cfg: Dict[str, Any], policy_name: str) -> None:
-    pol = deepcopy(PARALLEL_POLICIES[policy_name])
-    deep_set(cfg, "optimization.parallel_policy", policy_name)
-    deep_set(cfg, "optimization.parallel.pe", pol["pe"])
-    deep_set(cfg, "optimization.parallel.simd", pol["simd"])
-    deep_set(cfg, "optimization.parallel.unroll_factor", pol["unroll_factor"])
-    deep_set(cfg, "optimization.parallel.partition_factor", pol["partition_factor"])
-    deep_set(cfg, "optimization.parallel.pipeline_style", pol["pipeline_style"])
-    deep_set(cfg, "backends.hls.policy.parallel", pol)
-    if pol.get("target_clock_mhz") is not None:
-        deep_set(cfg, "targets.platform.clocks.0.target_mhz", pol["target_clock_mhz"])
+def parse_csynth_xml(xml_path: Path) -> Dict[str, Any]:
+    import xml.etree.ElementTree as ET
+
+    if not xml_path.exists():
+        return {}
+
+    try:
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+    except Exception:
+        return {}
+
+    def find_text(paths: List[str]) -> Optional[str]:
+        for p in paths:
+            e = root.find(p)
+            if e is not None and e.text is not None:
+                return e.text.strip()
+        return None
+
+    def as_int(x: Optional[str]) -> Optional[int]:
+        if x is None or x == "":
+            return None
+        try:
+            return int(float(x))
+        except Exception:
+            return None
+
+    def as_float(x: Optional[str]) -> Optional[float]:
+        if x is None or x == "":
+            return None
+        try:
+            return float(x)
+        except Exception:
+            return None
+
+    clock_ns = as_float(find_text([
+        ".//EstimatedClockPeriod",
+        ".//SummaryOfTimingAnalysis/EstimatedClockPeriod",
+    ]))
+
+    unc_ns = as_float(find_text([
+        ".//SummaryOfTimingAnalysis/EstimatedClockUncertainty",
+        ".//EstimatedClockUncertainty",
+    ]))
+
+    lat_min = as_int(find_text([
+        ".//SummaryOfOverallLatency/Best-caseLatency",
+        ".//PerformanceEstimates/SummaryOfOverallLatency/Best-caseLatency",
+    ]))
+    lat_max = as_int(find_text([
+        ".//SummaryOfOverallLatency/Worst-caseLatency",
+        ".//PerformanceEstimates/SummaryOfOverallLatency/Worst-caseLatency",
+    ]))
+    ii = as_int(find_text([
+        ".//SummaryOfOverallLatency/Interval-min",
+        ".//PerformanceEstimates/SummaryOfOverallLatency/Interval-min",
+    ]))
+
+    lut = as_int(find_text([
+        ".//AreaEstimates/Resources/LUT",
+        ".//Resources/LUT",
+    ]))
+    ff = as_int(find_text([
+        ".//AreaEstimates/Resources/FF",
+        ".//Resources/FF",
+    ]))
+    dsp = as_int(find_text([
+        ".//AreaEstimates/Resources/DSP",
+        ".//Resources/DSP",
+    ]))
+    bram = as_int(find_text([
+        ".//AreaEstimates/Resources/BRAM_18K",
+        ".//Resources/BRAM_18K",
+    ]))
+    uram = as_int(find_text([
+        ".//AreaEstimates/Resources/URAM",
+        ".//Resources/URAM",
+    ]))
+
+    lat_s_min = lat_min * clock_ns * 1e-9 if lat_min is not None and clock_ns is not None else None
+    lat_s_max = lat_max * clock_ns * 1e-9 if lat_max is not None and clock_ns is not None else None
+
+    return {
+        "latency_cycles_min": lat_min,
+        "latency_cycles_max": lat_max,
+        "latency_seconds_min": lat_s_min,
+        "latency_seconds_max": lat_s_max,
+        "ii": ii,
+        "estimated_clock_ns": clock_ns,
+        "estimated_clock_uncertainty_ns": unc_ns,
+        "lut": lut,
+        "ff": ff,
+        "dsp": dsp,
+        "bram_18k": bram,
+        "uram": uram,
+    }
 
 
-def apply_model_override(cfg: Dict[str, Any], model_path: str) -> None:
-    deep_set(cfg, "model.path", model_path)
+def find_csynth_xml(output_dir: Path) -> Optional[Path]:
+    candidates = [
+        output_dir / "hls" / "fpgai_hls_proj" / "sol1" / "syn" / "report" / "deeplearn_csynth.xml",
+        output_dir / "hls" / "fpgai_hls_proj" / "sol1" / "syn" / "report" / "csynth.xml",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    all_xml = list(output_dir.glob("**/*csynth*.xml"))
+    return all_xml[0] if all_xml else None
 
 
-def make_project_identity(model_path: str, precision_policy: str, parallel_policy: str) -> Tuple[str, str]:
-    model_name = model_name_from_path(model_path)
-    run_name = sanitize_name(f"{model_name}__{precision_policy}__{parallel_policy}")
-    out_dir = str(Path("build") / "policy_sweeps" / run_name)
-    return run_name, out_dir
+def apply_precision_policy(cfg: Dict[str, Any], precision_policy: str) -> Dict[str, Any]:
+    """
+    Rewrite actual numerics so each sweep point is real.
+    """
+    if "numerics" not in cfg:
+        cfg["numerics"] = {}
+    if "defaults" not in cfg["numerics"]:
+        cfg["numerics"]["defaults"] = {}
 
+    if precision_policy == "Uniform-12":
+        cfg["numerics"]["defaults"] = {
+            "activation": {"type": "ap_fixed", "total_bits": 12, "int_bits": 4},
+            "weight": {"type": "ap_fixed", "total_bits": 12, "int_bits": 4},
+            "bias": {"type": "ap_fixed", "total_bits": 20, "int_bits": 8},
+            "accum": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
+        }
+        cfg["numerics"]["layers"] = []
 
-def prepare_cfg(
-    base_cfg: Dict[str, Any],
-    model_path: str,
-    precision_policy: str,
-    parallel_policy: str,
-) -> Dict[str, Any]:
-    cfg = deepcopy(base_cfg)
-    apply_model_override(cfg, model_path)
-    apply_precision_policy(cfg, precision_policy)
-    apply_parallel_policy(cfg, parallel_policy)
+    elif precision_policy == "Uniform-16":
+        cfg["numerics"]["defaults"] = {
+            "activation": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
+            "weight": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
+            "bias": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
+            "accum": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
+        }
+        cfg["numerics"]["layers"] = []
 
-    project_name, out_dir = make_project_identity(model_path, precision_policy, parallel_policy)
-    deep_set(cfg, "project.name", project_name)
-    deep_set(cfg, "project.out_dir", out_dir)
-    deep_set(cfg, "project.clean", True)
+    elif precision_policy == "Mixed-Conservative":
+        cfg["numerics"]["defaults"] = {
+            "activation": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
+            "weight": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
+            "bias": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
+            "accum": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
+        }
+        cfg["numerics"]["layers"] = [
+            {
+                "match": {"op_type": "Conv"},
+                "weight": {"type": "ap_fixed", "total_bits": 14, "int_bits": 5},
+                "bias": {"type": "ap_fixed", "total_bits": 20, "int_bits": 8},
+                "accum": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
+            },
+            {
+                "match": {"op_type": "Dense"},
+                "weight": {"type": "ap_fixed", "total_bits": 12, "int_bits": 4},
+                "bias": {"type": "ap_fixed", "total_bits": 20, "int_bits": 8},
+                "accum": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
+            },
+            {
+                "match": {"op_type": "Sigmoid"},
+                "activation": {"type": "ap_fixed", "total_bits": 16, "int_bits": 4},
+            },
+            {
+                "match": {"op_type": "Softmax"},
+                "activation": {"type": "ap_fixed", "total_bits": 16, "int_bits": 4},
+            },
+        ]
+    else:
+        raise ValueError(f"Unsupported precision policy: {precision_policy}")
 
+    set_nested(cfg, ["analysis", "paper_precision_policy"], precision_policy)
     return cfg
 
 
-def run_one(repo_root: Path, python_exe: str, config_path: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [python_exe, "main.py", "--config", str(config_path)],
-        cwd=str(repo_root),
-        text=True,
-        capture_output=True,
-    )
+def parse_compile_plan(output_dir: Path) -> Optional[Dict[str, Any]]:
+    return parse_json_if_exists(output_dir / "ir" / "compile_plan.json")
 
 
-def append_csv_row(csv_path: Path, row: Dict[str, Any]) -> None:
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    exists = csv_path.exists()
-    with csv_path.open("a", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-        if not exists:
-            writer.writeheader()
-        writer.writerow({k: row.get(k, "") for k in CSV_COLUMNS})
+def parse_metrics(output_dir: Path) -> Optional[Dict[str, Any]]:
+    return parse_json_if_exists(output_dir / "bench" / "metrics.json")
 
 
-def collect_metrics(out_dir: Path) -> Dict[str, Any]:
-    row: Dict[str, Any] = {}
+def parse_quant_metrics(output_dir: Path) -> Optional[Dict[str, Any]]:
+    q1 = output_dir / "quant_report" / "metrics.json"
+    q2 = output_dir / "precision_sweep" / "results.json"
+    if q1.exists():
+        return parse_json_if_exists(q1)
+    return parse_json_if_exists(q2)
 
-    metrics_json = out_dir / "bench" / "metrics.json"
-    benchmark_manifest = out_dir / "bench" / "benchmark_manifest.json"
-    compile_plan_json = out_dir / "ir" / "compile_plan.json"
-    manifest_json = out_dir / "manifest.json"
 
-    row["metrics_json"] = str(metrics_json.resolve()) if metrics_json.exists() else ""
-    row["benchmark_manifest_json"] = str(benchmark_manifest.resolve()) if benchmark_manifest.exists() else ""
-    row["compile_plan_json"] = str(compile_plan_json.resolve()) if compile_plan_json.exists() else ""
-    row["manifest_json"] = str(manifest_json.resolve()) if manifest_json.exists() else ""
+def extract_compile_plan_fields(cp: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not cp:
+        return {}
 
-    metrics = read_json_if_exists(metrics_json) or {}
-    benchmark_manifest_obj = read_json_if_exists(benchmark_manifest) or {}
-    compile_plan = read_json_if_exists(compile_plan_json) or {}
-    root_manifest = read_json_if_exists(manifest_json) or {}
+    notes = cp.get("notes", {}) or {}
+    lps = cp.get("layer_plans", []) or []
 
-    row["benchmark_passed"] = metrics.get("passed")
-    row["max_abs_error"] = metrics.get("max_abs_error")
-    row["mean_abs_error"] = metrics.get("mean_abs_error")
-    row["rmse"] = metrics.get("rmse")
-    row["cosine_similarity"] = metrics.get("cosine_similarity")
-    row["argmax_match"] = metrics.get("argmax_match")
+    dense_lp = next((x for x in lps if x.get("op_type") == "Dense"), None)
+    conv_lp = next((x for x in lps if x.get("op_type") == "Conv"), None)
 
-    bm = benchmark_manifest_obj.get("benchmark", {}) if isinstance(benchmark_manifest_obj, dict) else {}
-    row["first_bad_layer"] = bm.get("intermediate_first_bad_layer")
+    def get_tile(lp: Optional[Dict[str, Any]], key: str) -> Optional[Any]:
+        return (lp.get("tile") or {}).get(key) if lp else None
 
-    report_path = find_hls_report(out_dir)
+    def get_unroll(lp: Optional[Dict[str, Any]], key: str) -> Optional[Any]:
+        return (lp.get("unroll") or {}).get(key) if lp else None
 
-    if report_path is None:
-        report_path_str = bm.get("hls_csynth_report")
-        if report_path_str:
-            rp = Path(report_path_str)
-            if rp.exists() and not _is_bad_report_name(rp.name):
-                report_path = rp
+    return {
+        "compile_clock_mhz": cp.get("clock_mhz"),
+        "parallel_policy_effective": notes.get("parallel_policy"),
+        "parallel_pe": notes.get("parallel_pe"),
+        "parallel_simd": notes.get("parallel_simd"),
+        "parallel_partition_factor": notes.get("parallel_partition_factor"),
+        "weight_region_preference": ",".join(notes.get("weight_region_preference", []) or []),
+        "activation_region_preference": ",".join(notes.get("activation_region_preference", []) or []),
+        "allow_double_buffer": notes.get("allow_double_buffer"),
+        "conv_tile_oh": get_tile(conv_lp, "oh"),
+        "conv_tile_ow": get_tile(conv_lp, "ow"),
+        "conv_tile_oc": get_tile(conv_lp, "oc"),
+        "conv_unroll_ic": get_unroll(conv_lp, "ic"),
+        "conv_unroll_oc": get_unroll(conv_lp, "oc"),
+        "dense_tile_in": get_tile(dense_lp, "in"),
+        "dense_tile_out": get_tile(dense_lp, "out"),
+        "dense_unroll_in": get_unroll(dense_lp, "in"),
+        "dense_unroll_out": get_unroll(dense_lp, "out"),
+        "dense_weight_mode": dense_lp.get("weight_mode") if dense_lp else None,
+        "conv_weight_mode": conv_lp.get("weight_mode") if conv_lp else None,
+    }
 
-    row["csynth_report_path"] = str(report_path.resolve()) if report_path and report_path.exists() else ""
-    row["hls_ok"] = bool(report_path and report_path.exists())
 
-    target_clock_mhz = deep_get(root_manifest, "targets.platform.clocks.0.target_mhz", None)
-    if target_clock_mhz is None:
-        target_clock_mhz = deep_get(compile_plan, "target_clock_mhz", None)
-    target_clock_mhz = safe_float(target_clock_mhz)
+def extract_quant_fields(qm: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not qm:
+        return {}
+    return {
+        "quant_match": qm.get("match") if "match" in qm else qm.get("passed"),
+        "quant_cosine": qm.get("cosine_similarity"),
+        "quant_mse": qm.get("mse"),
+        "quant_mae": qm.get("mae"),
+        "quant_rmse": qm.get("rmse"),
+        "quant_max_abs_error": qm.get("max_abs_error"),
+        "quant_argmax_match": qm.get("argmax_match"),
+        "first_bad_layer": qm.get("first_bad_layer"),
+    }
 
-    hls = parse_hls_report(report_path, target_clock_mhz)
-    row.update(hls)
 
-    hls_metrics_json = out_dir / "bench" / "hls_metrics.json"
-    hls_metrics_json.parent.mkdir(parents=True, exist_ok=True)
-    with hls_metrics_json.open("w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "report_path": str(report_path.resolve()) if report_path else None,
-                "target_clock_mhz": target_clock_mhz,
-                "parsed_metrics": hls,
-            },
-            f,
-            indent=2,
-        )
-    row["hls_metrics_json"] = str(hls_metrics_json.resolve())
+def extract_bench_fields(bm: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    if not bm:
+        return {}
+    return {
+        "benchmark_passed": bm.get("passed"),
+        "bench_cosine": bm.get("cosine_similarity"),
+        "bench_mse": bm.get("mse"),
+        "bench_mae": bm.get("mae"),
+        "bench_rmse": bm.get("rmse"),
+        "bench_max_abs_error": bm.get("max_abs_error"),
+        "bench_argmax_match": bm.get("argmax_match"),
+        "bench_latency_ms": bm.get("latency_ms"),
+    }
 
-    print(f"[DEBUG] report_path={report_path}")
-    print(f"[DEBUG] hls_metrics={hls}")
+
+def run_case(
+    base_cfg_path: Path,
+    case: SweepCase,
+    out_root: Path,
+    keep_temp_configs: bool,
+    keep_success_logs: bool,
+) -> Dict[str, Any]:
+    model_tag = sanitize_name(Path(case.model_path).name)
+    case_tag = f"{model_tag}__{sanitize_name(case.precision_policy)}__{sanitize_name(case.parallel_policy)}"
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="fpgai_policy_", dir=str(out_root)))
+    cfg_path = temp_dir / f"{case_tag}.yml"
+
+    cfg = load_yaml(base_cfg_path)
+    cfg = apply_precision_policy(cfg, case.precision_policy)
+
+    case_output_dir = out_root / case_tag
+    case_project_name = case_tag
+
+    set_nested(cfg, ["project", "name"], case_project_name)
+    set_nested(cfg, ["project", "out_dir"], str(case_output_dir))
+    set_nested(cfg, ["project", "clean"], True)
+
+    set_nested(cfg, ["model", "path"], case.model_path)
+    set_nested(cfg, ["analysis", "design_space", "policy_name"], case.parallel_policy)
+    set_nested(cfg, ["optimization", "parallel_policy"], case.parallel_policy)
+
+    dump_yaml(cfg, cfg_path)
+
+    stdout_log = temp_dir / "stdout.log"
+    stderr_log = temp_dir / "stderr.log"
+
+    cmd = [sys.executable, str(MAIN_PY), "--config", str(cfg_path)]
+    with stdout_log.open("w", encoding="utf-8") as so, stderr_log.open("w", encoding="utf-8") as se:
+        proc = subprocess.run(cmd, cwd=str(REPO_ROOT), stdout=so, stderr=se, text=True)
+
+    csynth_xml = find_csynth_xml(case_output_dir)
+    hls_metrics = parse_csynth_xml(csynth_xml) if csynth_xml else {}
+
+    cp = parse_compile_plan(case_output_dir)
+    bm = parse_metrics(case_output_dir)
+    qm = parse_quant_metrics(case_output_dir)
+
+    defaults = get_nested(cfg, ["numerics", "defaults"], {})
+    act = defaults.get("activation", {})
+    wgt = defaults.get("weight", {})
+    bias = defaults.get("bias", {})
+    accum = defaults.get("accum", {})
+
+    row: Dict[str, Any] = {
+        "timestamp": datetime.utcnow().isoformat(timespec="seconds"),
+        "run_id": case_tag,
+        "model_name": model_tag,
+        "model_path": case.model_path,
+        "project_name": case_project_name,
+        "out_dir": str(case_output_dir),
+        "precision_policy": case.precision_policy,
+        "parallel_policy": case.parallel_policy,
+        "activation_bits": act.get("total_bits"),
+        "activation_int_bits": act.get("int_bits"),
+        "weight_bits": wgt.get("total_bits"),
+        "weight_int_bits": wgt.get("int_bits"),
+        "bias_bits": bias.get("total_bits"),
+        "bias_int_bits": bias.get("int_bits"),
+        "accum_bits": accum.get("total_bits"),
+        "accum_int_bits": accum.get("int_bits"),
+        "compile_returncode": proc.returncode,
+        "compile_ok": proc.returncode == 0,
+        "benchmark_passed": bool((bm or {}).get("passed")),
+        "hls_ok": bool(hls_metrics),
+        "metrics_json": str(case_output_dir / "bench" / "metrics.json"),
+        "compile_plan_json": str(case_output_dir / "ir" / "compile_plan.json"),
+        "memory_plan_json": str(case_output_dir / "ir" / "memory_plan.json"),
+        "comm_plan_json": str(case_output_dir / "ir" / "comm_plan.json"),
+        "manifest_json": str(case_output_dir / "manifest.json"),
+        "stdout_log": str(stdout_log),
+        "stderr_log": str(stderr_log),
+        "csynth_report_path": str(csynth_xml) if csynth_xml else "",
+    }
+
+    row.update(extract_compile_plan_fields(cp))
+    row.update(extract_bench_fields(bm))
+    row.update(extract_quant_fields(qm))
+    row.update(hls_metrics)
+
+    if not keep_temp_configs:
+        cfg_path.unlink(missing_ok=True)
+
+    if proc.returncode == 0 and not keep_success_logs:
+        stdout_log.unlink(missing_ok=True)
+        stderr_log.unlink(missing_ok=True)
 
     return row
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser("FPGAI policy sweep runner")
-    parser.add_argument("--config", required=True, help="Base YAML config")
-    parser.add_argument("--models", nargs="*", default=None)
-    parser.add_argument(
-        "--precision-policies",
-        nargs="*",
-        default=list(PRECISION_POLICIES.keys()),
-        choices=list(PRECISION_POLICIES.keys()),
-    )
-    parser.add_argument(
-        "--parallel-policies",
-        nargs="*",
-        default=list(PARALLEL_POLICIES.keys()),
-        choices=list(PARALLEL_POLICIES.keys()),
-    )
-    parser.add_argument("--csv-out", default="build/policy_sweeps/policy_sweep_results.csv")
-    parser.add_argument("--python", default=sys.executable)
-    parser.add_argument("--keep-temp-configs", action="store_true")
-    parser.add_argument("--keep-builds", action="store_true")
-    parser.add_argument("--keep-success-logs", action="store_true")
-    args = parser.parse_args()
+def write_csv(rows: List[Dict[str, Any]], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames: List[str] = []
+    seen = set()
+    for r in rows:
+        for k in r.keys():
+            if k not in seen:
+                seen.add(k)
+                fieldnames.append(k)
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for r in rows:
+            writer.writerow(r)
 
-    repo_root = Path(__file__).resolve().parents[1]
-    base_cfg_path = (repo_root / args.config).resolve() if not Path(args.config).is_absolute() else Path(args.config)
-    csv_out = (repo_root / args.csv_out).resolve() if not Path(args.csv_out).is_absolute() else Path(args.csv_out)
 
-    base_cfg = load_yaml(base_cfg_path)
-    models = ensure_list(args.models) or DEFAULT_MODELS
+def build_cases(models: List[str], precisions: List[str], policies: List[str]) -> List[SweepCase]:
+    return [SweepCase(m, p, pol) for m in models for p in precisions for pol in policies]
 
-    sweep_dir = csv_out.parent
-    sweep_dir.mkdir(parents=True, exist_ok=True)
 
-    for model_path in models:
-        for precision_policy in args.precision_policies:
-            for parallel_policy in args.parallel_policies:
-                tstamp = time.strftime("%Y-%m-%dT%H:%M:%S")
-                run_id = sanitize_name(f"{model_name_from_path(model_path)}__{precision_policy}__{parallel_policy}")
+def parse_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--config", required=True)
+    ap.add_argument("--csv-out", required=True)
+    ap.add_argument("--keep-temp-configs", action="store_true")
+    ap.add_argument("--keep-success-logs", action="store_true")
+    ap.add_argument("--models", nargs="*", default=DEFAULT_MODELS)
+    ap.add_argument("--precisions", nargs="*", default=DEFAULT_PRECISIONS)
+    ap.add_argument("--policies", nargs="*", default=DEFAULT_POLICIES)
+    return ap.parse_args()
 
-                cfg = prepare_cfg(
-                    base_cfg=base_cfg,
-                    model_path=model_path,
-                    precision_policy=precision_policy,
-                    parallel_policy=parallel_policy,
-                )
 
-                out_dir = Path(deep_get(cfg, "project.out_dir")).resolve()
-                project_name = str(deep_get(cfg, "project.name"))
-                clock_mhz = deep_get(cfg, "targets.platform.clocks.0.target_mhz", None)
+def main() -> int:
+    args = parse_args()
 
-                tmp_dir = Path(tempfile.mkdtemp(prefix="fpgai_policy_", dir=str(sweep_dir)))
-                tmp_cfg_path = tmp_dir / f"{run_id}.yml"
-                dump_yaml(tmp_cfg_path, cfg)
+    base_cfg_path = Path(args.config).resolve()
+    csv_out = Path(args.csv_out).resolve()
+    out_root = csv_out.parent
+    out_root.mkdir(parents=True, exist_ok=True)
 
-                print("=" * 72)
-                print(f"[RUN] model={model_path} precision={precision_policy} parallel={parallel_policy}")
-                print(f"[CFG] {tmp_cfg_path}")
-                print(f"[OUT] {out_dir}")
+    cases = build_cases(args.models, args.precisions, args.policies)
 
-                proc = run_one(repo_root=repo_root, python_exe=args.python, config_path=tmp_cfg_path)
+    print("=" * 72)
+    print(f"[INFO] Running stable paper sweep: {len(cases)} cases")
+    print("=" * 72)
 
-                stdout_path = tmp_dir / "stdout.log"
-                stderr_path = tmp_dir / "stderr.log"
-                if proc.returncode != 0 or args.keep_success_logs:
-                    try:
-                        stdout_path.write_text(proc.stdout, encoding="utf-8", errors="ignore")
-                        stderr_path.write_text(proc.stderr, encoding="utf-8", errors="ignore")
-                    except OSError as e:
-                        print(f"[WARN] Could not write logs: {e}")
-                        stdout_path = None
-                        stderr_path = None
-                else:
-                    stdout_path = None
-                    stderr_path = None
+    rows: List[Dict[str, Any]] = []
+    for case in cases:
+        print(f"[RUN] model={case.model_path} precision={case.precision_policy} parallel={case.parallel_policy}")
+        row = run_case(
+            base_cfg_path=base_cfg_path,
+            case=case,
+            out_root=out_root,
+            keep_temp_configs=args.keep_temp_configs,
+            keep_success_logs=args.keep_success_logs,
+        )
+        rows.append(row)
+        print(
+            f"[DONE] returncode={row['compile_returncode']} "
+            f"compile_ok={row['compile_ok']} "
+            f"hls_ok={row['hls_ok']} "
+            f"benchmark_passed={row['benchmark_passed']}"
+        )
 
-                row: Dict[str, Any] = {k: "" for k in CSV_COLUMNS}
-                row["timestamp"] = tstamp
-                row["run_id"] = run_id
-                row["model_name"] = model_name_from_path(model_path)
-                row["model_path"] = model_path
-                row["project_name"] = project_name
-                row["out_dir"] = str(out_dir)
-                row["precision_policy"] = precision_policy
-                row["parallel_policy"] = parallel_policy
-                row["compile_returncode"] = proc.returncode
-                row["compile_ok"] = (proc.returncode == 0)
-                row["target_clock_mhz"] = clock_mhz
-
-                pol = PRECISION_POLICIES[precision_policy]
-                row["activation_bits"] = pol["activation"]["total_bits"]
-                row["activation_int_bits"] = pol["activation"]["int_bits"]
-                row["weight_bits"] = pol["weight"]["total_bits"]
-                row["weight_int_bits"] = pol["weight"]["int_bits"]
-                row["bias_bits"] = pol["bias"]["total_bits"]
-                row["bias_int_bits"] = pol["bias"]["int_bits"]
-                row["accum_bits"] = pol["accum"]["total_bits"]
-                row["accum_int_bits"] = pol["accum"]["int_bits"]
-
-                ppol = PARALLEL_POLICIES[parallel_policy]
-                row["pe"] = ppol["pe"]
-                row["simd"] = ppol["simd"]
-                row["unroll_factor"] = ppol["unroll_factor"]
-                row["partition_factor"] = ppol["partition_factor"]
-                row["pipeline_style"] = ppol["pipeline_style"]
-
-                if out_dir.exists():
-                    row.update(collect_metrics(out_dir))
-                else:
-                    row["hls_ok"] = False
-
-                append_csv_row(csv_out, row)
-
-                print(f"[DONE] returncode={proc.returncode} csv={csv_out}")
-                if proc.returncode != 0:
-                    if stdout_path is not None:
-                        print(f"[WARN] stdout: {stdout_path}")
-                    if stderr_path is not None:
-                        print(f"[WARN] stderr: {stderr_path}")
-
-                if proc.returncode == 0 and not args.keep_builds:
-                    try:
-                        if out_dir.exists():
-                            shutil.rmtree(out_dir, ignore_errors=True)
-                    except OSError as e:
-                        print(f"[WARN] Could not remove build dir {out_dir}: {e}")
-
-                if not args.keep_temp_configs:
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    print("")
-    print(f"[OK] Sweep completed: {csv_out}")
+    write_csv(rows, csv_out)
+    print(f"\n[OK] Sweep completed: {csv_out}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

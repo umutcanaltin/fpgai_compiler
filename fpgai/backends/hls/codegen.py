@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 import json
-
 import numpy as np
 
 from fpgai.ir.graph import Graph
@@ -55,31 +54,30 @@ def _infer_weight_words(graph: Graph) -> int:
                     for d in graph.constants[b_name].shape:
                         n *= int(d)
                     total += n
-
         elif op.op_type == "Dense":
             in_f = int(op.attrs.get("in_features") or 0)
             out_f = int(op.attrs.get("out_features") or 0)
             if in_f > 0 and out_f > 0:
                 total += in_f * out_f
                 total += out_f
-
     return total
 
 
 def _infer_in_out_words(graph: Graph) -> Tuple[int, int]:
-    in_words = 1
-    out_words = 1
-
+    in_words = None
+    out_words = None
     if graph.inputs:
         x = graph.get_tensor(graph.inputs[0])
         if x and x.shape:
             in_words = int(np.prod(x.shape))
-
     if graph.outputs:
         y = graph.get_tensor(graph.outputs[0])
         if y and y.shape:
             out_words = int(np.prod(y.shape))
-
+    if not in_words:
+        in_words = 1
+    if not out_words:
+        out_words = 1
     return in_words, out_words
 
 
@@ -93,65 +91,57 @@ def _plan_to_dict(obj: Any) -> Dict[str, Any]:
     return {"repr": repr(obj)}
 
 
-def _extract_codegen_numerics(hls_options: Dict[str, Any], compile_plan: Any) -> Dict[str, Any]:
-    numerics = hls_options.get("numerics", {}) if isinstance(hls_options, dict) else {}
-    if isinstance(numerics, dict) and numerics:
-        return numerics
+def _emit_hls_metadata(
+    proj: HLSProject,
+    *,
+    graph: Graph,
+    top_name: str,
+    weights_mode: str,
+    part: str,
+    clk_mhz: float,
+    compile_plan: Any = None,
+    memory_plan: Any = None,
+    communication_plan: Any = None,
+    intermediate_dump: bool = False,
+) -> None:
+    meta_dir = proj.hls_dir / "metadata"
+    meta_dir.mkdir(parents=True, exist_ok=True)
 
-    if compile_plan is None:
-        return {}
+    compile_plan_dict = _plan_to_dict(compile_plan)
+    memory_plan_dict = _plan_to_dict(memory_plan)
+    communication_plan_dict = _plan_to_dict(communication_plan)
 
-    cp = compile_plan.to_dict() if hasattr(compile_plan, "to_dict") else compile_plan
-    notes = cp.get("notes", {}) if isinstance(cp, dict) else {}
+    graph_summary = {
+        "top_name": top_name,
+        "num_ops": len(graph.ops),
+        "num_inputs": len(graph.inputs),
+        "num_outputs": len(graph.outputs),
+        "ops": [{"name": op.name, "type": op.op_type} for op in graph.ops],
+        "inputs": list(graph.inputs),
+        "outputs": list(graph.outputs),
+    }
 
-    act_bits = notes.get("act_bits")
-    act_int_bits = notes.get("act_int_bits")
-    weight_bits = notes.get("weight_bits")
-    weight_int_bits = notes.get("weight_int_bits")
-    bias_bits = notes.get("bias_bits")
-    bias_int_bits = notes.get("bias_int_bits")
-    accum_bits = notes.get("accum_bits")
-    accum_int_bits = notes.get("accum_int_bits")
-    precision_mode = str(notes.get("precision_mode", "fixed")).lower()
+    codegen_context = {
+        "top_name": top_name,
+        "weights_mode": weights_mode,
+        "part": part,
+        "clk_mhz": clk_mhz,
+        "intermediate_dump": bool(intermediate_dump),
+        "graph_summary": graph_summary,
+        "compile_plan_present": bool(compile_plan_dict),
+        "memory_plan_present": bool(memory_plan_dict),
+        "communication_plan_present": bool(communication_plan_dict),
+    }
 
-    if precision_mode == "float":
-        return {
-            "activation": {"type": "float"},
-            "weight": {"type": "float"},
-            "bias": {"type": "float"},
-            "accum": {"type": "float"},
-        }
+    write_text(meta_dir / "graph_summary.json", json.dumps(graph_summary, indent=2))
+    write_text(meta_dir / "codegen_context.json", json.dumps(codegen_context, indent=2))
 
-    if act_bits is not None and weight_bits is not None:
-        return {
-            "activation": {"type": "ap_fixed", "total_bits": int(act_bits), "int_bits": int(act_int_bits if act_int_bits is not None else 6)},
-            "weight": {"type": "ap_fixed", "total_bits": int(weight_bits), "int_bits": int(weight_int_bits if weight_int_bits is not None else 6)},
-            "bias": {"type": "ap_fixed", "total_bits": int(bias_bits if bias_bits is not None else 24), "int_bits": int(bias_int_bits if bias_int_bits is not None else 10)},
-            "accum": {"type": "ap_fixed", "total_bits": int(accum_bits if accum_bits is not None else 24), "int_bits": int(accum_int_bits if accum_int_bits is not None else 10)},
-        }
-
-    return {}
-
-
-def _extract_codegen_parallel(hls_options: Dict[str, Any], compile_plan: Any) -> Dict[str, Any]:
-    par = hls_options.get("parallel", {}) if isinstance(hls_options, dict) else {}
-    if isinstance(par, dict) and par:
-        return par
-
-    if compile_plan is None:
-        return {}
-
-    cp = compile_plan.to_dict() if hasattr(compile_plan, "to_dict") else compile_plan
-    notes = cp.get("notes", {}) if isinstance(cp, dict) else {}
-
-    style = str(notes.get("parallel_pipeline_style", "balanced"))
-    unroll = int(notes.get("parallel_unroll_factor", 1) or 1)
-
-    if style == "conservative":
-        return {"dense_in_unroll": 1, "conv_ic_unroll": 1}
-    if style == "aggressive":
-        return {"dense_in_unroll": max(1, unroll), "conv_ic_unroll": max(1, min(4, unroll))}
-    return {"dense_in_unroll": max(1, min(2, unroll)), "conv_ic_unroll": max(1, min(2, unroll))}
+    if compile_plan_dict:
+        write_text(meta_dir / "compile_plan.json", json.dumps(compile_plan_dict, indent=2))
+    if memory_plan_dict:
+        write_text(meta_dir / "memory_plan.json", json.dumps(memory_plan_dict, indent=2))
+    if communication_plan_dict:
+        write_text(meta_dir / "comm_plan.json", json.dumps(communication_plan_dict, indent=2))
 
 
 def emit_hls_stub(
@@ -165,13 +155,10 @@ def emit_hls_stub(
     communication_plan: Any = None,
 ) -> HLSProject:
     hls_options = hls_options or {}
-
     weights_mode = str(hls_options.get("weights_mode", "embedded")).lower()
     part = str(hls_options.get("part", "xck26-sfvc784-2LV-c"))
     clk_mhz = float(hls_options.get("clk_mhz", 200))
     intermediate_dump = bool(hls_options.get("intermediate_dump", False))
-    numerics = _extract_codegen_numerics(hls_options, compile_plan)
-    parallel = _extract_codegen_parallel(hls_options, compile_plan)
 
     proj = HLSProject(out_dir=out_dir, top_name=top_name)
 
@@ -181,9 +168,22 @@ def emit_hls_stub(
     ensure_clean_dir(proj.include_dir, clean=False)
     ensure_clean_dir(proj.src_dir, clean=False)
 
+    _emit_hls_metadata(
+        proj,
+        graph=graph,
+        top_name=top_name,
+        weights_mode=weights_mode,
+        part=part,
+        clk_mhz=clk_mhz,
+        compile_plan=compile_plan,
+        memory_plan=memory_plan,
+        communication_plan=communication_plan,
+        intermediate_dump=intermediate_dump,
+    )
+
     write_text(
         proj.include_dir / "fpgai_types.h",
-        emit_types_h(graph, top_name=top_name, numerics=numerics, parallel=parallel),
+        emit_types_h(graph, top_name=top_name, compile_plan=compile_plan),
     )
     write_text(
         proj.include_dir / "fpgai_params.h",
@@ -206,10 +206,7 @@ def emit_hls_stub(
 
     if weights_mode == "embedded":
         write_text(proj.src_dir / "fpgai_params.cpp", emit_params_cpp(graph))
-    elif weights_mode == "stream":
-        write_text(proj.include_dir / "weights_runtime.h", emit_weights_runtime_h(graph))
-        write_text(proj.src_dir / "weights_runtime.cpp", emit_weights_runtime_cpp(graph))
-    elif weights_mode == "ddr":
+    elif weights_mode in ("stream", "ddr"):
         write_text(proj.include_dir / "weights_runtime.h", emit_weights_runtime_h(graph))
         write_text(proj.src_dir / "weights_runtime.cpp", emit_weights_runtime_cpp(graph))
     else:

@@ -10,19 +10,15 @@ class LayerDescriptor:
     op_type: str
     inputs: List[str]
     outputs: List[str]
-
     input_shapes: List[Tuple[int, ...]] = field(default_factory=list)
     output_shapes: List[Tuple[int, ...]] = field(default_factory=list)
-
     param_names: List[str] = field(default_factory=list)
     param_bytes: int = 0
     activation_bytes_in: int = 0
     activation_bytes_out: int = 0
-
     macs: int = 0
     attrs: Dict[str, Any] = field(default_factory=dict)
-
-    compute_hint: str = "unknown"   # compute_bound / memory_bound / balanced / unknown
+    compute_hint: str = "unknown"  # compute_bound / memory_bound / balanced / unknown
     backend_kernel: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -33,20 +29,17 @@ class LayerDescriptor:
 class LayerPlan:
     node_name: str
     op_type: str
-
     precision_mode: str = "float32"
     act_bits: Optional[int] = None
     weight_bits: Optional[int] = None
-
     tile: Dict[str, int] = field(default_factory=dict)
     unroll: Dict[str, int] = field(default_factory=dict)
-
     pipeline_ii: Optional[int] = 1
     weight_mode: str = "embedded"   # embedded / stream / ddr
     activation_mode: str = "stream" # stream / buffer / ddr
     buffering: str = "single"       # single / double
-
     backend_kernel: Optional[str] = None
+    notes: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -57,10 +50,8 @@ class CompilePlan:
     target_board: str = "unknown"
     target_part: str = "unknown"
     clock_mhz: float = 200.0
-
     execution_order: List[str] = field(default_factory=list)
     layer_plans: List[LayerPlan] = field(default_factory=list)
-
     global_resource_budget: Dict[str, Any] = field(default_factory=dict)
     notes: Dict[str, Any] = field(default_factory=dict)
 
@@ -79,14 +70,15 @@ class CompilePlan:
 @dataclass
 class TensorPlacement:
     tensor_name: str
-    kind: str                    # input / output / weight / activation / temp
-    region: str                  # BRAM / URAM / LUTRAM / DDR / HOST
-    layout: str = "raw"          # raw / packed / tiled
+    kind: str  # input / output / weight / activation / temp
+    region: str  # BRAM / URAM / LUTRAM / DDR / HOST
+    layout: str = "raw"  # raw / packed / tiled
     offset: Optional[int] = None
     size_bytes: int = 0
     double_buffer: bool = False
     producer: Optional[str] = None
     consumer: Optional[str] = None
+    notes: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -109,12 +101,13 @@ class MemoryPlan:
 @dataclass
 class CommunicationEdge:
     tensor_name: str
-    direction: str               # PS_TO_PL / PL_TO_PS / PL_TO_PL
-    encoding: str = "raw"        # raw / bitpack / rle
+    direction: str  # PS_TO_PL / PL_TO_PS / PL_TO_PL
+    encoding: str = "raw"  # raw / bitpack / rle
     packed_bits: Optional[int] = None
     axi_word_bits: int = 32
     burst_len: int = 16
     unpack_in_pl: bool = False
+    notes: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

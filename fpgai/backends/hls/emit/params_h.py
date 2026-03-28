@@ -1,75 +1,82 @@
 from __future__ import annotations
 
-from fpgai.ir.graph import Graph
+from typing import List
+import numpy as np
 
 
-def _tensor_total(graph: Graph, name: str) -> int:
-    t = graph.get_tensor(name)
-    if t is not None and getattr(t, "shape", None):
-        total = 1
-        for d in t.shape:
-            total *= int(d)
-        return total
+def _numel_from_graph_named(graph, tensor_name: str) -> int:
+    if tensor_name is None:
+        return 0
 
-    if name in graph.constants:
-        total = 1
-        for d in graph.constants[name].shape:
-            total *= int(d)
-        return total
+    if hasattr(graph, "constants") and tensor_name in graph.constants:
+        return int(np.asarray(graph.constants[tensor_name]).size)
 
-    raise ValueError(f"Cannot resolve tensor size for parameter: {name}")
+    if hasattr(graph, "params") and tensor_name in graph.params:
+        return int(np.asarray(graph.params[tensor_name]).size)
+
+    try:
+        t = graph.get_tensor(tensor_name)
+    except Exception:
+        t = None
+
+    if t is not None:
+        shape = getattr(t, "shape", None)
+        if shape is not None:
+            n = 1
+            for d in shape:
+                n *= int(d)
+            return int(n)
+
+        data = getattr(t, "data", None)
+        if data is not None:
+            return int(np.asarray(data).size)
+
+    return 0
 
 
-def emit_params_h_stub(graph: Graph, weights_mode: str = "embedded") -> str:
-    runtime_weights = str(weights_mode).lower() in ("stream", "ddr")
-
-    lines = []
+def emit_params_h_stub(graph, *, weights_mode: str = "embedded") -> str:
+    lines: List[str] = []
     lines.append("#pragma once")
     lines.append('#include "fpgai_types.h"')
+    lines.append("")
     lines.append("namespace fpgai {")
     lines.append("")
 
-    weight_idx = 0
-    for op_idx, op in enumerate(graph.ops):
-        if op.op_type not in ["Conv", "Dense", "Gemm"]:
-            continue
+    if weights_mode == "embedded":
+        param_op_idx = 0
 
-        tag = op.attrs.get("precision_tag", f"op{op_idx}")
-        w_t = f"{tag}_wgt_t"
-        b_t = f"{tag}_bias_t"
+        for op in graph.ops:
+            if op.op_type == "Conv":
+                w_n = 0
+                b_n = 0
 
-        w_prefix = f"extern {w_t}" if runtime_weights else f"extern const {w_t}"
-        b_prefix = f"extern {b_t}" if runtime_weights else f"extern const {b_t}"
+                if len(op.inputs) > 1:
+                    w_n = _numel_from_graph_named(graph, op.inputs[1])
+                if len(op.inputs) > 2:
+                    b_n = _numel_from_graph_named(graph, op.inputs[2])
 
-        w_name = None
-        b_name = None
+                if w_n > 0:
+                    lines.append(f"extern const wgt_t W{param_op_idx}[{w_n}];")
+                if b_n > 0:
+                    lines.append(f"extern const bias_t B{param_op_idx}[{b_n}];")
 
-        if op.op_type in ("Dense", "Gemm"):
-            w_name = op.attrs.get("weight")
-            b_name = op.attrs.get("bias")
-            if w_name is None and len(op.inputs) > 1:
-                w_name = op.inputs[1]
-            if b_name is None and len(op.inputs) > 2:
-                b_name = op.inputs[2]
-        elif op.op_type == "Conv":
-            if len(op.inputs) > 1:
-                w_name = op.inputs[1]
-            if len(op.inputs) > 2:
-                b_name = op.inputs[2]
+                param_op_idx += 1
 
-        if w_name:
-            w_total = _tensor_total(graph, w_name)
-            lines.append(f"{w_prefix} W{weight_idx}[{w_total}];")
+            elif op.op_type == "Dense":
+                in_f = int(op.attrs.get("in_features") or 0)
+                out_f = int(op.attrs.get("out_features") or 0)
 
-        if b_name:
-            b_total = _tensor_total(graph, b_name)
-            lines.append(f"{b_prefix} B{weight_idx}[{b_total}];")
-        else:
-            lines.append(f"{b_prefix} B{weight_idx}[1];")
+                w_n = out_f * in_f if in_f > 0 and out_f > 0 else 0
+                b_n = out_f if out_f > 0 else 0
 
-        lines.append("")
-        weight_idx += 1
+                if w_n > 0:
+                    lines.append(f"extern const wgt_t W{param_op_idx}[{w_n}];")
+                if b_n > 0:
+                    lines.append(f"extern const bias_t B{param_op_idx}[{b_n}];")
 
+                param_op_idx += 1
+
+    lines.append("")
     lines.append("} // namespace fpgai")
     lines.append("")
     return "\n".join(lines)

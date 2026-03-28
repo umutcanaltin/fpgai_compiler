@@ -2,55 +2,83 @@ from __future__ import annotations
 
 
 def emit_conv_h() -> str:
-    return r'''
-#pragma once
+    return r'''#pragma once
 #include "fpgai_types.h"
 
 namespace fpgai {
 
 template<
-    int H, int W, int CIN,
-    int OH, int OW, int COUT,
+    int IN_H, int IN_W, int IN_C,
+    int OUT_H, int OUT_W, int OUT_C,
     int K, int STRIDE, int PAD,
-    typename WGT_T, typename BIAS_T
+    typename ACT_T = act_t,
+    typename WGT_T = wgt_t,
+    typename BIAS_T = bias_t,
+    typename ACC_T = acc_t
 >
 void conv2d(
-    const act_t x[H * W * CIN],
-    act_t y[OH * OW * COUT],
-    const WGT_T w[COUT * CIN * K * K],
-    const BIAS_T b[COUT]
+    const ACT_T x[IN_H * IN_W * IN_C],
+    ACT_T y[OUT_H * OUT_W * OUT_C],
+    const WGT_T W[OUT_C * IN_C * K * K],
+    const BIAS_T B[OUT_C]
 ) {
 #pragma HLS INLINE off
 
-OUT_H:
-    for (int oh = 0; oh < OH; oh++) {
-    OUT_W:
-        for (int ow = 0; ow < OW; ow++) {
-        OUT_C:
-            for (int co = 0; co < COUT; co++) {
-#pragma HLS PIPELINE II=1
-                acc_t acc = (acc_t)b[co];
+    OC_TILE:
+    for (int oc0 = 0; oc0 < OUT_C; oc0 += FPGAI_CONV_OC_UNROLL) {
+        OH_LOOP:
+        for (int oh = 0; oh < OUT_H; ++oh) {
+            OW_LOOP:
+            for (int ow = 0; ow < OUT_W; ++ow) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
 
-            K_H:
-                for (int kh = 0; kh < K; kh++) {
-                K_W:
-                    for (int kw = 0; kw < K; kw++) {
-                    IN_C:
-                        for (int ci = 0; ci < CIN; ci++) {
-#pragma HLS UNROLL factor=FPGAI_CONV_IC_UNROLL
+                ACC_T acc[FPGAI_CONV_OC_UNROLL];
+#pragma HLS ARRAY_PARTITION variable=acc complete
+
+                INIT_ACC:
+                for (int oco = 0; oco < FPGAI_CONV_OC_UNROLL; ++oco) {
+#pragma HLS UNROLL
+                    int oc = oc0 + oco;
+                    if (oc < OUT_C) acc[oco] = (ACC_T)B[oc];
+                }
+
+                IC_LOOP:
+                for (int ic = 0; ic < IN_C; ++ic) {
+                    KH_LOOP:
+                    for (int kh = 0; kh < K; ++kh) {
+                        KW_LOOP:
+                        for (int kw = 0; kw < K; ++kw) {
+#pragma HLS PIPELINE II=1
                             int ih = oh * STRIDE + kh - PAD;
                             int iw = ow * STRIDE + kw - PAD;
-                            if (ih >= 0 && ih < H && iw >= 0 && iw < W) {
-                                int x_idx = ((ih * W) + iw) * CIN + ci;
-                                int w_idx = (((co * CIN) + ci) * K + kh) * K + kw;
-                                acc += (acc_t)x[x_idx] * (acc_t)w[w_idx];
+
+                            if (ih >= 0 && ih < IN_H && iw >= 0 && iw < IN_W) {
+                                int x_idx = (ih * IN_W + iw) * IN_C + ic;
+                                ACT_T xv = x[x_idx];
+
+                                OC_ACC:
+                                for (int oco = 0; oco < FPGAI_CONV_OC_UNROLL; ++oco) {
+#pragma HLS UNROLL
+                                    int oc = oc0 + oco;
+                                    if (oc < OUT_C) {
+                                        int w_idx = (((oc * IN_C + ic) * K + kh) * K + kw);
+                                        acc[oco] += (ACC_T)xv * (ACC_T)W[w_idx];
+                                    }
+                                }
                             }
                         }
                     }
                 }
 
-                int y_idx = ((oh * OW) + ow) * COUT + co;
-                y[y_idx] = (act_t)acc;
+                WRITE_OUT:
+                for (int oco = 0; oco < FPGAI_CONV_OC_UNROLL; ++oco) {
+#pragma HLS UNROLL
+                    int oc = oc0 + oco;
+                    if (oc < OUT_C) {
+                        int y_idx = (oh * OUT_W + ow) * OUT_C + oc;
+                        y[y_idx] = (ACT_T)acc[oco];
+                    }
+                }
             }
         }
     }
