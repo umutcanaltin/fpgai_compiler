@@ -1,74 +1,74 @@
 from __future__ import annotations
 
 from typing import Any, Dict
+from fpgai.ir.graph import Graph
 
 
-def _cp_get(compile_plan: Any) -> Dict[str, Any]:
-    if compile_plan is None:
-        return {}
-    if hasattr(compile_plan, "to_dict"):
-        return compile_plan.to_dict()
-    if isinstance(compile_plan, dict):
-        return compile_plan
-    return {}
+def _spec_to_ap(spec) -> str:
+    if not isinstance(spec, dict):
+        return "ap_fixed<16,6>"
+    tb = int(spec.get("total_bits", 16))
+    ib = int(spec.get("int_bits", 6))
+    return f"ap_fixed<{tb},{ib}>"
 
 
-def emit_types_h(graph, *, top_name: str, compile_plan: Any = None) -> str:
-    cp = _cp_get(compile_plan)
-    notes = cp.get("notes", {}) or {}
-    layer_plans = cp.get("layer_plans", []) or []
+def _deep_get(d: Dict[str, Any], path: str, default=None):
+    cur: Any = d
+    for k in path.split("."):
+        if not isinstance(cur, dict) or k not in cur:
+            return default
+        cur = cur[k]
+    return cur
 
-    act_bits = int(notes.get("act_bits", 16) or 16)
-    act_int_bits = int(notes.get("act_int_bits", 6) or 6)
-    weight_bits = int(notes.get("weight_bits", 16) or 16)
-    weight_int_bits = int(notes.get("weight_int_bits", 6) or 6)
-    bias_bits = int(notes.get("bias_bits", 24) or 24)
-    bias_int_bits = int(notes.get("bias_int_bits", 10) or 10)
-    accum_bits = int(notes.get("accum_bits", 24) or 24)
-    accum_int_bits = int(notes.get("accum_int_bits", 10) or 10)
 
-    conv_ic_unroll = 1
-    conv_oc_unroll = 1
-    dense_in_unroll = 1
-    dense_out_unroll = 1
-    partition_factor = int(notes.get("parallel_partition_factor", 1) or 1)
-    pipeline_style = str(notes.get("parallel_pipeline_style", "balanced"))
+def _default_precision(raw_cfg: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "activation": _deep_get(raw_cfg, "numerics.defaults.activation", {"type": "ap_fixed", "total_bits": 16, "int_bits": 6}),
+        "weight": _deep_get(raw_cfg, "numerics.defaults.weight", {"type": "ap_fixed", "total_bits": 16, "int_bits": 6}),
+        "bias": _deep_get(raw_cfg, "numerics.defaults.bias", {"type": "ap_fixed", "total_bits": 24, "int_bits": 10}),
+        "accum": _deep_get(raw_cfg, "numerics.defaults.accum", {"type": "ap_fixed", "total_bits": 24, "int_bits": 10}),
+    }
 
-    for lp in layer_plans:
-        if lp.get("op_type") == "Conv":
-            u = lp.get("unroll") or {}
-            conv_ic_unroll = max(conv_ic_unroll, int(u.get("ic", 1) or 1))
-            conv_oc_unroll = max(conv_oc_unroll, int(u.get("oc", 1) or 1))
-        elif lp.get("op_type") == "Dense":
-            u = lp.get("unroll") or {}
-            dense_in_unroll = max(dense_in_unroll, int(u.get("in", 1) or 1))
-            dense_out_unroll = max(dense_out_unroll, int(u.get("out", 1) or 1))
 
-    if pipeline_style == "conservative":
-        pipeline_ii = 2
-    else:
-        pipeline_ii = 1
+def emit_types_h(graph: Graph, *, top_name: str, raw_cfg: Dict[str, Any] | None = None) -> str:
+    raw_cfg = raw_cfg or {}
+    dflt = _default_precision(raw_cfg)
 
-    return f"""#pragma once
-#include <ap_fixed.h>
-#include <ap_int.h>
+    grad_act = _deep_get(raw_cfg, "numerics.training.grad_activation", dflt["activation"])
+    grad_wgt = _deep_get(raw_cfg, "numerics.training.grad_weight", dflt["weight"])
+    grad_bias = _deep_get(raw_cfg, "numerics.training.grad_bias", dflt["bias"])
+    update_acc = _deep_get(raw_cfg, "numerics.training.update_accum", dflt["accum"])
+    optimizer_state = _deep_get(raw_cfg, "numerics.training.optimizer_state", dflt["accum"])
+    loss_t = _deep_get(raw_cfg, "numerics.training.loss", dflt["accum"])
 
-namespace fpgai {{
+    lines = []
+    lines.append("#pragma once")
+    lines.append("#include <ap_fixed.h>")
+    lines.append("")
+    lines.append("namespace fpgai {")
+    lines.append("")
+    lines.append(f"typedef {_spec_to_ap(dflt['activation'])} act_t;")
+    lines.append(f"typedef {_spec_to_ap(dflt['weight'])} wgt_t;")
+    lines.append(f"typedef {_spec_to_ap(dflt['bias'])} bias_t;")
+    lines.append(f"typedef {_spec_to_ap(dflt['accum'])} acc_t;")
+    lines.append("")
+    lines.append(f"typedef {_spec_to_ap(grad_act)} grad_act_t;")
+    lines.append(f"typedef {_spec_to_ap(grad_wgt)} grad_wgt_t;")
+    lines.append(f"typedef {_spec_to_ap(grad_bias)} grad_bias_t;")
+    lines.append(f"typedef {_spec_to_ap(update_acc)} upd_t;")
+    lines.append(f"typedef {_spec_to_ap(optimizer_state)} opt_t;")
+    lines.append(f"typedef {_spec_to_ap(loss_t)} loss_t;")
+    lines.append("")
 
-typedef ap_fixed<{act_bits}, {act_int_bits}, AP_TRN, AP_WRAP> act_t;
-typedef ap_fixed<{weight_bits}, {weight_int_bits}, AP_TRN, AP_WRAP> wgt_t;
-typedef ap_fixed<{bias_bits}, {bias_int_bits}, AP_TRN, AP_WRAP> bias_t;
-typedef ap_fixed<{accum_bits}, {accum_int_bits}, AP_TRN, AP_WRAP> acc_t;
-typedef ap_fixed<{accum_bits}, {accum_int_bits}, AP_TRN, AP_WRAP> accum_t;
+    for idx, op in enumerate(graph.ops):
+        p = op.attrs.get("precision", dflt)
+        tag = op.attrs.get("precision_tag", f"op{idx}")
+        lines.append(f"typedef {_spec_to_ap(p['activation'])} {tag}_act_t;")
+        lines.append(f"typedef {_spec_to_ap(p['weight'])} {tag}_wgt_t;")
+        lines.append(f"typedef {_spec_to_ap(p['bias'])} {tag}_bias_t;")
+        lines.append(f"typedef {_spec_to_ap(p['accum'])} {tag}_acc_t;")
+        lines.append("")
 
-#define FPGAI_PIPELINE_II {pipeline_ii}
-#define FPGAI_PARTITION_FACTOR {max(1, partition_factor)}
-
-#define FPGAI_CONV_IC_UNROLL {max(1, conv_ic_unroll)}
-#define FPGAI_CONV_OC_UNROLL {max(1, conv_oc_unroll)}
-
-#define FPGAI_DENSE_IN_UNROLL {max(1, dense_in_unroll)}
-#define FPGAI_DENSE_OUT_UNROLL {max(1, dense_out_unroll)}
-
-}} // namespace fpgai
-"""
+    lines.append("} // namespace fpgai")
+    lines.append("")
+    return "\n".join(lines)

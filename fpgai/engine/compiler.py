@@ -16,10 +16,13 @@ from fpgai.engine.planner import make_compile_plan
 from fpgai.engine.result import CompileResult
 from fpgai.engine.partition import single_device_plan
 from fpgai.engine.layerwise_precision import resolve_layerwise_precision
+from fpgai.engine.training import build_training_plan, emit_training_artifacts
 from fpgai.analysis.quantization_report import run_quantization_report
 from fpgai.analysis.precision_sweep import run_precision_sweep
 from fpgai.analysis.design_space_report import run_design_space_report
 from fpgai.analysis.hls_estimate_compare import run_estimate_vs_hls_compare
+from fpgai.benchmark.training_reference import run_training_reference_step
+from fpgai.benchmark.training_compare import compare_training_artifacts
 from fpgai.util.fs import ensure_clean_dir, write_text
 from fpgai.util.binio import write_f32_bin
 
@@ -43,6 +46,17 @@ class Compiler:
         return cls(load_config(path))
 
     def compile(self) -> CompileResult:
+        mode = str(self.cfg.pipeline.mode).lower()
+
+        if mode == "inference":
+            return self._compile_inference()
+
+        if mode == "training_on_device":
+            return self._compile_training()
+
+        raise RuntimeError(f"Unsupported pipeline mode: {self.cfg.pipeline.mode}")
+
+    def _compile_inference(self) -> CompileResult:
         raw = self.cfg.raw
         t0 = time.time()
 
@@ -50,6 +64,7 @@ class Compiler:
         top_name = str(_cfg_get(raw, "pipeline.outputs.top_kernel_name", "deeplearn"))
         verbose = bool(_cfg_get(raw, "debug.verbose", False))
         emit_manifest = bool(_cfg_get(raw, "project.reproducibility.emit_manifest", True))
+
         enable_hls = bool(_cfg_get(raw, "backends.hls.enabled", True))
         enable_host = bool(_cfg_get(raw, "backends.host_cpp.enabled", True))
         enable_quant_report = bool(_cfg_get(raw, "analysis.quantization_report.enabled", False))
@@ -80,7 +95,6 @@ class Compiler:
             memory_plan,
             communication_plan,
         )
-
         self._emit_dummy_input(out_dir, g)
 
         quant_result = None
@@ -171,6 +185,9 @@ class Compiler:
                 sweep_result=sweep_result,
                 design_result=design_result,
                 estimate_vs_hls_result=estimate_vs_hls_result,
+                training_plan=None,
+                training_reference_result=None,
+                training_compare_result=None,
                 seconds=time.time() - t0,
             )
 
@@ -195,22 +212,173 @@ class Compiler:
             hls_stdout_log=(hls_run.stdout_log if hls_run is not None else None),
             hls_stderr_log=(hls_run.stderr_log if hls_run is not None else None),
             hls_csynth_report=(hls_run.csynth_report if hls_run is not None else None),
-
             quant_report_dir=(quant_result.out_dir if quant_result is not None else None),
             quant_metrics_json=(quant_result.metrics_json if quant_result is not None else None),
             quant_summary_txt=(quant_result.summary_txt if quant_result is not None else None),
             quant_layerwise_csv=(quant_result.layerwise_csv if quant_result is not None else None),
-
             precision_sweep_dir=(sweep_result.out_dir if sweep_result is not None else None),
             precision_sweep_results_json=(sweep_result.results_json if sweep_result is not None else None),
             precision_sweep_summary_txt=(sweep_result.summary_txt if sweep_result is not None else None),
             precision_sweep_results_csv=(sweep_result.results_csv if sweep_result is not None else None),
-
             design_space_dir=(design_result.out_dir if design_result is not None else None),
             design_space_results_json=(design_result.results_json if design_result is not None else None),
             design_space_summary_txt=(design_result.summary_txt if design_result is not None else None),
             design_space_results_csv=(design_result.results_csv if design_result is not None else None),
             design_space_terminal_summary=(design_result.terminal_summary if design_result is not None else None),
+            training_plan_json=None,
+            training_summary_txt=None,
+        )
+
+    def _compile_training(self) -> CompileResult:
+        raw = self.cfg.raw
+        t0 = time.time()
+
+        out_dir = self._prepare_out_dir(raw)
+        top_name = str(_cfg_get(raw, "pipeline.outputs.top_kernel_name", "deeplearn"))
+        verbose = bool(_cfg_get(raw, "debug.verbose", False))
+        emit_manifest = bool(_cfg_get(raw, "project.reproducibility.emit_manifest", True))
+
+        enable_hls = bool(_cfg_get(raw, "backends.hls.enabled", True))
+        enable_host = bool(_cfg_get(raw, "backends.host_cpp.enabled", True))
+
+        act_kind, act_alpha, act_except_last = self._read_activation_insert_cfg(raw)
+        weights_mode = str(_cfg_get(raw, "data_movement.ps_pl.weights.mode", "embedded")).lower()
+
+        g = self._import_and_prepare_graph(
+            act_kind=act_kind,
+            act_alpha=act_alpha,
+            act_except_last=act_except_last,
+        )
+
+        resolve_layerwise_precision(g, raw)
+
+        descriptors = analyze_graph(g)
+        compile_plan = make_compile_plan(self.cfg, descriptors)
+        memory_plan = make_memory_plan(g, descriptors, compile_plan)
+        communication_plan = make_communication_plan(self.cfg, memory_plan)
+
+        self._emit_ir_artifacts(
+            out_dir,
+            g,
+            descriptors,
+            compile_plan,
+            memory_plan,
+            communication_plan,
+        )
+
+        training_plan = build_training_plan(g, raw)
+        emit_training_artifacts(out_dir, training_plan)
+
+        input_path = self._emit_dummy_input(out_dir, g)
+        target_path = self._emit_training_target(out_dir, g, raw)
+
+        x_input = np.fromfile(input_path, dtype=np.float32)
+        y_target = np.fromfile(target_path, dtype=np.float32)
+
+        training_reference_result = run_training_reference_step(
+            graph=g,
+            raw_cfg=raw,
+            out_dir=out_dir,
+            x_input=x_input,
+            target=y_target,
+        )
+
+        hls_dir: Optional[Path] = None
+        if enable_hls:
+            hls_dir = self._emit_hls(
+                out_dir,
+                g,
+                top_name=top_name,
+                weights_mode=weights_mode,
+                compile_plan=compile_plan,
+                memory_plan=memory_plan,
+                communication_plan=communication_plan,
+            )
+
+        host_dir: Optional[Path] = None
+        if enable_host:
+            host_dir = self._emit_hostcpp(out_dir, g, top_name=top_name)
+
+        hls_run = None
+        if enable_hls and hls_dir is not None:
+            hls_run = self._maybe_run_vitis_hls(hls_dir)
+
+        training_compare_result = None
+        if hls_run is not None and hls_dir is not None:
+            hls_grads = self._find_file_recursive(hls_dir, "grads.bin")
+            hls_w_before = self._find_file_recursive(hls_dir, "weights_before.bin")
+            hls_w_after = self._find_file_recursive(hls_dir, "weights_after.bin")
+
+            if hls_grads is not None and hls_w_before is not None and hls_w_after is not None:
+                training_compare_result = compare_training_artifacts(
+                    out_dir=out_dir,
+                    ref_grads_bin=training_reference_result.grads_flat_path,
+                    ref_weights_before_bin=training_reference_result.weights_before_flat_path,
+                    ref_weights_after_bin=training_reference_result.weights_after_flat_path,
+                    hls_grads_bin=hls_grads,
+                    hls_weights_before_bin=hls_w_before,
+                    hls_weights_after_bin=hls_w_after,
+                )
+                print("")
+                print(training_compare_result.summary_txt.read_text(encoding="utf-8"))
+                print("")
+
+        if emit_manifest:
+            self._emit_manifest(
+                out_dir=out_dir,
+                top_name=top_name,
+                weights_mode=weights_mode,
+                graph=g,
+                descriptors=descriptors,
+                compile_plan=compile_plan,
+                memory_plan=memory_plan,
+                communication_plan=communication_plan,
+                hls_run=hls_run,
+                quant_result=None,
+                sweep_result=None,
+                design_result=None,
+                estimate_vs_hls_result=None,
+                training_plan=training_plan,
+                training_reference_result=training_reference_result,
+                training_compare_result=training_compare_result,
+                seconds=time.time() - t0,
+            )
+
+        if verbose:
+            print("[FPGAI] training mode enabled")
+            print(f"[FPGAI] training optimizer: {training_plan.optimizer_type}")
+            print(f"[FPGAI] training loss: {training_plan.loss_type}")
+            print(f"[FPGAI] training weights_mode: {training_plan.weights_mode}")
+            print(f"[FPGAI] training reference: {training_reference_result.summary_txt}")
+            if training_compare_result is not None:
+                print(f"[FPGAI] training compare: {training_compare_result.summary_txt}")
+
+        return CompileResult(
+            out_dir=out_dir,
+            graph=g,
+            hls_project_dir=hls_dir,
+            host_project_dir=host_dir,
+            hls_ran=(hls_run is not None),
+            hls_ok=(hls_run.ok if hls_run is not None else None),
+            hls_returncode=(hls_run.returncode if hls_run is not None else None),
+            hls_stdout_log=(hls_run.stdout_log if hls_run is not None else None),
+            hls_stderr_log=(hls_run.stderr_log if hls_run is not None else None),
+            hls_csynth_report=(hls_run.csynth_report if hls_run is not None else None),
+            quant_report_dir=None,
+            quant_metrics_json=None,
+            quant_summary_txt=None,
+            quant_layerwise_csv=None,
+            precision_sweep_dir=None,
+            precision_sweep_results_json=None,
+            precision_sweep_summary_txt=None,
+            precision_sweep_results_csv=None,
+            design_space_dir=None,
+            design_space_results_json=None,
+            design_space_summary_txt=None,
+            design_space_results_csv=None,
+            design_space_terminal_summary=None,
+            training_plan_json=(out_dir / "training" / "training_plan.json"),
+            training_summary_txt=(out_dir / "training" / "summary.txt"),
         )
 
     def _prepare_out_dir(self, raw: Dict[str, Any]) -> Path:
@@ -231,10 +399,8 @@ class Compiler:
         from fpgai.ir.passes import validate_allowlist, assign_stable_names, insert_activations
 
         g = import_onnx(self.cfg.model.path, canonicalize=True, infer_shapes=True)
-
         if act_kind != "none":
             g = insert_activations(g, kind=act_kind, alpha=act_alpha, except_last=act_except_last)
-
         g = assign_stable_names(g)
         validate_allowlist(g, self.cfg.operators.supported)
         return g
@@ -255,6 +421,7 @@ class Compiler:
 
         ir_dir = out_dir / "ir"
         ir_dir.mkdir(parents=True, exist_ok=True)
+
         write_text(ir_dir / "descriptors.json", json.dumps([d.to_dict() for d in descriptors], indent=2))
         write_text(ir_dir / "compile_plan.json", json.dumps(compile_plan.to_dict(), indent=2))
         write_text(ir_dir / "memory_plan.json", json.dumps(memory_plan.to_dict(), indent=2))
@@ -291,6 +458,31 @@ class Compiler:
         write_f32_bin(p, x)
         return p
 
+    def _emit_training_target(self, out_dir: Path, g, raw: Dict[str, Any]) -> Path:
+        p = out_dir / "target.bin"
+        if p.exists():
+            return p
+
+        y_name = g.outputs[0]
+        y_spec = g.get_tensor(y_name)
+        out_words = 1
+        if y_spec is not None and getattr(y_spec, "shape", None):
+            shape = tuple(int(x) for x in y_spec.shape)
+            if len(shape) > 1 and shape[0] == 1:
+                shape = shape[1:]
+            out_words = int(np.prod(shape)) if shape else 1
+
+        target = np.zeros((out_words,), dtype=np.float32)
+        if out_words > 0:
+            target[0] = 1.0
+        write_f32_bin(p, target)
+        return p
+
+    def _find_file_recursive(self, root: Path, filename: str) -> Optional[Path]:
+        for p in root.rglob(filename):
+            return p
+        return None
+
     def _emit_hls(
         self,
         out_dir: Path,
@@ -319,6 +511,9 @@ class Compiler:
                 "clk_mhz": int(clk_mhz),
                 "proj_name": "fpgai_hls_proj",
                 "intermediate_dump": intermediate_dump,
+                "pipeline_mode": str(self.cfg.pipeline.mode).lower(),
+                "training_cfg": (_cfg_get(raw, "training", {}) or {}),
+                "raw_cfg": raw,
             },
             compile_plan=compile_plan,
             memory_plan=memory_plan,
@@ -342,6 +537,7 @@ class Compiler:
         settings64 = _cfg_get(raw, "toolchain.vitis_hls.settings64", None)
 
         from fpgai.backends.hls.runner import run_vitis_hls
+
         return run_vitis_hls(
             hls_dir=hls_dir,
             vitis_hls_exe=vitis_exe,
@@ -368,6 +564,9 @@ class Compiler:
         sweep_result,
         design_result,
         estimate_vs_hls_result,
+        training_plan,
+        training_reference_result,
+        training_compare_result,
         seconds: float,
     ) -> None:
         manifest = {
@@ -393,6 +592,36 @@ class Compiler:
                 }
                 for op in graph.ops
             ],
+            "training_plan": (None if training_plan is None else training_plan.to_dict()),
+            "training_reference": (
+                None
+                if training_reference_result is None
+                else {
+                    "loss_before": training_reference_result.loss_before,
+                    "loss_after": training_reference_result.loss_after,
+                    "grads_ref_bin": str(training_reference_result.grads_flat_path),
+                    "weights_before_ref_bin": str(training_reference_result.weights_before_flat_path),
+                    "weights_after_ref_bin": str(training_reference_result.weights_after_flat_path),
+                    "summary_json": str(training_reference_result.summary_json),
+                    "summary_txt": str(training_reference_result.summary_txt),
+                }
+            ),
+            "training_compare": (
+                None
+                if training_compare_result is None
+                else {
+                    "out_dir": str(training_compare_result.out_dir),
+                    "results_json": str(training_compare_result.results_json),
+                    "summary_txt": str(training_compare_result.summary_txt),
+                    "grad_cosine": training_compare_result.grad_cosine,
+                    "weight_after_cosine": training_compare_result.weight_after_cosine,
+                    "weight_delta_cosine": training_compare_result.weight_delta_cosine,
+                    "grad_mae": training_compare_result.grad_mae,
+                    "grad_max_abs": training_compare_result.grad_max_abs,
+                    "weight_after_mae": training_compare_result.weight_after_mae,
+                    "weight_after_max_abs": training_compare_result.weight_after_max_abs,
+                }
+            ),
             "quant_report": None if quant_result is None else {
                 "out_dir": str(quant_result.out_dir),
                 "metrics_json": str(quant_result.metrics_json),

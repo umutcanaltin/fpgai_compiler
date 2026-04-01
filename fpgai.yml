@@ -6,10 +6,18 @@ project:
   clean: true
 
 pipeline:
-  mode: inference
+  mode: training_on_device
   outputs:
     top_kernel_name: deeplearn
-
+training:
+  optimizer:
+    type: sgd
+    learning_rate: 0.01
+  loss:
+    type: mse
+  execution:
+    batch_size: 1
+    epochs: 1
 targets:
   platform:
     board: kv260
@@ -41,7 +49,7 @@ operators:
 
 model:
   format: onnx
-  path: models/cnn_mnist.onnx
+  path: models/mlp.onnx
 
 numerics:
   defaults:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from fpgai.config.loader import load_config, print_summary, ConfigError
+from fpgai.config.loader import ConfigError, load_config, print_summary
 from fpgai.engine.compiler import Compiler
 from fpgai.benchmark.pipeline import run_compile_correctness_benchmark
 
@@ -20,6 +20,10 @@ def _benchmark_enabled(cfg) -> bool:
     return bool(bench.get("enabled", False))
 
 
+def _should_run_inference_benchmark(cfg) -> bool:
+    return cfg.pipeline.mode == "inference" and _benchmark_enabled(cfg)
+
+
 def main():
     args = parse_args()
 
@@ -31,12 +35,13 @@ def main():
         raise SystemExit(2)
 
     try:
-        if _benchmark_enabled(cfg):
+        if _should_run_inference_benchmark(cfg):
             print("\n=============== FPGAI Benchmark ===============")
             bench = run_compile_correctness_benchmark(config_path=args.config)
             print(f"Benchmark passed : {bench.passed}")
             print(f"Metrics JSON     : {bench.metrics_json}")
             print(f"Summary TXT      : {bench.summary_txt}")
+
             if bench.quant_metrics_json is not None:
                 print(f"Quant JSON       : {bench.quant_metrics_json}")
             if bench.quant_summary_txt is not None:
@@ -45,16 +50,19 @@ def main():
                 print(f"Sweep JSON       : {bench.precision_sweep_results_json}")
             if getattr(bench, "precision_sweep_summary_txt", None) is not None:
                 print(f"Sweep Summary    : {bench.precision_sweep_summary_txt}")
+
             print("==============================================")
             if bench.passed:
                 print("[OK] Benchmark completed successfully.")
             else:
                 print("[WARN] Benchmark completed but did not pass thresholds.")
-        else:
-            compiler = Compiler(cfg)
-            result = compiler.compile()
-            print(result.summary())
-            print(f"[OK] Wrote artifacts to: {result.out_dir}")
+            return
+
+        compiler = Compiler(cfg)
+        result = compiler.compile()
+        print(result.summary())
+        print(f"[OK] Wrote artifacts to: {result.out_dir}")
+
     except RuntimeError as e:
         print(f"[ERROR] {e}", file=sys.stderr)
         raise SystemExit(1)
