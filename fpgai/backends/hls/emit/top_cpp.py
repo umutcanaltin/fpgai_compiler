@@ -17,7 +17,11 @@ def _plan_map(compile_plan: Any) -> Dict[str, Dict[str, Any]]:
                 out[d["node_name"]] = d
         return out
     if isinstance(compile_plan, dict):
-        return {lp["node_name"]: lp for lp in compile_plan.get("layer_plans", []) if isinstance(lp, dict) and lp.get("node_name")}
+        return {
+            lp["node_name"]: lp
+            for lp in compile_plan.get("layer_plans", [])
+            if isinstance(lp, dict) and lp.get("node_name")
+        }
     return {}
 
 
@@ -32,7 +36,11 @@ def _comm_map(communication_plan: Any) -> Dict[str, Dict[str, Any]]:
                 out[d["tensor_name"]] = d
         return out
     if isinstance(communication_plan, dict):
-        return {e["tensor_name"]: e for e in communication_plan.get("edges", []) if isinstance(e, dict) and e.get("tensor_name")}
+        return {
+            e["tensor_name"]: e
+            for e in communication_plan.get("edges", [])
+            if isinstance(e, dict) and e.get("tensor_name")
+        }
     return {}
 
 
@@ -47,7 +55,11 @@ def _memory_map(memory_plan: Any) -> Dict[str, Dict[str, Any]]:
                 out[d["tensor_name"]] = d
         return out
     if isinstance(memory_plan, dict):
-        return {p["tensor_name"]: p for p in memory_plan.get("placements", []) if isinstance(p, dict) and p.get("tensor_name")}
+        return {
+            p["tensor_name"]: p
+            for p in memory_plan.get("placements", [])
+            if isinstance(p, dict) and p.get("tensor_name")
+        }
     return {}
 
 
@@ -133,8 +145,8 @@ def _infer_out_shape(graph: Graph, op, curr_shape: Tuple[int, ...]) -> Tuple[int
 
     if op.op_type == "Dense":
         out_f = op.attrs.get("out_features", op.attrs.get("out"))
-        if out_f is None and "weight" in op.attrs:
-            w_name = op.attrs["weight"]
+        if out_f is None and len(op.inputs) > 1:
+            w_name = op.inputs[1]
             w_t = graph.get_tensor(w_name)
             if w_t is not None and getattr(w_t, "shape", None):
                 out_f = tuple(int(v) for v in w_t.shape)[0]
@@ -177,6 +189,10 @@ def _emit_storage_pragmas(lines, var_name: str, mem_info: Dict[str, Any] | None)
         lines.append(f"#pragma HLS BIND_STORAGE variable={var_name} type=ram_1p impl=bram")
 
 
+def _bn_param_name(prefix: str, idx: int) -> str:
+    return f"{prefix}{idx}"
+
+
 def emit_top_cpp(
     graph: Graph,
     *,
@@ -205,6 +221,7 @@ def emit_top_cpp(
     lines.append('#include "layers/conv.h"')
     lines.append('#include "layers/pool.h"')
     lines.append('#include "layers/activations.h"')
+    lines.append('#include "layers/batchnorm.h"')
     lines.append('#if defined(FPGAI_DEBUG_DUMP) && !defined(__SYNTHESIS__)')
     lines.append('#include <fstream>')
     lines.append('#endif')
@@ -253,6 +270,7 @@ def emit_top_cpp(
     lines.append("")
 
     param_idx = 0
+    bn_idx = 0
     layer_idx = 0
 
     for op in graph.ops:
@@ -316,7 +334,7 @@ def emit_top_cpp(
         elif op.op_type == "LeakyRelu":
             alpha = float(op.attrs.get("alpha", 0.1))
             lines.append(f"    for(int j=0; j<{out_flat}; j++) {out_buf}[j] = {curr_buf}[j];")
-            lines.append(f"    leaky_relu_inplace<{out_flat}>({out_buf}, (act_t){alpha});")
+            lines.append(f"    leaky_relu_inplace<{out_flat}>({out_buf}, (act_t){alpha:.8f}f);")
 
         elif op.op_type == "Sigmoid":
             lines.append(f"    for(int j=0; j<{out_flat}; j++) {out_buf}[j] = {curr_buf}[j];")
@@ -355,6 +373,34 @@ def emit_top_cpp(
                 lines.append("    }")
             else:
                 lines.append(f"    reshape_copy<{out_flat}>({curr_buf}, {out_buf});")
+
+        elif op.op_type == "Add":
+            rhs_name = op.inputs[1]
+            rhs_shape = curr_shape
+            rhs_flat = _flat_size(rhs_shape)
+            rhs_buf = f"add_rhs_{layer_idx}"
+            lines.append(f"    act_t {rhs_buf}[{rhs_flat}];")
+            _emit_storage_pragmas(lines, rhs_buf, mem_by_tensor.get(rhs_name))
+            if rhs_name in graph.inputs:
+                lines.append(f"    // Add rhs comes from graph input tensor '{rhs_name}'")
+                lines.append(f"    for(int j=0; j<{rhs_flat}; j++) {rhs_buf}[j] = (act_t)0;")
+            else:
+                lines.append(f"    // Add rhs tensor '{rhs_name}' assumed produced earlier or constant-folded")
+                lines.append(f"    for(int j=0; j<{rhs_flat}; j++) {rhs_buf}[j] = (act_t)0;")
+            lines.append(f"    add_vec<{out_flat}>({curr_buf}, {rhs_buf}, {out_buf});")
+
+        elif op.op_type == "BatchNormalization":
+            if len(curr_shape) != 3:
+                raise ValueError(f"BatchNormalization expects CHW shape, got {curr_shape}")
+            c_in, h_in, w_in = _as_chw(curr_shape)
+            hw = h_in * w_in
+            gamma_name = _bn_param_name("BN_G", bn_idx)
+            beta_name = _bn_param_name("BN_B", bn_idx)
+            mean_name = _bn_param_name("BN_M", bn_idx)
+            var_name = _bn_param_name("BN_V", bn_idx)
+            lines.append(f"    batchnorm_infer<{c_in}, {hw}>({curr_buf}, {out_buf}, {gamma_name}, {beta_name}, {mean_name}, {var_name});")
+            bn_idx += 1
+
         else:
             lines.append(f"    for(int j=0; j<{out_flat}; j++) {out_buf}[j] = {curr_buf}[j];")
 
@@ -370,17 +416,17 @@ def emit_top_cpp(
     output_tensor_name = graph.outputs[0] if graph.outputs else "output"
     output_comm = comm_by_tensor.get(output_tensor_name)
     output_mem = mem_by_tensor.get(output_tensor_name)
-
-    out_flat = _flat_size(curr_shape)
     lines.append(f"    // output transfer: {_comm_comment(output_comm)}")
     lines.append(f"    // output placement: {_placement_comment(output_mem)}")
-    lines.append(f"    for(int i=0; i<{out_flat}; i++) {{")
+    lines.append(f"    for(int i=0; i<{_flat_size(curr_shape)}; i++) {{")
     lines.append("        axis_t temp;")
     lines.append(f"        temp.data = act_to_bits({curr_buf}[i]);")
-    lines.append("        temp.keep = -1; temp.strb = -1;")
-    lines.append(f"        temp.last = (i == {out_flat}-1);")
+    lines.append("        temp.keep = -1;")
+    lines.append("        temp.strb = -1;")
+    lines.append(f"        temp.last = (i == {_flat_size(curr_shape)} - 1) ? 1 : 0;")
     lines.append("        out_stream.write(temp);")
     lines.append("    }")
     lines.append("}")
+    lines.append("")
 
     return "\n".join(lines)

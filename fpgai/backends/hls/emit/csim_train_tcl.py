@@ -52,6 +52,9 @@ if {{[file exists "${{SRC_DIR}}/layers/pool.cpp"]}} {{
 if {{[file exists "${{SRC_DIR}}/layers/activations.cpp"]}} {{
   add_files ${{SRC_DIR}}/layers/activations.cpp -cflags "{top_cflags}"
 }}
+if {{[file exists "${{SRC_DIR}}/layers/batchnorm.cpp"]}} {{
+  add_files ${{SRC_DIR}}/layers/batchnorm.cpp -cflags "{top_cflags}"
+}}
 if {{[file exists "${{SRC_DIR}}/layers/model_inst.cpp"]}} {{
   add_files ${{SRC_DIR}}/layers/model_inst.cpp -cflags "{top_cflags}"
 }}

@@ -20,7 +20,6 @@ def emit_csim_tcl(
         extra_cflags += " -DFPGAI_DEBUG_DUMP"
 
     weight_src_line += extra_cflags + '"'
-
     top_cflags = f'-I${{INC_DIR}} -I${{LAYERS_INC_DIR}}{extra_cflags}'
     tb_cflags = f'-I${{INC_DIR}} -I${{LAYERS_INC_DIR}}{extra_cflags}'
 
@@ -33,7 +32,6 @@ set SRC_DIR ./src
 set INC_DIR ./include
 set LAYERS_INC_DIR ./include/layers
 
-# Design sources
 if {{[file exists "${{SRC_DIR}}/{top_name}.cpp"]}} {{
     add_files ${{SRC_DIR}}/{top_name}.cpp -cflags "{top_cflags}"
 }} else {{
@@ -54,11 +52,13 @@ if {{[file exists "${{SRC_DIR}}/layers/pool.cpp"]}} {{
 if {{[file exists "${{SRC_DIR}}/layers/activations.cpp"]}} {{
     add_files ${{SRC_DIR}}/layers/activations.cpp -cflags "{top_cflags}"
 }}
+if {{[file exists "${{SRC_DIR}}/layers/batchnorm.cpp"]}} {{
+    add_files ${{SRC_DIR}}/layers/batchnorm.cpp -cflags "{top_cflags}"
+}}
 if {{[file exists "${{SRC_DIR}}/layers/model_inst.cpp"]}} {{
     add_files ${{SRC_DIR}}/layers/model_inst.cpp -cflags "{top_cflags}"
 }}
 
-# Testbench
 add_files -tb ${{SRC_DIR}}/tb.cpp -cflags "{tb_cflags}"
 
 open_solution -reset sol1

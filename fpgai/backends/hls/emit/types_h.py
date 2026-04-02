@@ -30,6 +30,14 @@ def _default_precision(raw_cfg: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _macro_int(raw_cfg: Dict[str, Any], path: str, default: int) -> int:
+    v = _deep_get(raw_cfg, path, default)
+    try:
+        return int(v)
+    except Exception:
+        return int(default)
+
+
 def emit_types_h(graph: Graph, *, top_name: str, raw_cfg: Dict[str, Any] | None = None) -> str:
     raw_cfg = raw_cfg or {}
     dflt = _default_precision(raw_cfg)
@@ -41,9 +49,33 @@ def emit_types_h(graph: Graph, *, top_name: str, raw_cfg: Dict[str, Any] | None 
     optimizer_state = _deep_get(raw_cfg, "numerics.training.optimizer_state", dflt["accum"])
     loss_t = _deep_get(raw_cfg, "numerics.training.loss", dflt["accum"])
 
+    pipe_ii = _macro_int(raw_cfg, "hls.pipeline_ii", 1)
+    dense_out_unroll = _macro_int(raw_cfg, "hls.dense.out_unroll", 1)
+    dense_in_unroll = _macro_int(raw_cfg, "hls.dense.in_unroll", 1)
+    dense_bwd_out_unroll = _macro_int(raw_cfg, "hls.dense.backward_out_unroll", dense_out_unroll)
+    dense_bwd_in_unroll = _macro_int(raw_cfg, "hls.dense.backward_in_unroll", dense_in_unroll)
+    dense_upd_unroll = _macro_int(raw_cfg, "hls.dense.update_unroll", 1)
+    dense_part_in = _macro_int(raw_cfg, "hls.dense.partition_input", 1)
+    dense_part_out = _macro_int(raw_cfg, "hls.dense.partition_output", 1)
+    dense_part_w = _macro_int(raw_cfg, "hls.dense.partition_weights", 1)
+    dense_part_g = _macro_int(raw_cfg, "hls.dense.partition_grads", 1)
+    act_unroll = _macro_int(raw_cfg, "hls.activation.unroll", 1)
+
     lines = []
     lines.append("#pragma once")
     lines.append("#include <ap_fixed.h>")
+    lines.append("")
+    lines.append(f"#define FPGAI_PIPELINE_II {pipe_ii}")
+    lines.append(f"#define FPGAI_DENSE_OUT_UNROLL {dense_out_unroll}")
+    lines.append(f"#define FPGAI_DENSE_IN_UNROLL {dense_in_unroll}")
+    lines.append(f"#define FPGAI_DENSE_BWD_OUT_UNROLL {dense_bwd_out_unroll}")
+    lines.append(f"#define FPGAI_DENSE_BWD_IN_UNROLL {dense_bwd_in_unroll}")
+    lines.append(f"#define FPGAI_DENSE_UPD_UNROLL {dense_upd_unroll}")
+    lines.append(f"#define FPGAI_DENSE_PARTITION_INPUT {dense_part_in}")
+    lines.append(f"#define FPGAI_DENSE_PARTITION_OUTPUT {dense_part_out}")
+    lines.append(f"#define FPGAI_DENSE_PARTITION_WEIGHTS {dense_part_w}")
+    lines.append(f"#define FPGAI_DENSE_PARTITION_GRADS {dense_part_g}")
+    lines.append(f"#define FPGAI_ACT_UNROLL {act_unroll}")
     lines.append("")
     lines.append("namespace fpgai {")
     lines.append("")

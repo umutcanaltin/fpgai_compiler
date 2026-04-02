@@ -26,6 +26,16 @@ from fpgai.benchmark.training_compare import compare_training_artifacts
 from fpgai.util.fs import ensure_clean_dir, write_text
 from fpgai.util.binio import write_f32_bin
 
+from fpgai.backends.hls.emit.types_h import emit_types_h
+from fpgai.backends.hls.emit.top_cpp import emit_top_cpp
+from fpgai.backends.hls.emit.top_train_cpp import emit_top_train_cpp
+from fpgai.backends.hls.emit.layers_dense import emit_dense_h, emit_dense_cpp
+from fpgai.backends.hls.emit.layers_conv import emit_conv_h, emit_conv_cpp
+from fpgai.backends.hls.emit.layers_pool import emit_pool_h, emit_pool_cpp
+from fpgai.backends.hls.emit.layers_activations import emit_activations_h, emit_activations_cpp
+from fpgai.backends.hls.emit.csim_tcl import emit_csim_tcl
+from fpgai.backends.hls.emit.csim_train_tcl import emit_csim_train_tcl
+
 
 def _cfg_get(raw: Dict[str, Any], path: str, default: Any = None) -> Any:
     cur: Any = raw
@@ -508,6 +518,8 @@ class Compiler:
         part = str(_cfg_get(raw, "targets.platform.part", "xck26-sfvc784-2LV-c"))
         clk_mhz = float(_cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200))
         intermediate_dump = bool(_cfg_get(raw, "benchmark.intermediate.enabled", False))
+        pipeline_mode = str(self.cfg.pipeline.mode).lower()
+        training_cfg = (_cfg_get(raw, "training", {}) or {})
 
         proj = emit_hls_stub(
             graph=g,
@@ -519,15 +531,90 @@ class Compiler:
                 "clk_mhz": int(clk_mhz),
                 "proj_name": "fpgai_hls_proj",
                 "intermediate_dump": intermediate_dump,
-                "pipeline_mode": str(self.cfg.pipeline.mode).lower(),
-                "training_cfg": (_cfg_get(raw, "training", {}) or {}),
+                "pipeline_mode": pipeline_mode,
+                "training_cfg": training_cfg,
                 "raw_cfg": raw,
             },
             compile_plan=compile_plan,
             memory_plan=memory_plan,
             communication_plan=communication_plan,
         )
-        return proj.hls_dir
+
+        hls_dir = proj.hls_dir
+        inc_dir = hls_dir / "include"
+        layers_inc_dir = inc_dir / "layers"
+        src_dir = hls_dir / "src"
+        layers_src_dir = src_dir / "layers"
+
+        inc_dir.mkdir(parents=True, exist_ok=True)
+        layers_inc_dir.mkdir(parents=True, exist_ok=True)
+        src_dir.mkdir(parents=True, exist_ok=True)
+        layers_src_dir.mkdir(parents=True, exist_ok=True)
+
+        # Force overwrite generated files so placeholder emitters cannot win.
+        write_text(inc_dir / "fpgai_types.h", emit_types_h(g, top_name=top_name, raw_cfg=raw))
+
+        write_text(layers_inc_dir / "dense.h", emit_dense_h())
+        write_text(layers_src_dir / "dense.cpp", emit_dense_cpp())
+
+        write_text(layers_inc_dir / "conv.h", emit_conv_h())
+        write_text(layers_src_dir / "conv.cpp", emit_conv_cpp())
+
+        write_text(layers_inc_dir / "pool.h", emit_pool_h())
+        write_text(layers_src_dir / "pool.cpp", emit_pool_cpp())
+
+        write_text(layers_inc_dir / "activations.h", emit_activations_h())
+        write_text(layers_src_dir / "activations.cpp", emit_activations_cpp())
+
+        if pipeline_mode == "training_on_device":
+            write_text(
+                src_dir / f"{top_name}.cpp",
+                emit_top_train_cpp(
+                    graph=g,
+                    top_name=top_name,
+                    weights_mode=weights_mode,
+                    training_cfg=training_cfg,
+                ),
+            )
+            input_bin = str((out_dir / "input.bin").resolve())
+            target_bin = str((out_dir / "target.bin").resolve())
+            write_text(
+                hls_dir / "run_hls.tcl",
+                emit_csim_train_tcl(
+                    top_name=top_name,
+                    part=part,
+                    input_bin_path=input_bin,
+                    target_bin_path=target_bin,
+                    weights_mode=weights_mode,
+                    intermediate_dump=intermediate_dump,
+                ),
+            )
+        else:
+            write_text(
+                src_dir / f"{top_name}.cpp",
+                emit_top_cpp(
+                    g,
+                    top_name=top_name,
+                    weights_mode=weights_mode,
+                    compile_plan=compile_plan,
+                    memory_plan=memory_plan,
+                    communication_plan=communication_plan,
+                ),
+            )
+            input_bin = str((out_dir / "input.bin").resolve())
+            write_text(
+                hls_dir / "run_hls.tcl",
+                emit_csim_tcl(
+                    top_name=top_name,
+                    part=part,
+                    clk_period_ns=(1000.0 / clk_mhz),
+                    input_bin_path=input_bin,
+                    weights_mode=weights_mode,
+                    intermediate_dump=intermediate_dump,
+                ),
+            )
+
+        return hls_dir
 
     def _maybe_run_vitis_hls(self, hls_dir: Path):
         raw = self.cfg.raw
@@ -688,9 +775,9 @@ class Compiler:
             "hls_ran": hls_run is not None,
             "hls_ok": (hls_run.ok if hls_run is not None else None),
             "hls_returncode": (hls_run.returncode if hls_run is not None else None),
-            "hls_stdout_log": (hls_run.stdout_log if hls_run is not None else None),
-            "hls_stderr_log": (hls_run.stderr_log if hls_run is not None else None),
-            "hls_csynth_report": (hls_run.csynth_report if hls_run is not None else None),
+            "hls_stdout_log": (str(hls_run.stdout_log) if hls_run is not None and hls_run.stdout_log is not None else None),
+            "hls_stderr_log": (str(hls_run.stderr_log) if hls_run is not None and hls_run.stderr_log is not None else None),
+            "hls_csynth_report": (str(hls_run.csynth_report) if hls_run is not None and hls_run.csynth_report is not None else None),
             "seconds": round(float(seconds), 6),
         }
         write_text(out_dir / "manifest.json", json.dumps(manifest, indent=2))
