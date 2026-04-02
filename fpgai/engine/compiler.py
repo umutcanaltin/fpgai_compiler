@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 import json
 import time
-
 import numpy as np
 
 from fpgai.config.loader import FPGAIConfig
@@ -21,6 +20,7 @@ from fpgai.analysis.quantization_report import run_quantization_report
 from fpgai.analysis.precision_sweep import run_precision_sweep
 from fpgai.analysis.design_space_report import run_design_space_report
 from fpgai.analysis.hls_estimate_compare import run_estimate_vs_hls_compare
+from fpgai.analysis.training_resource_estimate import run_training_resource_estimate
 from fpgai.benchmark.training_reference import run_training_reference_step
 from fpgai.benchmark.training_compare import compare_training_artifacts
 from fpgai.util.fs import ensure_clean_dir, write_text
@@ -47,13 +47,10 @@ class Compiler:
 
     def compile(self) -> CompileResult:
         mode = str(self.cfg.pipeline.mode).lower()
-
         if mode == "inference":
             return self._compile_inference()
-
         if mode == "training_on_device":
             return self._compile_training()
-
         raise RuntimeError(f"Unsupported pipeline mode: {self.cfg.pipeline.mode}")
 
     def _compile_inference(self) -> CompileResult:
@@ -64,7 +61,6 @@ class Compiler:
         top_name = str(_cfg_get(raw, "pipeline.outputs.top_kernel_name", "deeplearn"))
         verbose = bool(_cfg_get(raw, "debug.verbose", False))
         emit_manifest = bool(_cfg_get(raw, "project.reproducibility.emit_manifest", True))
-
         enable_hls = bool(_cfg_get(raw, "backends.hls.enabled", True))
         enable_host = bool(_cfg_get(raw, "backends.host_cpp.enabled", True))
         enable_quant_report = bool(_cfg_get(raw, "analysis.quantization_report.enabled", False))
@@ -79,7 +75,6 @@ class Compiler:
             act_alpha=act_alpha,
             act_except_last=act_except_last,
         )
-
         resolve_layerwise_precision(g, raw)
 
         descriptors = analyze_graph(g)
@@ -188,6 +183,7 @@ class Compiler:
                 training_plan=None,
                 training_reference_result=None,
                 training_compare_result=None,
+                training_estimate_result=None,
                 seconds=time.time() - t0,
             )
 
@@ -237,7 +233,6 @@ class Compiler:
         top_name = str(_cfg_get(raw, "pipeline.outputs.top_kernel_name", "deeplearn"))
         verbose = bool(_cfg_get(raw, "debug.verbose", False))
         emit_manifest = bool(_cfg_get(raw, "project.reproducibility.emit_manifest", True))
-
         enable_hls = bool(_cfg_get(raw, "backends.hls.enabled", True))
         enable_host = bool(_cfg_get(raw, "backends.host_cpp.enabled", True))
 
@@ -249,7 +244,6 @@ class Compiler:
             act_alpha=act_alpha,
             act_except_last=act_except_last,
         )
-
         resolve_layerwise_precision(g, raw)
 
         descriptors = analyze_graph(g)
@@ -268,6 +262,17 @@ class Compiler:
 
         training_plan = build_training_plan(g, raw)
         emit_training_artifacts(out_dir, training_plan)
+
+        training_estimate_result = None
+        if bool(training_plan.estimator.get("enabled", True)):
+            training_estimate_result = run_training_resource_estimate(
+                graph=g,
+                training_plan=training_plan,
+                out_dir=out_dir,
+            )
+            print("")
+            print(training_estimate_result.summary_txt.read_text(encoding="utf-8"))
+            print("")
 
         input_path = self._emit_dummy_input(out_dir, g)
         target_path = self._emit_training_target(out_dir, g, raw)
@@ -341,6 +346,7 @@ class Compiler:
                 training_plan=training_plan,
                 training_reference_result=training_reference_result,
                 training_compare_result=training_compare_result,
+                training_estimate_result=training_estimate_result,
                 seconds=time.time() - t0,
             )
 
@@ -350,6 +356,8 @@ class Compiler:
             print(f"[FPGAI] training loss: {training_plan.loss_type}")
             print(f"[FPGAI] training weights_mode: {training_plan.weights_mode}")
             print(f"[FPGAI] training reference: {training_reference_result.summary_txt}")
+            if training_estimate_result is not None:
+                print(f"[FPGAI] training estimate: {training_estimate_result.summary_txt}")
             if training_compare_result is not None:
                 print(f"[FPGAI] training compare: {training_compare_result.summary_txt}")
 
@@ -421,7 +429,6 @@ class Compiler:
 
         ir_dir = out_dir / "ir"
         ir_dir.mkdir(parents=True, exist_ok=True)
-
         write_text(ir_dir / "descriptors.json", json.dumps([d.to_dict() for d in descriptors], indent=2))
         write_text(ir_dir / "compile_plan.json", json.dumps(compile_plan.to_dict(), indent=2))
         write_text(ir_dir / "memory_plan.json", json.dumps(memory_plan.to_dict(), indent=2))
@@ -465,6 +472,7 @@ class Compiler:
 
         y_name = g.outputs[0]
         y_spec = g.get_tensor(y_name)
+
         out_words = 1
         if y_spec is not None and getattr(y_spec, "shape", None):
             shape = tuple(int(x) for x in y_spec.shape)
@@ -537,7 +545,6 @@ class Compiler:
         settings64 = _cfg_get(raw, "toolchain.vitis_hls.settings64", None)
 
         from fpgai.backends.hls.runner import run_vitis_hls
-
         return run_vitis_hls(
             hls_dir=hls_dir,
             vitis_hls_exe=vitis_exe,
@@ -545,6 +552,17 @@ class Compiler:
         )
 
     def _emit_hostcpp(self, out_dir: Path, g, *, top_name: str) -> Path:
+        pipeline_mode = str(getattr(self.cfg.pipeline, "mode", "inference")).lower()
+
+        if pipeline_mode == "training_on_device":
+            from fpgai.backends.hostcpp.emit_host_train import emit_hostcpp_project_train
+            return emit_hostcpp_project_train(
+                g,
+                out_dir,
+                top_name=top_name,
+                raw_cfg=self.cfg.raw,
+            )
+
         from fpgai.backends.hostcpp.emit_host_model import emit_hostcpp_project
         return emit_hostcpp_project(g, out_dir, top_name=top_name)
 
@@ -567,6 +585,7 @@ class Compiler:
         training_plan,
         training_reference_result,
         training_compare_result,
+        training_estimate_result,
         seconds: float,
     ) -> None:
         manifest = {
@@ -622,25 +641,46 @@ class Compiler:
                     "weight_after_max_abs": training_compare_result.weight_after_max_abs,
                 }
             ),
-            "quant_report": None if quant_result is None else {
+            "training_estimate": (
+                None
+                if training_estimate_result is None
+                else {
+                    "out_dir": str(training_estimate_result.out_dir),
+                    "results_json": str(training_estimate_result.results_json),
+                    "summary_txt": str(training_estimate_result.summary_txt),
+                    "total_param_bytes": training_estimate_result.total_param_bytes,
+                    "total_activation_cache_bytes": training_estimate_result.total_activation_cache_bytes,
+                    "total_gradient_bytes": training_estimate_result.total_gradient_bytes,
+                    "total_optimizer_state_bytes": training_estimate_result.total_optimizer_state_bytes,
+                }
+            ),
+            "quant_report": None
+            if quant_result is None
+            else {
                 "out_dir": str(quant_result.out_dir),
                 "metrics_json": str(quant_result.metrics_json),
                 "summary_txt": str(quant_result.summary_txt),
                 "layerwise_csv": str(quant_result.layerwise_csv),
             },
-            "precision_sweep": None if sweep_result is None else {
+            "precision_sweep": None
+            if sweep_result is None
+            else {
                 "out_dir": str(sweep_result.out_dir),
                 "results_json": str(sweep_result.results_json),
                 "summary_txt": str(sweep_result.summary_txt),
                 "results_csv": str(sweep_result.results_csv),
             },
-            "design_space": None if design_result is None else {
+            "design_space": None
+            if design_result is None
+            else {
                 "out_dir": str(design_result.out_dir),
                 "results_json": str(design_result.results_json),
                 "summary_txt": str(design_result.summary_txt),
                 "results_csv": str(design_result.results_csv),
             },
-            "estimate_vs_hls": None if estimate_vs_hls_result is None else {
+            "estimate_vs_hls": None
+            if estimate_vs_hls_result is None
+            else {
                 "out_dir": str(estimate_vs_hls_result.out_dir),
                 "results_json": str(estimate_vs_hls_result.results_json),
                 "summary_txt": str(estimate_vs_hls_result.summary_txt),

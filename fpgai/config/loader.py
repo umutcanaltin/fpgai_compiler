@@ -58,17 +58,20 @@ class FPGAIConfig:
 
 
 PIPELINE_MODES_V1 = {"inference", "training_on_device"}
-WEIGHT_MEMORY_MODES = {"embedded", "stream", "ddr"}
 
-_BASE_NUMERIC_KEYS = ["activation", "weight", "bias", "accum"]
-_TRAINING_NUMERIC_KEYS = [
-    "grad_activation",
-    "grad_weight",
-    "grad_bias",
-    "update_accum",
-    "optimizer_state",
-    "loss",
-]
+DEFAULT_NUMERIC_ROLES = {"activation", "weight", "bias", "accum"}
+
+TRAINING_NUMERIC_ROLE_ALIASES = {
+    # canonical names
+    "grad": "grad",
+    "grad_accum": "grad_accum",
+    "master_weight": "master_weight",
+    "optimizer_state": "optimizer_state",
+    # backwards-compatible aliases
+    "gradient": "grad",
+    "gradient_accum": "grad_accum",
+    "weight_master": "master_weight",
+}
 
 
 def _is_valid_precision_spec(x: Any) -> bool:
@@ -92,7 +95,7 @@ def _ap_str(node: Any) -> str:
 
 
 def _validate_default_numerics(raw: Dict[str, Any], issues: List[ConfigIssue]) -> None:
-    for key in _BASE_NUMERIC_KEYS:
+    for key in DEFAULT_NUMERIC_ROLES:
         spec = _deep_get(raw, f"numerics.defaults.{key}", None)
         if spec is not None and not _is_valid_precision_spec(spec):
             issues.append(
@@ -130,7 +133,7 @@ def _validate_layerwise_numerics(raw: Dict[str, Any], issues: List[ConfigIssue])
                     )
                 )
 
-        for key in _BASE_NUMERIC_KEYS:
+        for key in DEFAULT_NUMERIC_ROLES:
             if key in rule and not _is_valid_precision_spec(rule[key]):
                 issues.append(
                     ConfigIssue(
@@ -138,6 +141,46 @@ def _validate_layerwise_numerics(raw: Dict[str, Any], issues: List[ConfigIssue])
                         "Expected {type: ap_fixed, total_bits: int, int_bits: int} with int_bits <= total_bits",
                     )
                 )
+
+
+def _validate_and_normalize_training_numerics(raw: Dict[str, Any], issues: List[ConfigIssue]) -> None:
+    numerics = raw.setdefault("numerics", {})
+    training = numerics.get("training", {})
+
+    if training is None:
+        numerics["training"] = {}
+        return
+
+    if not isinstance(training, dict):
+        issues.append(ConfigIssue("numerics.training", "Expected a mapping"))
+        return
+
+    normalized: Dict[str, Any] = {}
+
+    for role, spec in training.items():
+        if role not in TRAINING_NUMERIC_ROLE_ALIASES:
+            issues.append(
+                ConfigIssue(
+                    f"numerics.training.{role}",
+                    f"Unknown training numeric role '{role}'",
+                )
+            )
+            continue
+
+        canonical_role = TRAINING_NUMERIC_ROLE_ALIASES[role]
+
+        if not _is_valid_precision_spec(spec):
+            issues.append(
+                ConfigIssue(
+                    f"numerics.training.{role}",
+                    "Expected {type: ap_fixed, total_bits: int, int_bits: int} with int_bits <= total_bits",
+                )
+            )
+            continue
+
+        normalized[canonical_role] = spec
+
+    numerics["training"] = normalized
 
 
 def _validate_analysis_cfg(raw: Dict[str, Any], issues: List[ConfigIssue]) -> None:
@@ -165,11 +208,13 @@ def _validate_analysis_cfg(raw: Dict[str, Any], issues: List[ConfigIssue]) -> No
                     if not isinstance(cand, dict):
                         issues.append(ConfigIssue(p, "Each candidate must be a mapping"))
                         continue
+
                     defaults = cand.get("defaults", {})
                     if not isinstance(defaults, dict):
                         issues.append(ConfigIssue(f"{p}.defaults", "Must be a mapping"))
                         continue
-                    for key in _BASE_NUMERIC_KEYS:
+
+                    for key in DEFAULT_NUMERIC_ROLES:
                         spec = defaults.get(key)
                         if spec is None or not _is_valid_precision_spec(spec):
                             issues.append(
@@ -178,91 +223,6 @@ def _validate_analysis_cfg(raw: Dict[str, Any], issues: List[ConfigIssue]) -> No
                                     "Expected valid ap_fixed precision spec",
                                 )
                             )
-
-
-def _validate_weight_mode(raw: Dict[str, Any], issues: List[ConfigIssue]) -> None:
-    mode = str(_deep_get(raw, "data_movement.ps_pl.weights.mode", "embedded")).lower()
-    if mode not in WEIGHT_MEMORY_MODES:
-        issues.append(
-            ConfigIssue(
-                "data_movement.ps_pl.weights.mode",
-                f"Must be one of {sorted(WEIGHT_MEMORY_MODES)}",
-            )
-        )
-
-
-def _validate_training_cfg(raw: Dict[str, Any], mode: str, issues: List[ConfigIssue]) -> None:
-    training_cfg = _deep_get(raw, "training", None)
-
-    if training_cfg is None:
-        if mode == "training_on_device":
-            issues.append(
-                ConfigIssue(
-                    "training",
-                    "Missing training section while pipeline.mode=training_on_device",
-                )
-            )
-        return
-
-    if not isinstance(training_cfg, dict):
-        issues.append(ConfigIssue("training", "Expected a mapping"))
-        return
-
-    optimizer = training_cfg.get("optimizer", {})
-    if not isinstance(optimizer, dict):
-        issues.append(ConfigIssue("training.optimizer", "Expected a mapping"))
-    else:
-        opt_type = str(optimizer.get("type", "sgd")).lower()
-        if opt_type != "sgd":
-            issues.append(ConfigIssue("training.optimizer.type", "Only 'sgd' is supported in the first integrated version"))
-        lr = optimizer.get("learning_rate", None)
-        if not isinstance(lr, (int, float)) or float(lr) <= 0.0:
-            issues.append(ConfigIssue("training.optimizer.learning_rate", "Must be a positive number"))
-
-    loss = training_cfg.get("loss", {})
-    if not isinstance(loss, dict):
-        issues.append(ConfigIssue("training.loss", "Expected a mapping"))
-    else:
-        loss_type = str(loss.get("type", "mse")).lower()
-        if loss_type not in {"mse", "cross_entropy"}:
-            issues.append(ConfigIssue("training.loss.type", "Must be one of ['mse', 'cross_entropy']"))
-
-    execution = training_cfg.get("execution", {})
-    if execution is not None and not isinstance(execution, dict):
-        issues.append(ConfigIssue("training.execution", "Expected a mapping"))
-    elif isinstance(execution, dict):
-        batch_size = execution.get("batch_size", 1)
-        epochs = execution.get("epochs", 1)
-        if not isinstance(batch_size, int) or batch_size <= 0:
-            issues.append(ConfigIssue("training.execution.batch_size", "Must be a positive integer"))
-        if not isinstance(epochs, int) or epochs <= 0:
-            issues.append(ConfigIssue("training.execution.epochs", "Must be a positive integer"))
-
-    dataset = training_cfg.get("dataset", {})
-    if dataset is not None and not isinstance(dataset, dict):
-        issues.append(ConfigIssue("training.dataset", "Expected a mapping"))
-
-    training_numerics = _deep_get(raw, "numerics.training", None)
-    if training_numerics is not None:
-        if not isinstance(training_numerics, dict):
-            issues.append(ConfigIssue("numerics.training", "Expected a mapping"))
-        else:
-            for key, spec in training_numerics.items():
-                if key not in _TRAINING_NUMERIC_KEYS:
-                    issues.append(
-                        ConfigIssue(
-                            f"numerics.training.{key}",
-                            f"Unknown training numeric role '{key}'",
-                        )
-                    )
-                    continue
-                if not _is_valid_precision_spec(spec):
-                    issues.append(
-                        ConfigIssue(
-                            f"numerics.training.{key}",
-                            "Expected {type: ap_fixed, total_bits: int, int_bits: int} with int_bits <= total_bits",
-                        )
-                    )
 
 
 def load_config(path: str) -> FPGAIConfig:
@@ -306,9 +266,8 @@ def load_config(path: str) -> FPGAIConfig:
 
     _validate_default_numerics(raw, issues)
     _validate_layerwise_numerics(raw, issues)
+    _validate_and_normalize_training_numerics(raw, issues)
     _validate_analysis_cfg(raw, issues)
-    _validate_weight_mode(raw, issues)
-    _validate_training_cfg(raw, mode, issues)
 
     if issues:
         raise ConfigError(issues)
@@ -331,13 +290,15 @@ def print_summary(cfg: FPGAIConfig) -> None:
     board = g("targets.platform.board", "kv260")
     part = g("targets.platform.part", "xck26-sfvc784-2LV-c")
     clk = g("targets.platform.clocks.0.target_mhz", 200)
+
     act = g("numerics.defaults.activation", {})
     wgt = g("numerics.defaults.weight", {})
     bias = g("numerics.defaults.bias", {})
     acc = g("numerics.defaults.accum", {})
     layer_rules = g("numerics.layers", []) or []
+    training_rules = g("numerics.training", {}) or {}
+
     compression = bool(g("data_movement.ps_pl.compression.enabled", False))
-    weights_mode = str(g("data_movement.ps_pl.weights.mode", "embedded")).lower()
     vitis = bool(g("toolchain.vitis_hls.enabled", True))
     vivado = bool(g("toolchain.vivado.enabled", True))
     verbose = bool(g("debug.verbose", False))
@@ -359,27 +320,15 @@ def print_summary(cfg: FPGAIConfig) -> None:
     print(f" bias                 : {_ap_str(bias)}")
     print(f" accum                : {_ap_str(acc)}")
     print(f"Layerwise overrides   : {len(layer_rules)}")
-    training_numerics = g("numerics.training", {}) or {}
-    if training_numerics:
-        print(" Training numerics    :")
-        for k, v in training_numerics.items():
-            print(f"  - {k:<16} {_ap_str(v)}")
+    print(f"Training numerics     : {sorted(training_rules.keys())}")
     print("------------------------------------------------------")
     print("Operator allowlist    :")
     for op in cfg.operators.supported:
         print(f" - {op}")
     print("------------------------------------------------------")
     print(f"Compression enabled   : {compression}")
-    print(f"Weights mode          : {weights_mode}")
     print(f"Quant report enabled  : {qrep_enabled}")
     print(f"Precision sweep       : {psweep_enabled}")
-    if cfg.pipeline.mode == "training_on_device":
-        print("Training mode details :")
-        print(f" optimizer            : {g('training.optimizer.type', 'sgd')}")
-        print(f" learning_rate        : {g('training.optimizer.learning_rate', 'n/a')}")
-        print(f" loss                 : {g('training.loss.type', 'mse')}")
-        print(f" batch_size           : {g('training.execution.batch_size', 1)}")
-        print(f" epochs               : {g('training.execution.epochs', 1)}")
     print("------------------------------------------------------")
     print(f"Toolchain.vitis_hls   : {vitis}")
     print(f"Toolchain.vivado      : {vivado}")
