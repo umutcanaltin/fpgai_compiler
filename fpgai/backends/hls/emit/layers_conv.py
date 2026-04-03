@@ -17,10 +17,6 @@ def emit_conv_h() -> str:
 #define FPGAI_CONV_IC_UNROLL 1
 #endif
 
-#ifndef FPGAI_CONV_UPD_UNROLL
-#define FPGAI_CONV_UPD_UNROLL 1
-#endif
-
 namespace fpgai {
 
 template<
@@ -39,7 +35,6 @@ void conv2d(
     const BIAS_T B[OUT_C]
 ) {
 #pragma HLS INLINE off
-
     for (int oc0 = 0; oc0 < OUT_C; oc0 += FPGAI_CONV_OC_UNROLL) {
         for (int oh = 0; oh < OUT_H; ++oh) {
             for (int ow = 0; ow < OUT_W; ++ow) {
@@ -65,7 +60,6 @@ void conv2d(
                                     if (ih >= 0 && ih < IN_H && iw >= 0 && iw < IN_W) {
                                         int x_idx = (ih * IN_W + iw) * IN_C + ic;
                                         ACT_T xv = x[x_idx];
-
                                         for (int oco = 0; oco < FPGAI_CONV_OC_UNROLL; ++oco) {
 #pragma HLS UNROLL
                                             int oc = oc0 + oco;
@@ -105,7 +99,6 @@ void conv2d_backward_input(
     grad_act_t dX[IN_H * IN_W * IN_C]
 ) {
 #pragma HLS INLINE off
-INIT_DX:
     for (int i = 0; i < IN_H * IN_W * IN_C; ++i) {
 #pragma HLS PIPELINE II=1
         dX[i] = (grad_act_t)0;
@@ -146,7 +139,6 @@ void conv2d_weight_grad(
     grad_wgt_t dW[OUT_C * IN_C * K * K]
 ) {
 #pragma HLS INLINE off
-INIT_DW:
     for (int i = 0; i < OUT_C * IN_C * K * K; ++i) {
 #pragma HLS PIPELINE II=1
         dW[i] = (grad_wgt_t)0;
@@ -182,7 +174,6 @@ void conv2d_bias_grad(
     grad_bias_t dB[OUT_C]
 ) {
 #pragma HLS INLINE off
-INIT_DB:
     for (int oc = 0; oc < OUT_C; ++oc) {
 #pragma HLS PIPELINE II=1
         dB[oc] = (grad_bias_t)0;

@@ -202,8 +202,9 @@ def emit_top_train_cpp(
     training_cfg: Dict[str, Any],
 ) -> str:
     supported = {
-        "Dense", "Relu", "LeakyRelu", "Sigmoid", "Softmax",
-        "Flatten", "Reshape", "Add"
+    "Dense", "Conv", "MaxPool", "AvgPool", "BatchNormalization",
+    "Relu", "LeakyRelu", "Sigmoid", "Softmax",
+    "Flatten", "Reshape", "Add"
     }
     bad = [op.op_type for op in graph.ops if op.op_type not in supported]
     if bad:

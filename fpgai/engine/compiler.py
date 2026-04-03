@@ -33,6 +33,7 @@ from fpgai.backends.hls.emit.layers_dense import emit_dense_h, emit_dense_cpp
 from fpgai.backends.hls.emit.layers_conv import emit_conv_h, emit_conv_cpp
 from fpgai.backends.hls.emit.layers_pool import emit_pool_h, emit_pool_cpp
 from fpgai.backends.hls.emit.layers_activations import emit_activations_h, emit_activations_cpp
+from fpgai.backends.hls.emit.layers_batchnorm import emit_batchnorm_h, emit_batchnorm_cpp
 from fpgai.backends.hls.emit.csim_tcl import emit_csim_tcl
 from fpgai.backends.hls.emit.csim_train_tcl import emit_csim_train_tcl
 
@@ -551,7 +552,6 @@ class Compiler:
         src_dir.mkdir(parents=True, exist_ok=True)
         layers_src_dir.mkdir(parents=True, exist_ok=True)
 
-        # Force overwrite generated files so placeholder emitters cannot win.
         write_text(inc_dir / "fpgai_types.h", emit_types_h(g, top_name=top_name, raw_cfg=raw))
 
         write_text(layers_inc_dir / "dense.h", emit_dense_h())
@@ -565,6 +565,9 @@ class Compiler:
 
         write_text(layers_inc_dir / "activations.h", emit_activations_h())
         write_text(layers_src_dir / "activations.cpp", emit_activations_cpp())
+
+        write_text(layers_inc_dir / "batchnorm.h", emit_batchnorm_h())
+        write_text(layers_src_dir / "batchnorm.cpp", emit_batchnorm_cpp())
 
         if pipeline_mode == "training_on_device":
             write_text(
