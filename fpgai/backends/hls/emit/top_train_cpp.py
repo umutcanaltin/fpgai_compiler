@@ -55,6 +55,46 @@ def _as_chw(shape3: Tuple[int, ...]) -> Tuple[int, int, int]:
     return int(c), int(h), int(w)
 
 
+def _get_tensor_shape(graph: Graph, name: str) -> Tuple[int, ...]:
+    try:
+        t = graph.get_tensor(name)
+    except Exception:
+        t = None
+    if t is not None and getattr(t, "shape", None):
+        return _shape_wo_batch(t.shape)
+    if hasattr(graph, "tensors") and name in getattr(graph, "tensors", {}):
+        ts = graph.tensors[name]
+        if getattr(ts, "shape", None):
+            return _shape_wo_batch(ts.shape)
+    return tuple()
+
+
+def _infer_conv_output_shape(
+    xshape: Tuple[int, int, int],
+    wshape: Tuple[int, int, int, int],
+    stride: int,
+    pad: int,
+) -> Tuple[int, int, int]:
+    c_in, h_in, w_in = _as_chw(xshape)
+    c_out, _c_w, k_h, k_w = tuple(int(v) for v in wshape)
+    if k_h != k_w:
+        raise RuntimeError(f"Only square conv kernels are supported in training top, got {wshape}")
+    h_out = ((h_in + 2 * pad - k_h) // stride) + 1
+    w_out = ((w_in + 2 * pad - k_w) // stride) + 1
+    return int(c_out), int(h_out), int(w_out)
+
+
+def _infer_pool_output_shape(
+    xshape: Tuple[int, int, int],
+    k: int,
+    stride: int,
+) -> Tuple[int, int, int]:
+    c, h, w = _as_chw(xshape)
+    h_out = ((h - k) // stride) + 1
+    w_out = ((w - k) // stride) + 1
+    return int(c), int(h_out), int(w_out)
+
+
 def _flatten_from_graph_named(graph: Graph, tensor_name: str) -> Optional[np.ndarray]:
     if tensor_name is None:
         return None
@@ -184,8 +224,8 @@ def _resolve_dense_arrays(graph: Graph, op) -> Tuple[np.ndarray, np.ndarray, int
         raise RuntimeError(f"Dense weights not found for training top op '{op.name}'")
 
     if in_f <= 0 or out_f <= 0:
-        xshape = _shape_wo_batch(graph.get_tensor(op.inputs[0]).shape)
-        yshape = _shape_wo_batch(graph.get_tensor(op.outputs[0]).shape)
+        xshape = _get_tensor_shape(graph, op.inputs[0])
+        yshape = _get_tensor_shape(graph, op.outputs[0])
         in_f = _flat_size(xshape)
         out_f = _flat_size(yshape)
 
@@ -217,26 +257,34 @@ def _resolve_conv_arrays(graph: Graph, op):
 
     ws = None
     if len(op.inputs) > 1:
-        w_t = graph.get_tensor(op.inputs[1])
+        try:
+            w_t = graph.get_tensor(op.inputs[1])
+        except Exception:
+            w_t = None
         if w_t is not None and getattr(w_t, "shape", None):
             ws = tuple(int(v) for v in w_t.shape)
 
-    if ws is None:
-        attrs = getattr(op, "attrs", {}) or {}
-        for key in ("kernel_shape_full", "weight_shape", "weights_shape", "kernel_shape"):
-            if key in attrs:
-                candidate = attrs[key]
-                if isinstance(candidate, (list, tuple)) and len(candidate) == 4:
-                    ws = tuple(int(v) for v in candidate)
-                    break
+    if ws is None and hasattr(graph, "constants") and len(op.inputs) > 1 and op.inputs[1] in graph.constants:
+        ws = tuple(int(v) for v in graph.constants[op.inputs[1]].shape)
 
     if ws is None:
-        xshape = _shape_wo_batch(graph.get_tensor(op.inputs[0]).shape)
-        yshape = _shape_wo_batch(graph.get_tensor(op.outputs[0]).shape)
-        c_in, _, _ = _as_chw(xshape)
-        c_out, _, _ = _as_chw(yshape)
-        k = int((getattr(op, "attrs", {}) or {}).get("kernel_shape", [3, 3])[0])
-        ws = (c_out, c_in, k, k)
+        attrs = getattr(op, "attrs", {}) or {}
+        for key in ("kernel_shape_full", "weight_shape", "weights_shape"):
+            if key in attrs and isinstance(attrs[key], (list, tuple)) and len(attrs[key]) == 4:
+                ws = tuple(int(v) for v in attrs[key])
+                break
+
+    if ws is None:
+        xshape = _get_tensor_shape(graph, op.inputs[0])
+        yshape = _get_tensor_shape(graph, op.outputs[0])
+        if xshape and yshape:
+            c_in, _, _ = _as_chw(xshape)
+            c_out, _, _ = _as_chw(yshape)
+            k = int((getattr(op, "attrs", {}) or {}).get("kernel_shape", [3, 3])[0])
+            ws = (c_out, c_in, k, k)
+
+    if ws is None:
+        raise RuntimeError(f"Conv weight shape unavailable for op '{op.name}'")
 
     out_c = int(ws[0])
     if b_arr is None:
@@ -274,6 +322,103 @@ def _resolve_bn_arrays(graph: Graph, op, c: int):
     return gamma, beta, mean, var
 
 
+def _build_tensor_maps(graph: Graph) -> Tuple[Dict[str, Tuple[int, ...]], Dict[str, int], Dict[str, str], Dict[str, str]]:
+    inferred_shapes: Dict[str, Tuple[int, ...]] = {}
+
+    if hasattr(graph, "tensors"):
+        for tname, tspec in graph.tensors.items():
+            shp = _shape_wo_batch(getattr(tspec, "shape", None))
+            if shp:
+                inferred_shapes[tname] = shp
+
+    for name in list(getattr(graph, "inputs", [])) + list(getattr(graph, "outputs", [])):
+        if name not in inferred_shapes:
+            shp = _get_tensor_shape(graph, name)
+            if shp:
+                inferred_shapes[name] = shp
+
+    def get_shape(name: str) -> Tuple[int, ...]:
+        if name in inferred_shapes and inferred_shapes[name]:
+            return inferred_shapes[name]
+        shp = _get_tensor_shape(graph, name)
+        if shp:
+            inferred_shapes[name] = shp
+            return shp
+        return tuple()
+
+    for op in graph.ops:
+        xname = op.inputs[0]
+        yname = op.outputs[0]
+        xshape = get_shape(xname)
+
+        yshape = get_shape(yname)
+        if yshape:
+            inferred_shapes[yname] = yshape
+            continue
+
+        if op.op_type in ("Relu", "LeakyRelu", "Sigmoid", "Softmax", "Add", "BatchNormalization"):
+            if xshape:
+                inferred_shapes[yname] = xshape
+
+        elif op.op_type in ("Flatten", "Reshape"):
+            if xshape:
+                inferred_shapes[yname] = (_flat_size(xshape),)
+
+        elif op.op_type == "Dense":
+            try:
+                _W, B, _in_f, _out_f = _resolve_dense_arrays(graph, op)
+                inferred_shapes[yname] = (int(B.size),)
+            except Exception:
+                pass
+
+        elif op.op_type == "Conv":
+            try:
+                _Wflat, _Bflat, ws = _resolve_conv_arrays(graph, op)
+                stride = int(op.attrs.get("strides", [1, 1])[0])
+                pad = int(op.attrs.get("pads", [0, 0, 0, 0])[0])
+                if xshape:
+                    inferred_shapes[yname] = _infer_conv_output_shape(_as_chw(xshape), tuple(int(v) for v in ws), stride, pad)
+            except Exception:
+                pass
+
+        elif op.op_type in ("MaxPool", "AvgPool"):
+            try:
+                k = int(op.attrs.get("kernel_shape", [2, 2])[0])
+                stride = int(op.attrs.get("strides", [2, 2])[0])
+                if xshape:
+                    inferred_shapes[yname] = _infer_pool_output_shape(_as_chw(xshape), k, stride)
+            except Exception:
+                pass
+
+    all_tensor_names = set()
+    all_tensor_names.update(getattr(graph, "inputs", []))
+    all_tensor_names.update(getattr(graph, "outputs", []))
+    if hasattr(graph, "tensors"):
+        all_tensor_names.update(graph.tensors.keys())
+    for op in graph.ops:
+        all_tensor_names.update(op.inputs)
+        all_tensor_names.update(op.outputs)
+
+    tensor_name_to_shape: Dict[str, Tuple[int, ...]] = {}
+    tensor_name_to_size: Dict[str, int] = {}
+    tensor_name_to_cxx: Dict[str, str] = {}
+    grad_name_to_cxx: Dict[str, str] = {}
+
+    for tname in sorted(all_tensor_names):
+        shp = inferred_shapes.get(tname, tuple())
+        if not shp:
+            shp = _get_tensor_shape(graph, tname)
+        if not shp:
+            shp = (1,)
+        tensor_name_to_shape[tname] = shp
+        tensor_name_to_size[tname] = _flat_size(shp)
+        sname = _sanitize(tname)
+        tensor_name_to_cxx[tname] = f"buf_{sname}"
+        grad_name_to_cxx[tname] = f"grad_{sname}"
+
+    return tensor_name_to_shape, tensor_name_to_size, tensor_name_to_cxx, grad_name_to_cxx
+
+
 def emit_top_train_cpp(
     *,
     graph: Graph,
@@ -296,18 +441,7 @@ def emit_top_train_cpp(
     input_name = graph.inputs[0]
     output_name = graph.outputs[0]
 
-    tensor_name_to_shape: Dict[str, Tuple[int, ...]] = {}
-    tensor_name_to_size: Dict[str, int] = {}
-    tensor_name_to_cxx: Dict[str, str] = {}
-    grad_name_to_cxx: Dict[str, str] = {}
-
-    for tname, tspec in graph.tensors.items():
-        shp = _shape_wo_batch(tspec.shape)
-        tensor_name_to_shape[tname] = shp
-        tensor_name_to_size[tname] = _flat_size(shp)
-        sname = _sanitize(tname)
-        tensor_name_to_cxx[tname] = f"buf_{sname}"
-        grad_name_to_cxx[tname] = f"grad_{sname}"
+    tensor_name_to_shape, tensor_name_to_size, tensor_name_to_cxx, grad_name_to_cxx = _build_tensor_maps(graph)
 
     input_size = tensor_name_to_size[input_name]
     output_size = tensor_name_to_size[output_name]
@@ -446,7 +580,9 @@ def emit_top_train_cpp(
             param_specs.append(("conv", op, tag, W.size, B.size))
 
         elif op.op_type == "BatchNormalization":
-            out_shape = tensor_name_to_shape[op.outputs[0]]
+            out_shape = tensor_name_to_shape.get(op.outputs[0], tuple())
+            if not out_shape:
+                out_shape = tensor_name_to_shape.get(op.inputs[0], tuple())
             if len(out_shape) != 3:
                 raise RuntimeError(f"BatchNormalization training expects CHW shape, got {out_shape} for op '{op.name}'")
             c, h, w = _as_chw(out_shape)
@@ -513,8 +649,8 @@ def emit_top_train_cpp(
         yname = op.outputs[0]
         xbuf = tensor_name_to_cxx[xname]
         ybuf = tensor_name_to_cxx[yname]
-        xshape = tensor_name_to_shape[xname]
-        yshape = tensor_name_to_shape[yname]
+        xshape = tensor_name_to_shape.get(xname, tuple())
+        yshape = tensor_name_to_shape.get(yname, tuple())
         sz = tensor_name_to_size[yname]
         opname = _sanitize(op.name)
 
@@ -525,12 +661,14 @@ def emit_top_train_cpp(
 
         elif op.op_type == "Conv":
             tag = _sanitize(op.name)
-            c_in, h_in, w_in = _as_chw(xshape)
-            c_out, h_out, w_out = _as_chw(yshape)
             ws = _resolve_conv_arrays(graph, op)[2]
-            k_h = int(ws[2])
             stride = int(op.attrs.get('strides', [1, 1])[0])
             pad = int(op.attrs.get('pads', [0, 0, 0, 0])[0])
+            if not yshape:
+                yshape = _infer_conv_output_shape(_as_chw(xshape), tuple(int(v) for v in ws), stride, pad)
+            c_in, h_in, w_in = _as_chw(xshape)
+            c_out, h_out, w_out = _as_chw(yshape)
+            k_h = int(ws[2])
             lines.append(f"  fpgai::conv2d<{h_in}, {w_in}, {c_in}, {h_out}, {w_out}, {c_out}, {k_h}, {stride}, {pad}>({xbuf}, {ybuf}, W_{tag}, B_{tag});")
 
         elif op.op_type == "Relu":
@@ -554,21 +692,27 @@ def emit_top_train_cpp(
             lines.append(f"  fpgai::add_vec<{sz}>({xbuf}, {rhs}, {ybuf});")
 
         elif op.op_type == "MaxPool":
-            c_in, h_in, w_in = _as_chw(xshape)
-            _c_out, h_out, w_out = _as_chw(yshape)
             k = int(op.attrs.get("kernel_shape", [2, 2])[0])
             stride = int(op.attrs.get("strides", [2, 2])[0])
+            if not yshape:
+                yshape = _infer_pool_output_shape(_as_chw(xshape), k, stride)
+            c_in, h_in, w_in = _as_chw(xshape)
+            _c_out, h_out, w_out = _as_chw(yshape)
             lines.append(f"  fpgai::maxpool2d<{h_in}, {w_in}, {c_in}, {k}, {stride}, {h_out}, {w_out}>({xbuf}, {ybuf});")
 
         elif op.op_type == "AvgPool":
-            c_in, h_in, w_in = _as_chw(xshape)
-            _c_out, h_out, w_out = _as_chw(yshape)
             k = int(op.attrs.get("kernel_shape", [2, 2])[0])
             stride = int(op.attrs.get("strides", [2, 2])[0])
+            if not yshape:
+                yshape = _infer_pool_output_shape(_as_chw(xshape), k, stride)
+            c_in, h_in, w_in = _as_chw(xshape)
+            _c_out, h_out, w_out = _as_chw(yshape)
             lines.append(f"  fpgai::avgpool2d<{h_in}, {w_in}, {c_in}, {k}, {stride}, {h_out}, {w_out}>({xbuf}, {ybuf});")
 
         elif op.op_type == "BatchNormalization":
             tag = _sanitize(op.name)
+            if not yshape:
+                yshape = xshape
             c, h, w = _as_chw(yshape)
             hw = h * w
             lines.append(f"  fpgai::batchnorm_train_forward<{c}, {hw}>({xbuf}, {ybuf}, BN_G_{tag}, BN_B_{tag}, BN_M_{tag}, BN_V_{tag}, BN_XHAT_{tag});")
@@ -592,8 +736,8 @@ def emit_top_train_cpp(
         ybuf = tensor_name_to_cxx[yname]
         gx = grad_name_to_cxx[xname]
         gy = grad_name_to_cxx[yname]
-        xshape = tensor_name_to_shape[xname]
-        yshape = tensor_name_to_shape[yname]
+        xshape = tensor_name_to_shape.get(xname, tuple())
+        yshape = tensor_name_to_shape.get(yname, tuple())
         sz_in = tensor_name_to_size[xname]
         sz_out = tensor_name_to_size[yname]
         opname = _sanitize(op.name)
@@ -609,12 +753,14 @@ def emit_top_train_cpp(
 
         elif op.op_type == "Conv":
             tag = _sanitize(op.name)
-            c_in, h_in, w_in = _as_chw(xshape)
-            c_out, h_out, w_out = _as_chw(yshape)
             ws = _resolve_conv_arrays(graph, op)[2]
-            k_h = int(ws[2])
             stride = int(op.attrs.get('strides', [1, 1])[0])
             pad = int(op.attrs.get('pads', [0, 0, 0, 0])[0])
+            if not yshape:
+                yshape = _infer_conv_output_shape(_as_chw(xshape), tuple(int(v) for v in ws), stride, pad)
+            c_in, h_in, w_in = _as_chw(xshape)
+            c_out, h_out, w_out = _as_chw(yshape)
+            k_h = int(ws[2])
             lines.append(f"  fpgai::conv2d_weight_grad<{h_in}, {w_in}, {c_in}, {h_out}, {w_out}, {c_out}, {k_h}, {stride}, {pad}>({xbuf}, {gy}, dW_{tag});")
             lines.append(f"  fpgai::conv2d_bias_grad<{c_out}, {h_out}, {w_out}>({gy}, dB_{tag});")
             lines.append(f"  fpgai::conv2d_backward_input<{h_in}, {w_in}, {c_in}, {h_out}, {w_out}, {c_out}, {k_h}, {stride}, {pad}>({gy}, W_{tag}, {gx});")
@@ -642,21 +788,27 @@ def emit_top_train_cpp(
             lines.append(f"  fpgai::add_backward<{sz_out}>({gy}, {gx}, {rhsg});")
 
         elif op.op_type == "MaxPool":
-            c_in, h_in, w_in = _as_chw(xshape)
-            _c_out, h_out, w_out = _as_chw(yshape)
             k = int(op.attrs.get("kernel_shape", [2, 2])[0])
             stride = int(op.attrs.get("strides", [2, 2])[0])
+            if not yshape:
+                yshape = _infer_pool_output_shape(_as_chw(xshape), k, stride)
+            c_in, h_in, w_in = _as_chw(xshape)
+            _c_out, h_out, w_out = _as_chw(yshape)
             lines.append(f"  fpgai::maxpool2d_backward<{h_in}, {w_in}, {c_in}, {k}, {stride}, {h_out}, {w_out}>({xbuf}, {ybuf}, {gy}, {gx});")
 
         elif op.op_type == "AvgPool":
-            c_in, h_in, w_in = _as_chw(xshape)
-            _c_out, h_out, w_out = _as_chw(yshape)
             k = int(op.attrs.get("kernel_shape", [2, 2])[0])
             stride = int(op.attrs.get("strides", [2, 2])[0])
+            if not yshape:
+                yshape = _infer_pool_output_shape(_as_chw(xshape), k, stride)
+            c_in, h_in, w_in = _as_chw(xshape)
+            _c_out, h_out, w_out = _as_chw(yshape)
             lines.append(f"  fpgai::avgpool2d_backward<{h_in}, {w_in}, {c_in}, {k}, {stride}, {h_out}, {w_out}>({gy}, {gx});")
 
         elif op.op_type == "BatchNormalization":
             tag = _sanitize(op.name)
+            if not yshape:
+                yshape = xshape
             c, h, w = _as_chw(yshape)
             hw = h * w
             lines.append(f"  fpgai::batchnorm_param_grad<{c}, {hw}>({gy}, BN_XHAT_{tag}, dBN_G_{tag}, dBN_B_{tag});")

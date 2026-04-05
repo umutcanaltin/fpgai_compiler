@@ -93,12 +93,10 @@ def _resolve_attr_candidate(graph, v):
     arr = _as_numpy_numeric(v)
     if arr is not None and arr.size > 0:
         return arr.reshape(-1), "direct_numeric_attr"
-
     if isinstance(v, str):
         arr = _flatten_from_graph_named(graph, v)
         if arr is not None:
             return arr.reshape(-1), f"graph_ref('{v}')"
-
     return None, None
 
 
@@ -160,6 +158,43 @@ def _dense_expected_shapes(op) -> Tuple[int, int, int, int]:
     return in_f, out_f, expected_w, expected_b
 
 
+def _get_tensor_shape(graph, name: str) -> Tuple[int, ...]:
+    t = graph.get_tensor(name)
+    if t is not None and getattr(t, "shape", None):
+        return _shape_wo_batch(t.shape)
+    if hasattr(graph, "tensors") and name in getattr(graph, "tensors", {}):
+        ts = graph.tensors[name]
+        if getattr(ts, "shape", None):
+            return _shape_wo_batch(ts.shape)
+    return tuple()
+
+
+def _infer_conv_output_shape(
+    xshape: Tuple[int, int, int],
+    wshape: Tuple[int, int, int, int],
+    stride: int,
+    pad: int,
+) -> Tuple[int, int, int]:
+    c_in, h_in, w_in = _as_chw(xshape)
+    c_out, _c_w, k_h, k_w = tuple(int(v) for v in wshape)
+    if k_h != k_w:
+        raise RuntimeError(f"Only square conv kernels are supported in training reference, got {wshape}")
+    h_out = ((h_in + 2 * pad - k_h) // stride) + 1
+    w_out = ((w_in + 2 * pad - k_w) // stride) + 1
+    return int(c_out), int(h_out), int(w_out)
+
+
+def _infer_pool_output_shape(
+    xshape: Tuple[int, int, int],
+    k: int,
+    stride: int,
+) -> Tuple[int, int, int]:
+    c, h, w = _as_chw(xshape)
+    h_out = ((h - k) // stride) + 1
+    w_out = ((w - k) // stride) + 1
+    return int(c), int(h_out), int(w_out)
+
+
 def _resolve_dense_arrays(graph, op) -> Tuple[np.ndarray, np.ndarray, int, int]:
     in_f, out_f, expected_w, expected_b = _dense_expected_shapes(op)
 
@@ -182,8 +217,8 @@ def _resolve_dense_arrays(graph, op) -> Tuple[np.ndarray, np.ndarray, int, int]:
         raise RuntimeError(f"Dense weights not found for training reference op '{op.name}'")
 
     if in_f <= 0 or out_f <= 0:
-        xshape = _shape_wo_batch(graph.get_tensor(op.inputs[0]).shape)
-        yshape = _shape_wo_batch(graph.get_tensor(op.outputs[0]).shape)
+        xshape = _get_tensor_shape(graph, op.inputs[0])
+        yshape = _get_tensor_shape(graph, op.outputs[0])
         in_f = _flat_size(xshape)
         out_f = _flat_size(yshape)
 
@@ -219,22 +254,27 @@ def _resolve_conv_arrays(graph, op):
         if w_t is not None and getattr(w_t, "shape", None):
             ws = tuple(int(v) for v in w_t.shape)
 
-    if ws is None:
-        attrs = getattr(op, "attrs", {}) or {}
-        for key in ("kernel_shape_full", "weight_shape", "weights_shape", "kernel_shape"):
-            if key in attrs:
-                candidate = attrs[key]
-                if isinstance(candidate, (list, tuple)) and len(candidate) == 4:
-                    ws = tuple(int(v) for v in candidate)
-                    break
+    if ws is None and hasattr(graph, "constants") and len(op.inputs) > 1 and op.inputs[1] in graph.constants:
+        ws = tuple(int(v) for v in graph.constants[op.inputs[1]].shape)
 
     if ws is None:
-        xshape = _shape_wo_batch(graph.get_tensor(op.inputs[0]).shape)
-        yshape = _shape_wo_batch(graph.get_tensor(op.outputs[0]).shape)
-        c_in, _, _ = _as_chw(xshape)
-        c_out, _, _ = _as_chw(yshape)
-        k = int((getattr(op, "attrs", {}) or {}).get("kernel_shape", [3, 3])[0])
-        ws = (c_out, c_in, k, k)
+        attrs = getattr(op, "attrs", {}) or {}
+        for key in ("kernel_shape_full", "weight_shape", "weights_shape"):
+            if key in attrs and isinstance(attrs[key], (list, tuple)) and len(attrs[key]) == 4:
+                ws = tuple(int(v) for v in attrs[key])
+                break
+
+    if ws is None:
+        xshape = _get_tensor_shape(graph, op.inputs[0])
+        yshape = _get_tensor_shape(graph, op.outputs[0])
+        if xshape and yshape:
+            c_in, _, _ = _as_chw(xshape)
+            c_out, _, _ = _as_chw(yshape)
+            k = int((getattr(op, "attrs", {}) or {}).get("kernel_shape", [3, 3])[0])
+            ws = (c_out, c_in, k, k)
+
+    if ws is None:
+        raise RuntimeError(f"Conv weight shape unavailable for op '{op.name}'")
 
     out_c = int(ws[0])
     if b_arr is None:
@@ -600,9 +640,23 @@ def _bn_backward_input_exact_hwc(
 def _forward_pass(graph, params_state: Dict[str, Dict[str, np.ndarray]], x_input: np.ndarray, layerwise_dir: Path):
     vals: Dict[str, np.ndarray] = {}
     caches: Dict[str, Dict[str, Any]] = {}
+    inferred_shapes: Dict[str, Tuple[int, ...]] = {}
 
     input_name = graph.inputs[0]
     vals[input_name] = x_input.astype(np.float32)
+
+    input_shape = _get_tensor_shape(graph, input_name)
+    if input_shape:
+        inferred_shapes[input_name] = input_shape
+
+    def get_shape(name: str) -> Tuple[int, ...]:
+        if name in inferred_shapes and inferred_shapes[name]:
+            return inferred_shapes[name]
+        shp = _get_tensor_shape(graph, name)
+        if shp:
+            inferred_shapes[name] = shp
+            return shp
+        return tuple()
 
     for op in graph.ops:
         xname = op.inputs[0]
@@ -617,15 +671,22 @@ def _forward_pass(graph, params_state: Dict[str, Dict[str, np.ndarray]], x_input
             B = params_state[tag]["B"]
             y = _dense_forward(x, W, B)
             cache["x"] = x
+            inferred_shapes[yname] = (int(B.size),)
 
         elif op.op_type == "Conv":
             tag = op.name
             W = params_state[tag]["W"]
             B = params_state[tag]["B"]
-            xshape = _shape_wo_batch(graph.get_tensor(xname).shape)
-            yshape = _shape_wo_batch(graph.get_tensor(yname).shape)
+            xshape = get_shape(xname)
+            if not xshape:
+                raise RuntimeError(f"Conv input shape unavailable for op '{op.name}' input '{xname}'")
             stride = int(op.attrs.get("strides", [1, 1])[0])
             pad = int(op.attrs.get("pads", [0, 0, 0, 0])[0])
+
+            yshape = get_shape(yname)
+            if not yshape:
+                yshape = _infer_conv_output_shape(_as_chw(xshape), tuple(int(v) for v in W.shape), stride, pad)
+
             y = _conv_forward_hwc(x, _as_chw(xshape), W, B, stride, pad, _as_chw(yshape))
             cache["x"] = x
             cache["xshape"] = _as_chw(xshape)
@@ -633,60 +694,94 @@ def _forward_pass(graph, params_state: Dict[str, Dict[str, np.ndarray]], x_input
             cache["stride"] = stride
             cache["pad"] = pad
             cache["Wshape"] = W.shape
+            inferred_shapes[yname] = tuple(int(v) for v in yshape)
 
         elif op.op_type == "Relu":
             y = _relu(x)
+            xshape = get_shape(xname)
+            if xshape:
+                inferred_shapes[yname] = xshape
 
         elif op.op_type == "LeakyRelu":
             alpha = float((getattr(op, "attrs", {}) or {}).get("alpha", 0.01))
             y = _leaky_relu(x, alpha)
             cache["alpha"] = alpha
             cache["x"] = x
+            xshape = get_shape(xname)
+            if xshape:
+                inferred_shapes[yname] = xshape
 
         elif op.op_type == "Sigmoid":
             y = _sigmoid(x)
+            xshape = get_shape(xname)
+            if xshape:
+                inferred_shapes[yname] = xshape
 
         elif op.op_type == "Softmax":
             y = _softmax(x)
+            xshape = get_shape(xname)
+            if xshape:
+                inferred_shapes[yname] = xshape
 
         elif op.op_type in ("Flatten", "Reshape"):
             y = _reshape_copy(x)
+            inferred_shapes[yname] = (int(y.size),)
 
         elif op.op_type == "Add":
             rhs = vals[op.inputs[1]]
             y = _add_vec(x, rhs)
+            xshape = get_shape(xname)
+            if xshape:
+                inferred_shapes[yname] = xshape
+            else:
+                inferred_shapes[yname] = (int(y.size),)
 
         elif op.op_type == "MaxPool":
-            xshape = _shape_wo_batch(graph.get_tensor(xname).shape)
-            yshape = _shape_wo_batch(graph.get_tensor(yname).shape)
+            xshape = get_shape(xname)
+            if not xshape:
+                raise RuntimeError(f"MaxPool input shape unavailable for op '{op.name}' input '{xname}'")
             k = int(op.attrs.get("kernel_shape", [2, 2])[0])
             stride = int(op.attrs.get("strides", [2, 2])[0])
+            yshape = get_shape(yname)
+            if not yshape:
+                yshape = _infer_pool_output_shape(_as_chw(xshape), k, stride)
             y = _maxpool_forward_hwc(x, _as_chw(xshape), k, stride, _as_chw(yshape))
             cache["x"] = x
             cache["xshape"] = _as_chw(xshape)
             cache["yshape"] = _as_chw(yshape)
             cache["k"] = k
             cache["stride"] = stride
+            inferred_shapes[yname] = tuple(int(v) for v in yshape)
 
         elif op.op_type == "AvgPool":
-            xshape = _shape_wo_batch(graph.get_tensor(xname).shape)
-            yshape = _shape_wo_batch(graph.get_tensor(yname).shape)
+            xshape = get_shape(xname)
+            if not xshape:
+                raise RuntimeError(f"AvgPool input shape unavailable for op '{op.name}' input '{xname}'")
             k = int(op.attrs.get("kernel_shape", [2, 2])[0])
             stride = int(op.attrs.get("strides", [2, 2])[0])
+            yshape = get_shape(yname)
+            if not yshape:
+                yshape = _infer_pool_output_shape(_as_chw(xshape), k, stride)
             y = _avgpool_forward_hwc(x, _as_chw(xshape), k, stride, _as_chw(yshape))
             cache["xshape"] = _as_chw(xshape)
             cache["yshape"] = _as_chw(yshape)
             cache["k"] = k
             cache["stride"] = stride
+            inferred_shapes[yname] = tuple(int(v) for v in yshape)
 
         elif op.op_type == "BatchNormalization":
             tag = op.name
             gamma = params_state[tag]["gamma"]
             beta = params_state[tag]["beta"]
-            shape = _shape_wo_batch(graph.get_tensor(yname).shape)
+            shape = get_shape(yname)
+            if not shape:
+                shape = get_shape(xname)
+            if not shape:
+                raise RuntimeError(f"BatchNormalization shape unavailable for op '{op.name}'")
             y, bn_cache = _bn_forward_hwc(x, _as_chw(shape), gamma, beta)
             cache["shape"] = _as_chw(shape)
             cache.update(bn_cache)
+            inferred_shapes[yname] = tuple(int(v) for v in shape)
 
         else:
             raise RuntimeError(f"Unsupported training reference op: {op.op_type}")
@@ -735,7 +830,11 @@ def run_training_reference_step(
             trainable_order.append(("conv", op.name))
 
         elif op.op_type == "BatchNormalization":
-            shape = _shape_wo_batch(graph.get_tensor(op.outputs[0]).shape)
+            shape = _get_tensor_shape(graph, op.outputs[0])
+            if not shape:
+                shape = _get_tensor_shape(graph, op.inputs[0])
+            if not shape:
+                raise RuntimeError(f"BatchNormalization shape unavailable for op '{op.name}'")
             c, _, _ = _as_chw(shape)
             gamma, beta, _mean, _var = _resolve_bn_arrays(graph, op, c)
             params_state[op.name] = {
