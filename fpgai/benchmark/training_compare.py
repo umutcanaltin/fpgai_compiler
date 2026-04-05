@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Any
 import json
 import numpy as np
 
@@ -48,6 +48,8 @@ def _metrics(ref: np.ndarray, got: np.ndarray) -> Dict[str, float]:
         "cosine": cosine,
         "l2": l2,
         "count": int(n),
+        "ref_count": int(ref.size),
+        "got_count": int(got.size),
     }
 
 
@@ -58,6 +60,88 @@ def _find_layerwise_bins(root: Path) -> Dict[str, Path]:
     for p in root.rglob("*.bin"):
         out[p.name] = p
     return out
+
+
+def _classify_layerwise_name(name: str) -> str:
+    if name.endswith("__fwd.bin"):
+        return "forward"
+    if name.endswith("__bwd_in.bin"):
+        return "backward_input"
+    if name.endswith("__param_grad_w.bin"):
+        return "param_grad_weight"
+    if name.endswith("__param_grad_b.bin"):
+        return "param_grad_bias"
+    if name.endswith("__param_grad_gamma.bin"):
+        return "param_grad_gamma"
+    if name.endswith("__param_grad_beta.bin"):
+        return "param_grad_beta"
+    if name.endswith("__weights_before.bin"):
+        return "weights_before"
+    if name.endswith("__weights_after.bin"):
+        return "weights_after"
+    return "other"
+
+
+def _group_layerwise_results(ref_bins: Dict[str, Path], hls_bins: Dict[str, Path]) -> Dict[str, List[Dict[str, Any]]]:
+    grouped: Dict[str, List[Dict[str, Any]]] = {
+        "forward_layerwise": [],
+        "backward_input_layerwise": [],
+        "param_grad_weight_layerwise": [],
+        "param_grad_bias_layerwise": [],
+        "param_grad_gamma_layerwise": [],
+        "param_grad_beta_layerwise": [],
+        "other_layerwise": [],
+    }
+
+    for name in sorted(set(ref_bins.keys()) & set(hls_bins.keys())):
+        ref_arr = _read_f32(ref_bins[name])
+        hls_arr = _read_f32(hls_bins[name])
+        m = _metrics(ref_arr, hls_arr)
+        item: Dict[str, Any] = {
+            "name": name,
+            "kind": _classify_layerwise_name(name),
+            **m,
+        }
+
+        if item["kind"] == "forward":
+            grouped["forward_layerwise"].append(item)
+        elif item["kind"] == "backward_input":
+            grouped["backward_input_layerwise"].append(item)
+        elif item["kind"] == "param_grad_weight":
+            grouped["param_grad_weight_layerwise"].append(item)
+        elif item["kind"] == "param_grad_bias":
+            grouped["param_grad_bias_layerwise"].append(item)
+        elif item["kind"] == "param_grad_gamma":
+            grouped["param_grad_gamma_layerwise"].append(item)
+        elif item["kind"] == "param_grad_beta":
+            grouped["param_grad_beta_layerwise"].append(item)
+        else:
+            grouped["other_layerwise"].append(item)
+
+    return grouped
+
+
+def _summarize_group(items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not items:
+        return {
+            "count": 0,
+            "min_cosine": None,
+            "mean_cosine": None,
+            "max_mae": None,
+            "max_max_abs": None,
+        }
+
+    cosines = np.asarray([float(x["cosine"]) for x in items], dtype=np.float32)
+    maes = np.asarray([float(x["mae"]) for x in items], dtype=np.float32)
+    max_abs = np.asarray([float(x["max_abs"]) for x in items], dtype=np.float32)
+
+    return {
+        "count": int(len(items)),
+        "min_cosine": float(np.min(cosines)),
+        "mean_cosine": float(np.mean(cosines)),
+        "max_mae": float(np.max(maes)),
+        "max_max_abs": float(np.max(max_abs)),
+    }
 
 
 def compare_training_artifacts(
@@ -89,26 +173,29 @@ def compare_training_artifacts(
     wa_m = _metrics(ref_w_after, hls_w_after)
     wd_m = _metrics(ref_delta, hls_delta)
 
-    # layerwise compare
     ref_layer_root = Path(out_dir).parent / "training_reference" / "layerwise"
     hls_layer_root = hls_grads_bin.parent
     ref_bins = _find_layerwise_bins(ref_layer_root)
     hls_bins = _find_layerwise_bins(hls_layer_root)
 
-    layerwise = []
-    for name in sorted(set(ref_bins.keys()) & set(hls_bins.keys())):
-        ref_arr = _read_f32(ref_bins[name])
-        hls_arr = _read_f32(hls_bins[name])
-        m = _metrics(ref_arr, hls_arr)
-        m["name"] = name
-        layerwise.append(m)
+    grouped = _group_layerwise_results(ref_bins, hls_bins)
+    grouped_summary = {
+        "forward_layerwise": _summarize_group(grouped["forward_layerwise"]),
+        "backward_input_layerwise": _summarize_group(grouped["backward_input_layerwise"]),
+        "param_grad_weight_layerwise": _summarize_group(grouped["param_grad_weight_layerwise"]),
+        "param_grad_bias_layerwise": _summarize_group(grouped["param_grad_bias_layerwise"]),
+        "param_grad_gamma_layerwise": _summarize_group(grouped["param_grad_gamma_layerwise"]),
+        "param_grad_beta_layerwise": _summarize_group(grouped["param_grad_beta_layerwise"]),
+        "other_layerwise": _summarize_group(grouped["other_layerwise"]),
+    }
 
     results = {
         "grads": grads_m,
         "weights_before": wb_m,
         "weights_after": wa_m,
         "weight_delta": wd_m,
-        "layerwise": layerwise,
+        **grouped,
+        "layerwise_summary": grouped_summary,
         "ref_layerwise_dir": str(ref_layer_root),
         "hls_layerwise_dir": str(hls_layer_root),
     }
@@ -120,29 +207,49 @@ def compare_training_artifacts(
     lines: List[str] = []
     lines.append("")
     lines.append("=============== FPGAI Training Compare ===============")
-    lines.append("grads:")
-    lines.append(f"  mae      : {grads_m['mae']}")
-    lines.append(f"  max_abs  : {grads_m['max_abs']}")
-    lines.append(f"  cosine   : {grads_m['cosine']}")
-    lines.append(f"  l2       : {grads_m['l2']}")
-    lines.append("weights_before:")
-    lines.append(f"  mae      : {wb_m['mae']}")
-    lines.append(f"  max_abs  : {wb_m['max_abs']}")
-    lines.append(f"  cosine   : {wb_m['cosine']}")
-    lines.append("weights_after:")
-    lines.append(f"  mae      : {wa_m['mae']}")
-    lines.append(f"  max_abs  : {wa_m['max_abs']}")
-    lines.append(f"  cosine   : {wa_m['cosine']}")
-    lines.append("weight_delta:")
-    lines.append(f"  mae      : {wd_m['mae']}")
-    lines.append(f"  max_abs  : {wd_m['max_abs']}")
-    lines.append(f"  cosine   : {wd_m['cosine']}")
-    if layerwise:
-        lines.append("layerwise:")
-        for item in layerwise:
+    lines.append("global:")
+    lines.append("  grads:")
+    lines.append(f"    mae      : {grads_m['mae']}")
+    lines.append(f"    max_abs  : {grads_m['max_abs']}")
+    lines.append(f"    cosine   : {grads_m['cosine']}")
+    lines.append(f"    l2       : {grads_m['l2']}")
+    lines.append("  weights_before:")
+    lines.append(f"    mae      : {wb_m['mae']}")
+    lines.append(f"    max_abs  : {wb_m['max_abs']}")
+    lines.append(f"    cosine   : {wb_m['cosine']}")
+    lines.append("  weights_after:")
+    lines.append(f"    mae      : {wa_m['mae']}")
+    lines.append(f"    max_abs  : {wa_m['max_abs']}")
+    lines.append(f"    cosine   : {wa_m['cosine']}")
+    lines.append("  weight_delta:")
+    lines.append(f"    mae      : {wd_m['mae']}")
+    lines.append(f"    max_abs  : {wd_m['max_abs']}")
+    lines.append(f"    cosine   : {wd_m['cosine']}")
+
+    def _emit_group(title: str, key: str) -> None:
+        items = grouped[key]
+        summary = grouped_summary[key]
+        lines.append(f"{title}:")
+        lines.append(f"  count      : {summary['count']}")
+        lines.append(f"  min_cosine : {summary['min_cosine']}")
+        lines.append(f"  mean_cosine: {summary['mean_cosine']}")
+        lines.append(f"  max_mae    : {summary['max_mae']}")
+        lines.append(f"  max_abs    : {summary['max_max_abs']}")
+        for item in items:
             lines.append(
                 f"  {item['name']}: cosine={item['cosine']:.6f} mae={item['mae']:.6e} max_abs={item['max_abs']:.6e}"
             )
+
+    _emit_group("forward_layerwise", "forward_layerwise")
+    _emit_group("backward_input_layerwise", "backward_input_layerwise")
+    _emit_group("param_grad_weight_layerwise", "param_grad_weight_layerwise")
+    _emit_group("param_grad_bias_layerwise", "param_grad_bias_layerwise")
+    _emit_group("param_grad_gamma_layerwise", "param_grad_gamma_layerwise")
+    _emit_group("param_grad_beta_layerwise", "param_grad_beta_layerwise")
+
+    if grouped["other_layerwise"]:
+        _emit_group("other_layerwise", "other_layerwise")
+
     lines.append("======================================================")
     summary_txt.write_text("\n".join(lines), encoding="utf-8")
 

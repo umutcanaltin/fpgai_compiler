@@ -49,7 +49,7 @@ operators:
 
 model:
   format: onnx
-  path: models/mlp.onnx
+  path: models/cnn_mnist.onnx
 
 numerics:
   defaults:

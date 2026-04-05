@@ -538,7 +538,7 @@ def _bn_forward_hwc(x: np.ndarray, shape: Tuple[int, int, int], gamma: np.ndarra
             xhat[idx] = xn
             y[idx] = gamma[ch] * xn + beta[ch]
 
-    cache = {"mean": mean, "var": var, "xhat": xhat}
+    cache = {"mean": mean, "var": var, "xhat": xhat, "eps": float(eps)}
     return y.astype(np.float32), cache
 
 
@@ -561,14 +561,39 @@ def _bn_param_grad_hwc(dy: np.ndarray, xhat: np.ndarray, shape: Tuple[int, int, 
     return dgamma, dbeta
 
 
-def _bn_backward_input_simple_hwc(dy: np.ndarray, shape: Tuple[int, int, int], gamma: np.ndarray):
+def _bn_backward_input_exact_hwc(
+    dy: np.ndarray,
+    xhat: np.ndarray,
+    var: np.ndarray,
+    shape: Tuple[int, int, int],
+    gamma: np.ndarray,
+    eps: float = 1e-5,
+) -> np.ndarray:
     c, h, w = shape
     hw = h * w
     dx = np.zeros_like(dy, dtype=np.float32)
+
     for ch in range(c):
+        inv_std = 1.0 / float(np.sqrt(float(var[ch]) + float(eps)))
+        sum_dy = 0.0
+        sum_dy_xhat = 0.0
+
         for hw_i in range(hw):
             idx = hw_i * c + ch
-            dx[idx] = dy[idx] * gamma[ch]
+            g = float(dy[idx])
+            xh = float(xhat[idx])
+            sum_dy += g
+            sum_dy_xhat += g * xh
+
+        mean_dy = sum_dy / float(hw)
+        mean_dy_xhat = sum_dy_xhat / float(hw)
+        scale = float(gamma[ch]) * inv_std
+
+        for hw_i in range(hw):
+            idx = hw_i * c + ch
+            xh = float(xhat[idx])
+            dx[idx] = scale * (float(dy[idx]) - mean_dy - xh * mean_dy_xhat)
+
     return dx.astype(np.float32)
 
 
@@ -725,9 +750,11 @@ def run_training_reference_step(
         if kind in ("dense", "conv"):
             weights_before_chunks.append(ps["W"].reshape(-1).copy())
             weights_before_chunks.append(ps["B"].reshape(-1).copy())
+            _write_f32(layerwise_dir / f"{name}__weights_before.bin", np.concatenate([ps["W"].reshape(-1), ps["B"].reshape(-1)]).astype(np.float32))
         else:
             weights_before_chunks.append(ps["gamma"].reshape(-1).copy())
             weights_before_chunks.append(ps["beta"].reshape(-1).copy())
+            _write_f32(layerwise_dir / f"{name}__weights_before.bin", np.concatenate([ps["gamma"].reshape(-1), ps["beta"].reshape(-1)]).astype(np.float32))
 
     vals, caches = _forward_pass(graph, params_state, x_input.astype(np.float32), layerwise_dir)
     pred = vals[graph.outputs[0]]
@@ -739,7 +766,6 @@ def run_training_reference_step(
     for op in reversed(graph.ops):
         xname = op.inputs[0]
         yname = op.outputs[0]
-        x = vals[xname]
         y = vals[yname]
         dy = grads_by_tensor[yname]
 
@@ -750,6 +776,8 @@ def run_training_reference_step(
             dx = _dense_backward_input(dy, ps["W"])
             grad_chunks_map[op.name] = (dW.reshape(-1), dB.reshape(-1))
             grads_by_tensor[xname] = dx
+            _write_f32(layerwise_dir / f"{op.name}__param_grad_w.bin", dW.reshape(-1).astype(np.float32))
+            _write_f32(layerwise_dir / f"{op.name}__param_grad_b.bin", dB.reshape(-1).astype(np.float32))
 
         elif op.op_type == "Conv":
             ps = params_state[op.name]
@@ -761,6 +789,8 @@ def run_training_reference_step(
             dx = _conv_backward_input_hwc(dy, ps["W"], cache["xshape"], cache["yshape"], cache["stride"], cache["pad"])
             grad_chunks_map[op.name] = (dW.reshape(-1), dB.reshape(-1))
             grads_by_tensor[xname] = dx
+            _write_f32(layerwise_dir / f"{op.name}__param_grad_w.bin", dW.reshape(-1).astype(np.float32))
+            _write_f32(layerwise_dir / f"{op.name}__param_grad_b.bin", dB.reshape(-1).astype(np.float32))
 
         elif op.op_type == "Relu":
             dx = _relu_backward_from_output(y, dy)
@@ -800,9 +830,18 @@ def run_training_reference_step(
             ps = params_state[op.name]
             cache = caches[op.name]
             dgamma, dbeta = _bn_param_grad_hwc(dy, cache["xhat"], cache["shape"])
-            dx = _bn_backward_input_simple_hwc(dy, cache["shape"], ps["gamma"])
+            dx = _bn_backward_input_exact_hwc(
+                dy,
+                cache["xhat"],
+                cache["var"],
+                cache["shape"],
+                ps["gamma"],
+                eps=float(cache.get("eps", 1e-5)),
+            )
             grad_chunks_map[op.name] = (dgamma.reshape(-1), dbeta.reshape(-1))
             grads_by_tensor[xname] = dx
+            _write_f32(layerwise_dir / f"{op.name}__param_grad_gamma.bin", dgamma.reshape(-1).astype(np.float32))
+            _write_f32(layerwise_dir / f"{op.name}__param_grad_beta.bin", dbeta.reshape(-1).astype(np.float32))
 
         else:
             raise RuntimeError(f"Unsupported training reference op: {op.op_type}")
@@ -834,9 +873,11 @@ def run_training_reference_step(
         if kind in ("dense", "conv"):
             weights_after_chunks.append(ps["W"].reshape(-1).copy())
             weights_after_chunks.append(ps["B"].reshape(-1).copy())
+            _write_f32(layerwise_dir / f"{name}__weights_after.bin", np.concatenate([ps["W"].reshape(-1), ps["B"].reshape(-1)]).astype(np.float32))
         else:
             weights_after_chunks.append(ps["gamma"].reshape(-1).copy())
             weights_after_chunks.append(ps["beta"].reshape(-1).copy())
+            _write_f32(layerwise_dir / f"{name}__weights_after.bin", np.concatenate([ps["gamma"].reshape(-1), ps["beta"].reshape(-1)]).astype(np.float32))
 
     weights_after_flat = np.concatenate(weights_after_chunks, axis=0).astype(np.float32) if weights_after_chunks else np.zeros((0,), dtype=np.float32)
 

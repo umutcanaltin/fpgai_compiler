@@ -63,7 +63,7 @@ operators:
       except_last: true
 model:
   format: onnx
-  path: models/mlp.onnx
+  path: models/cnn_mnist.onnx
 numerics:
   training:
     grad:

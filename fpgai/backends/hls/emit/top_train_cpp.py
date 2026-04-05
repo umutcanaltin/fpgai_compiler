@@ -195,24 +195,48 @@ def _resolve_dense_arrays(graph: Graph, op) -> Tuple[np.ndarray, np.ndarray, int
 
 
 def _resolve_conv_arrays(graph: Graph, op):
-    if len(op.inputs) < 2:
-        raise RuntimeError(f"Conv weights not found for op '{op.name}'")
+    w_arr = None
+    b_arr = None
 
-    w_arr = _flatten_from_graph_named(graph, op.inputs[1])
+    if len(op.inputs) > 1:
+        w_arr = _flatten_from_graph_named(graph, op.inputs[1])
+    if len(op.inputs) > 2:
+        b_arr = _flatten_from_graph_named(graph, op.inputs[2])
+
+    if w_arr is None:
+        attrs = getattr(op, "attrs", {}) or {}
+        for key in ("weights", "weight", "kernel", "W", "w", "weight_data", "kernel_data"):
+            if key in attrs:
+                arr, _ = _resolve_attr_candidate(graph, attrs[key])
+                if arr is not None:
+                    w_arr = arr
+                    break
+
     if w_arr is None:
         raise RuntimeError(f"Conv weight tensor not found for op '{op.name}'")
 
-    w_t = graph.get_tensor(op.inputs[1])
-    if w_t is not None and getattr(w_t, "shape", None):
-        ws = tuple(int(v) for v in w_t.shape)
-    elif hasattr(graph, "constants") and op.inputs[1] in graph.constants:
-        ws = tuple(int(v) for v in graph.constants[op.inputs[1]].shape)
-    else:
-        raise RuntimeError(f"Conv weight shape unavailable for op '{op.name}'")
+    ws = None
+    if len(op.inputs) > 1:
+        w_t = graph.get_tensor(op.inputs[1])
+        if w_t is not None and getattr(w_t, "shape", None):
+            ws = tuple(int(v) for v in w_t.shape)
 
-    b_arr = None
-    if len(op.inputs) > 2:
-        b_arr = _flatten_from_graph_named(graph, op.inputs[2])
+    if ws is None:
+        attrs = getattr(op, "attrs", {}) or {}
+        for key in ("kernel_shape_full", "weight_shape", "weights_shape", "kernel_shape"):
+            if key in attrs:
+                candidate = attrs[key]
+                if isinstance(candidate, (list, tuple)) and len(candidate) == 4:
+                    ws = tuple(int(v) for v in candidate)
+                    break
+
+    if ws is None:
+        xshape = _shape_wo_batch(graph.get_tensor(op.inputs[0]).shape)
+        yshape = _shape_wo_batch(graph.get_tensor(op.outputs[0]).shape)
+        c_in, _, _ = _as_chw(xshape)
+        c_out, _, _ = _as_chw(yshape)
+        k = int((getattr(op, "attrs", {}) or {}).get("kernel_shape", [3, 3])[0])
+        ws = (c_out, c_in, k, k)
 
     out_c = int(ws[0])
     if b_arr is None:
@@ -227,6 +251,20 @@ def _resolve_bn_arrays(graph: Graph, op, c: int):
             arr = _flatten_from_graph_named(graph, op.inputs[idx])
             if arr is not None:
                 return np.asarray(arr, dtype=np.float32).reshape(n)
+
+        attrs = getattr(op, "attrs", {}) or {}
+        attr_keys = {
+            1: ("gamma", "scale", "weight", "weights"),
+            2: ("beta", "bias", "biases"),
+            3: ("mean", "running_mean"),
+            4: ("var", "variance", "running_var"),
+        }.get(idx, ())
+        for k in attr_keys:
+            if k in attrs:
+                arr, _ = _resolve_attr_candidate(graph, attrs[k])
+                if arr is not None:
+                    return np.asarray(arr, dtype=np.float32).reshape(n)
+
         return np.full((n,), default, dtype=np.float32)
 
     gamma = _get_or_default(1, c, 1.0)
@@ -313,10 +351,69 @@ def emit_top_train_cpp(
     lines.append('  for (int i = 0; i < N; ++i) tmp[i] = (float)data[i];')
     lines.append('  fpgai_dump_tensor(path, tmp, N);')
     lines.append('}')
+    lines.append('template<int N>')
+    lines.append('static inline void fpgai_dump_grad_wgt(const char* path, const grad_wgt_t data[N]) {')
+    lines.append('  float tmp[N];')
+    lines.append('  for (int i = 0; i < N; ++i) tmp[i] = (float)data[i];')
+    lines.append('  fpgai_dump_tensor(path, tmp, N);')
+    lines.append('}')
+    lines.append('template<int N>')
+    lines.append('static inline void fpgai_dump_grad_bias(const char* path, const grad_bias_t data[N]) {')
+    lines.append('  float tmp[N];')
+    lines.append('  for (int i = 0; i < N; ++i) tmp[i] = (float)data[i];')
+    lines.append('  fpgai_dump_tensor(path, tmp, N);')
+    lines.append('}')
+    lines.append('template<int N>')
+    lines.append('static inline void fpgai_dump_wgt(const char* path, const wgt_t data[N]) {')
+    lines.append('  float tmp[N];')
+    lines.append('  for (int i = 0; i < N; ++i) tmp[i] = (float)data[i];')
+    lines.append('  fpgai_dump_tensor(path, tmp, N);')
+    lines.append('}')
+    lines.append('template<int N>')
+    lines.append('static inline void fpgai_dump_bias(const char* path, const bias_t data[N]) {')
+    lines.append('  float tmp[N];')
+    lines.append('  for (int i = 0; i < N; ++i) tmp[i] = (float)data[i];')
+    lines.append('  fpgai_dump_tensor(path, tmp, N);')
+    lines.append('}')
     lines.append('#else')
     lines.append('template<int N> static inline void fpgai_dump_act(const char*, const act_t[N]) {}')
     lines.append('template<int N> static inline void fpgai_dump_grad(const char*, const grad_act_t[N]) {}')
+    lines.append('template<int N> static inline void fpgai_dump_grad_wgt(const char*, const grad_wgt_t[N]) {}')
+    lines.append('template<int N> static inline void fpgai_dump_grad_bias(const char*, const grad_bias_t[N]) {}')
+    lines.append('template<int N> static inline void fpgai_dump_wgt(const char*, const wgt_t[N]) {}')
+    lines.append('template<int N> static inline void fpgai_dump_bias(const char*, const bias_t[N]) {}')
     lines.append('#endif')
+    lines.append("")
+    lines.append('template<int C, int HW>')
+    lines.append('static inline void fpgai_bn_backward_input_exact(')
+    lines.append('  const grad_act_t gy[C * HW],')
+    lines.append('  const wgt_t gamma[C],')
+    lines.append('  const acc_t var[C],')
+    lines.append('  const act_t xhat[C * HW],')
+    lines.append('  grad_act_t gx[C * HW]')
+    lines.append(') {')
+    lines.append('  const float eps = 1e-5f;')
+    lines.append('  for (int c = 0; c < C; ++c) {')
+    lines.append('    float sum_dy = 0.0f;')
+    lines.append('    float sum_dy_xhat = 0.0f;')
+    lines.append('    for (int hw = 0; hw < HW; ++hw) {')
+    lines.append('      const int idx = hw * C + c;')
+    lines.append('      const float g = (float)gy[idx];')
+    lines.append('      const float xh = (float)xhat[idx];')
+    lines.append('      sum_dy += g;')
+    lines.append('      sum_dy_xhat += g * xh;')
+    lines.append('    }')
+    lines.append('    const float mean_dy = sum_dy / (float)HW;')
+    lines.append('    const float mean_dy_xhat = sum_dy_xhat / (float)HW;')
+    lines.append('    const float inv_std = 1.0f / sqrtf((float)var[c] + eps);')
+    lines.append('    const float scale = ((float)gamma[c]) * inv_std;')
+    lines.append('    for (int hw = 0; hw < HW; ++hw) {')
+    lines.append('      const int idx = hw * C + c;')
+    lines.append('      const float xh = (float)xhat[idx];')
+    lines.append('      gx[idx] = (grad_act_t)(scale * (((float)gy[idx]) - mean_dy - xh * mean_dy_xhat));')
+    lines.append('    }')
+    lines.append('  }')
+    lines.append('}')
     lines.append("")
 
     for tname, size in tensor_name_to_size.items():
@@ -411,7 +508,6 @@ def emit_top_train_cpp(
             lines.append(f"  for (int i = 0; i < {b_size}; ++i) dBN_B_{tag}[i] = (grad_bias_t)0;")
     lines.append("")
 
-    # forward
     for op in graph.ops:
         xname = op.inputs[0]
         yname = op.outputs[0]
@@ -431,10 +527,10 @@ def emit_top_train_cpp(
             tag = _sanitize(op.name)
             c_in, h_in, w_in = _as_chw(xshape)
             c_out, h_out, w_out = _as_chw(yshape)
-            ws = graph.get_tensor(op.inputs[1]).shape
+            ws = _resolve_conv_arrays(graph, op)[2]
             k_h = int(ws[2])
-            stride = int(op.attrs.get('strides', [1,1])[0])
-            pad = int(op.attrs.get('pads', [0,0,0,0])[0])
+            stride = int(op.attrs.get('strides', [1, 1])[0])
+            pad = int(op.attrs.get('pads', [0, 0, 0, 0])[0])
             lines.append(f"  fpgai::conv2d<{h_in}, {w_in}, {c_in}, {h_out}, {w_out}, {c_out}, {k_h}, {stride}, {pad}>({xbuf}, {ybuf}, W_{tag}, B_{tag});")
 
         elif op.op_type == "Relu":
@@ -459,16 +555,16 @@ def emit_top_train_cpp(
 
         elif op.op_type == "MaxPool":
             c_in, h_in, w_in = _as_chw(xshape)
-            c_out, h_out, w_out = _as_chw(yshape)
-            k = int(op.attrs.get("kernel_shape", [2,2])[0])
-            stride = int(op.attrs.get("strides", [2,2])[0])
+            _c_out, h_out, w_out = _as_chw(yshape)
+            k = int(op.attrs.get("kernel_shape", [2, 2])[0])
+            stride = int(op.attrs.get("strides", [2, 2])[0])
             lines.append(f"  fpgai::maxpool2d<{h_in}, {w_in}, {c_in}, {k}, {stride}, {h_out}, {w_out}>({xbuf}, {ybuf});")
 
         elif op.op_type == "AvgPool":
             c_in, h_in, w_in = _as_chw(xshape)
-            c_out, h_out, w_out = _as_chw(yshape)
-            k = int(op.attrs.get("kernel_shape", [2,2])[0])
-            stride = int(op.attrs.get("strides", [2,2])[0])
+            _c_out, h_out, w_out = _as_chw(yshape)
+            k = int(op.attrs.get("kernel_shape", [2, 2])[0])
+            stride = int(op.attrs.get("strides", [2, 2])[0])
             lines.append(f"  fpgai::avgpool2d<{h_in}, {w_in}, {c_in}, {k}, {stride}, {h_out}, {w_out}>({xbuf}, {ybuf});")
 
         elif op.op_type == "BatchNormalization":
@@ -489,7 +585,6 @@ def emit_top_train_cpp(
         lines.append(f"  for (int i = 0; i < {output_size}; ++i) {final_grad}[i] = (grad_act_t)(((acc_t){final_buf}[i]) - ((acc_t)target_buf[i]));")
     lines.append("")
 
-    # backward
     for op in reversed(graph.ops):
         xname = op.inputs[0]
         yname = op.outputs[0]
@@ -509,18 +604,22 @@ def emit_top_train_cpp(
             lines.append(f"  fpgai::dense_weight_grad<{in_f}, {out_f}>({xbuf}, {gy}, dW_{tag});")
             lines.append(f"  fpgai::dense_bias_grad<{out_f}>({gy}, dB_{tag});")
             lines.append(f"  fpgai::dense_backward_input<{in_f}, {out_f}>({gy}, W_{tag}, {gx});")
+            lines.append(f'  fpgai_dump_grad_wgt<{_W.size}>("{opname}__param_grad_w.bin", dW_{tag});')
+            lines.append(f'  fpgai_dump_grad_bias<{_B.size}>("{opname}__param_grad_b.bin", dB_{tag});')
 
         elif op.op_type == "Conv":
             tag = _sanitize(op.name)
             c_in, h_in, w_in = _as_chw(xshape)
             c_out, h_out, w_out = _as_chw(yshape)
-            ws = graph.get_tensor(op.inputs[1]).shape
+            ws = _resolve_conv_arrays(graph, op)[2]
             k_h = int(ws[2])
-            stride = int(op.attrs.get('strides', [1,1])[0])
-            pad = int(op.attrs.get('pads', [0,0,0,0])[0])
+            stride = int(op.attrs.get('strides', [1, 1])[0])
+            pad = int(op.attrs.get('pads', [0, 0, 0, 0])[0])
             lines.append(f"  fpgai::conv2d_weight_grad<{h_in}, {w_in}, {c_in}, {h_out}, {w_out}, {c_out}, {k_h}, {stride}, {pad}>({xbuf}, {gy}, dW_{tag});")
             lines.append(f"  fpgai::conv2d_bias_grad<{c_out}, {h_out}, {w_out}>({gy}, dB_{tag});")
             lines.append(f"  fpgai::conv2d_backward_input<{h_in}, {w_in}, {c_in}, {h_out}, {w_out}, {c_out}, {k_h}, {stride}, {pad}>({gy}, W_{tag}, {gx});")
+            lines.append(f'  fpgai_dump_grad_wgt<{int(np.prod(ws))}>("{opname}__param_grad_w.bin", dW_{tag});')
+            lines.append(f'  fpgai_dump_grad_bias<{c_out}>("{opname}__param_grad_b.bin", dB_{tag});')
 
         elif op.op_type == "Relu":
             lines.append(f"  fpgai::relu_backward_from_output<{sz_out}>({ybuf}, {gy}, {gx});")
@@ -544,16 +643,16 @@ def emit_top_train_cpp(
 
         elif op.op_type == "MaxPool":
             c_in, h_in, w_in = _as_chw(xshape)
-            c_out, h_out, w_out = _as_chw(yshape)
-            k = int(op.attrs.get("kernel_shape", [2,2])[0])
-            stride = int(op.attrs.get("strides", [2,2])[0])
+            _c_out, h_out, w_out = _as_chw(yshape)
+            k = int(op.attrs.get("kernel_shape", [2, 2])[0])
+            stride = int(op.attrs.get("strides", [2, 2])[0])
             lines.append(f"  fpgai::maxpool2d_backward<{h_in}, {w_in}, {c_in}, {k}, {stride}, {h_out}, {w_out}>({xbuf}, {ybuf}, {gy}, {gx});")
 
         elif op.op_type == "AvgPool":
             c_in, h_in, w_in = _as_chw(xshape)
-            c_out, h_out, w_out = _as_chw(yshape)
-            k = int(op.attrs.get("kernel_shape", [2,2])[0])
-            stride = int(op.attrs.get("strides", [2,2])[0])
+            _c_out, h_out, w_out = _as_chw(yshape)
+            k = int(op.attrs.get("kernel_shape", [2, 2])[0])
+            stride = int(op.attrs.get("strides", [2, 2])[0])
             lines.append(f"  fpgai::avgpool2d_backward<{h_in}, {w_in}, {c_in}, {k}, {stride}, {h_out}, {w_out}>({gy}, {gx});")
 
         elif op.op_type == "BatchNormalization":
@@ -561,20 +660,22 @@ def emit_top_train_cpp(
             c, h, w = _as_chw(yshape)
             hw = h * w
             lines.append(f"  fpgai::batchnorm_param_grad<{c}, {hw}>({gy}, BN_XHAT_{tag}, dBN_G_{tag}, dBN_B_{tag});")
-            lines.append(f"  fpgai::batchnorm_backward_input_simple<{c}, {hw}>({gy}, BN_G_{tag}, {gx});")
+            lines.append(f"  fpgai_bn_backward_input_exact<{c}, {hw}>({gy}, BN_G_{tag}, BN_V_{tag}, BN_XHAT_{tag}, {gx});")
+            lines.append(f'  fpgai_dump_grad_wgt<{c}>("{opname}__param_grad_gamma.bin", dBN_G_{tag});')
+            lines.append(f'  fpgai_dump_grad_bias<{c}>("{opname}__param_grad_beta.bin", dBN_B_{tag});')
 
         lines.append(f'  fpgai_dump_grad<{sz_in}>("{opname}__bwd_in.bin", {gx});')
 
-    # snapshot weights_before
     for kind, _op, tag, w_size, b_size in param_specs:
         if kind in ("dense", "conv"):
             lines.append(f"  for (int i = 0; i < {w_size}; ++i) W_before_{tag}[i] = W_{tag}[i];")
             lines.append(f"  for (int i = 0; i < {b_size}; ++i) B_before_{tag}[i] = B_{tag}[i];")
+            lines.append(f'  fpgai_dump_wgt<{w_size}>("{tag}__weights_before.bin", W_before_{tag});')
+            lines.append(f'  fpgai_dump_bias<{b_size}>("{tag}__weights_before_bias_only.bin", B_before_{tag});')
         elif kind == "bn":
             lines.append(f"  for (int i = 0; i < {w_size}; ++i) BN_G_before_{tag}[i] = BN_G_{tag}[i];")
             lines.append(f"  for (int i = 0; i < {b_size}; ++i) BN_B_before_{tag}[i] = BN_B_{tag}[i];")
 
-    # updates
     for kind, _op, tag, w_size, b_size in param_specs:
         if kind in ("dense", "conv"):
             lines.append(f"  fpgai::sgd_update_wgt<{w_size}>(W_{tag}, dW_{tag}, (upd_t){lr:.8f}f);")
@@ -583,11 +684,18 @@ def emit_top_train_cpp(
             lines.append(f"  fpgai::sgd_update_wgt<{w_size}>(BN_G_{tag}, dBN_G_{tag}, (upd_t){lr:.8f}f);")
             lines.append(f"  fpgai::sgd_update_bias<{b_size}>(BN_B_{tag}, dBN_B_{tag}, (upd_t){lr:.8f}f);")
 
+    for kind, _op, tag, w_size, b_size in param_specs:
+        if kind in ("dense", "conv"):
+            lines.append(f'  fpgai_dump_wgt<{w_size}>("{tag}__weights_after.bin", W_{tag});')
+            lines.append(f'  fpgai_dump_bias<{b_size}>("{tag}__weights_after_bias_only.bin", B_{tag});')
+        elif kind == "bn":
+            lines.append(f'  fpgai_dump_wgt<{w_size}>("{tag}__weights_after.bin", BN_G_{tag});')
+            lines.append(f'  fpgai_dump_bias<{b_size}>("{tag}__weights_after_bias_only.bin", BN_B_{tag});')
+
     total_words = sum((w_size + b_size) for _kind, _op, _tag, w_size, b_size in param_specs)
     emitted = 0
     total_emit_words = total_words * 3
 
-    # grads
     for kind, _op, tag, w_size, b_size in param_specs:
         if kind in ("dense", "conv"):
             for i in range(w_size):
@@ -604,7 +712,6 @@ def emit_top_train_cpp(
                 emitted += 1
                 lines.append(f"  write_f32(out, (float)dBN_B_{tag}[{i}], false);")
 
-    # weights_before
     for kind, _op, tag, w_size, b_size in param_specs:
         if kind in ("dense", "conv"):
             for i in range(w_size):
@@ -621,7 +728,6 @@ def emit_top_train_cpp(
                 emitted += 1
                 lines.append(f"  write_f32(out, (float)BN_B_before_{tag}[{i}], false);")
 
-    # weights_after
     for kind, _op, tag, w_size, b_size in param_specs:
         if kind in ("dense", "conv"):
             for i in range(w_size):
