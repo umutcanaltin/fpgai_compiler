@@ -12,6 +12,9 @@ def emit_batchnorm_h() -> str:
 
 namespace fpgai {
 
+// HWC-flat convention to match conv/pool emitters:
+// flat index = hw * C + c
+
 template<int C, int HW>
 void batchnorm_train_forward(
     const act_t x[C * HW],
@@ -27,19 +30,22 @@ void batchnorm_train_forward(
     for (int c = 0; c < C; ++c) {
         acc_t m = 0;
         acc_t v = 0;
+
         for (int hw = 0; hw < HW; ++hw) {
 #pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-            int idx = c * HW + hw;
+            int idx = hw * C + c;
             m += (acc_t)x[idx];
         }
         m /= (acc_t)HW;
+
         for (int hw = 0; hw < HW; ++hw) {
 #pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-            int idx = c * HW + hw;
+            int idx = hw * C + c;
             acc_t d = (acc_t)x[idx] - m;
             v += d * d;
         }
         v /= (acc_t)HW;
+
         mean[c] = m;
         var[c] = v;
     }
@@ -48,7 +54,7 @@ void batchnorm_train_forward(
         acc_t inv_std = (acc_t)1.0 / hls::sqrt((acc_t)var[c] + (acc_t)eps);
         for (int hw = 0; hw < HW; ++hw) {
 #pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-            int idx = c * HW + hw;
+            int idx = hw * C + c;
             acc_t xn = ((acc_t)x[idx] - (acc_t)mean[c]) * inv_std;
             xhat[idx] = (act_t)xn;
             y[idx] = (act_t)((acc_t)gamma[c] * xn + (acc_t)beta[c]);
@@ -67,17 +73,21 @@ void batchnorm_param_grad(
     for (int c = 0; c < C; ++c) {
         acc_t dg = 0;
         acc_t db = 0;
+
         for (int hw = 0; hw < HW; ++hw) {
 #pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-            int idx = c * HW + hw;
+            int idx = hw * C + c;
             dg += (acc_t)dY[idx] * (acc_t)xhat[idx];
             db += (acc_t)dY[idx];
         }
+
         dGamma[c] = (grad_wgt_t)dg;
         dBeta[c] = (grad_bias_t)db;
     }
 }
 
+// Simple input gradient for now.
+// This keeps training structurally complete; exact BN backward can be swapped in later.
 template<int C, int HW>
 void batchnorm_backward_input_simple(
     const grad_act_t dY[C * HW],
@@ -88,7 +98,7 @@ void batchnorm_backward_input_simple(
     for (int c = 0; c < C; ++c) {
         for (int hw = 0; hw < HW; ++hw) {
 #pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-            int idx = c * HW + hw;
+            int idx = hw * C + c;
             dX[idx] = (grad_act_t)((acc_t)dY[idx] * (acc_t)gamma[c]);
         }
     }

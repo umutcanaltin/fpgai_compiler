@@ -2,32 +2,51 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple, Any, Optional
 import json
 import numpy as np
 
-from fpgai.ir.graph import Graph
-from fpgai.util.fs import write_text
 
-
-@dataclass(frozen=True)
+@dataclass
 class TrainingReferenceResult:
-    loss_before: float
-    loss_after: float
+    out_dir: Path
     grads_flat_path: Path
     weights_before_flat_path: Path
     weights_after_flat_path: Path
     summary_json: Path
     summary_txt: Path
+    loss_before: float
+    loss_after: float
+    layerwise_dir: Path
 
 
-def _cfg_get(raw: Dict[str, Any], path: str, default: Any = None) -> Any:
-    cur: Any = raw
-    for k in path.split("."):
-        if not isinstance(cur, dict) or k not in cur:
-            return default
-        cur = cur[k]
-    return cur
+def _shape_wo_batch(shape) -> Tuple[int, ...]:
+    if shape is None:
+        return tuple()
+    shp = tuple(int(x) for x in shape)
+    if len(shp) > 1 and shp[0] == 1:
+        return shp[1:]
+    return shp
+
+
+def _flat_size(shape: Tuple[int, ...]) -> int:
+    if not shape:
+        return 1
+    v = 1
+    for d in shape:
+        v *= int(d)
+    return int(v)
+
+
+def _as_chw(shape3: Tuple[int, ...]) -> Tuple[int, int, int]:
+    if len(shape3) != 3:
+        raise ValueError(f"Expected 3D shape, got {shape3}")
+    return int(shape3[0]), int(shape3[1]), int(shape3[2])
+
+
+def _write_f32(path: Path, arr: np.ndarray) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.asarray(arr, dtype=np.float32).reshape(-1).tofile(path)
 
 
 def _as_numpy_numeric(x) -> Optional[np.ndarray]:
@@ -44,61 +63,33 @@ def _as_numpy_numeric(x) -> Optional[np.ndarray]:
     return arr.astype(np.float32, copy=False)
 
 
-def _flatten_from_graph_named(graph: Graph, tensor_name: str) -> Optional[np.ndarray]:
-    if tensor_name is None:
+def _read_named_array(graph, name: str):
+    if name is None:
         return None
-
-    if hasattr(graph, "constants") and tensor_name in graph.constants:
-        arr = _as_numpy_numeric(graph.constants[tensor_name])
-        if arr is not None:
-            return arr.reshape(-1)
-
-    if hasattr(graph, "params") and tensor_name in graph.params:
-        arr = _as_numpy_numeric(graph.params[tensor_name])
-        if arr is not None:
-            return arr.reshape(-1)
-
-    try:
-        t = graph.get_tensor(tensor_name)
-    except Exception:
-        t = None
-
+    if hasattr(graph, "constants") and name in graph.constants:
+        return np.asarray(graph.constants[name], dtype=np.float32)
+    if hasattr(graph, "params") and name in graph.params:
+        return np.asarray(graph.params[name], dtype=np.float32)
+    t = graph.get_tensor(name)
     if t is not None:
-        data = getattr(t, "data", None)
-        if data is not None:
-            arr = _as_numpy_numeric(data)
-            if arr is not None:
-                return arr.reshape(-1)
-
-        for attr_name in ("initializer", "value", "values"):
-            if hasattr(t, attr_name):
-                arr = _as_numpy_numeric(getattr(t, attr_name))
-                if arr is not None:
-                    return arr.reshape(-1)
-
+        for attr in ("data", "initializer", "value", "values"):
+            if hasattr(t, attr):
+                v = getattr(t, attr)
+                if v is not None:
+                    arr = _as_numpy_numeric(v)
+                    if arr is not None:
+                        return arr
     return None
 
 
-def _array_from_graph_named(graph: Graph, tensor_name: str) -> Optional[np.ndarray]:
-    arr = _flatten_from_graph_named(graph, tensor_name)
-    if arr is not None:
-        return arr.copy()
-
-    try:
-        t = graph.get_tensor(tensor_name)
-    except Exception:
-        t = None
-
-    if t is not None and getattr(t, "shape", None):
-        shape = tuple(int(x) for x in t.shape)
-        flat = _flatten_from_graph_named(graph, tensor_name)
-        if flat is not None and int(np.prod(shape)) == flat.size:
-            return flat.reshape(shape).astype(np.float32)
-
-    return None
+def _flatten_from_graph_named(graph, tensor_name: str) -> Optional[np.ndarray]:
+    arr = _read_named_array(graph, tensor_name)
+    if arr is None:
+        return None
+    return np.asarray(arr, dtype=np.float32).reshape(-1)
 
 
-def _resolve_attr_candidate(graph: Graph, v):
+def _resolve_attr_candidate(graph, v):
     arr = _as_numpy_numeric(v)
     if arr is not None and arr.size > 0:
         return arr.reshape(-1), "direct_numeric_attr"
@@ -123,6 +114,7 @@ def _candidate_attr_arrays(graph, op, expected_w: int, expected_b: int):
     ]
     likely_bias_keys = [
         "bias", "biases", "B", "b", "bias_data", "bias_values",
+        "mean", "var", "scale", "gamma", "beta",
     ]
 
     for k in likely_weight_keys:
@@ -152,13 +144,11 @@ def _candidate_attr_arrays(graph, op, expected_w: int, expected_b: int):
 def _pick_dense_from_attrs(graph, op, expected_w: int, expected_b: int):
     weight_arr = None
     bias_arr = None
-
     for kind, _key, arr, _src in _candidate_attr_arrays(graph, op, expected_w, expected_b):
         if kind == "weight" and weight_arr is None:
             weight_arr = arr
         elif kind == "bias" and bias_arr is None:
             bias_arr = arr
-
     return weight_arr, bias_arr
 
 
@@ -170,506 +160,731 @@ def _dense_expected_shapes(op) -> Tuple[int, int, int, int]:
     return in_f, out_f, expected_w, expected_b
 
 
-def _resolve_dense_arrays(graph: Graph, op) -> Tuple[np.ndarray, np.ndarray, int, int, str, Optional[str]]:
+def _resolve_dense_arrays(graph, op) -> Tuple[np.ndarray, np.ndarray, int, int]:
     in_f, out_f, expected_w, expected_b = _dense_expected_shapes(op)
 
     w_arr = None
     b_arr = None
-    w_name = None
-    b_name = None
 
     if len(op.inputs) > 1:
-        w_name = op.inputs[1]
-        w_arr = _flatten_from_graph_named(graph, w_name)
-
+        w_arr = _flatten_from_graph_named(graph, op.inputs[1])
     if len(op.inputs) > 2:
-        b_name = op.inputs[2]
-        b_arr = _flatten_from_graph_named(graph, b_name)
+        b_arr = _flatten_from_graph_named(graph, op.inputs[2])
 
     if w_arr is None or (b_arr is None and expected_b > 0):
         wa, ba = _pick_dense_from_attrs(graph, op, expected_w, expected_b)
         if w_arr is None and wa is not None:
             w_arr = wa
-            w_name = f"{op.name}__attr_weight"
         if b_arr is None and ba is not None:
             b_arr = ba
-            b_name = f"{op.name}__attr_bias"
 
     if w_arr is None:
-        raise RuntimeError(
-            f"Dense weights not found for training op '{op.name}'. "
-            f"op.inputs={list(getattr(op, 'inputs', []))}, "
-            f"op.attrs keys={sorted(list((getattr(op, 'attrs', {}) or {}).keys()))}"
-        )
+        raise RuntimeError(f"Dense weights not found for training reference op '{op.name}'")
 
-    if expected_w > 0:
-        if w_arr.size != expected_w:
-            raise RuntimeError(
-                f"Dense weight size mismatch for '{op.name}': got {w_arr.size}, expected {expected_w}"
-            )
-        W = w_arr.reshape(out_f, in_f).astype(np.float32)
-    else:
-        if w_arr.ndim == 2:
-            W = w_arr.astype(np.float32)
-            out_f, in_f = int(W.shape[0]), int(W.shape[1])
-        else:
-            raise RuntimeError(f"Cannot infer Dense weight shape for '{op.name}'")
+    if in_f <= 0 or out_f <= 0:
+        xshape = _shape_wo_batch(graph.get_tensor(op.inputs[0]).shape)
+        yshape = _shape_wo_batch(graph.get_tensor(op.outputs[0]).shape)
+        in_f = _flat_size(xshape)
+        out_f = _flat_size(yshape)
 
-    if expected_b > 0:
-        if b_arr is None:
-            B = np.zeros((out_f,), dtype=np.float32)
-        else:
-            if b_arr.size != expected_b:
-                raise RuntimeError(
-                    f"Dense bias size mismatch for '{op.name}': got {b_arr.size}, expected {expected_b}"
-                )
-            B = b_arr.reshape(out_f).astype(np.float32)
-    else:
-        B = np.zeros((out_f,), dtype=np.float32)
+    W = np.asarray(w_arr, dtype=np.float32).reshape(out_f, in_f)
+    B = np.zeros((out_f,), dtype=np.float32) if b_arr is None else np.asarray(b_arr, dtype=np.float32).reshape(out_f)
+    return W, B, in_f, out_f
 
-    return W, B, in_f, out_f, w_name, b_name
+
+def _resolve_conv_arrays(graph, op):
+    w_arr = None
+    b_arr = None
+
+    if len(op.inputs) > 1:
+        w_arr = _flatten_from_graph_named(graph, op.inputs[1])
+    if len(op.inputs) > 2:
+        b_arr = _flatten_from_graph_named(graph, op.inputs[2])
+
+    if w_arr is None:
+        attrs = getattr(op, "attrs", {}) or {}
+        for key in ("weights", "weight", "kernel", "W", "w", "weight_data", "kernel_data"):
+            if key in attrs:
+                arr, _ = _resolve_attr_candidate(graph, attrs[key])
+                if arr is not None:
+                    w_arr = arr
+                    break
+
+    if w_arr is None:
+        raise RuntimeError(f"Conv weight tensor not found for op '{op.name}'")
+
+    ws = None
+    if len(op.inputs) > 1:
+        w_t = graph.get_tensor(op.inputs[1])
+        if w_t is not None and getattr(w_t, "shape", None):
+            ws = tuple(int(v) for v in w_t.shape)
+
+    if ws is None:
+        attrs = getattr(op, "attrs", {}) or {}
+        for key in ("kernel_shape_full", "weight_shape", "weights_shape", "kernel_shape"):
+            if key in attrs:
+                candidate = attrs[key]
+                if isinstance(candidate, (list, tuple)) and len(candidate) == 4:
+                    ws = tuple(int(v) for v in candidate)
+                    break
+
+    if ws is None:
+        xshape = _shape_wo_batch(graph.get_tensor(op.inputs[0]).shape)
+        yshape = _shape_wo_batch(graph.get_tensor(op.outputs[0]).shape)
+        c_in, _, _ = _as_chw(xshape)
+        c_out, _, _ = _as_chw(yshape)
+        k = int((getattr(op, "attrs", {}) or {}).get("kernel_shape", [3, 3])[0])
+        ws = (c_out, c_in, k, k)
+
+    out_c = int(ws[0])
+    if b_arr is None:
+        b_arr = np.zeros((out_c,), dtype=np.float32)
+
+    return np.asarray(w_arr, dtype=np.float32).reshape(ws), np.asarray(b_arr, dtype=np.float32).reshape(-1), ws
+
+
+def _resolve_bn_arrays(graph, op, c: int):
+    def _get_or_default(idx, n, default):
+        if len(op.inputs) > idx:
+            arr = _flatten_from_graph_named(graph, op.inputs[idx])
+            if arr is not None:
+                return np.asarray(arr, dtype=np.float32).reshape(n)
+
+        attrs = getattr(op, "attrs", {}) or {}
+        attr_keys = {
+            1: ("gamma", "scale", "weight", "weights"),
+            2: ("beta", "bias", "biases"),
+            3: ("mean", "running_mean"),
+            4: ("var", "variance", "running_var"),
+        }.get(idx, ())
+        for k in attr_keys:
+            if k in attrs:
+                arr, _ = _resolve_attr_candidate(graph, attrs[k])
+                if arr is not None:
+                    return np.asarray(arr, dtype=np.float32).reshape(n)
+
+        return np.full((n,), default, dtype=np.float32)
+
+    gamma = _get_or_default(1, c, 1.0)
+    beta = _get_or_default(2, c, 0.0)
+    mean = _get_or_default(3, c, 0.0)
+    var = _get_or_default(4, c, 1.0)
+    return gamma, beta, mean, var
 
 
 def _softmax(x: np.ndarray) -> np.ndarray:
-    z = x.astype(np.float64)
-    z = z - np.max(z)
+    x = x.astype(np.float32)
+    z = x - np.max(x)
     e = np.exp(z)
-    p = e / np.sum(e)
-    return p.astype(np.float32)
+    s = np.sum(e)
+    if s == 0:
+        return np.zeros_like(x)
+    return e / s
 
 
-def _softmax_backward(y: np.ndarray, gy: np.ndarray) -> np.ndarray:
-    y = y.astype(np.float32)
-    gy = gy.astype(np.float32)
-    dot = float(np.sum(y * gy))
-    return (y * (gy - dot)).astype(np.float32)
+def _dense_forward(x: np.ndarray, W: np.ndarray, B: np.ndarray) -> np.ndarray:
+    return (W @ x + B).astype(np.float32)
 
 
-def _mse_loss_and_grad(pred: np.ndarray, target: np.ndarray) -> Tuple[float, np.ndarray]:
-    diff = pred - target
-    loss = float(np.mean(diff * diff))
-    grad = (2.0 / diff.size) * diff
-    return loss, grad.astype(np.float32)
+def _dense_weight_grad(x: np.ndarray, dy: np.ndarray) -> np.ndarray:
+    return np.outer(dy, x).astype(np.float32)
 
 
-def _cross_entropy_loss_and_grad(probs: np.ndarray, target: np.ndarray) -> Tuple[float, np.ndarray]:
-    p = probs.astype(np.float64)
-    p = p / np.sum(p)
-    loss = float(-np.sum(target * np.log(p + 1e-12)))
-    grad = (p - target).astype(np.float32)
-    return loss, grad
+def _dense_bias_grad(dy: np.ndarray) -> np.ndarray:
+    return dy.astype(np.float32)
 
 
-def _conv2d_nchw(x, w, b, strides=(1, 1), pads=(0, 0, 0, 0)):
-    n, c_in, h, w_in = x.shape
-    c_out, _, kh, kw = w.shape
-    sh, sw = strides
-    pt, pl, pb, pr = pads
-
-    xpad = np.pad(x, ((0, 0), (0, 0), (pt, pb), (pl, pr)), mode="constant")
-    hout = (xpad.shape[2] - kh) // sh + 1
-    wout = (xpad.shape[3] - kw) // sw + 1
-
-    y = np.zeros((n, c_out, hout, wout), dtype=np.float32)
-    for nn in range(n):
-        for co in range(c_out):
-            for ho in range(hout):
-                for wo in range(wout):
-                    acc = float(b[co]) if b is not None else 0.0
-                    hs = ho * sh
-                    ws = wo * sw
-                    for ci in range(c_in):
-                        for i in range(kh):
-                            for j in range(kw):
-                                acc += float(xpad[nn, ci, hs + i, ws + j]) * float(w[co, ci, i, j])
-                    y[nn, co, ho, wo] = acc
-    return y, xpad
+def _dense_backward_input(dy: np.ndarray, W: np.ndarray) -> np.ndarray:
+    return (W.T @ dy).astype(np.float32)
 
 
-def _conv2d_backward_nchw(x, xpad, w, gy, strides=(1, 1), pads=(0, 0, 0, 0)):
-    n, c_in, h, w_in = x.shape
-    c_out, _, kh, kw = w.shape
-    sh, sw = strides
-    pt, pl, pb, pr = pads
+def _relu(x: np.ndarray) -> np.ndarray:
+    return np.maximum(x, 0).astype(np.float32)
 
-    dxpad = np.zeros_like(xpad, dtype=np.float32)
-    dw = np.zeros_like(w, dtype=np.float32)
+
+def _relu_backward_from_output(y: np.ndarray, dy: np.ndarray) -> np.ndarray:
+    return (dy * (y > 0).astype(np.float32)).astype(np.float32)
+
+
+def _leaky_relu(x: np.ndarray, alpha: float) -> np.ndarray:
+    return np.where(x > 0, x, alpha * x).astype(np.float32)
+
+
+def _leaky_relu_backward_from_input(x: np.ndarray, dy: np.ndarray, alpha: float) -> np.ndarray:
+    return np.where(x > 0, dy, alpha * dy).astype(np.float32)
+
+
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    return (1.0 / (1.0 + np.exp(-x))).astype(np.float32)
+
+
+def _sigmoid_backward_from_output(y: np.ndarray, dy: np.ndarray) -> np.ndarray:
+    return (dy * y * (1.0 - y)).astype(np.float32)
+
+
+def _softmax_backward(y: np.ndarray, dy: np.ndarray) -> np.ndarray:
+    out = np.zeros_like(y, dtype=np.float32)
+    for i in range(y.size):
+        acc = 0.0
+        for j in range(y.size):
+            jac = y[i] * (1.0 - y[i]) if i == j else -y[i] * y[j]
+            acc += jac * dy[j]
+        out[i] = acc
+    return out.astype(np.float32)
+
+
+def _reshape_copy(x: np.ndarray) -> np.ndarray:
+    return x.copy().astype(np.float32)
+
+
+def _add_vec(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    return (a + b).astype(np.float32)
+
+
+def _conv_forward_hwc(
+    x: np.ndarray,
+    xshape: Tuple[int, int, int],
+    W: np.ndarray,
+    B: np.ndarray,
+    stride: int,
+    pad: int,
+    yshape: Tuple[int, int, int],
+) -> np.ndarray:
+    c_in, h_in, w_in = xshape
+    c_out, h_out, w_out = yshape
+    K = W.shape[2]
+    y = np.zeros((h_out * w_out * c_out,), dtype=np.float32)
+
+    for oh in range(h_out):
+        for ow in range(w_out):
+            for oc in range(c_out):
+                acc = float(B[oc])
+                for ic in range(c_in):
+                    for kh in range(K):
+                        for kw in range(K):
+                            ih = oh * stride + kh - pad
+                            iw = ow * stride + kw - pad
+                            if 0 <= ih < h_in and 0 <= iw < w_in:
+                                x_idx = (ih * w_in + iw) * c_in + ic
+                                acc += float(x[x_idx]) * float(W[oc, ic, kh, kw])
+                y[(oh * w_out + ow) * c_out + oc] = acc
+    return y
+
+
+def _conv_backward_input_hwc(
+    dy: np.ndarray,
+    W: np.ndarray,
+    xshape: Tuple[int, int, int],
+    yshape: Tuple[int, int, int],
+    stride: int,
+    pad: int,
+) -> np.ndarray:
+    c_in, h_in, w_in = xshape
+    c_out, h_out, w_out = yshape
+    K = W.shape[2]
+    dx = np.zeros((h_in * w_in * c_in,), dtype=np.float32)
+
+    for oh in range(h_out):
+        for ow in range(w_out):
+            for oc in range(c_out):
+                gy = float(dy[(oh * w_out + ow) * c_out + oc])
+                for ic in range(c_in):
+                    for kh in range(K):
+                        for kw in range(K):
+                            ih = oh * stride + kh - pad
+                            iw = ow * stride + kw - pad
+                            if 0 <= ih < h_in and 0 <= iw < w_in:
+                                x_idx = (ih * w_in + iw) * c_in + ic
+                                dx[x_idx] += gy * float(W[oc, ic, kh, kw])
+    return dx.astype(np.float32)
+
+
+def _conv_weight_grad_hwc(
+    x: np.ndarray,
+    dy: np.ndarray,
+    xshape: Tuple[int, int, int],
+    yshape: Tuple[int, int, int],
+    Wshape: Tuple[int, int, int, int],
+    stride: int,
+    pad: int,
+) -> np.ndarray:
+    c_in, h_in, w_in = xshape
+    c_out, h_out, w_out = yshape
+    _, _, K, _ = Wshape
+    dW = np.zeros(Wshape, dtype=np.float32)
+
+    for oc in range(c_out):
+        for ic in range(c_in):
+            for kh in range(K):
+                for kw in range(K):
+                    acc = 0.0
+                    for oh in range(h_out):
+                        for ow in range(w_out):
+                            ih = oh * stride + kh - pad
+                            iw = ow * stride + kw - pad
+                            if 0 <= ih < h_in and 0 <= iw < w_in:
+                                x_idx = (ih * w_in + iw) * c_in + ic
+                                y_idx = (oh * w_out + ow) * c_out + oc
+                                acc += float(x[x_idx]) * float(dy[y_idx])
+                    dW[oc, ic, kh, kw] = acc
+    return dW.reshape(-1).astype(np.float32)
+
+
+def _conv_bias_grad_hwc(dy: np.ndarray, yshape: Tuple[int, int, int]) -> np.ndarray:
+    c_out, h_out, w_out = yshape
     db = np.zeros((c_out,), dtype=np.float32)
-
-    hout, wout = gy.shape[2], gy.shape[3]
-
-    for nn in range(n):
-        for co in range(c_out):
-            for ho in range(hout):
-                for wo in range(wout):
-                    g = float(gy[nn, co, ho, wo])
-                    db[co] += g
-                    hs = ho * sh
-                    ws = wo * sw
-                    for ci in range(c_in):
-                        for i in range(kh):
-                            for j in range(kw):
-                                dw[co, ci, i, j] += g * float(xpad[nn, ci, hs + i, ws + j])
-                                dxpad[nn, ci, hs + i, ws + j] += g * float(w[co, ci, i, j])
-
-    dx = dxpad[:, :, pt:pt + h, pl:pl + w_in].astype(np.float32)
-    return dx, dw.astype(np.float32), db.astype(np.float32)
+    for oh in range(h_out):
+        for ow in range(w_out):
+            for oc in range(c_out):
+                db[oc] += dy[(oh * w_out + ow) * c_out + oc]
+    return db.astype(np.float32)
 
 
-def _pool2d_forward_nchw(x, kernel, strides, pads, mode):
-    n, c, h, w = x.shape
-    kh, kw = kernel
-    sh, sw = strides
-    pt, pl, pb, pr = pads
-    xpad = np.pad(x, ((0, 0), (0, 0), (pt, pb), (pl, pr)), mode="constant")
-    hout = (xpad.shape[2] - kh) // sh + 1
-    wout = (xpad.shape[3] - kw) // sw + 1
-
-    y = np.zeros((n, c, hout, wout), dtype=np.float32)
-    mask = np.zeros_like(xpad, dtype=np.float32) if mode == "max" else None
-
-    for nn in range(n):
-        for cc in range(c):
-            for ho in range(hout):
-                for wo in range(wout):
-                    hs = ho * sh
-                    ws = wo * sw
-                    window = xpad[nn, cc, hs:hs + kh, ws:ws + kw]
-                    if mode == "max":
-                        m = np.max(window)
-                        y[nn, cc, ho, wo] = m
-                        idx = np.unravel_index(np.argmax(window), window.shape)
-                        mask[nn, cc, hs + idx[0], ws + idx[1]] += 1.0
-                    else:
-                        y[nn, cc, ho, wo] = float(np.mean(window))
-    return y, xpad, mask
-
-
-def _pool2d_backward_nchw(x, xpad, gy, kernel, strides, pads, mode, mask=None):
-    n, c, h, w = x.shape
-    kh, kw = kernel
-    sh, sw = strides
-    pt, pl, pb, pr = pads
-    dxpad = np.zeros_like(xpad, dtype=np.float32)
-
-    hout, wout = gy.shape[2], gy.shape[3]
-    for nn in range(n):
-        for cc in range(c):
-            for ho in range(hout):
-                for wo in range(wout):
-                    g = float(gy[nn, cc, ho, wo])
-                    hs = ho * sh
-                    ws = wo * sw
-                    if mode == "max":
-                        window_mask = mask[nn, cc, hs:hs + kh, ws:ws + kw]
-                        dxpad[nn, cc, hs:hs + kh, ws:ws + kw] += g * window_mask
-                    else:
-                        dxpad[nn, cc, hs:hs + kh, ws:ws + kw] += g / float(kh * kw)
-
-    dx = dxpad[:, :, pt:pt + h, pl:pl + w].astype(np.float32)
-    return dx
-
-
-def _bn_forward(x, scale, bias, mean, var, eps):
-    shape = (1, -1) + (1,) * (x.ndim - 2)
-    y = ((x - mean.reshape(shape)) / np.sqrt(var.reshape(shape) + eps)) * scale.reshape(shape) + bias.reshape(shape)
+def _maxpool_forward_hwc(x: np.ndarray, xshape: Tuple[int, int, int], k: int, stride: int, yshape: Tuple[int, int, int]) -> np.ndarray:
+    c_in, h_in, w_in = xshape
+    c_out, h_out, w_out = yshape
+    y = np.zeros((h_out * w_out * c_out,), dtype=np.float32)
+    for oh in range(h_out):
+        for ow in range(w_out):
+            for c in range(c_in):
+                best = x[((oh * stride) * w_in + (ow * stride)) * c_in + c]
+                for kh in range(k):
+                    for kw in range(k):
+                        ih = oh * stride + kh
+                        iw = ow * stride + kw
+                        idx = (ih * w_in + iw) * c_in + c
+                        if x[idx] > best:
+                            best = x[idx]
+                y[(oh * w_out + ow) * c_out + c] = best
     return y.astype(np.float32)
 
 
-def _bn_backward(x, gy, scale, mean, var, eps):
-    shape = (1, -1) + (1,) * (x.ndim - 2)
-    invstd = 1.0 / np.sqrt(var.reshape(shape) + eps)
-    dx = gy * scale.reshape(shape) * invstd
-    dscale = np.sum(gy * ((x - mean.reshape(shape)) * invstd), axis=tuple(i for i in range(x.ndim) if i != 1))
-    dbias = np.sum(gy, axis=tuple(i for i in range(x.ndim) if i != 1))
-    return dx.astype(np.float32), dscale.astype(np.float32), dbias.astype(np.float32)
+def _avgpool_forward_hwc(x: np.ndarray, xshape: Tuple[int, int, int], k: int, stride: int, yshape: Tuple[int, int, int]) -> np.ndarray:
+    c_in, h_in, w_in = xshape
+    c_out, h_out, w_out = yshape
+    y = np.zeros((h_out * w_out * c_out,), dtype=np.float32)
+    for oh in range(h_out):
+        for ow in range(w_out):
+            for c in range(c_in):
+                acc = 0.0
+                for kh in range(k):
+                    for kw in range(k):
+                        ih = oh * stride + kh
+                        iw = ow * stride + kw
+                        idx = (ih * w_in + iw) * c_in + c
+                        acc += float(x[idx])
+                y[(oh * w_out + ow) * c_out + c] = acc / float(k * k)
+    return y.astype(np.float32)
 
 
-def _read_conv_attrs(op):
-    attrs = getattr(op, "attrs", {}) or {}
-    strides = tuple(attrs.get("strides", [1, 1]))
-    pads = attrs.get("pads", [0, 0, 0, 0])
-    if len(pads) == 2:
-        pads = [pads[0], pads[1], pads[0], pads[1]]
-    return tuple(int(x) for x in strides), tuple(int(x) for x in pads)
+def _maxpool_backward_hwc(x: np.ndarray, y: np.ndarray, dy: np.ndarray, xshape: Tuple[int, int, int], k: int, stride: int, yshape: Tuple[int, int, int]) -> np.ndarray:
+    c_in, h_in, w_in = xshape
+    c_out, h_out, w_out = yshape
+    dx = np.zeros((h_in * w_in * c_in,), dtype=np.float32)
+    for oh in range(h_out):
+        for ow in range(w_out):
+            for c in range(c_in):
+                out_idx = (oh * w_out + ow) * c_out + c
+                pooled = y[out_idx]
+                routed = False
+                for kh in range(k):
+                    for kw in range(k):
+                        ih = oh * stride + kh
+                        iw = ow * stride + kw
+                        in_idx = (ih * w_in + iw) * c_in + c
+                        if (not routed) and (x[in_idx] == pooled):
+                            dx[in_idx] += dy[out_idx]
+                            routed = True
+    return dx.astype(np.float32)
 
 
-def _read_pool_attrs(op):
-    attrs = getattr(op, "attrs", {}) or {}
-    kernel = attrs.get("kernel_shape", [2, 2])
-    strides = attrs.get("strides", kernel)
-    pads = attrs.get("pads", [0, 0, 0, 0])
-    if len(pads) == 2:
-        pads = [pads[0], pads[1], pads[0], pads[1]]
-    return tuple(int(x) for x in kernel), tuple(int(x) for x in strides), tuple(int(x) for x in pads)
+def _avgpool_backward_hwc(dy: np.ndarray, xshape: Tuple[int, int, int], k: int, stride: int, yshape: Tuple[int, int, int]) -> np.ndarray:
+    c_in, h_in, w_in = xshape
+    c_out, h_out, w_out = yshape
+    dx = np.zeros((h_in * w_in * c_in,), dtype=np.float32)
+    scale = 1.0 / float(k * k)
+    for oh in range(h_out):
+        for ow in range(w_out):
+            for c in range(c_in):
+                out_idx = (oh * w_out + ow) * c_out + c
+                g = float(dy[out_idx]) * scale
+                for kh in range(k):
+                    for kw in range(k):
+                        ih = oh * stride + kh
+                        iw = ow * stride + kw
+                        in_idx = (ih * w_in + iw) * c_in + c
+                        dx[in_idx] += g
+    return dx.astype(np.float32)
 
 
-def run_training_reference_step(
-    *,
-    graph: Graph,
-    raw_cfg: Dict[str, Any],
-    out_dir: Path,
-    x_input: np.ndarray,
-    target: np.ndarray,
-) -> TrainingReferenceResult:
-    out_dir = Path(out_dir)
-    ref_dir = out_dir / "training_reference"
-    ref_dir.mkdir(parents=True, exist_ok=True)
+def _bn_forward_hwc(x: np.ndarray, shape: Tuple[int, int, int], gamma: np.ndarray, beta: np.ndarray, eps: float = 1e-5):
+    c, h, w = shape
+    hw = h * w
+    mean = np.zeros((c,), dtype=np.float32)
+    var = np.zeros((c,), dtype=np.float32)
+    xhat = np.zeros_like(x, dtype=np.float32)
+    y = np.zeros_like(x, dtype=np.float32)
 
-    lr = float(_cfg_get(raw_cfg, "training.optimizer.learning_rate", 0.01))
-    loss_type = str(_cfg_get(raw_cfg, "training.loss.type", "mse")).lower()
+    for ch in range(c):
+        vals = np.array([x[hw_i * c + ch] for hw_i in range(hw)], dtype=np.float32)
+        m = float(np.mean(vals))
+        v = float(np.mean((vals - m) ** 2))
+        mean[ch] = m
+        var[ch] = v
+        inv_std = 1.0 / np.sqrt(v + eps)
+        for hw_i in range(hw):
+            idx = hw_i * c + ch
+            xn = (x[idx] - m) * inv_std
+            xhat[idx] = xn
+            y[idx] = gamma[ch] * xn + beta[ch]
 
+    cache = {"mean": mean, "var": var, "xhat": xhat}
+    return y.astype(np.float32), cache
+
+
+def _bn_param_grad_hwc(dy: np.ndarray, xhat: np.ndarray, shape: Tuple[int, int, int]):
+    c, h, w = shape
+    hw = h * w
+    dgamma = np.zeros((c,), dtype=np.float32)
+    dbeta = np.zeros((c,), dtype=np.float32)
+
+    for ch in range(c):
+        dg = 0.0
+        db = 0.0
+        for hw_i in range(hw):
+            idx = hw_i * c + ch
+            dg += float(dy[idx]) * float(xhat[idx])
+            db += float(dy[idx])
+        dgamma[ch] = dg
+        dbeta[ch] = db
+
+    return dgamma, dbeta
+
+
+def _bn_backward_input_simple_hwc(dy: np.ndarray, shape: Tuple[int, int, int], gamma: np.ndarray):
+    c, h, w = shape
+    hw = h * w
+    dx = np.zeros_like(dy, dtype=np.float32)
+    for ch in range(c):
+        for hw_i in range(hw):
+            idx = hw_i * c + ch
+            dx[idx] = dy[idx] * gamma[ch]
+    return dx.astype(np.float32)
+
+
+def _forward_pass(graph, params_state: Dict[str, Dict[str, np.ndarray]], x_input: np.ndarray, layerwise_dir: Path):
     vals: Dict[str, np.ndarray] = {}
-    grads: Dict[str, np.ndarray] = {}
-    cache: Dict[str, Dict[str, Any]] = {}
+    caches: Dict[str, Dict[str, Any]] = {}
 
     input_name = graph.inputs[0]
-    output_name = graph.outputs[0]
-    vals[input_name] = np.asarray(x_input, dtype=np.float32)
-
-    trainable_order: List[Tuple[str, List[np.ndarray], List[np.ndarray]]] = []
+    vals[input_name] = x_input.astype(np.float32)
 
     for op in graph.ops:
         xname = op.inputs[0]
         yname = op.outputs[0]
         x = vals[xname]
+        y = None
+        cache: Dict[str, Any] = {}
 
-        if op.op_type in ("Flatten", "Reshape"):
-            vals[yname] = x.reshape(-1).astype(np.float32)
-            cache[op.name] = {"op_type": op.op_type, "xname": xname, "yname": yname, "in_shape": x.shape}
-
-        elif op.op_type == "Dense":
-            W, B, _in_f, _out_f, _w_name, _b_name = _resolve_dense_arrays(graph, op)
-            xv = x.reshape(-1)
-            y = (W @ xv + B).astype(np.float32)
-            vals[yname] = y
-            cache[op.name] = {"op_type": "Dense", "xname": xname, "yname": yname, "x": xv.copy(), "W": W.copy(), "B": B.copy()}
-            trainable_order.append((op.name, [W.copy(), B.copy()], []))
+        if op.op_type == "Dense":
+            tag = op.name
+            W = params_state[tag]["W"]
+            B = params_state[tag]["B"]
+            y = _dense_forward(x, W, B)
+            cache["x"] = x
 
         elif op.op_type == "Conv":
-            W = _array_from_graph_named(graph, op.inputs[1]).astype(np.float32)
-            B = _array_from_graph_named(graph, op.inputs[2]).astype(np.float32) if len(op.inputs) > 2 else np.zeros((W.shape[0],), dtype=np.float32)
-            x4 = x.astype(np.float32)
-            if x4.ndim == 3:
-                x4 = x4[None, ...]
-            strides, pads = _read_conv_attrs(op)
-            y, xpad = _conv2d_nchw(x4, W, B, strides=strides, pads=pads)
-            vals[yname] = y.astype(np.float32)
-            cache[op.name] = {"op_type": "Conv", "xname": xname, "yname": yname, "x": x4.copy(), "xpad": xpad.copy(), "W": W.copy(), "B": B.copy(), "strides": strides, "pads": pads}
-            trainable_order.append((op.name, [W.copy(), B.copy()], []))
+            tag = op.name
+            W = params_state[tag]["W"]
+            B = params_state[tag]["B"]
+            xshape = _shape_wo_batch(graph.get_tensor(xname).shape)
+            yshape = _shape_wo_batch(graph.get_tensor(yname).shape)
+            stride = int(op.attrs.get("strides", [1, 1])[0])
+            pad = int(op.attrs.get("pads", [0, 0, 0, 0])[0])
+            y = _conv_forward_hwc(x, _as_chw(xshape), W, B, stride, pad, _as_chw(yshape))
+            cache["x"] = x
+            cache["xshape"] = _as_chw(xshape)
+            cache["yshape"] = _as_chw(yshape)
+            cache["stride"] = stride
+            cache["pad"] = pad
+            cache["Wshape"] = W.shape
 
         elif op.op_type == "Relu":
-            y = np.maximum(x, 0.0).astype(np.float32)
-            vals[yname] = y
-            cache[op.name] = {"op_type": "Relu", "xname": xname, "yname": yname, "y": y.copy()}
+            y = _relu(x)
 
         elif op.op_type == "LeakyRelu":
             alpha = float((getattr(op, "attrs", {}) or {}).get("alpha", 0.01))
-            y = np.where(x > 0, x, alpha * x).astype(np.float32)
-            vals[yname] = y
-            cache[op.name] = {"op_type": "LeakyRelu", "xname": xname, "yname": yname, "x": x.copy(), "alpha": alpha}
+            y = _leaky_relu(x, alpha)
+            cache["alpha"] = alpha
+            cache["x"] = x
 
         elif op.op_type == "Sigmoid":
-            y = (1.0 / (1.0 + np.exp(-x))).astype(np.float32)
-            vals[yname] = y
-            cache[op.name] = {"op_type": "Sigmoid", "xname": xname, "yname": yname, "y": y.copy()}
+            y = _sigmoid(x)
 
         elif op.op_type == "Softmax":
-            y = _softmax(x.reshape(-1))
-            vals[yname] = y
-            cache[op.name] = {"op_type": "Softmax", "xname": xname, "yname": yname, "y": y.copy()}
+            y = _softmax(x)
+
+        elif op.op_type in ("Flatten", "Reshape"):
+            y = _reshape_copy(x)
 
         elif op.op_type == "Add":
-            rhs_name = op.inputs[1]
-            rhs = vals[rhs_name] if rhs_name in vals else _array_from_graph_named(graph, rhs_name)
-            y = (x + rhs).astype(np.float32)
-            vals[yname] = y
-            cache[op.name] = {"op_type": "Add", "xname": xname, "rhs_name": rhs_name, "yname": yname, "rhs_shape": np.shape(rhs)}
-
-        elif op.op_type == "BatchNormalization":
-            scale = _array_from_graph_named(graph, op.inputs[1]).astype(np.float32)
-            bias = _array_from_graph_named(graph, op.inputs[2]).astype(np.float32)
-            mean = _array_from_graph_named(graph, op.inputs[3]).astype(np.float32)
-            var = _array_from_graph_named(graph, op.inputs[4]).astype(np.float32)
-            eps = float((getattr(op, "attrs", {}) or {}).get("epsilon", 1e-5))
-            y = _bn_forward(x.astype(np.float32), scale, bias, mean, var, eps)
-            vals[yname] = y
-            cache[op.name] = {"op_type": "BatchNormalization", "xname": xname, "yname": yname, "x": x.copy(), "scale": scale.copy(), "bias": bias.copy(), "mean": mean.copy(), "var": var.copy(), "eps": eps}
-            trainable_order.append((op.name, [scale.copy(), bias.copy()], []))
+            rhs = vals[op.inputs[1]]
+            y = _add_vec(x, rhs)
 
         elif op.op_type == "MaxPool":
-            kernel, strides, pads = _read_pool_attrs(op)
-            x4 = x.astype(np.float32)
-            if x4.ndim == 3:
-                x4 = x4[None, ...]
-            y, xpad, mask = _pool2d_forward_nchw(x4, kernel, strides, pads, mode="max")
-            vals[yname] = y.astype(np.float32)
-            cache[op.name] = {"op_type": "MaxPool", "xname": xname, "yname": yname, "x": x4.copy(), "xpad": xpad.copy(), "mask": mask.copy(), "kernel": kernel, "strides": strides, "pads": pads}
+            xshape = _shape_wo_batch(graph.get_tensor(xname).shape)
+            yshape = _shape_wo_batch(graph.get_tensor(yname).shape)
+            k = int(op.attrs.get("kernel_shape", [2, 2])[0])
+            stride = int(op.attrs.get("strides", [2, 2])[0])
+            y = _maxpool_forward_hwc(x, _as_chw(xshape), k, stride, _as_chw(yshape))
+            cache["x"] = x
+            cache["xshape"] = _as_chw(xshape)
+            cache["yshape"] = _as_chw(yshape)
+            cache["k"] = k
+            cache["stride"] = stride
 
         elif op.op_type == "AvgPool":
-            kernel, strides, pads = _read_pool_attrs(op)
-            x4 = x.astype(np.float32)
-            if x4.ndim == 3:
-                x4 = x4[None, ...]
-            y, xpad, _mask = _pool2d_forward_nchw(x4, kernel, strides, pads, mode="avg")
-            vals[yname] = y.astype(np.float32)
-            cache[op.name] = {"op_type": "AvgPool", "xname": xname, "yname": yname, "x": x4.copy(), "xpad": xpad.copy(), "kernel": kernel, "strides": strides, "pads": pads}
+            xshape = _shape_wo_batch(graph.get_tensor(xname).shape)
+            yshape = _shape_wo_batch(graph.get_tensor(yname).shape)
+            k = int(op.attrs.get("kernel_shape", [2, 2])[0])
+            stride = int(op.attrs.get("strides", [2, 2])[0])
+            y = _avgpool_forward_hwc(x, _as_chw(xshape), k, stride, _as_chw(yshape))
+            cache["xshape"] = _as_chw(xshape)
+            cache["yshape"] = _as_chw(yshape)
+            cache["k"] = k
+            cache["stride"] = stride
+
+        elif op.op_type == "BatchNormalization":
+            tag = op.name
+            gamma = params_state[tag]["gamma"]
+            beta = params_state[tag]["beta"]
+            shape = _shape_wo_batch(graph.get_tensor(yname).shape)
+            y, bn_cache = _bn_forward_hwc(x, _as_chw(shape), gamma, beta)
+            cache["shape"] = _as_chw(shape)
+            cache.update(bn_cache)
 
         else:
-            raise RuntimeError(f"Unsupported training-reference op_type={op.op_type} in extended reference")
+            raise RuntimeError(f"Unsupported training reference op: {op.op_type}")
 
-    pred = vals[output_name].reshape(-1)
-    target = np.asarray(target, dtype=np.float32).reshape(-1)
+        vals[yname] = y.astype(np.float32)
+        caches[op.name] = cache
+        _write_f32(layerwise_dir / f"{op.name}__fwd.bin", y.astype(np.float32))
 
-    if loss_type == "mse":
-        loss_before, dy = _mse_loss_and_grad(pred, target)
-    elif loss_type == "cross_entropy":
-        loss_before, dy = _cross_entropy_loss_and_grad(pred, target)
-    else:
-        raise RuntimeError(f"Unsupported loss type: {loss_type}")
+    return vals, caches
 
-    grads[output_name] = dy
-    trainable_grads_rev: List[List[np.ndarray]] = []
+
+def _mse_loss_and_grad(pred: np.ndarray, target: np.ndarray):
+    diff = pred.astype(np.float32) - target.astype(np.float32)
+    loss = float(np.mean(diff * diff))
+    grad = (2.0 / float(pred.size)) * diff
+    return loss, grad.astype(np.float32)
+
+
+def run_training_reference_step(
+    *,
+    graph,
+    raw_cfg: Dict[str, Any],
+    out_dir: Path,
+    x_input: np.ndarray,
+    target: np.ndarray,
+) -> TrainingReferenceResult:
+    ref_dir = Path(out_dir) / "training_reference"
+    ref_dir.mkdir(parents=True, exist_ok=True)
+    layerwise_dir = ref_dir / "layerwise"
+    layerwise_dir.mkdir(parents=True, exist_ok=True)
+
+    lr = float((((raw_cfg.get("training", {}) or {}).get("optimizer", {}) or {}).get("learning_rate", 0.01)))
+
+    params_state: Dict[str, Dict[str, np.ndarray]] = {}
+    trainable_order: List[Tuple[str, str]] = []
+
+    for op in graph.ops:
+        if op.op_type == "Dense":
+            W, B, _in_f, _out_f = _resolve_dense_arrays(graph, op)
+            params_state[op.name] = {"W": W.copy(), "B": B.copy()}
+            trainable_order.append(("dense", op.name))
+
+        elif op.op_type == "Conv":
+            W, B, _ws = _resolve_conv_arrays(graph, op)
+            params_state[op.name] = {"W": W.copy(), "B": B.reshape(-1).copy()}
+            trainable_order.append(("conv", op.name))
+
+        elif op.op_type == "BatchNormalization":
+            shape = _shape_wo_batch(graph.get_tensor(op.outputs[0]).shape)
+            c, _, _ = _as_chw(shape)
+            gamma, beta, _mean, _var = _resolve_bn_arrays(graph, op, c)
+            params_state[op.name] = {
+                "gamma": gamma.copy(),
+                "beta": beta.copy(),
+            }
+            trainable_order.append(("bn", op.name))
+
+    weights_before_chunks: List[np.ndarray] = []
+    for kind, name in trainable_order:
+        ps = params_state[name]
+        if kind in ("dense", "conv"):
+            weights_before_chunks.append(ps["W"].reshape(-1).copy())
+            weights_before_chunks.append(ps["B"].reshape(-1).copy())
+        else:
+            weights_before_chunks.append(ps["gamma"].reshape(-1).copy())
+            weights_before_chunks.append(ps["beta"].reshape(-1).copy())
+
+    vals, caches = _forward_pass(graph, params_state, x_input.astype(np.float32), layerwise_dir)
+    pred = vals[graph.outputs[0]]
+    loss_before, d_output = _mse_loss_and_grad(pred, target.astype(np.float32))
+
+    grads_by_tensor: Dict[str, np.ndarray] = {graph.outputs[0]: d_output.astype(np.float32)}
+    grad_chunks_map: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
 
     for op in reversed(graph.ops):
-        rec = cache[op.name]
-        xname = rec["xname"]
-        yname = rec["yname"]
-        gy = grads[yname]
+        xname = op.inputs[0]
+        yname = op.outputs[0]
+        x = vals[xname]
+        y = vals[yname]
+        dy = grads_by_tensor[yname]
 
-        if rec["op_type"] in ("Flatten", "Reshape"):
-            grads[xname] = gy.reshape(rec["in_shape"]).astype(np.float32)
+        if op.op_type == "Dense":
+            ps = params_state[op.name]
+            dW = _dense_weight_grad(caches[op.name]["x"], dy)
+            dB = _dense_bias_grad(dy)
+            dx = _dense_backward_input(dy, ps["W"])
+            grad_chunks_map[op.name] = (dW.reshape(-1), dB.reshape(-1))
+            grads_by_tensor[xname] = dx
 
-        elif rec["op_type"] == "Relu":
-            grads[xname] = (gy * (rec["y"] > 0).astype(np.float32)).astype(np.float32)
-
-        elif rec["op_type"] == "LeakyRelu":
-            x = rec["x"]
-            alpha = rec["alpha"]
-            grads[xname] = (gy * np.where(x > 0, 1.0, alpha)).astype(np.float32)
-
-        elif rec["op_type"] == "Sigmoid":
-            y = rec["y"]
-            grads[xname] = (gy * y * (1.0 - y)).astype(np.float32)
-
-        elif rec["op_type"] == "Softmax":
-            grads[xname] = _softmax_backward(rec["y"], gy.reshape(-1))
-
-        elif rec["op_type"] == "Add":
-            grads[xname] = gy.astype(np.float32)
-            rhs_name = rec["rhs_name"]
-            if rhs_name in vals:
-                grads[rhs_name] = gy.astype(np.float32)
-
-        elif rec["op_type"] == "Dense":
-            x = rec["x"].reshape(-1)
-            W = rec["W"]
-            gyf = gy.reshape(-1)
-            dW = np.outer(gyf, x).astype(np.float32)
-            dB = gyf.astype(np.float32)
-            dx = (W.T @ gyf).astype(np.float32)
-            trainable_grads_rev.append([dW, dB])
-            grads[xname] = dx
-
-        elif rec["op_type"] == "Conv":
-            gy4 = gy.astype(np.float32)
-            if gy4.ndim == 3:
-                gy4 = gy4[None, ...]
-            dx, dW, dB = _conv2d_backward_nchw(
-                rec["x"], rec["xpad"], rec["W"], gy4,
-                strides=rec["strides"], pads=rec["pads"]
+        elif op.op_type == "Conv":
+            ps = params_state[op.name]
+            cache = caches[op.name]
+            dW = _conv_weight_grad_hwc(
+                cache["x"], dy, cache["xshape"], cache["yshape"], cache["Wshape"], cache["stride"], cache["pad"]
             )
-            trainable_grads_rev.append([dW, dB])
-            grads[xname] = dx.astype(np.float32)
+            dB = _conv_bias_grad_hwc(dy, cache["yshape"])
+            dx = _conv_backward_input_hwc(dy, ps["W"], cache["xshape"], cache["yshape"], cache["stride"], cache["pad"])
+            grad_chunks_map[op.name] = (dW.reshape(-1), dB.reshape(-1))
+            grads_by_tensor[xname] = dx
 
-        elif rec["op_type"] == "BatchNormalization":
-            dx, dscale, dbias = _bn_backward(rec["x"], gy, rec["scale"], rec["mean"], rec["var"], rec["eps"])
-            trainable_grads_rev.append([dscale, dbias])
-            grads[xname] = dx.astype(np.float32)
+        elif op.op_type == "Relu":
+            dx = _relu_backward_from_output(y, dy)
+            grads_by_tensor[xname] = dx
 
-        elif rec["op_type"] == "MaxPool":
-            gy4 = gy.astype(np.float32)
-            if gy4.ndim == 3:
-                gy4 = gy4[None, ...]
-            dx = _pool2d_backward_nchw(
-                rec["x"], rec["xpad"], gy4,
-                rec["kernel"], rec["strides"], rec["pads"],
-                mode="max", mask=rec["mask"]
-            )
-            grads[xname] = dx.astype(np.float32)
+        elif op.op_type == "LeakyRelu":
+            dx = _leaky_relu_backward_from_input(caches[op.name]["x"], dy, caches[op.name]["alpha"])
+            grads_by_tensor[xname] = dx
 
-        elif rec["op_type"] == "AvgPool":
-            gy4 = gy.astype(np.float32)
-            if gy4.ndim == 3:
-                gy4 = gy4[None, ...]
-            dx = _pool2d_backward_nchw(
-                rec["x"], rec["xpad"], gy4,
-                rec["kernel"], rec["strides"], rec["pads"],
-                mode="avg", mask=None
-            )
-            grads[xname] = dx.astype(np.float32)
+        elif op.op_type == "Sigmoid":
+            dx = _sigmoid_backward_from_output(y, dy)
+            grads_by_tensor[xname] = dx
 
-    trainable_grads_rev.reverse()
+        elif op.op_type == "Softmax":
+            dx = _softmax_backward(y, dy)
+            grads_by_tensor[xname] = dx
 
-    weights_before: List[np.ndarray] = []
-    grads_flattened: List[np.ndarray] = []
-    weights_after: List[np.ndarray] = []
+        elif op.op_type in ("Flatten", "Reshape"):
+            grads_by_tensor[xname] = dy.copy().astype(np.float32)
 
-    for (_op_name, params_before, _), param_grads in zip(trainable_order, trainable_grads_rev):
-        for p_before, dp in zip(params_before, param_grads):
-            p_before_f = np.asarray(p_before, dtype=np.float32).reshape(-1)
-            dp_f = np.asarray(dp, dtype=np.float32).reshape(-1)
-            weights_before.append(p_before_f)
-            grads_flattened.append(dp_f)
-            weights_after.append((p_before_f - lr * dp_f).astype(np.float32))
+        elif op.op_type == "Add":
+            grads_by_tensor[xname] = dy.copy().astype(np.float32)
+            rhs = op.inputs[1]
+            grads_by_tensor[rhs] = grads_by_tensor.get(rhs, np.zeros_like(dy, dtype=np.float32)) + dy.astype(np.float32)
 
-    if not weights_before:
-        raise RuntimeError("No trainable parameters found in training reference")
+        elif op.op_type == "MaxPool":
+            cache = caches[op.name]
+            dx = _maxpool_backward_hwc(cache["x"], y, dy, cache["xshape"], cache["k"], cache["stride"], cache["yshape"])
+            grads_by_tensor[xname] = dx
 
-    weights_before_flat = np.concatenate(weights_before, axis=0).astype(np.float32)
-    grads_flat = np.concatenate(grads_flattened, axis=0).astype(np.float32)
-    weights_after_flat = np.concatenate(weights_after, axis=0).astype(np.float32)
+        elif op.op_type == "AvgPool":
+            cache = caches[op.name]
+            dx = _avgpool_backward_hwc(dy, cache["xshape"], cache["k"], cache["stride"], cache["yshape"])
+            grads_by_tensor[xname] = dx
 
-    grads_path = ref_dir / "grads_ref.bin"
-    w_before_path = ref_dir / "weights_before_ref.bin"
-    w_after_path = ref_dir / "weights_after_ref.bin"
+        elif op.op_type == "BatchNormalization":
+            ps = params_state[op.name]
+            cache = caches[op.name]
+            dgamma, dbeta = _bn_param_grad_hwc(dy, cache["xhat"], cache["shape"])
+            dx = _bn_backward_input_simple_hwc(dy, cache["shape"], ps["gamma"])
+            grad_chunks_map[op.name] = (dgamma.reshape(-1), dbeta.reshape(-1))
+            grads_by_tensor[xname] = dx
 
-    grads_flat.tofile(grads_path)
-    weights_before_flat.tofile(w_before_path)
-    weights_after_flat.tofile(w_after_path)
+        else:
+            raise RuntimeError(f"Unsupported training reference op: {op.op_type}")
 
-    payload = {
-        "loss_before": float(loss_before),
-        "loss_after": None,
-        "grads_ref_bin": str(grads_path),
-        "weights_before_ref_bin": str(w_before_path),
-        "weights_after_ref_bin": str(w_after_path),
-        "num_grad_words": int(grads_flat.size),
-        "num_weight_words": int(weights_before_flat.size),
-    }
+        _write_f32(layerwise_dir / f"{op.name}__bwd_in.bin", grads_by_tensor[xname].astype(np.float32))
 
+    grads_chunks: List[np.ndarray] = []
+    for kind, name in trainable_order:
+        g0, g1 = grad_chunks_map[name]
+        grads_chunks.append(g0.reshape(-1))
+        grads_chunks.append(g1.reshape(-1))
+
+    grads_flat = np.concatenate(grads_chunks, axis=0).astype(np.float32) if grads_chunks else np.zeros((0,), dtype=np.float32)
+    weights_before_flat = np.concatenate(weights_before_chunks, axis=0).astype(np.float32) if weights_before_chunks else np.zeros((0,), dtype=np.float32)
+
+    for kind, name in trainable_order:
+        ps = params_state[name]
+        g0, g1 = grad_chunks_map[name]
+        if kind in ("dense", "conv"):
+            ps["W"] = (ps["W"].reshape(-1) - lr * g0.reshape(-1)).reshape(ps["W"].shape).astype(np.float32)
+            ps["B"] = (ps["B"].reshape(-1) - lr * g1.reshape(-1)).reshape(ps["B"].shape).astype(np.float32)
+        else:
+            ps["gamma"] = (ps["gamma"].reshape(-1) - lr * g0.reshape(-1)).reshape(ps["gamma"].shape).astype(np.float32)
+            ps["beta"] = (ps["beta"].reshape(-1) - lr * g1.reshape(-1)).reshape(ps["beta"].shape).astype(np.float32)
+
+    weights_after_chunks: List[np.ndarray] = []
+    for kind, name in trainable_order:
+        ps = params_state[name]
+        if kind in ("dense", "conv"):
+            weights_after_chunks.append(ps["W"].reshape(-1).copy())
+            weights_after_chunks.append(ps["B"].reshape(-1).copy())
+        else:
+            weights_after_chunks.append(ps["gamma"].reshape(-1).copy())
+            weights_after_chunks.append(ps["beta"].reshape(-1).copy())
+
+    weights_after_flat = np.concatenate(weights_after_chunks, axis=0).astype(np.float32) if weights_after_chunks else np.zeros((0,), dtype=np.float32)
+
+    vals_after, _ = _forward_pass(graph, params_state, x_input.astype(np.float32), layerwise_dir / "after_step")
+    pred_after = vals_after[graph.outputs[0]]
+    loss_after, _ = _mse_loss_and_grad(pred_after, target.astype(np.float32))
+
+    grads_flat_path = ref_dir / "grads_ref.bin"
+    weights_before_flat_path = ref_dir / "weights_before_ref.bin"
+    weights_after_flat_path = ref_dir / "weights_after_ref.bin"
     summary_json = ref_dir / "summary.json"
     summary_txt = ref_dir / "summary.txt"
-    write_text(summary_json, json.dumps(payload, indent=2))
-    write_text(
-        summary_txt,
+
+    _write_f32(grads_flat_path, grads_flat)
+    _write_f32(weights_before_flat_path, weights_before_flat)
+    _write_f32(weights_after_flat_path, weights_after_flat)
+
+    payload = {
+        "loss_before": loss_before,
+        "loss_after": loss_after,
+        "num_grad_words": int(grads_flat.size),
+        "num_weight_words": int(weights_before_flat.size),
+        "layerwise_dir": str(layerwise_dir),
+    }
+    summary_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    summary_txt.write_text(
         "\n".join(
             [
                 "=========== FPGAI Training Reference ===========",
-                f"loss_before      : {loss_before}",
-                f"num_grad_words   : {grads_flat.size}",
-                f"num_weight_words : {weights_before_flat.size}",
+                f"loss_before : {loss_before}",
+                f"loss_after  : {loss_after}",
+                f"grad_words  : {int(grads_flat.size)}",
+                f"param_words : {int(weights_before_flat.size)}",
+                f"layerwise   : {layerwise_dir}",
                 "================================================",
             ]
         ),
+        encoding="utf-8",
     )
 
     return TrainingReferenceResult(
-        loss_before=float(loss_before),
-        loss_after=float("nan"),
-        grads_flat_path=grads_path,
-        weights_before_flat_path=w_before_path,
-        weights_after_flat_path=w_after_path,
+        out_dir=ref_dir,
+        grads_flat_path=grads_flat_path,
+        weights_before_flat_path=weights_before_flat_path,
+        weights_after_flat_path=weights_after_flat_path,
         summary_json=summary_json,
         summary_txt=summary_txt,
+        loss_before=loss_before,
+        loss_after=loss_after,
+        layerwise_dir=layerwise_dir,
     )
