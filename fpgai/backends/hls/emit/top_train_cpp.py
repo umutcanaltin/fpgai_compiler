@@ -322,7 +322,7 @@ def _resolve_bn_arrays(graph: Graph, op, c: int):
     return gamma, beta, mean, var
 
 
-def _build_tensor_maps(graph: Graph) -> Tuple[Dict[str, Tuple[int, ...]], Dict[str, int], Dict[str, str], Dict[str, str]]:
+def _build_tensor_shapes(graph: Graph) -> Tuple[Dict[str, Tuple[int, ...]], Dict[str, int]]:
     inferred_shapes: Dict[str, Tuple[int, ...]] = {}
 
     if hasattr(graph, "tensors"):
@@ -401,8 +401,6 @@ def _build_tensor_maps(graph: Graph) -> Tuple[Dict[str, Tuple[int, ...]], Dict[s
 
     tensor_name_to_shape: Dict[str, Tuple[int, ...]] = {}
     tensor_name_to_size: Dict[str, int] = {}
-    tensor_name_to_cxx: Dict[str, str] = {}
-    grad_name_to_cxx: Dict[str, str] = {}
 
     for tname in sorted(all_tensor_names):
         shp = inferred_shapes.get(tname, tuple())
@@ -412,11 +410,64 @@ def _build_tensor_maps(graph: Graph) -> Tuple[Dict[str, Tuple[int, ...]], Dict[s
             shp = (1,)
         tensor_name_to_shape[tname] = shp
         tensor_name_to_size[tname] = _flat_size(shp)
-        sname = _sanitize(tname)
-        tensor_name_to_cxx[tname] = f"buf_{sname}"
-        grad_name_to_cxx[tname] = f"grad_{sname}"
 
-    return tensor_name_to_shape, tensor_name_to_size, tensor_name_to_cxx, grad_name_to_cxx
+    return tensor_name_to_shape, tensor_name_to_size
+
+
+def _build_tensor_aliases(
+    graph: Graph,
+    tensor_name_to_size: Dict[str, int],
+) -> Tuple[Dict[str, str], Dict[str, str], List[str]]:
+    all_names = set(tensor_name_to_size.keys())
+    produced = {op.outputs[0] for op in graph.ops if op.outputs}
+    inputs = set(getattr(graph, "inputs", []))
+    outputs = set(getattr(graph, "outputs", []))
+
+    canonical: Dict[str, str] = {name: name for name in all_names}
+
+    prev_output: Optional[str] = None
+    for op in graph.ops:
+        if op.inputs:
+            xname = op.inputs[0]
+            if (
+                prev_output is not None
+                and xname not in produced
+                and xname not in inputs
+                and xname not in outputs
+                and tensor_name_to_size.get(xname, -1) == tensor_name_to_size.get(prev_output, -2)
+            ):
+                canonical[xname] = canonical.get(prev_output, prev_output)
+        if op.outputs:
+            yname = op.outputs[0]
+            if yname not in canonical:
+                canonical[yname] = yname
+            prev_output = yname
+
+    root_to_cxx: Dict[str, str] = {}
+    root_to_grad: Dict[str, str] = {}
+    roots_in_order: List[str] = []
+
+    def _root(name: str) -> str:
+        seen = set()
+        cur = name
+        while canonical.get(cur, cur) != cur and cur not in seen:
+            seen.add(cur)
+            cur = canonical[cur]
+        return cur
+
+    tensor_name_to_cxx: Dict[str, str] = {}
+    grad_name_to_cxx: Dict[str, str] = {}
+
+    for name in sorted(all_names):
+        root = _root(name)
+        if root not in root_to_cxx:
+            root_to_cxx[root] = f"buf_{_sanitize(root)}"
+            root_to_grad[root] = f"grad_{_sanitize(root)}"
+            roots_in_order.append(root)
+        tensor_name_to_cxx[name] = root_to_cxx[root]
+        grad_name_to_cxx[name] = root_to_grad[root]
+
+    return tensor_name_to_cxx, grad_name_to_cxx, roots_in_order
 
 
 def emit_top_train_cpp(
@@ -441,7 +492,8 @@ def emit_top_train_cpp(
     input_name = graph.inputs[0]
     output_name = graph.outputs[0]
 
-    tensor_name_to_shape, tensor_name_to_size, tensor_name_to_cxx, grad_name_to_cxx = _build_tensor_maps(graph)
+    tensor_name_to_shape, tensor_name_to_size = _build_tensor_shapes(graph)
+    tensor_name_to_cxx, grad_name_to_cxx, roots_in_order = _build_tensor_aliases(graph, tensor_name_to_size)
 
     input_size = tensor_name_to_size[input_name]
     output_size = tensor_name_to_size[output_name]
@@ -467,6 +519,16 @@ def emit_top_train_cpp(
     lines.append("static inline float u32_to_f32(unsigned int v) { union { float f; unsigned int u; } x; x.u = v; return x.f; }")
     lines.append("static inline void write_f32(hls::stream<axis_t>& s, float v, bool last=false) { axis_t p; p.data=f32_to_u32(v); p.keep=-1; p.strb=-1; p.last=last?1:0; s.write(p); }")
     lines.append("static inline float read_f32(hls::stream<axis_t>& s) { axis_t p = s.read(); return u32_to_f32((unsigned int)p.data); }")
+    lines.append("")
+    lines.append("template<int N>")
+    lines.append("static inline void emit_stream_block(hls::stream<axis_t>& out, const float* data, bool is_last_block) {")
+    lines.append("#pragma HLS INLINE off")
+    lines.append("  for (int i = 0; i < N; ++i) {")
+    lines.append("#pragma HLS PIPELINE II=1")
+    lines.append("    bool last = is_last_block && (i == N - 1);")
+    lines.append("    write_f32(out, data[i], last);")
+    lines.append("  }")
+    lines.append("}")
     lines.append("")
     lines.append('#if defined(FPGAI_DEBUG_DUMP) && !defined(__SYNTHESIS__)')
     lines.append('static inline void fpgai_dump_tensor(const char* path, const float* data, int n) {')
@@ -550,15 +612,18 @@ def emit_top_train_cpp(
     lines.append('}')
     lines.append("")
 
-    for tname, size in tensor_name_to_size.items():
-        lines.append(f"static act_t {tensor_name_to_cxx[tname]}[{size}];")
-        lines.append(f"static grad_act_t {grad_name_to_cxx[tname]}[{size}];")
+    for root in roots_in_order:
+        size = tensor_name_to_size[root]
+        cxx = tensor_name_to_cxx[root]
+        gcxx = grad_name_to_cxx[root]
+        lines.append(f"static act_t {cxx}[{size}];")
+        lines.append(f"static grad_act_t {gcxx}[{size}];")
 
     param_specs = []
 
     for op in graph.ops:
         if op.op_type == "Dense":
-            W, B, in_f, out_f = _resolve_dense_arrays(graph, op)
+            W, B, _in_f, _out_f = _resolve_dense_arrays(graph, op)
             ws = _sanitize(op.name)
             lines.append(f"static wgt_t W_{ws}[{W.size}] = {{ {', '.join(f'{float(x):.8f}f' for x in W.reshape(-1))} }};")
             lines.append(f"static bias_t B_{ws}[{B.size}] = {{ {', '.join(f'{float(x):.8f}f' for x in B.reshape(-1))} }};")
@@ -566,6 +631,9 @@ def emit_top_train_cpp(
             lines.append(f"static bias_t B_before_{ws}[{B.size}];")
             lines.append(f"static grad_wgt_t dW_{ws}[{W.size}];")
             lines.append(f"static grad_bias_t dB_{ws}[{B.size}];")
+            lines.append(f"static float OUT_grad_{ws}[{W.size + B.size}];")
+            lines.append(f"static float OUT_before_{ws}[{W.size + B.size}];")
+            lines.append(f"static float OUT_after_{ws}[{W.size + B.size}];")
             param_specs.append(("dense", op, ws, W.size, B.size))
 
         elif op.op_type == "Conv":
@@ -577,6 +645,9 @@ def emit_top_train_cpp(
             lines.append(f"static bias_t B_before_{tag}[{B.size}];")
             lines.append(f"static grad_wgt_t dW_{tag}[{W.size}];")
             lines.append(f"static grad_bias_t dB_{tag}[{B.size}];")
+            lines.append(f"static float OUT_grad_{tag}[{W.size + B.size}];")
+            lines.append(f"static float OUT_before_{tag}[{W.size + B.size}];")
+            lines.append(f"static float OUT_after_{tag}[{W.size + B.size}];")
             param_specs.append(("conv", op, tag, W.size, B.size))
 
         elif op.op_type == "BatchNormalization":
@@ -599,6 +670,9 @@ def emit_top_train_cpp(
             lines.append(f"static act_t BN_XHAT_{tag}[{c * hw}];")
             lines.append(f"static grad_wgt_t dBN_G_{tag}[{c}];")
             lines.append(f"static grad_bias_t dBN_B_{tag}[{c}];")
+            lines.append(f"static float OUT_grad_{tag}[{2 * c}];")
+            lines.append(f"static float OUT_before_{tag}[{2 * c}];")
+            lines.append(f"static float OUT_after_{tag}[{2 * c}];")
             param_specs.append(("bn", op, tag, c, c))
 
     lines.append("")
@@ -633,8 +707,9 @@ def emit_top_train_cpp(
     lines.append(f"  for (int i = 0; i < {output_size}; ++i) target_buf[i] = (act_t)read_f32(in);")
     lines.append("")
 
-    for tname, size in tensor_name_to_size.items():
-        lines.append(f"  for (int i = 0; i < {size}; ++i) {grad_name_to_cxx[tname]}[i] = (grad_act_t)0;")
+    for root in roots_in_order:
+        size = tensor_name_to_size[root]
+        lines.append(f"  for (int i = 0; i < {size}; ++i) {grad_name_to_cxx[root]}[i] = (grad_act_t)0;")
     for kind, _op, tag, w_size, b_size in param_specs:
         if kind in ("dense", "conv"):
             lines.append(f"  for (int i = 0; i < {w_size}; ++i) dW_{tag}[i] = (grad_wgt_t)0;")
@@ -844,61 +919,35 @@ def emit_top_train_cpp(
             lines.append(f'  fpgai_dump_wgt<{w_size}>("{tag}__weights_after.bin", BN_G_{tag});')
             lines.append(f'  fpgai_dump_bias<{b_size}>("{tag}__weights_after_bias_only.bin", BN_B_{tag});')
 
-    total_words = sum((w_size + b_size) for _kind, _op, _tag, w_size, b_size in param_specs)
-    emitted = 0
-    total_emit_words = total_words * 3
+    for kind, _op, tag, w_size, b_size in param_specs:
+        total = w_size + b_size
+        if kind in ("dense", "conv"):
+            lines.append(f"  for (int i = 0; i < {w_size}; ++i) OUT_grad_{tag}[i] = (float)dW_{tag}[i];")
+            lines.append(f"  for (int i = 0; i < {b_size}; ++i) OUT_grad_{tag}[{w_size} + i] = (float)dB_{tag}[i];")
+            lines.append(f"  for (int i = 0; i < {w_size}; ++i) OUT_before_{tag}[i] = (float)W_before_{tag}[i];")
+            lines.append(f"  for (int i = 0; i < {b_size}; ++i) OUT_before_{tag}[{w_size} + i] = (float)B_before_{tag}[i];")
+            lines.append(f"  for (int i = 0; i < {w_size}; ++i) OUT_after_{tag}[i] = (float)W_{tag}[i];")
+            lines.append(f"  for (int i = 0; i < {b_size}; ++i) OUT_after_{tag}[{w_size} + i] = (float)B_{tag}[i];")
+            lines.append(f"  emit_stream_block<{total}>(out, OUT_grad_{tag}, false);")
+        elif kind == "bn":
+            lines.append(f"  for (int i = 0; i < {w_size}; ++i) OUT_grad_{tag}[i] = (float)dBN_G_{tag}[i];")
+            lines.append(f"  for (int i = 0; i < {b_size}; ++i) OUT_grad_{tag}[{w_size} + i] = (float)dBN_B_{tag}[i];")
+            lines.append(f"  for (int i = 0; i < {w_size}; ++i) OUT_before_{tag}[i] = (float)BN_G_before_{tag}[i];")
+            lines.append(f"  for (int i = 0; i < {b_size}; ++i) OUT_before_{tag}[{w_size} + i] = (float)BN_B_before_{tag}[i];")
+            lines.append(f"  for (int i = 0; i < {w_size}; ++i) OUT_after_{tag}[i] = (float)BN_G_{tag}[i];")
+            lines.append(f"  for (int i = 0; i < {b_size}; ++i) OUT_after_{tag}[{w_size} + i] = (float)BN_B_{tag}[i];")
+            lines.append(f"  emit_stream_block<{total}>(out, OUT_grad_{tag}, false);")
 
     for kind, _op, tag, w_size, b_size in param_specs:
-        if kind in ("dense", "conv"):
-            for i in range(w_size):
-                emitted += 1
-                lines.append(f"  write_f32(out, (float)dW_{tag}[{i}], false);")
-            for i in range(b_size):
-                emitted += 1
-                lines.append(f"  write_f32(out, (float)dB_{tag}[{i}], false);")
-        elif kind == "bn":
-            for i in range(w_size):
-                emitted += 1
-                lines.append(f"  write_f32(out, (float)dBN_G_{tag}[{i}], false);")
-            for i in range(b_size):
-                emitted += 1
-                lines.append(f"  write_f32(out, (float)dBN_B_{tag}[{i}], false);")
+        total = w_size + b_size
+        lines.append(f"  emit_stream_block<{total}>(out, OUT_before_{tag}, false);")
 
-    for kind, _op, tag, w_size, b_size in param_specs:
-        if kind in ("dense", "conv"):
-            for i in range(w_size):
-                emitted += 1
-                lines.append(f"  write_f32(out, (float)W_before_{tag}[{i}], false);")
-            for i in range(b_size):
-                emitted += 1
-                lines.append(f"  write_f32(out, (float)B_before_{tag}[{i}], false);")
-        elif kind == "bn":
-            for i in range(w_size):
-                emitted += 1
-                lines.append(f"  write_f32(out, (float)BN_G_before_{tag}[{i}], false);")
-            for i in range(b_size):
-                emitted += 1
-                lines.append(f"  write_f32(out, (float)BN_B_before_{tag}[{i}], false);")
-
-    for kind, _op, tag, w_size, b_size in param_specs:
-        if kind in ("dense", "conv"):
-            for i in range(w_size):
-                emitted += 1
-                lines.append(f"  write_f32(out, (float)W_{tag}[{i}], false);")
-            for i in range(b_size):
-                emitted += 1
-                last = emitted == total_emit_words
-                lines.append(f"  write_f32(out, (float)B_{tag}[{i}], {'true' if last else 'false'});")
-        elif kind == "bn":
-            for i in range(w_size):
-                emitted += 1
-                lines.append(f"  write_f32(out, (float)BN_G_{tag}[{i}], false);")
-            for i in range(b_size):
-                emitted += 1
-                last = emitted == total_emit_words
-                lines.append(f"  write_f32(out, (float)BN_B_{tag}[{i}], {'true' if last else 'false'});")
-
-    if total_words == 0:
+    if param_specs:
+        for idx, (kind, _op, tag, w_size, b_size) in enumerate(param_specs):
+            total = w_size + b_size
+            is_last = "true" if idx == len(param_specs) - 1 else "false"
+            lines.append(f"  emit_stream_block<{total}>(out, OUT_after_{tag}, {is_last});")
+    else:
         lines.append("  write_f32(out, 0.0f, true);")
 
     lines.append("}")

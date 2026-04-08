@@ -71,7 +71,7 @@ operators:
 
 model:
   format: onnx
-  path: models/suite/cnn_mnist.onnx
+  path: models/cnn_mnist.onnx
 
 numerics:
   defaults:

@@ -24,7 +24,9 @@ void maxpool2d(const act_t* x, act_t* y) {
                         int ih = oh * STRIDE + kh;
                         int iw = ow * STRIDE + kw;
                         int idx = (ih * IN_W + iw) * IN_C + c;
-                        if (x[idx] > best) best = x[idx];
+                        if (x[idx] > best) {
+                            best = x[idx];
+                        }
                     }
                 }
                 y[(oh * OUT_W + ow) * IN_C + c] = best;
@@ -81,7 +83,8 @@ void maxpool2d_backward(
                         int ih = oh * STRIDE + kh;
                         int iw = ow * STRIDE + kw;
                         int in_idx = (ih * IN_W + iw) * IN_C + c;
-                        if (!routed && x[in_idx] == pooled) {
+
+                        if ((!routed) && (x[in_idx] == pooled)) {
                             dX[in_idx] += dY[out_idx];
                             routed = true;
                         }
@@ -111,6 +114,7 @@ void avgpool2d_backward(
 #pragma HLS PIPELINE II=FPGAI_PIPELINE_II
                 int out_idx = (oh * OUT_W + ow) * IN_C + c;
                 grad_act_t g = (grad_act_t)((acc_t)dY[out_idx] * scale);
+
                 for (int kh = 0; kh < K; ++kh) {
                     for (int kw = 0; kw < K; ++kw) {
                         int ih = oh * STRIDE + kh;
