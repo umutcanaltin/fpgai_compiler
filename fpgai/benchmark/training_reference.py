@@ -195,6 +195,56 @@ def _infer_pool_output_shape(
     return int(c), int(h_out), int(w_out)
 
 
+def _dense_input_preflatten_shape(graph, op) -> Tuple[int, ...]:
+    xname = op.inputs[0]
+    producer = None
+    for prev in graph.ops:
+        if prev.outputs and prev.outputs[0] == xname:
+            producer = prev
+            break
+
+    if producer is None:
+        return _get_tensor_shape(graph, xname)
+
+    if producer.op_type not in ("Flatten", "Reshape"):
+        return _get_tensor_shape(graph, xname)
+
+    if not producer.inputs:
+        return _get_tensor_shape(graph, xname)
+
+    src_shape = _get_tensor_shape(graph, producer.inputs[0])
+    if src_shape:
+        return src_shape
+
+    return _get_tensor_shape(graph, xname)
+
+
+def _remap_dense_weights_chw_to_hwc_if_needed(
+    W: np.ndarray,
+    logical_input_shape: Tuple[int, ...],
+) -> np.ndarray:
+    if len(logical_input_shape) != 3:
+        return W
+
+    c, h, w = (int(logical_input_shape[0]), int(logical_input_shape[1]), int(logical_input_shape[2]))
+    n = c * h * w
+    if W.shape[1] != n:
+        return W
+
+    chw_to_hwc = np.empty((n,), dtype=np.int64)
+    chw_idx = 0
+    for cc in range(c):
+        for hh in range(h):
+            for ww in range(w):
+                hwc_idx = (hh * w + ww) * c + cc
+                chw_to_hwc[chw_idx] = hwc_idx
+                chw_idx += 1
+
+    W_hwc = np.empty_like(W)
+    W_hwc[:, chw_to_hwc] = W
+    return W_hwc
+
+
 def _resolve_dense_arrays(graph, op) -> Tuple[np.ndarray, np.ndarray, int, int]:
     in_f, out_f, expected_w, expected_b = _dense_expected_shapes(op)
 
@@ -216,14 +266,23 @@ def _resolve_dense_arrays(graph, op) -> Tuple[np.ndarray, np.ndarray, int, int]:
     if w_arr is None:
         raise RuntimeError(f"Dense weights not found for training reference op '{op.name}'")
 
-    if in_f <= 0 or out_f <= 0:
-        xshape = _get_tensor_shape(graph, op.inputs[0])
-        yshape = _get_tensor_shape(graph, op.outputs[0])
-        in_f = _flat_size(xshape)
+    xshape_flat = _get_tensor_shape(graph, op.inputs[0])
+    xshape_logical = _dense_input_preflatten_shape(graph, op)
+    yshape = _get_tensor_shape(graph, op.outputs[0])
+
+    if in_f <= 0:
+        in_f = _flat_size(xshape_flat)
+    if out_f <= 0:
         out_f = _flat_size(yshape)
 
     W = np.asarray(w_arr, dtype=np.float32).reshape(out_f, in_f)
-    B = np.zeros((out_f,), dtype=np.float32) if b_arr is None else np.asarray(b_arr, dtype=np.float32).reshape(out_f)
+    W = _remap_dense_weights_chw_to_hwc_if_needed(W, xshape_logical)
+
+    B = (
+        np.zeros((out_f,), dtype=np.float32)
+        if b_arr is None
+        else np.asarray(b_arr, dtype=np.float32).reshape(out_f)
+    )
     return W, B, in_f, out_f
 
 
@@ -800,6 +859,16 @@ def _mse_loss_and_grad(pred: np.ndarray, target: np.ndarray):
     return loss, grad.astype(np.float32)
 
 
+def _is_final_softmax_mse_case(graph, raw_cfg: Dict[str, Any]) -> bool:
+    loss_type = str((((raw_cfg.get("training", {}) or {}).get("loss", {}) or {}).get("type", "mse")).lower())
+    if loss_type != "mse":
+        return False
+    if not getattr(graph, "ops", None):
+        return False
+    last_op = graph.ops[-1]
+    return bool(last_op.op_type == "Softmax" and last_op.outputs and graph.outputs and last_op.outputs[0] == graph.outputs[0])
+
+
 def run_training_reference_step(
     *,
     graph,
@@ -814,6 +883,7 @@ def run_training_reference_step(
     layerwise_dir.mkdir(parents=True, exist_ok=True)
 
     lr = float((((raw_cfg.get("training", {}) or {}).get("optimizer", {}) or {}).get("learning_rate", 0.01)))
+    bypass_final_softmax_backward = _is_final_softmax_mse_case(graph, raw_cfg)
 
     params_state: Dict[str, Dict[str, np.ndarray]] = {}
     trainable_order: List[Tuple[str, str]] = []
@@ -862,7 +932,8 @@ def run_training_reference_step(
     grads_by_tensor: Dict[str, np.ndarray] = {graph.outputs[0]: d_output.astype(np.float32)}
     grad_chunks_map: Dict[str, Tuple[np.ndarray, np.ndarray]] = {}
 
-    for op in reversed(graph.ops):
+    for op_idx in range(len(graph.ops) - 1, -1, -1):
+        op = graph.ops[op_idx]
         xname = op.inputs[0]
         yname = op.outputs[0]
         y = vals[yname]
@@ -904,8 +975,12 @@ def run_training_reference_step(
             grads_by_tensor[xname] = dx
 
         elif op.op_type == "Softmax":
-            dx = _softmax_backward(y, dy)
-            grads_by_tensor[xname] = dx
+            is_final_op = bool(op_idx == len(graph.ops) - 1 and yname == graph.outputs[0])
+            if bypass_final_softmax_backward and is_final_op:
+                grads_by_tensor[xname] = dy.copy().astype(np.float32)
+            else:
+                dx = _softmax_backward(y, dy)
+                grads_by_tensor[xname] = dx
 
         elif op.op_type in ("Flatten", "Reshape"):
             grads_by_tensor[xname] = dy.copy().astype(np.float32)
@@ -1000,6 +1075,7 @@ def run_training_reference_step(
         "num_grad_words": int(grads_flat.size),
         "num_weight_words": int(weights_before_flat.size),
         "layerwise_dir": str(layerwise_dir),
+        "bypass_final_softmax_backward": bool(bypass_final_softmax_backward),
     }
     summary_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     summary_txt.write_text(
@@ -1011,6 +1087,7 @@ def run_training_reference_step(
                 f"grad_words  : {int(grads_flat.size)}",
                 f"param_words : {int(weights_before_flat.size)}",
                 f"layerwise   : {layerwise_dir}",
+                f"bypass_final_softmax_backward : {bool(bypass_final_softmax_backward)}",
                 "================================================",
             ]
         ),

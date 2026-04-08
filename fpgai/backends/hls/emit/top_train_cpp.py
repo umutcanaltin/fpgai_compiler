@@ -202,6 +202,57 @@ def _dense_expected_shapes(op) -> Tuple[int, int, int, int]:
     return in_f, out_f, expected_w, expected_b
 
 
+def _dense_input_preflatten_shape(graph: Graph, op) -> Tuple[int, ...]:
+    xname = op.inputs[0]
+    producer = None
+    for prev in graph.ops:
+        if prev.outputs and prev.outputs[0] == xname:
+            producer = prev
+            break
+
+    if producer is None:
+        return _get_tensor_shape(graph, xname)
+
+    if producer.op_type not in ("Flatten", "Reshape"):
+        return _get_tensor_shape(graph, xname)
+
+    if not producer.inputs:
+        return _get_tensor_shape(graph, xname)
+
+    src_shape = _get_tensor_shape(graph, producer.inputs[0])
+    if src_shape:
+        return src_shape
+
+    return _get_tensor_shape(graph, xname)
+
+
+def _remap_dense_weights_chw_to_hwc_if_needed(
+    W: np.ndarray,
+    logical_input_shape: Tuple[int, ...],
+) -> np.ndarray:
+    if len(logical_input_shape) != 3:
+        return W
+
+    c, h, w = (int(logical_input_shape[0]), int(logical_input_shape[1]), int(logical_input_shape[2]))
+    n = c * h * w
+    if W.shape[1] != n:
+        return W
+
+    chw_to_hwc = np.empty((n,), dtype=np.int64)
+
+    chw_idx = 0
+    for cc in range(c):
+        for hh in range(h):
+            for ww in range(w):
+                hwc_idx = (hh * w + ww) * c + cc
+                chw_to_hwc[chw_idx] = hwc_idx
+                chw_idx += 1
+
+    W_hwc = np.empty_like(W)
+    W_hwc[:, chw_to_hwc] = W
+    return W_hwc
+
+
 def _resolve_dense_arrays(graph: Graph, op) -> Tuple[np.ndarray, np.ndarray, int, int]:
     in_f, out_f, expected_w, expected_b = _dense_expected_shapes(op)
 
@@ -223,14 +274,23 @@ def _resolve_dense_arrays(graph: Graph, op) -> Tuple[np.ndarray, np.ndarray, int
     if w_arr is None:
         raise RuntimeError(f"Dense weights not found for training top op '{op.name}'")
 
-    if in_f <= 0 or out_f <= 0:
-        xshape = _get_tensor_shape(graph, op.inputs[0])
-        yshape = _get_tensor_shape(graph, op.outputs[0])
-        in_f = _flat_size(xshape)
+    xshape_flat = _get_tensor_shape(graph, op.inputs[0])
+    xshape_logical = _dense_input_preflatten_shape(graph, op)
+    yshape = _get_tensor_shape(graph, op.outputs[0])
+
+    if in_f <= 0:
+        in_f = _flat_size(xshape_flat)
+    if out_f <= 0:
         out_f = _flat_size(yshape)
 
     W = np.asarray(w_arr, dtype=np.float32).reshape(out_f, in_f)
-    B = np.zeros((out_f,), dtype=np.float32) if b_arr is None else np.asarray(b_arr, dtype=np.float32).reshape(out_f)
+    W = _remap_dense_weights_chw_to_hwc_if_needed(W, xshape_logical)
+
+    B = (
+        np.zeros((out_f,), dtype=np.float32)
+        if b_arr is None
+        else np.asarray(b_arr, dtype=np.float32).reshape(out_f)
+    )
     return W, B, in_f, out_f
 
 
@@ -470,12 +530,82 @@ def _build_tensor_aliases(
     return tensor_name_to_cxx, grad_name_to_cxx, roots_in_order
 
 
+def _plan_map(compile_plan: Any) -> Dict[str, Dict[str, Any]]:
+    if compile_plan is None:
+        return {}
+    if hasattr(compile_plan, "layer_plans"):
+        out = {}
+        for lp in compile_plan.layer_plans:
+            d = lp.to_dict() if hasattr(lp, "to_dict") else (lp if isinstance(lp, dict) else {})
+            if d.get("node_name"):
+                out[d["node_name"]] = d
+        return out
+    if isinstance(compile_plan, dict):
+        return {lp["node_name"]: lp for lp in compile_plan.get("layer_plans", []) if isinstance(lp, dict) and lp.get("node_name")}
+    return {}
+
+
+def _memory_map(memory_plan: Any) -> Dict[str, Dict[str, Any]]:
+    if memory_plan is None:
+        return {}
+    if hasattr(memory_plan, "placements"):
+        out = {}
+        for p in memory_plan.placements:
+            d = p.to_dict() if hasattr(p, "to_dict") else (p if isinstance(p, dict) else {})
+            if d.get("tensor_name"):
+                out[d["tensor_name"]] = d
+        return out
+    if isinstance(memory_plan, dict):
+        return {p["tensor_name"]: p for p in memory_plan.get("placements", []) if isinstance(p, dict) and p.get("tensor_name")}
+    return {}
+
+
+def _comm_map(communication_plan: Any) -> Dict[str, Dict[str, Any]]:
+    if communication_plan is None:
+        return {}
+    if hasattr(communication_plan, "edges"):
+        out = {}
+        for e in communication_plan.edges:
+            d = e.to_dict() if hasattr(e, "to_dict") else (e if isinstance(e, dict) else {})
+            if d.get("tensor_name"):
+                out[d["tensor_name"]] = d
+        return out
+    if isinstance(communication_plan, dict):
+        return {e["tensor_name"]: e for e in communication_plan.get("edges", []) if isinstance(e, dict) and e.get("tensor_name")}
+    return {}
+
+
+def _placement_comment(mem_info: Dict[str, Any] | None) -> str:
+    if not mem_info:
+        return "unknown"
+    return f"{mem_info.get('region', 'unknown')} / size={mem_info.get('size_bytes', 'unknown')} bytes"
+
+
+def _comm_comment(comm_info: Dict[str, Any] | None) -> str:
+    if not comm_info:
+        return "unknown"
+    return f"{comm_info.get('direction', 'unknown')} / {comm_info.get('encoding', 'raw')}"
+
+
+def _is_final_softmax_mse_case(graph: Graph, training_cfg: Dict[str, Any]) -> bool:
+    loss_type = str(training_cfg.get("loss", {}).get("type", "mse")).lower()
+    if loss_type != "mse":
+        return False
+    if not getattr(graph, "ops", None):
+        return False
+    last_op = graph.ops[-1]
+    return bool(last_op.op_type == "Softmax" and last_op.outputs and graph.outputs and last_op.outputs[0] == graph.outputs[0])
+
+
 def emit_top_train_cpp(
     *,
     graph: Graph,
     top_name: str,
     weights_mode: str,
     training_cfg: Dict[str, Any],
+    compile_plan: Any = None,
+    memory_plan: Any = None,
+    communication_plan: Any = None,
 ) -> str:
     supported = {
         "Dense", "Conv", "MaxPool", "AvgPool", "BatchNormalization",
@@ -488,6 +618,10 @@ def emit_top_train_cpp(
 
     loss_type = str(training_cfg.get("loss", {}).get("type", "mse")).lower()
     lr = float(training_cfg.get("optimizer", {}).get("learning_rate", 0.01))
+    bypass_final_softmax_backward = _is_final_softmax_mse_case(graph, training_cfg)
+    layer_plan_map = _plan_map(compile_plan)
+    mem_map = _memory_map(memory_plan)
+    comm_map = _comm_map(communication_plan)
 
     input_name = graph.inputs[0]
     output_name = graph.outputs[0]
@@ -622,6 +756,14 @@ def emit_top_train_cpp(
     param_specs = []
 
     for op in graph.ops:
+        yname = op.outputs[0]
+        lp = layer_plan_map.get(op.name, {})
+        out_mem = mem_map.get(yname)
+        out_comm = comm_map.get(yname)
+        lines.append(f"  // layer_plan[{op.name}] = {lp}")
+        lines.append(f"  // output placement[{yname}] = {_placement_comment(out_mem)}")
+        lines.append(f"  // output communication[{yname}] = {_comm_comment(out_comm)}")
+
         if op.op_type == "Dense":
             W, B, _in_f, _out_f = _resolve_dense_arrays(graph, op)
             ws = _sanitize(op.name)
@@ -728,6 +870,9 @@ def emit_top_train_cpp(
         yshape = tensor_name_to_shape.get(yname, tuple())
         sz = tensor_name_to_size[yname]
         opname = _sanitize(op.name)
+        lp = layer_plan_map.get(op.name, {})
+        out_mem = mem_map.get(yname)
+        out_comm = comm_map.get(yname)
 
         if op.op_type == "Dense":
             tag = _sanitize(op.name)
@@ -804,7 +949,8 @@ def emit_top_train_cpp(
         lines.append(f"  for (int i = 0; i < {output_size}; ++i) {final_grad}[i] = (grad_act_t)(((acc_t){final_buf}[i]) - ((acc_t)target_buf[i]));")
     lines.append("")
 
-    for op in reversed(graph.ops):
+    for op_idx in range(len(graph.ops) - 1, -1, -1):
+        op = graph.ops[op_idx]
         xname = op.inputs[0]
         yname = op.outputs[0]
         xbuf = tensor_name_to_cxx[xname]
@@ -816,6 +962,9 @@ def emit_top_train_cpp(
         sz_in = tensor_name_to_size[xname]
         sz_out = tensor_name_to_size[yname]
         opname = _sanitize(op.name)
+        lp = layer_plan_map.get(op.name, {})
+        out_mem = mem_map.get(yname)
+        out_comm = comm_map.get(yname)
 
         if op.op_type == "Dense":
             tag = _sanitize(op.name)
@@ -853,7 +1002,11 @@ def emit_top_train_cpp(
             lines.append(f"  fpgai::sigmoid_backward_from_output<{sz_out}>({ybuf}, {gy}, {gx});")
 
         elif op.op_type == "Softmax":
-            lines.append(f"  fpgai::softmax_backward<{sz_out}>({ybuf}, {gy}, {gx});")
+            is_final_op = (op_idx == len(graph.ops) - 1 and yname == output_name)
+            if bypass_final_softmax_backward and is_final_op:
+                lines.append(f"  for (int i = 0; i < {sz_out}; ++i) {gx}[i] += {gy}[i];")
+            else:
+                lines.append(f"  fpgai::softmax_backward<{sz_out}>({ybuf}, {gy}, {gx});")
 
         elif op.op_type in ('Flatten', 'Reshape'):
             lines.append(f"  for (int i = 0; i < {sz_out}; ++i) {gx}[i] += {gy}[i];")
