@@ -12,6 +12,8 @@ outputs:
   top_kernel_name: deeplearn
 
 training:
+  debug:
+    dump_intermediates: false
   optimizer:
     type: sgd
     learning_rate: 0.005

@@ -846,7 +846,7 @@ def emit_top_train_cpp(
 
     lines.append(f"  for (int i = 0; i < {input_size}; ++i) {tensor_name_to_cxx[input_name]}[i] = (act_t)read_f32(in);")
     lines.append(f"  static act_t target_buf[{output_size}];")
-    lines.append(f"  for (int i = 0; i < {output_size}; ++i) target_buf[i] = (act_t)read_f32(in);")
+    lines.append(f"  for (int i = 0; i < {output_size}; ++i) target_buf[i] = (act_t)read_f32(aux);")
     lines.append("")
 
     for root in roots_in_order:
@@ -870,9 +870,6 @@ def emit_top_train_cpp(
         yshape = tensor_name_to_shape.get(yname, tuple())
         sz = tensor_name_to_size[yname]
         opname = _sanitize(op.name)
-        lp = layer_plan_map.get(op.name, {})
-        out_mem = mem_map.get(yname)
-        out_comm = comm_map.get(yname)
 
         if op.op_type == "Dense":
             tag = _sanitize(op.name)
@@ -962,9 +959,6 @@ def emit_top_train_cpp(
         sz_in = tensor_name_to_size[xname]
         sz_out = tensor_name_to_size[yname]
         opname = _sanitize(op.name)
-        lp = layer_plan_map.get(op.name, {})
-        out_mem = mem_map.get(yname)
-        out_comm = comm_map.get(yname)
 
         if op.op_type == "Dense":
             tag = _sanitize(op.name)

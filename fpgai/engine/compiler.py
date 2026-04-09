@@ -37,6 +37,7 @@ from fpgai.backends.hls.emit.layers_batchnorm import emit_batchnorm_h, emit_batc
 from fpgai.backends.hls.emit.csim_tcl import emit_csim_tcl
 from fpgai.backends.hls.emit.csim_train_tcl import emit_csim_train_tcl
 from fpgai.backends.hls.testbench import emit_tb_cpp
+from fpgai.backends.hls.testbench_train import emit_tb_train_cpp
 
 
 def _cfg_get(raw: Dict[str, Any], path: str, default: Any = None) -> Any:
@@ -442,9 +443,12 @@ class Compiler:
         raw = self.cfg.raw
         part = str(_cfg_get(raw, "targets.platform.part", "xck26-sfvc784-2LV-c"))
         clk_mhz = float(_cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200))
-        intermediate_dump = bool(_cfg_get(raw, "benchmark.intermediate.enabled", False))
         pipeline_mode = str(self.cfg.pipeline.mode).lower()
         training_cfg = (_cfg_get(raw, "training", {}) or {})
+
+        intermediate_dump = bool(_cfg_get(raw, "benchmark.intermediate.enabled", False))
+        if pipeline_mode == "training_on_device":
+            intermediate_dump = bool(_cfg_get(raw, "training.debug.dump_intermediates", False))
 
         proj = emit_hls_stub(
             graph=g,
@@ -505,7 +509,53 @@ class Compiler:
                     communication_plan=communication_plan,
                 ),
             )
+
             target_bin = str((out_dir / "target.bin").resolve())
+
+            total_param_words = 0
+            for op in g.ops:
+                if op.op_type == "Dense":
+                    in_f = int(op.attrs.get("in_features") or 0)
+                    out_f = int(op.attrs.get("out_features") or 0)
+                    total_param_words += out_f * in_f
+                    total_param_words += out_f
+                elif op.op_type == "Conv":
+                    if len(op.inputs) > 1:
+                        wt = g.get_tensor(op.inputs[1])
+                        if wt is not None and getattr(wt, "shape", None):
+                            total_param_words += int(np.prod(tuple(int(v) for v in wt.shape)))
+                    if len(op.inputs) > 2:
+                        bt = g.get_tensor(op.inputs[2])
+                        if bt is not None and getattr(bt, "shape", None):
+                            total_param_words += int(np.prod(tuple(int(v) for v in bt.shape)))
+                elif op.op_type == "BatchNormalization":
+                    xshape = None
+                    try:
+                        xshape = g.get_tensor(op.inputs[0])
+                    except Exception:
+                        xshape = None
+                    c = None
+                    if xshape is not None and getattr(xshape, "shape", None):
+                        shp = tuple(int(v) for v in xshape.shape)
+                        if len(shp) > 1 and shp[0] == 1:
+                            shp = shp[1:]
+                        if len(shp) == 3:
+                            c = int(shp[0])
+                    if c is not None:
+                        total_param_words += 2 * c
+
+            emit_tb_train_cpp(
+                src_dir,
+                graph=g,
+                top_name=top_name,
+                in_words=int(np.fromfile(input_bin, dtype=np.float32).size),
+                out_words=0,
+                weights_mode=weights_mode,
+                weight_words=total_param_words,
+                preload_weights=[],
+                training_cfg=training_cfg,
+            )
+
             write_text(
                 hls_dir / "run_hls.tcl",
                 emit_csim_train_tcl(
@@ -530,7 +580,6 @@ class Compiler:
                 ),
             )
 
-            # Real testbench generation: this is what writes output.bin during csim.
             x_name = g.inputs[0]
             y_name = g.outputs[0]
             x_spec = g.get_tensor(x_name)

@@ -10,16 +10,10 @@ def emit_csim_train_tcl(
     weights_mode: str = "embedded",
     intermediate_dump: bool = False,
 ) -> str:
-    if weights_mode in ("stream", "ddr"):
-        weight_src_line = 'add_files ${SRC_DIR}/weights_runtime.cpp -cflags "-I${INC_DIR} -I${LAYERS_INC_DIR}'
-    else:
-        weight_src_line = 'add_files ${SRC_DIR}/fpgai_params.cpp -cflags "-I${INC_DIR} -I${LAYERS_INC_DIR}'
-
     extra_cflags = ""
     if intermediate_dump:
         extra_cflags += " -DFPGAI_DEBUG_DUMP"
 
-    weight_src_line += extra_cflags + '"'
     top_cflags = f'-I${{INC_DIR}} -I${{LAYERS_INC_DIR}}{extra_cflags}'
     tb_cflags = f'-I${{INC_DIR}} -I${{LAYERS_INC_DIR}}{extra_cflags}'
 
@@ -36,8 +30,6 @@ if {{[file exists "${{SRC_DIR}}/{top_name}.cpp"]}} {{
 }} else {{
   add_files ${{SRC_DIR}}/deeplearn.cpp -cflags "{top_cflags}"
 }}
-
-{weight_src_line}
 
 if {{[file exists "${{SRC_DIR}}/layers/dense.cpp"]}} {{
   add_files ${{SRC_DIR}}/layers/dense.cpp -cflags "{top_cflags}"

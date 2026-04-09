@@ -18,13 +18,15 @@ def emit_tb_train_cpp(
     training_cfg: dict,
 ) -> None:
     tb_path = tb_dir / "tb.cpp"
+
     preload_vals = ", ".join(f"{float(v):.8f}f" for v in preload_weights)
 
-    tb_text = f"""
-#include <cstdio>
-#include <cstdlib>
+    tb_text = f"""\
 #include <vector>
 #include <fstream>
+#include <cstdio>
+#include <cstdlib>
+#include <string>
 #include <hls_stream.h>
 #include <ap_axi_sdata.h>
 
@@ -70,6 +72,7 @@ static void write_bin(const char* path, const std::vector<float>& data) {{
 int main(int argc, char** argv) {{
     const char* in_path = "input.bin";
     const char* target_path = "target.bin";
+
     if (argc >= 2) in_path = argv[1];
     if (argc >= 3) target_path = argv[2];
 
@@ -91,6 +94,7 @@ int main(int argc, char** argv) {{
     for (size_t i = 0; i < input_data.size(); ++i) {{
         push_f32(in_stream, input_data[i], i + 1 == input_data.size());
     }}
+
     for (size_t i = 0; i < target_data.size(); ++i) {{
         push_f32(aux_stream, target_data[i], i + 1 == target_data.size());
     }}
