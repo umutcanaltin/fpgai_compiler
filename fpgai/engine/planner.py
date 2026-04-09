@@ -130,13 +130,21 @@ def _numerics_defaults(cfg) -> Dict[str, Any]:
     return _cfg_get(cfg.raw, "numerics.defaults", {}) or {}
 
 
-def _default_precision_info(cfg) -> Dict[str, Any]:
-    numerics = _numerics_defaults(cfg)
-    act = numerics.get("activation", {}) or {}
-    weight = numerics.get("weight", {}) or {}
-    bias = numerics.get("bias", {}) or {}
-    accum = numerics.get("accum", {}) or {}
+def _normalize_ap_spec(spec: Dict[str, Any] | None, default_tb: int, default_ib: int) -> Dict[str, Any]:
+    spec = spec or {}
+    return {
+        "type": str(spec.get("type", "ap_fixed")),
+        "total_bits": int(spec.get("total_bits", default_tb)),
+        "int_bits": int(spec.get("int_bits", default_ib)),
+    }
 
+
+def _precision_info_from_specs(
+    act: Dict[str, Any],
+    weight: Dict[str, Any],
+    bias: Dict[str, Any],
+    accum: Dict[str, Any],
+) -> Dict[str, Any]:
     act_type = str(act.get("type", "float")).lower()
     weight_type = str(weight.get("type", "float")).lower()
 
@@ -162,6 +170,27 @@ def _default_precision_info(cfg) -> Dict[str, Any]:
         "act_type": act_type,
         "weight_type": weight_type,
     }
+
+
+def _default_precision_info(cfg) -> Dict[str, Any]:
+    numerics = _numerics_defaults(cfg)
+    act = _normalize_ap_spec(numerics.get("activation", {}), 16, 6)
+    weight = _normalize_ap_spec(numerics.get("weight", {}), 16, 6)
+    bias = _normalize_ap_spec(numerics.get("bias", {}), 24, 10)
+    accum = _normalize_ap_spec(numerics.get("accum", {}), 24, 10)
+    return _precision_info_from_specs(act, weight, bias, accum)
+
+
+def _descriptor_precision_info(desc: LayerDescriptor, default_precision: Dict[str, Any]) -> Dict[str, Any]:
+    raw = (desc.attrs or {}).get("precision")
+    if not isinstance(raw, dict):
+        return dict(default_precision)
+
+    act = _normalize_ap_spec(raw.get("activation", {}), default_precision.get("act_bits") or 16, default_precision.get("act_int_bits") or 6)
+    weight = _normalize_ap_spec(raw.get("weight", {}), default_precision.get("weight_bits") or 16, default_precision.get("weight_int_bits") or 6)
+    bias = _normalize_ap_spec(raw.get("bias", {}), default_precision.get("bias_bits") or 24, default_precision.get("bias_int_bits") or 10)
+    accum = _normalize_ap_spec(raw.get("accum", {}), default_precision.get("accum_bits") or 24, default_precision.get("accum_int_bits") or 10)
+    return _precision_info_from_specs(act, weight, bias, accum)
 
 
 def _policy_name(cfg) -> str:
@@ -212,11 +241,6 @@ def _override_policy_from_cfg(cfg, base: Policy) -> Policy:
 
 
 def _choose_weight_mode(desc: LayerDescriptor, raw_cfg: Dict[str, Any]) -> str:
-    """
-    Keep the full pipeline stable:
-    - only use stream/ddr if the user explicitly requests it
-    - otherwise stay embedded for small/medium models
-    """
     requested = str(_cfg_get(raw_cfg, "data_movement.ps_pl.weights.mode", "embedded")).lower()
     if requested == "dma_ddr":
         requested = "ddr"
@@ -224,7 +248,6 @@ def _choose_weight_mode(desc: LayerDescriptor, raw_cfg: Dict[str, Any]) -> str:
     if requested in ("stream", "ddr"):
         return requested
 
-    # Safe default for now: keep robust full pipeline
     return "embedded"
 
 
@@ -246,6 +269,7 @@ def _layer_notes(desc: LayerDescriptor, precision: Dict[str, Any], policy: Polic
     return {
         "policy_name": policy.name,
         "compute_hint": desc.compute_hint,
+        "precision_tag": (desc.attrs or {}).get("precision_tag"),
         "partition_factor": policy.partition_factor,
         "partition_mode": policy.array_partition_mode,
         "mac_style": policy.mac_style,
@@ -360,7 +384,7 @@ def _plan_generic(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode
 
 def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
     raw = cfg.raw
-    precision = _default_precision_info(cfg)
+    default_precision = _default_precision_info(cfg)
     policy = _override_policy_from_cfg(cfg, _pick_policy(cfg))
 
     target_board = str(_cfg_get(raw, "targets.platform.board", "unknown"))
@@ -372,6 +396,7 @@ def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
     for desc in descriptors:
         execution_order.append(desc.node_name)
         weights_mode = _choose_weight_mode(desc, raw)
+        precision = _descriptor_precision_info(desc, default_precision)
 
         if desc.op_type == "Conv":
             plan = _plan_conv(desc, precision, weights_mode, policy)
@@ -402,17 +427,17 @@ def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
             "total_activation_bytes_out": total_activation_out,
         },
         notes={
-            "planner": "policy_driven_v5_stable",
+            "planner": "policy_driven_v6_precision_aware",
             "global_weights_mode_requested": str(_cfg_get(raw, "data_movement.ps_pl.weights.mode", "embedded")).lower(),
-            "precision_mode": precision["precision_mode"],
-            "act_bits": precision["act_bits"],
-            "weight_bits": precision["weight_bits"],
-            "bias_bits": precision["bias_bits"],
-            "accum_bits": precision["accum_bits"],
-            "act_int_bits": precision["act_int_bits"],
-            "weight_int_bits": precision["weight_int_bits"],
-            "bias_int_bits": precision["bias_int_bits"],
-            "accum_int_bits": precision["accum_int_bits"],
+            "precision_mode": default_precision["precision_mode"],
+            "act_bits": default_precision["act_bits"],
+            "weight_bits": default_precision["weight_bits"],
+            "bias_bits": default_precision["bias_bits"],
+            "accum_bits": default_precision["accum_bits"],
+            "act_int_bits": default_precision["act_int_bits"],
+            "weight_int_bits": default_precision["weight_int_bits"],
+            "bias_int_bits": default_precision["bias_int_bits"],
+            "accum_int_bits": default_precision["accum_int_bits"],
             "parallel_policy": policy.name,
             "parallel_pe": policy.pe,
             "parallel_simd": policy.simd,
