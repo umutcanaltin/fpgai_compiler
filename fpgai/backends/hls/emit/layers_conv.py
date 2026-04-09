@@ -104,10 +104,11 @@ void conv2d_backward_input(
         dX[i] = (grad_act_t)0;
     }
 
+    // Intentionally conservative for HLS compile time.
+    // The previous pipelined form creates dependence-heavy scheduling due to dX[x_idx] += ...
     for (int oh = 0; oh < OUT_H; ++oh) {
         for (int ow = 0; ow < OUT_W; ++ow) {
             for (int oc = 0; oc < OUT_C; ++oc) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
                 const int y_idx = (oh * OUT_W + ow) * OUT_C + oc;
                 const acc_t gy = (acc_t)dY[y_idx];
                 for (int ic = 0; ic < IN_C; ++ic) {
@@ -144,11 +145,11 @@ void conv2d_weight_grad(
         dW[i] = (grad_wgt_t)0;
     }
 
+    // Also conservative for compile time.
     for (int oc = 0; oc < OUT_C; ++oc) {
         for (int ic = 0; ic < IN_C; ++ic) {
             for (int kh = 0; kh < K; ++kh) {
                 for (int kw = 0; kw < K; ++kw) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
                     acc_t acc = 0;
                     for (int oh = 0; oh < OUT_H; ++oh) {
                         for (int ow = 0; ow < OUT_W; ++ow) {
@@ -182,7 +183,6 @@ void conv2d_bias_grad(
     for (int oh = 0; oh < OUT_H; ++oh) {
         for (int ow = 0; ow < OUT_W; ++ow) {
             for (int oc = 0; oc < OUT_C; ++oc) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
                 const int y_idx = (oh * OUT_W + ow) * OUT_C + oc;
                 dB[oc] += (grad_bias_t)dY[y_idx];
             }

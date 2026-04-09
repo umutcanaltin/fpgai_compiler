@@ -101,33 +101,24 @@ int main(int argc, char** argv) {{
 
     {top_name}(in_stream, out_stream, aux_stream, 2);
 
-    std::vector<float> all_out;
+    std::vector<float> grads;
     while (!out_stream.empty()) {{
         axis_t pkt = out_stream.read();
         union {{ unsigned int i; float f; }} u;
         u.i = pkt.data.to_uint();
-        all_out.push_back(u.f);
+        grads.push_back(u.f);
     }}
 
-    const int grad_words = {int(weight_words)};
-    const int w_before_words = {int(weight_words)};
-    const int w_after_words = {int(weight_words)};
-    const int expected_total = grad_words + w_before_words + w_after_words;
+    const int expected_words = {int(weight_words)};
 
-    if ((int)all_out.size() != expected_total) {{
-        fprintf(stderr, "[TB-TRAIN] Unexpected output words. got=%zu expected=%d\\n", all_out.size(), expected_total);
+    if ((int)grads.size() != expected_words) {{
+        fprintf(stderr, "[TB-TRAIN] Unexpected output words. got=%zu expected=%d\\n", grads.size(), expected_words);
         return 2;
     }}
 
-    std::vector<float> grads(all_out.begin(), all_out.begin() + grad_words);
-    std::vector<float> w_before(all_out.begin() + grad_words, all_out.begin() + grad_words + w_before_words);
-    std::vector<float> w_after(all_out.begin() + grad_words + w_before_words, all_out.end());
-
     write_bin("grads.bin", grads);
-    write_bin("weights_before.bin", w_before);
-    write_bin("weights_after.bin", w_after);
 
-    printf("[TB-TRAIN] Wrote grads.bin, weights_before.bin, weights_after.bin\\n");
+    printf("[TB-TRAIN] Wrote grads.bin (%zu floats)\\n", grads.size());
     return 0;
 }}
 """

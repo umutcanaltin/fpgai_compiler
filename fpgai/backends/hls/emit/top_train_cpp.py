@@ -530,63 +530,6 @@ def _build_tensor_aliases(
     return tensor_name_to_cxx, grad_name_to_cxx, roots_in_order
 
 
-def _plan_map(compile_plan: Any) -> Dict[str, Dict[str, Any]]:
-    if compile_plan is None:
-        return {}
-    if hasattr(compile_plan, "layer_plans"):
-        out = {}
-        for lp in compile_plan.layer_plans:
-            d = lp.to_dict() if hasattr(lp, "to_dict") else (lp if isinstance(lp, dict) else {})
-            if d.get("node_name"):
-                out[d["node_name"]] = d
-        return out
-    if isinstance(compile_plan, dict):
-        return {lp["node_name"]: lp for lp in compile_plan.get("layer_plans", []) if isinstance(lp, dict) and lp.get("node_name")}
-    return {}
-
-
-def _memory_map(memory_plan: Any) -> Dict[str, Dict[str, Any]]:
-    if memory_plan is None:
-        return {}
-    if hasattr(memory_plan, "placements"):
-        out = {}
-        for p in memory_plan.placements:
-            d = p.to_dict() if hasattr(p, "to_dict") else (p if isinstance(p, dict) else {})
-            if d.get("tensor_name"):
-                out[d["tensor_name"]] = d
-        return out
-    if isinstance(memory_plan, dict):
-        return {p["tensor_name"]: p for p in memory_plan.get("placements", []) if isinstance(p, dict) and p.get("tensor_name")}
-    return {}
-
-
-def _comm_map(communication_plan: Any) -> Dict[str, Dict[str, Any]]:
-    if communication_plan is None:
-        return {}
-    if hasattr(communication_plan, "edges"):
-        out = {}
-        for e in communication_plan.edges:
-            d = e.to_dict() if hasattr(e, "to_dict") else (e if isinstance(e, dict) else {})
-            if d.get("tensor_name"):
-                out[d["tensor_name"]] = d
-        return out
-    if isinstance(communication_plan, dict):
-        return {e["tensor_name"]: e for e in communication_plan.get("edges", []) if isinstance(e, dict) and e.get("tensor_name")}
-    return {}
-
-
-def _placement_comment(mem_info: Dict[str, Any] | None) -> str:
-    if not mem_info:
-        return "unknown"
-    return f"{mem_info.get('region', 'unknown')} / size={mem_info.get('size_bytes', 'unknown')} bytes"
-
-
-def _comm_comment(comm_info: Dict[str, Any] | None) -> str:
-    if not comm_info:
-        return "unknown"
-    return f"{comm_info.get('direction', 'unknown')} / {comm_info.get('encoding', 'raw')}"
-
-
 def _is_final_softmax_mse_case(graph: Graph, training_cfg: Dict[str, Any]) -> bool:
     loss_type = str(training_cfg.get("loss", {}).get("type", "mse")).lower()
     if loss_type != "mse":
@@ -595,6 +538,32 @@ def _is_final_softmax_mse_case(graph: Graph, training_cfg: Dict[str, Any]) -> bo
         return False
     last_op = graph.ops[-1]
     return bool(last_op.op_type == "Softmax" and last_op.outputs and graph.outputs and last_op.outputs[0] == graph.outputs[0])
+
+
+def _needs_input_gradient(graph: Graph, op_idx: int) -> bool:
+    op = graph.ops[op_idx]
+    if not op.inputs:
+        return False
+
+    xname = op.inputs[0]
+    if xname in getattr(graph, "inputs", []):
+        return False
+
+    producer_idx = None
+    for i, prev in enumerate(graph.ops):
+        if prev.outputs and prev.outputs[0] == xname:
+            producer_idx = i
+            break
+
+    if producer_idx is None:
+        return False
+
+    producer = graph.ops[producer_idx]
+    return producer.op_type in {
+        "Dense", "Conv", "BatchNormalization",
+        "Relu", "LeakyRelu", "Sigmoid", "Softmax",
+        "Add", "MaxPool", "AvgPool", "Flatten", "Reshape"
+    }
 
 
 def emit_top_train_cpp(
@@ -619,9 +588,6 @@ def emit_top_train_cpp(
     loss_type = str(training_cfg.get("loss", {}).get("type", "mse")).lower()
     lr = float(training_cfg.get("optimizer", {}).get("learning_rate", 0.01))
     bypass_final_softmax_backward = _is_final_softmax_mse_case(graph, training_cfg)
-    layer_plan_map = _plan_map(compile_plan)
-    mem_map = _memory_map(memory_plan)
-    comm_map = _comm_map(communication_plan)
 
     input_name = graph.inputs[0]
     output_name = graph.outputs[0]
@@ -642,9 +608,6 @@ def emit_top_train_cpp(
     lines.append('#include "layers/pool.h"')
     lines.append('#include "layers/activations.h"')
     lines.append('#include "layers/batchnorm.h"')
-    lines.append('#if defined(FPGAI_DEBUG_DUMP) && !defined(__SYNTHESIS__)')
-    lines.append('#include <fstream>')
-    lines.append('#endif')
     lines.append("")
     lines.append("typedef ap_axis<32,0,0,0> axis_t;")
     lines.append("using namespace fpgai;")
@@ -663,56 +626,6 @@ def emit_top_train_cpp(
     lines.append("    write_f32(out, data[i], last);")
     lines.append("  }")
     lines.append("}")
-    lines.append("")
-    lines.append('#if defined(FPGAI_DEBUG_DUMP) && !defined(__SYNTHESIS__)')
-    lines.append('static inline void fpgai_dump_tensor(const char* path, const float* data, int n) {')
-    lines.append('  std::ofstream f(path, std::ios::binary);')
-    lines.append('  for (int i = 0; i < n; ++i) f.write(reinterpret_cast<const char*>(&data[i]), sizeof(float));')
-    lines.append('}')
-    lines.append('template<int N>')
-    lines.append('static inline void fpgai_dump_act(const char* path, const act_t data[N]) {')
-    lines.append('  float tmp[N];')
-    lines.append('  for (int i = 0; i < N; ++i) tmp[i] = (float)data[i];')
-    lines.append('  fpgai_dump_tensor(path, tmp, N);')
-    lines.append('}')
-    lines.append('template<int N>')
-    lines.append('static inline void fpgai_dump_grad(const char* path, const grad_act_t data[N]) {')
-    lines.append('  float tmp[N];')
-    lines.append('  for (int i = 0; i < N; ++i) tmp[i] = (float)data[i];')
-    lines.append('  fpgai_dump_tensor(path, tmp, N);')
-    lines.append('}')
-    lines.append('template<int N>')
-    lines.append('static inline void fpgai_dump_grad_wgt(const char* path, const grad_wgt_t data[N]) {')
-    lines.append('  float tmp[N];')
-    lines.append('  for (int i = 0; i < N; ++i) tmp[i] = (float)data[i];')
-    lines.append('  fpgai_dump_tensor(path, tmp, N);')
-    lines.append('}')
-    lines.append('template<int N>')
-    lines.append('static inline void fpgai_dump_grad_bias(const char* path, const grad_bias_t data[N]) {')
-    lines.append('  float tmp[N];')
-    lines.append('  for (int i = 0; i < N; ++i) tmp[i] = (float)data[i];')
-    lines.append('  fpgai_dump_tensor(path, tmp, N);')
-    lines.append('}')
-    lines.append('template<int N>')
-    lines.append('static inline void fpgai_dump_wgt(const char* path, const wgt_t data[N]) {')
-    lines.append('  float tmp[N];')
-    lines.append('  for (int i = 0; i < N; ++i) tmp[i] = (float)data[i];')
-    lines.append('  fpgai_dump_tensor(path, tmp, N);')
-    lines.append('}')
-    lines.append('template<int N>')
-    lines.append('static inline void fpgai_dump_bias(const char* path, const bias_t data[N]) {')
-    lines.append('  float tmp[N];')
-    lines.append('  for (int i = 0; i < N; ++i) tmp[i] = (float)data[i];')
-    lines.append('  fpgai_dump_tensor(path, tmp, N);')
-    lines.append('}')
-    lines.append('#else')
-    lines.append('template<int N> static inline void fpgai_dump_act(const char*, const act_t[N]) {}')
-    lines.append('template<int N> static inline void fpgai_dump_grad(const char*, const grad_act_t[N]) {}')
-    lines.append('template<int N> static inline void fpgai_dump_grad_wgt(const char*, const grad_wgt_t[N]) {}')
-    lines.append('template<int N> static inline void fpgai_dump_grad_bias(const char*, const grad_bias_t[N]) {}')
-    lines.append('template<int N> static inline void fpgai_dump_wgt(const char*, const wgt_t[N]) {}')
-    lines.append('template<int N> static inline void fpgai_dump_bias(const char*, const bias_t[N]) {}')
-    lines.append('#endif')
     lines.append("")
     lines.append('template<int C, int HW>')
     lines.append('static inline void fpgai_bn_backward_input_exact(')
@@ -756,65 +669,40 @@ def emit_top_train_cpp(
     param_specs = []
 
     for op in graph.ops:
-        yname = op.outputs[0]
-        lp = layer_plan_map.get(op.name, {})
-        out_mem = mem_map.get(yname)
-        out_comm = comm_map.get(yname)
-        lines.append(f"  // layer_plan[{op.name}] = {lp}")
-        lines.append(f"  // output placement[{yname}] = {_placement_comment(out_mem)}")
-        lines.append(f"  // output communication[{yname}] = {_comm_comment(out_comm)}")
-
         if op.op_type == "Dense":
             W, B, _in_f, _out_f = _resolve_dense_arrays(graph, op)
-            ws = _sanitize(op.name)
-            lines.append(f"static wgt_t W_{ws}[{W.size}] = {{ {', '.join(f'{float(x):.8f}f' for x in W.reshape(-1))} }};")
-            lines.append(f"static bias_t B_{ws}[{B.size}] = {{ {', '.join(f'{float(x):.8f}f' for x in B.reshape(-1))} }};")
-            lines.append(f"static wgt_t W_before_{ws}[{W.size}];")
-            lines.append(f"static bias_t B_before_{ws}[{B.size}];")
-            lines.append(f"static grad_wgt_t dW_{ws}[{W.size}];")
-            lines.append(f"static grad_bias_t dB_{ws}[{B.size}];")
-            lines.append(f"static float OUT_grad_{ws}[{W.size + B.size}];")
-            lines.append(f"static float OUT_before_{ws}[{W.size + B.size}];")
-            lines.append(f"static float OUT_after_{ws}[{W.size + B.size}];")
-            param_specs.append(("dense", op, ws, W.size, B.size))
+            tag = _sanitize(op.name)
+            lines.append(f"static wgt_t W_{tag}[{W.size}] = {{ {', '.join(f'{float(x):.8f}f' for x in W.reshape(-1))} }};")
+            lines.append(f"static bias_t B_{tag}[{B.size}] = {{ {', '.join(f'{float(x):.8f}f' for x in B.reshape(-1))} }};")
+            lines.append(f"static grad_wgt_t dW_{tag}[{W.size}];")
+            lines.append(f"static grad_bias_t dB_{tag}[{B.size}];")
+            lines.append(f"static float OUT_grad_{tag}[{W.size + B.size}];")
+            param_specs.append(("dense", op, tag, W.size, B.size))
 
         elif op.op_type == "Conv":
             W, B, _ws = _resolve_conv_arrays(graph, op)
             tag = _sanitize(op.name)
             lines.append(f"static wgt_t W_{tag}[{W.size}] = {{ {', '.join(f'{float(x):.8f}f' for x in W.reshape(-1))} }};")
             lines.append(f"static bias_t B_{tag}[{B.size}] = {{ {', '.join(f'{float(x):.8f}f' for x in B.reshape(-1))} }};")
-            lines.append(f"static wgt_t W_before_{tag}[{W.size}];")
-            lines.append(f"static bias_t B_before_{tag}[{B.size}];")
             lines.append(f"static grad_wgt_t dW_{tag}[{W.size}];")
             lines.append(f"static grad_bias_t dB_{tag}[{B.size}];")
             lines.append(f"static float OUT_grad_{tag}[{W.size + B.size}];")
-            lines.append(f"static float OUT_before_{tag}[{W.size + B.size}];")
-            lines.append(f"static float OUT_after_{tag}[{W.size + B.size}];")
             param_specs.append(("conv", op, tag, W.size, B.size))
 
         elif op.op_type == "BatchNormalization":
-            out_shape = tensor_name_to_shape.get(op.outputs[0], tuple())
-            if not out_shape:
-                out_shape = tensor_name_to_shape.get(op.inputs[0], tuple())
-            if len(out_shape) != 3:
-                raise RuntimeError(f"BatchNormalization training expects CHW shape, got {out_shape} for op '{op.name}'")
+            out_shape = tensor_name_to_shape.get(op.outputs[0], tuple()) or tensor_name_to_shape.get(op.inputs[0], tuple())
             c, h, w = _as_chw(out_shape)
             hw = h * w
             tag = _sanitize(op.name)
             gamma, beta, mean, var = _resolve_bn_arrays(graph, op, c)
-
             lines.append(f"static wgt_t BN_G_{tag}[{c}] = {{ {', '.join(f'{float(x):.8f}f' for x in gamma)} }};")
             lines.append(f"static bias_t BN_B_{tag}[{c}] = {{ {', '.join(f'{float(x):.8f}f' for x in beta)} }};")
-            lines.append(f"static wgt_t BN_G_before_{tag}[{c}];")
-            lines.append(f"static bias_t BN_B_before_{tag}[{c}];")
             lines.append(f"static acc_t BN_M_{tag}[{c}] = {{ {', '.join(f'{float(x):.8f}f' for x in mean)} }};")
             lines.append(f"static acc_t BN_V_{tag}[{c}] = {{ {', '.join(f'{float(x):.8f}f' for x in var)} }};")
             lines.append(f"static act_t BN_XHAT_{tag}[{c * hw}];")
             lines.append(f"static grad_wgt_t dBN_G_{tag}[{c}];")
             lines.append(f"static grad_bias_t dBN_B_{tag}[{c}];")
             lines.append(f"static float OUT_grad_{tag}[{2 * c}];")
-            lines.append(f"static float OUT_before_{tag}[{2 * c}];")
-            lines.append(f"static float OUT_after_{tag}[{2 * c}];")
             param_specs.append(("bn", op, tag, c, c))
 
     lines.append("")
@@ -869,7 +757,6 @@ def emit_top_train_cpp(
         xshape = tensor_name_to_shape.get(xname, tuple())
         yshape = tensor_name_to_shape.get(yname, tuple())
         sz = tensor_name_to_size[yname]
-        opname = _sanitize(op.name)
 
         if op.op_type == "Dense":
             tag = _sanitize(op.name)
@@ -934,14 +821,16 @@ def emit_top_train_cpp(
             hw = h * w
             lines.append(f"  fpgai::batchnorm_train_forward<{c}, {hw}>({xbuf}, {ybuf}, BN_G_{tag}, BN_B_{tag}, BN_M_{tag}, BN_V_{tag}, BN_XHAT_{tag});")
 
-        lines.append(f'  fpgai_dump_act<{sz}>("{opname}__fwd.bin", {ybuf});')
-
     final_buf = tensor_name_to_cxx[output_name]
     final_grad = grad_name_to_cxx[output_name]
 
     if loss_type == "mse":
-        lines.append("  loss_t loss_value;")
-        lines.append(f"  fpgai::mse_loss_grad<{output_size}>({final_buf}, target_buf, {final_grad}, loss_value);")
+        lines.append("  loss_t loss_value = (loss_t)0;")
+        lines.append(f"  for (int i = 0; i < {output_size}; ++i) {{")
+        lines.append(f"    acc_t diff = (acc_t){final_buf}[i] - (acc_t)target_buf[i];")
+        lines.append(f"    {final_grad}[i] = (grad_act_t)diff;")
+        lines.append("    loss_value += (loss_t)(diff * diff);")
+        lines.append("  }")
     else:
         lines.append(f"  for (int i = 0; i < {output_size}; ++i) {final_grad}[i] = (grad_act_t)(((acc_t){final_buf}[i]) - ((acc_t)target_buf[i]));")
     lines.append("")
@@ -958,7 +847,6 @@ def emit_top_train_cpp(
         yshape = tensor_name_to_shape.get(yname, tuple())
         sz_in = tensor_name_to_size[xname]
         sz_out = tensor_name_to_size[yname]
-        opname = _sanitize(op.name)
 
         if op.op_type == "Dense":
             tag = _sanitize(op.name)
@@ -966,8 +854,6 @@ def emit_top_train_cpp(
             lines.append(f"  fpgai::dense_weight_grad<{in_f}, {out_f}>({xbuf}, {gy}, dW_{tag});")
             lines.append(f"  fpgai::dense_bias_grad<{out_f}>({gy}, dB_{tag});")
             lines.append(f"  fpgai::dense_backward_input<{in_f}, {out_f}>({gy}, W_{tag}, {gx});")
-            lines.append(f'  fpgai_dump_grad_wgt<{_W.size}>("{opname}__param_grad_w.bin", dW_{tag});')
-            lines.append(f'  fpgai_dump_grad_bias<{_B.size}>("{opname}__param_grad_b.bin", dB_{tag});')
 
         elif op.op_type == "Conv":
             tag = _sanitize(op.name)
@@ -979,11 +865,14 @@ def emit_top_train_cpp(
             c_in, h_in, w_in = _as_chw(xshape)
             c_out, h_out, w_out = _as_chw(yshape)
             k_h = int(ws[2])
+
             lines.append(f"  fpgai::conv2d_weight_grad<{h_in}, {w_in}, {c_in}, {h_out}, {w_out}, {c_out}, {k_h}, {stride}, {pad}>({xbuf}, {gy}, dW_{tag});")
             lines.append(f"  fpgai::conv2d_bias_grad<{c_out}, {h_out}, {w_out}>({gy}, dB_{tag});")
-            lines.append(f"  fpgai::conv2d_backward_input<{h_in}, {w_in}, {c_in}, {h_out}, {w_out}, {c_out}, {k_h}, {stride}, {pad}>({gy}, W_{tag}, {gx});")
-            lines.append(f'  fpgai_dump_grad_wgt<{int(np.prod(ws))}>("{opname}__param_grad_w.bin", dW_{tag});')
-            lines.append(f'  fpgai_dump_grad_bias<{c_out}>("{opname}__param_grad_b.bin", dB_{tag});')
+
+            if _needs_input_gradient(graph, op_idx):
+                lines.append(f"  fpgai::conv2d_backward_input<{h_in}, {w_in}, {c_in}, {h_out}, {w_out}, {c_out}, {k_h}, {stride}, {pad}>({gy}, W_{tag}, {gx});")
+            else:
+                lines.append(f"  for (int i = 0; i < {sz_in}; ++i) {gx}[i] = (grad_act_t)0;")
 
         elif op.op_type == "Relu":
             lines.append(f"  fpgai::relu_backward_from_output<{sz_out}>({ybuf}, {gy}, {gx});")
@@ -1035,20 +924,6 @@ def emit_top_train_cpp(
             hw = h * w
             lines.append(f"  fpgai::batchnorm_param_grad<{c}, {hw}>({gy}, BN_XHAT_{tag}, dBN_G_{tag}, dBN_B_{tag});")
             lines.append(f"  fpgai_bn_backward_input_exact<{c}, {hw}>({gy}, BN_G_{tag}, BN_V_{tag}, BN_XHAT_{tag}, {gx});")
-            lines.append(f'  fpgai_dump_grad_wgt<{c}>("{opname}__param_grad_gamma.bin", dBN_G_{tag});')
-            lines.append(f'  fpgai_dump_grad_bias<{c}>("{opname}__param_grad_beta.bin", dBN_B_{tag});')
-
-        lines.append(f'  fpgai_dump_grad<{sz_in}>("{opname}__bwd_in.bin", {gx});')
-
-    for kind, _op, tag, w_size, b_size in param_specs:
-        if kind in ("dense", "conv"):
-            lines.append(f"  for (int i = 0; i < {w_size}; ++i) W_before_{tag}[i] = W_{tag}[i];")
-            lines.append(f"  for (int i = 0; i < {b_size}; ++i) B_before_{tag}[i] = B_{tag}[i];")
-            lines.append(f'  fpgai_dump_wgt<{w_size}>("{tag}__weights_before.bin", W_before_{tag});')
-            lines.append(f'  fpgai_dump_bias<{b_size}>("{tag}__weights_before_bias_only.bin", B_before_{tag});')
-        elif kind == "bn":
-            lines.append(f"  for (int i = 0; i < {w_size}; ++i) BN_G_before_{tag}[i] = BN_G_{tag}[i];")
-            lines.append(f"  for (int i = 0; i < {b_size}; ++i) BN_B_before_{tag}[i] = BN_B_{tag}[i];")
 
     for kind, _op, tag, w_size, b_size in param_specs:
         if kind in ("dense", "conv"):
@@ -1058,43 +933,18 @@ def emit_top_train_cpp(
             lines.append(f"  fpgai::sgd_update_wgt<{w_size}>(BN_G_{tag}, dBN_G_{tag}, (upd_t){lr:.8f}f);")
             lines.append(f"  fpgai::sgd_update_bias<{b_size}>(BN_B_{tag}, dBN_B_{tag}, (upd_t){lr:.8f}f);")
 
-    for kind, _op, tag, w_size, b_size in param_specs:
-        if kind in ("dense", "conv"):
-            lines.append(f'  fpgai_dump_wgt<{w_size}>("{tag}__weights_after.bin", W_{tag});')
-            lines.append(f'  fpgai_dump_bias<{b_size}>("{tag}__weights_after_bias_only.bin", B_{tag});')
-        elif kind == "bn":
-            lines.append(f'  fpgai_dump_wgt<{w_size}>("{tag}__weights_after.bin", BN_G_{tag});')
-            lines.append(f'  fpgai_dump_bias<{b_size}>("{tag}__weights_after_bias_only.bin", BN_B_{tag});')
-
-    for kind, _op, tag, w_size, b_size in param_specs:
+    for idx, (kind, _op, tag, w_size, b_size) in enumerate(param_specs):
         total = w_size + b_size
         if kind in ("dense", "conv"):
             lines.append(f"  for (int i = 0; i < {w_size}; ++i) OUT_grad_{tag}[i] = (float)dW_{tag}[i];")
             lines.append(f"  for (int i = 0; i < {b_size}; ++i) OUT_grad_{tag}[{w_size} + i] = (float)dB_{tag}[i];")
-            lines.append(f"  for (int i = 0; i < {w_size}; ++i) OUT_before_{tag}[i] = (float)W_before_{tag}[i];")
-            lines.append(f"  for (int i = 0; i < {b_size}; ++i) OUT_before_{tag}[{w_size} + i] = (float)B_before_{tag}[i];")
-            lines.append(f"  for (int i = 0; i < {w_size}; ++i) OUT_after_{tag}[i] = (float)W_{tag}[i];")
-            lines.append(f"  for (int i = 0; i < {b_size}; ++i) OUT_after_{tag}[{w_size} + i] = (float)B_{tag}[i];")
-            lines.append(f"  emit_stream_block<{total}>(out, OUT_grad_{tag}, false);")
-        elif kind == "bn":
+        else:
             lines.append(f"  for (int i = 0; i < {w_size}; ++i) OUT_grad_{tag}[i] = (float)dBN_G_{tag}[i];")
             lines.append(f"  for (int i = 0; i < {b_size}; ++i) OUT_grad_{tag}[{w_size} + i] = (float)dBN_B_{tag}[i];")
-            lines.append(f"  for (int i = 0; i < {w_size}; ++i) OUT_before_{tag}[i] = (float)BN_G_before_{tag}[i];")
-            lines.append(f"  for (int i = 0; i < {b_size}; ++i) OUT_before_{tag}[{w_size} + i] = (float)BN_B_before_{tag}[i];")
-            lines.append(f"  for (int i = 0; i < {w_size}; ++i) OUT_after_{tag}[i] = (float)BN_G_{tag}[i];")
-            lines.append(f"  for (int i = 0; i < {b_size}; ++i) OUT_after_{tag}[{w_size} + i] = (float)BN_B_{tag}[i];")
-            lines.append(f"  emit_stream_block<{total}>(out, OUT_grad_{tag}, false);")
+        is_last = "true" if idx == len(param_specs) - 1 else "false"
+        lines.append(f"  emit_stream_block<{total}>(out, OUT_grad_{tag}, {is_last});")
 
-    for kind, _op, tag, w_size, b_size in param_specs:
-        total = w_size + b_size
-        lines.append(f"  emit_stream_block<{total}>(out, OUT_before_{tag}, false);")
-
-    if param_specs:
-        for idx, (kind, _op, tag, w_size, b_size) in enumerate(param_specs):
-            total = w_size + b_size
-            is_last = "true" if idx == len(param_specs) - 1 else "false"
-            lines.append(f"  emit_stream_block<{total}>(out, OUT_after_{tag}, {is_last});")
-    else:
+    if not param_specs:
         lines.append("  write_f32(out, 0.0f, true);")
 
     lines.append("}")
