@@ -34,6 +34,10 @@ from fpgai.backends.hls.emit.layers_conv import emit_conv_h, emit_conv_cpp
 from fpgai.backends.hls.emit.layers_pool import emit_pool_h, emit_pool_cpp
 from fpgai.backends.hls.emit.layers_activations import emit_activations_h, emit_activations_cpp
 from fpgai.backends.hls.emit.layers_batchnorm import emit_batchnorm_h, emit_batchnorm_cpp
+from fpgai.backends.hls.emit.params_h import emit_params_h
+from fpgai.backends.hls.emit.params_cpp import emit_params_cpp
+from fpgai.backends.hls.emit.weights_runtime_h import emit_weights_runtime_h
+from fpgai.backends.hls.emit.weights_runtime_cpp import emit_weights_runtime_cpp
 from fpgai.backends.hls.emit.csim_tcl import emit_csim_tcl
 from fpgai.backends.hls.emit.csim_train_tcl import emit_csim_train_tcl
 from fpgai.backends.hls.testbench import emit_tb_cpp
@@ -494,6 +498,15 @@ class Compiler:
         write_text(layers_inc_dir / "batchnorm.h", emit_batchnorm_h())
         write_text(layers_src_dir / "batchnorm.cpp", emit_batchnorm_cpp())
 
+        if weights_mode in ("stream", "ddr"):
+            write_text(inc_dir / "weights_runtime.h", emit_weights_runtime_h(g))
+            write_text(src_dir / "weights_runtime.cpp", emit_weights_runtime_cpp(g))
+            write_text(inc_dir / "fpgai_params.h", emit_params_h(g, weights_mode="stream"))
+            write_text(src_dir / "fpgai_params.cpp", '#include "fpgai_params.h"\n')
+        else:
+            write_text(inc_dir / "fpgai_params.h", emit_params_h(g, weights_mode="embedded"))
+            write_text(src_dir / "fpgai_params.cpp", emit_params_cpp(g))
+
         input_bin = str((out_dir / "input.bin").resolve())
 
         if pipeline_mode == "training_on_device":
@@ -512,28 +525,100 @@ class Compiler:
 
             target_bin = str((out_dir / "target.bin").resolve())
 
+            def _try_numel_tensor(name: str) -> int:
+                if not name:
+                    return 0
+
+                try:
+                    t = g.get_tensor(name)
+                except Exception:
+                    t = None
+
+                if t is not None and getattr(t, "shape", None):
+                    return int(np.prod(tuple(int(v) for v in t.shape)))
+
+                if hasattr(g, "constants") and name in getattr(g, "constants", {}):
+                    return int(np.asarray(g.constants[name]).size)
+
+                if hasattr(g, "params") and name in getattr(g, "params", {}):
+                    return int(np.asarray(g.params[name]).size)
+
+                if t is not None:
+                    data = getattr(t, "data", None)
+                    if data is not None:
+                        return int(np.asarray(data).size)
+                    for attr_name in ("initializer", "value", "values"):
+                        if hasattr(t, attr_name):
+                            arr = getattr(t, attr_name)
+                            if arr is not None:
+                                return int(np.asarray(arr).size)
+
+                return 0
+
+            def _attr_numel(op, *keys: str) -> int:
+                attrs = getattr(op, "attrs", {}) or {}
+                for k in keys:
+                    if k not in attrs:
+                        continue
+                    v = attrs[k]
+                    if isinstance(v, str):
+                        n = _try_numel_tensor(v)
+                        if n > 0:
+                            return n
+                    else:
+                        try:
+                            arr = np.asarray(v)
+                            if arr.dtype.kind not in ("U", "S", "O"):
+                                return int(arr.size)
+                        except Exception:
+                            pass
+                return 0
+
             total_param_words = 0
             for op in g.ops:
                 if op.op_type == "Dense":
                     in_f = int(op.attrs.get("in_features") or 0)
                     out_f = int(op.attrs.get("out_features") or 0)
-                    total_param_words += out_f * in_f
-                    total_param_words += out_f
+
+                    if in_f > 0 and out_f > 0:
+                        total_param_words += out_f * in_f
+                        total_param_words += out_f
+                    else:
+                        w_n = 0
+                        b_n = 0
+                        if len(op.inputs) > 1:
+                            w_n = _try_numel_tensor(op.inputs[1])
+                        if len(op.inputs) > 2:
+                            b_n = _try_numel_tensor(op.inputs[2])
+                        if w_n == 0:
+                            w_n = _attr_numel(op, "weights", "weight", "W", "kernel", "weights_name", "weight_name")
+                        if b_n == 0:
+                            b_n = _attr_numel(op, "bias", "biases", "B", "bias_name")
+                        total_param_words += w_n + b_n
+
                 elif op.op_type == "Conv":
+                    w_n = 0
+                    b_n = 0
+
                     if len(op.inputs) > 1:
-                        wt = g.get_tensor(op.inputs[1])
-                        if wt is not None and getattr(wt, "shape", None):
-                            total_param_words += int(np.prod(tuple(int(v) for v in wt.shape)))
+                        w_n = _try_numel_tensor(op.inputs[1])
                     if len(op.inputs) > 2:
-                        bt = g.get_tensor(op.inputs[2])
-                        if bt is not None and getattr(bt, "shape", None):
-                            total_param_words += int(np.prod(tuple(int(v) for v in bt.shape)))
+                        b_n = _try_numel_tensor(op.inputs[2])
+
+                    if w_n == 0:
+                        w_n = _attr_numel(op, "weights", "weight", "W", "kernel", "weights_name", "weight_name")
+                    if b_n == 0:
+                        b_n = _attr_numel(op, "bias", "biases", "B", "bias_name")
+
+                    total_param_words += w_n + b_n
+
                 elif op.op_type == "BatchNormalization":
                     xshape = None
                     try:
                         xshape = g.get_tensor(op.inputs[0])
                     except Exception:
                         xshape = None
+
                     c = None
                     if xshape is not None and getattr(xshape, "shape", None):
                         shp = tuple(int(v) for v in xshape.shape)
@@ -541,6 +626,15 @@ class Compiler:
                             shp = shp[1:]
                         if len(shp) == 3:
                             c = int(shp[0])
+
+                    if c is None:
+                        gamma_n = 0
+                        if len(op.inputs) > 1:
+                            gamma_n = _try_numel_tensor(op.inputs[1])
+                        if gamma_n == 0:
+                            gamma_n = _attr_numel(op, "scale", "gamma", "scale_name", "gamma_name")
+                        c = gamma_n if gamma_n > 0 else None
+
                     if c is not None:
                         total_param_words += 2 * c
 

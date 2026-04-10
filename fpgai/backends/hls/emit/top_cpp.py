@@ -328,21 +328,17 @@ def emit_top_cpp(
             param_idx += 1
 
         elif op.op_type == "Relu":
-            lines.append(f"    for(int j=0; j<{out_flat}; j++) {out_buf}[j] = {curr_buf}[j];")
-            lines.append(f"    relu_inplace<{out_flat}>({out_buf});")
+            lines.append(f"    relu<{out_flat}>({curr_buf}, {out_buf});")
 
         elif op.op_type == "LeakyRelu":
             alpha = float(op.attrs.get("alpha", 0.1))
-            lines.append(f"    for(int j=0; j<{out_flat}; j++) {out_buf}[j] = {curr_buf}[j];")
-            lines.append(f"    leaky_relu_inplace<{out_flat}>({out_buf}, (act_t){alpha:.8f}f);")
+            lines.append(f"    leaky_relu<{out_flat}>({curr_buf}, {out_buf}, (act_t){alpha:.8f}f);")
 
         elif op.op_type == "Sigmoid":
-            lines.append(f"    for(int j=0; j<{out_flat}; j++) {out_buf}[j] = {curr_buf}[j];")
-            lines.append(f"    sigmoid_inplace<{out_flat}>({out_buf});")
+            lines.append(f"    sigmoid<{out_flat}>({curr_buf}, {out_buf});")
 
         elif op.op_type == "Softmax":
-            lines.append(f"    for(int j=0; j<{out_flat}; j++) {out_buf}[j] = {curr_buf}[j];")
-            lines.append(f"    softmax_inplace<{out_flat}>({out_buf});")
+            lines.append(f"    softmax<{out_flat}>({curr_buf}, {out_buf});")
 
         elif op.op_type in ("MaxPool", "AvgPool"):
             c_in, h_in, w_in = _as_chw(curr_shape)

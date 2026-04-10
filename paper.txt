@@ -1,0 +1,517 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{float}
+\usepackage{amsmath}
+\begin{document}
+
+\title{FPGAI: A Resource-Aware 
+%Layer-Wise 
+Compiler for Neural Network Inference 
+%and Fully In-PL 
+and Training on 
+%Edge 
+FPGA-SoCs}
+
+% For double-blind submission:
+\author{
+\IEEEauthorblockN{Anonymous Authors}
+\IEEEauthorblockA{Anonymous Institution\\
+Anonymous City, Country\\
+anonymous@email.com}
+}
+
+\maketitle
+
+\begin{abstract}
+FPGA-based System-on-Chip (SoC) platforms have emerged as a compelling solution for AI edge applications due to their ability to deliver configurable parallelism, low-latency execution, and energy-efficient performance within a compact hardware footprint.
+%, compiling neural networks for such platforms remains challenging,
+However, efficient deployment of neural networks on such platforms remains a significant challenge. The compilation process must jointly optimize multiple interdependent factors, including computational mapping, numerical precision, memory placement, data movement, and resource allocation. These challenges are further exacerbated by stringent constraints on logic resources, on-chip memory capacity, and external memory bandwidth.
+%This paper presents FPGAI, an open-source, resource-aware compiler that translates ONNX neural networks into deployable FPGA implementations through a layer-wise compilation flow integrating graph analysis, compile planning, configurable precision selection, memory and communication planning, parameterized high-level synthesis (HLS) generation, runtime packaging, auto-generated testbench construction, and built-in numerical validation. FPGAI supports multiple data-movement strategies, including embedded, streamed, and external-memory-backed weight delivery, and provides both end-to-end correctness benchmarking against ONNX reference outputs and intermediate layer-by-layer error tracing for debugging and validation. In contrast to inference-only deployment frameworks, FPGAI supports fully in-programmable-logic (PL) execution of forward propagation, backward propagation, and parameter updates, thereby enabling both batch and online training directly on the target device. To improve compilation robustness, FPGAI also incorporates an internal resource-estimation mechanism that complements imperfect or unstable HLS feedback during early design exploration and provides a foundation for future machine-learning-, agentic-, and reinforcement-learning-driven compiler optimization. Experimental evaluation is organized around compilation capability, numerical correctness, synthesis characteristics, and comparative performance against CPU, GPU, and hls4ml baselines on representative workloads.
+%Mahyar suggestion:
+This paper presents FPGAI, an open-source, resource-aware compiler for mapping ONNX neural networks to FPGA-based systems via a layer-wise compilation flow. FPGAI integrates graph analysis, precision and memory optimization, data-movement planning, parameterized HLS generation, and automated validation. It supports diverse data-delivery strategies and provides both end-to-end correctness verification and fine-grained error tracing. Distinct from prior inference-only frameworks, FPGAI also enables full in-programmable-logic execution of forward and backward propagation as well as on-device training. Additionally, it incorporates an internal resource estimation mechanism to improve compilation reliability under uncertain HLS feedback and to enable future learning-driven optimizations. Experimental results demonstrate correctness, efficient synthesis, and competitive performance against CPU, GPU, and hls4ml baselines.
+\end{abstract}
+
+\begin{IEEEkeywords}
+FPGA compiler, edge AI, ONNX, high-level synthesis, on-device training, FPGA-SoC
+\end{IEEEkeywords}
+
+\section{Introduction}
+
+Deep neural networks are increasingly being deployed in edge systems such as embedded vision devices, robots, wearable sensors, and industrial monitoring platforms. In these environments, inference often has to be performed under strict latency, energy, privacy, and reliability constraints, while the available compute and memory resources remain limited \cite{KARAMIMANESH2025}. In many practical cases, however, inference alone is not sufficient. Models deployed at the edge may need to adapt to sensor drift, changing environments, user-specific behavior, or non-stationary data distributions. This creates a broader challenge: edge AI systems should ideally support not only efficient inference, but also on-chip learningafter deployment \cite{Shahsavari2023}.
+
+FPGA-based SoC platforms are attractive candidates for this purpose. Devices such as Xilinx Zynq and Zynq UltraScale+ combine a processing system (PS), typically based on ARM cores, with programmable logic (PL) on the same chip. This architecture allows the designer to combine software flexibility with hardware specialization. The PL can implement highly parallel and deeply pipelined neural network (NN) operators, while the PS can coordinate control, orchestration, and system-level integration. Compared with CPU-only embedded platforms, FPGA-SoCs offer much greater opportunities for parallel execution and customized dataflow. Compared with GPU-based embedded solutions, they  often provide better energy efficiency and tighter integration for domain-specific workloads.
+
+Despite these advantages, deploying NNs on FPGA-SoCs remains difficult in practice. The problem is not only writing hardware for one operator, but coordinating the entire mapping of a model to a constrained device. Designers must choose numeric precision, loop parallelism, tiling strategy, memory placement, communication structure, and interface protocols, while staying within limits on DSP usage, LUT utilization, BRAM capacity, routing complexity, and timing closure. In addition, communication between the PS and PL can easily become a bottleneck if data transfer is not handled carefully. These issues make FPGA deployment inaccessible for many machine-learning researchers and embedded developers, especially when they do not already have substantial HLS or RTL design experience.
+
+Several existing frameworks attempt to reduce this complexity. Commercial solutions such as Vitis AI provide relatively mature and stable deployment flows, particularly for inference on supported models and target platforms. However, such frameworks are generally constrained by vendor-defined operators, fixed deployment assumptions, and limited transparency into internal optimization stages. Research-oriented frameworks such as FINN and hls4ml offer more openness and flexibility, and have significantly improved the accessibility of FPGA-based inference for specific classes of NNs. Nevertheless, many of these frameworks still focus primarily on inference, assume particular dataflow organizations or quantization strategies, or provide limited support for explicit communication-aware compilation. More importantly, support for local on-device learning remains limited in most existing FPGA deployment flows.
+
+This paper presents FPGAI, an open-source compiler intended to address these limitations through a unified hardware-oriented compilation workflow for FPGA-based edge systems. FPGAI accepts NN models in ONNX format and applies a layer-wise compilation strategy in which each operator is analyzed, configured, and generated independently according to target-device constraints. Instead of treating the model as a single block, FPGAI keeps explicit per-layer structure throughout the compilation process. This enables the compiler to reason about resource usage, memory behavior, and communication requirements and makes it easier to extend the framework with new operators and alternative hardware templates.
+
+FPGAI integrates a broader set of compiler capabilities than the basic generation of HLS code alone. The framework supports ONNX model import, layer-wise graph analysis, resource-aware compile planning, memory placement planning, communication planning, automatic Vitis HLS project generation, runtime packaging, auto-generated HLS testbench construction, and built-in numerical validation. It supports a configurable operator set including dense layers, convolution, pooling, element-wise addition, common activations, normalization, and tensor-shape operators such as Flatten and Reshape.  FPGAI also exposes configurable numeric formats for activations, weights, bias terms, and accumulators, enabling precision-aware compilation rather than relying on a single fixed arithmetic format. In addition, the framework supports multiple parameter-delivery modes, including embedded, streamed, and external-memory-backed weight movement, together with PS-PL compression-aware data movement. To improve trustworthiness and debugging, FPGAI includes both end-to-end correctness benchmarking against ONNX reference outputs and intermediate layer-by-layer error tracing. These features make the framework useful not only for deployment, but also for validation, debugging, and systematic exploration of hardware-software trade-offs.
+
+The compiler integrates several stages that are usually handled separately. Performs graph analysis, memory planning, communication planning, high-level parameterized synthesis generation, runtime packaging, and built-in numerical validation within the same flow. In addition, FPGAI includes an internal resource-estimation mechanism.  HLS feedback is not always sufficient by itself during early design exploration: reported resource numbers can be incomplete, unstable, or misleading depending on the current compilation stage and the structure of the generated code. By incorporating an internal estimator, FPGAI can make more robust compilation decisions and establish a basis for future machine-learning, agentic, and reinforcement-learning-driven optimization of mapping, scheduling, and resource-allocation decisions.
+
+A central feature of FPGAI is that it is not restricted to inference-only execution. The framework fully supports in-programmable-logic training, including forward propagation, backward propagation, gradient accumulation, and parameter updates inside the PL. This allows the same compilation framework to target three execution modes: inference, batch training, and online training. Batch training is useful when gradients can be accumulated across multiple samples before an update is applied, while online training is relevant for edge systems that must adapt continuously as new samples arrive. Supporting both modes inside PL is important for reducing reliance on CPU-side learning stages and for enabling truly adaptive edge deployments.
+
+The main contributions of this work are summarized as follows. First, FPGAI provides an ONNX-based, layer-wise compiler flow for mapping neural-network operators to FPGA-SoC implementations through resource-aware HLS generation. Second, FPGAI uses a unified compilation strategy that combines operator analysis, configurable precision selection, memory placement, communication planning, runtime packaging, auto-generated testbench generation, numerical validation, and internal resource estimation. Third, FPGAI supports multiple deployment modes, including embedded, streamed, and external-memory-backed parameter delivery, together with communication-aware PS--PL data movement. Fourth, FPGAI has built-in validation support through both end-to-end comparison against ONNX ground truth and intermediate layer-by-layer error tracing. Finally, FPGAI provides fully in-PL execution of inference and adaptive learning, including batch and online training modes.
+
+FPGAI is intended not only as a deployment framework for current edge AI workloads but also as a compiler foundation for future intelligent optimization strategies. By exposing layer-wise decisions, resource estimates, validation traces, and hardware feedback explicitly, the framework creates a suitable substrate for upcoming agentic and reinforcement-learning-based compiler optimization approaches.
+
+The remainder of the paper is organized as follows. Section II discusses related work. % in FPGA-based NN deployment. 
+Section III presents the FPGAI compiler architecture. Section IV describes the full in-PL training model and execution modes. Section V summarizes the experimental methodology. Section VI presents the evaluation results. Section VII concludes the paper.
+
+\section{Related Work}
+
+Open-source FPGA DL frameworks have significantly improved the accessibility of NN deployment for researchers and hardware developers. See Table~\ref{tab:framework_compare} for an overview.
+
+Among the most prominent examples, FINN \cite{finn2017,finnr2018} introduced a framework for building fast and scalable FPGA accelerators for quantized neural-network inference. Its main strength lies in a streaming, dataflow-oriented hardware generation strategy that is highly effective for low-precision inference workloads. However, the framework is fundamentally centered on inference and is most naturally aligned with static quantized execution pipelines rather than broader training-capable or communication-aware compiler flows.
+
+The hls4ml framework~\cite{hls4ml2021} follows a different design philosophy. Rather than emphasizing aggressive network-specific dataflow specialization, it provides a lightweight and accessible open-source workflow for translating machine-learning models into HLS implementations. This has made hls4ml particularly useful in low-latency research settings and scientific applications, where rapid model-to-hardware translation is important. At the same time, its main focus is inference-oriented HLS generation, and it does not provide the layer-wise compile planning, communication-aware deployment, or fully in-PL adaptive learning flow targeted in this work.
+
+Earlier open-source efforts such as DNNWeaver \cite{dnnweaver2016} helped establish the value of compiling high-level NN models into FPGA accelerators. DNNWeaver aimed to bridge the semantic gap between programmer-facing DNN specifications and FPGA execution, demonstrating that accelerator generation could be raised to a more accessible abstraction level. Nevertheless, earlier frameworks of this kind were generally more limited in flexibility with respect to configurable arithmetic formats, deployment-oriented communication planning, built-in validation flows, and adaptive execution support.
+
+\begin{table}[t]
+\caption{Qualitative comparison with representative open-source FPGA deep-learning frameworks. Limited support denoted by $\circ$.}
+\label{tab:framework_compare}
+\centering
+\scriptsize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+\textbf{Feature} & \textbf{FPGAI} & \textbf{hls4ml} & \textbf{FINN} & \textbf{DNNWeaver} \\
+\hline
+Open-source & + & + & + & + \\
+\hline
+ONNX input & + & $\circ$ & + & - \\
+\hline
+Layer-wise generation & + & + & $\circ$ & $\circ$ \\
+\hline
+Configurable precisions & + & + & + & $\circ$ \\
+\hline
+Inference support & + & + & + & + \\
+\hline
+Fully in-PL training & + & - & - & - \\
+\hline
+Batch training mode & + & - & - & - \\
+\hline
+Online training mode & + & - & - & - \\
+\hline
+Communication-aware compilation & + & $\circ$ & $\circ$ & $\circ$ \\
+\hline
+Intermediate validation & + & $\circ$ & $\circ$ & $\circ$ \\
+\hline
+Runtime packaging + testbench flow & + & $\circ$ & $\circ$ & $\circ$ \\
+\hline
+\end{tabular}
+\end{table}
+
+Taken together, these open-source research frameworks have substantially advanced FPGA-based NN deployment, but they also reveal a common pattern: most are centered primarily on inference, often assume fixed or framework-specific hardware organizations, and provide limited support for unified handling of deployment, debugging, validation, and adaptive execution. FPGAI extends this open-source compiler direction by combining layer-wise compilation, configurable precision handling, memory and communication planning, auto-generated testbench and runtime packaging, end-to-end and intermediate validation, internal resource estimation, and a path toward fully in-PL inference and learning within a single %compiler-oriented 
+workflow.
+
+\section{Inference and Training Formulation}
+
+This section summarizes the mathematical operations that FPGAI maps to hardware for inference and training. The goal is not to introduce deep learning in general, but to define the computational structure that the compiler must translate into FPGA implementations.
+
+Consider a neural network composed of $L$ layers. Let $\mathbf{x}^{(0)}$ denote the input tensor and $\mathbf{x}^{(l)}$ the output of layer $l$. For a parameterized layer with weights $\mathbf{W}^{(l)}$ and bias $\mathbf{b}^{(l)}$, the forward computation can be written as %in the generic form
+\begin{equation}
+\mathbf{z}^{(l)} = f^{(l)}\!\left(\mathbf{x}^{(l-1)}; \mathbf{W}^{(l)}, \mathbf{b}^{(l)}\right),
+\end{equation}
+followed by an activation function
+$
+\mathbf{x}^{(l)} = \phi^{(l)}\!\left(\mathbf{z}^{(l)}\right)$. 
+For example, in a fully connected layer,
+$
+\mathbf{z}^{(l)} = \mathbf{W}^{(l)}\mathbf{x}^{(l-1)} + \mathbf{b}^{(l)},
+$
+while in a convolutional layer the operator $f^{(l)}(\cdot)$ corresponds to a discrete convolution over the input feature maps.
+
+During inference, the network output $\mathbf{x}^{(L)}$ is used directly for prediction, e.g., for classification tasks, the predicted label is typically obtained as
+$
+\hat{y} = \arg\max_{k} \; x^{(L)}_k$. 
+From a hardware perspective, inference consists only of evaluating the forward path of the network, which makes it possible to optimize the implementation mainly around parallelism, memory reuse, and communication efficiency.
+
+Training requires additional computations beyond the forward pass. Let $\mathcal{L}(\mathbf{x}^{(L)}, \mathbf{y})$ denote the loss function for target label $\mathbf{y}$. The training objective is to minimize this loss with respect to the model parameters. This requires backward propagation of gradients through the network. For layer $l$, the error signal can be written as
+$
+\boldsymbol{\delta}^{(l)} = {\partial \mathcal{L}} / {\partial \mathbf{z}^{(l)}}$.
+Using the chain rule, gradients with respect to the parameters are computed as
+\begin{equation}
+\frac{\partial \mathcal{L}}{\partial \mathbf{W}^{(l)}} =
+\boldsymbol{\delta}^{(l)} \left(\mathbf{x}^{(l-1)}\right)^T,
+\qquad
+\frac{\partial \mathcal{L}}{\partial \mathbf{b}^{(l)}} =
+\boldsymbol{\delta}^{(l)}.
+\end{equation}
+The error is then propagated to the previous layer according to
+\begin{equation}
+\boldsymbol{\delta}^{(l-1)} =
+\left(\mathbf{W}^{(l)}\right)^T \boldsymbol{\delta}^{(l)} \odot
+\phi'^{(l-1)}\!\left(\mathbf{z}^{(l-1)}\right),
+\end{equation}
+where $\odot$ denotes element-wise multiplication.
+Once gradients are available, parameters are updated by an optimization rule. In the simplest case of stochastic gradient descent,
+\begin{equation}
+\mathbf{W}^{(l)} \leftarrow \mathbf{W}^{(l)} - \eta
+\frac{\partial \mathcal{L}}{\partial \mathbf{W}^{(l)}},
+\qquad
+\mathbf{b}^{(l)} \leftarrow \mathbf{b}^{(l)} - \eta
+\frac{\partial \mathcal{L}}{\partial \mathbf{b}^{(l)}},
+\end{equation}
+where $\eta$ is the learning rate.
+
+FPGAI targets three execution regimes derived from this formulation. In \emph{inference mode}, only the forward equations are mapped to hardware. In \emph{online training mode}, the forward pass, backward pass, and parameter update are executed for each input sample. In \emph{batch training mode}, gradients are accumulated across multiple samples before the update step is applied. These regimes share the same %mathematical 
+structure but lead to different requirements in arithmetic precision, memory allocation, communication, and hardware scheduling, motivating the compiler-driven approach proposed in this work.
+
+\section{FPGAI Compiler Architecture}
+
+\subsection{Overview}
+
+The design of FPGAI is guided by three primary objectives: resource awareness, automation, and extensibility. Resource awareness means that compilation decisions must satisfy the computational, memory, and bandwidth constraints of the target SoC. Automation means that the flow from a high-level model to a deployable hardware implementation should require minimal manual intervention. Extensibility means that new operators, dataflows, numeric formats, and hardware templates should be incorporable without redesigning the compiler core.
+
+Starting from an ONNX model, FPGAI performs a sequence of compilation stages that transform the abstract neural-network graph into a deployable FPGA-SoC implementation. 
+%These stages include model ingestion, operator analysis, compile planning, resource-aware configuration, memory placement and spill planning, communication planning, HLS code generation, validation artifact generation, and deployment packaging. 
+See Fig.~\ref{fig:fpgai_architecture} for an overview of these stages.
+Unlike monolithic generator styles, the framework preserves explicit per-layer structure during compilation. This organization supports fine-grained reasoning about resource use, enables heterogeneous implementation choices across layers, and aligns naturally with inference and training-capable execution modes.
+
+FPGAI is designed as a compiler framework rather than only a hardware generator. In addition to translating ONNX graphs into HLS implementations, the framework emits multiple compiler artifacts that are useful for deployment, debugging, and future optimization. These include graph-level analysis results, compile-planning decisions, memory-placement plans, communication plans, generated HLS kernels, auto-generated HLS testbenches, runtime packaging artifacts, end-to-end correctness reports, and intermediate layer-by-layer validation traces. This explicit artifact generation is important because it makes the compilation flow inspectable, extensible, and suitable for later intelligent optimization strategies.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{fpgai_architecture.png}
+  \caption{FPGAI compiler architecture and runtime.}
+  \label{fig:fpgai_architecture}
+\end{figure}
+
+\subsection{Model Ingestion and Operator Analysis}
+
+FPGAI accepts models in ONNX format to ensure interoperability with widely used training frameworks such as PyTorch and TensorFlow. The compilation process begins with graph traversal, during which FPGAI parses the ONNX computation graph and extracts metadata for each operator, including tensor dimensions, dependencies, parameter sizes, and layer type. From this information, the compiler constructs a set of layer descriptors that serve as the internal representation of the network.
+
+This layer-wise representation is one of the main design choices in FPGAI. Instead of flattening the whole network into a single execution block, the compiler keeps each operator explicit during the entire flow. This makes it easier to optimize every layer separately in terms of precision, tiling, parallelism, memory usage, and communication. It also makes the framework easier to extend when new layer types or hardware templates are added.
+
+To support device-aware optimization, FPGAI maintains a hardware profile for each target platform. This profile captures the available DSP slices, LUTs, flip-flops, BRAM, optional URAM, off-chip memory capacity, and relevant PS--PL bandwidth characteristics. These parameters define the hard constraints under which later compilation decisions must operate.
+
+\subsection{Configurable Numeric Precision Support}
+
+FPGAI does not assume a single precision for the whole network. Numeric precision is decided as part of the compiler flow, and the framework supports separate formats for activations, weights, bias terms, and accumulators. This is especially useful for FPGA-based implementations, where the selected arithmetic format strongly influences resource utilization, timing, memory usage, and model fidelity.
+
+FPGAI therefore allows different precisions to be assigned to different tensor classes and different operators. For example, activations and weights can be represented with one fixed-point format while bias terms and accumulation paths use wider formats to preserve numerical stability. This separation is useful in both inference and training, since gradient and update paths can require different numeric robustness than the forward path alone.
+
+By exposing these choices explicitly, FPGAI supports precision-aware design-space exploration rather than treating quantization as a separate pre-processing stage. The compiler can therefore reason jointly about arithmetic format, hardware cost, and model behavior.
+
+\subsection{Memory Placement and Spill Policy}
+
+A major challenge in deploying NNs on FPGA-SoCs is choosing where to store weights, activations, gradients, and intermediate buffers within the device memory hierarchy. Platforms such as KV260 expose multiple storage classes, including BRAM, URAM, and external DDR memory. These classes differ substantially in capacity, latency, and effective bandwidth.
+
+FPGAI therefore includes an explicit memory placement and spill policy. The compiler first attempts to keep highly reused tensors on chip, prioritizing BRAM for low-latency access and URAM for larger structures when available. If the required storage exceeds the available on-chip budget, the compiler spills tensors to DDR and generates the supporting access logic needed to stream or fetch them during execution.
+
+The same reasoning applies during training, where intermediate activations, gradients, and update-related state introduce additional memory pressure. By handling spill decisions explicitly at compile time, FPGAI allows larger models or training-capable designs to remain feasible even when their full state cannot be held entirely on chip.
+
+\subsection{Weight-Delivery and Data-Movement Modes}
+
+FPGAI supports multiple weight-delivery and data-movement strategies, allowing the generated design to use embedded, streamed, or external-memory-backed parameter handling depending on the target configuration. In embedded mode, parameters are packaged directly into the generated project where feasible. In streamed mode, weights are supplied dynamically during execution. In external-memory-backed mode, parameters are staged through off-chip memory pathways when on-chip capacity is insufficient or when a more flexible deployment style is preferred.
+
+In parallel, the compiler performs PS--PL communication planning and can integrate communication-aware packing or compression choices into the generated flow. This enables FPGAI to reason about deployment not only as a compute problem, but also as a data-movement problem. This is particularly important for limited-bandwidth edge SoCs.
+
+\subsection{Layer-Wise Resource-Aware Optimization}
+
+At the heart of FPGAI lies a layer-wise resource-aware optimization engine. Each layer is analyzed independently to determine how it should be implemented under the constraints of the target device. The compiler reasons about three main categories of cost: compute demand, memory demand, and bandwidth demand. These depend on the structure of the layer, its chosen numeric format, and the selected parallelization and tiling strategy.
+
+Given device limits on available compute, memory, and communication bandwidth, FPGAI searches for configurations that remain synthesizable while targeting low-latency and efficient execution. Compute-intensive operators such as convolutions and dense layers are assigned aggressive parallelism where feasible, whereas memory-bound operators are configured more conservatively to preserve on-chip storage and routing headroom. The resulting implementation plan is recorded in a per-layer configuration table that drives code generation.
+
+Lower-precision arithmetic can reduce resource consumption and improve performance, but may also degrade model behavior. FPGAI therefore performs precision-aware configuration rather than treating numeric format as a fixed external choice. By making this decision at the layer level, the compiler can apply heterogeneous mappings across the same network.
+
+\subsection{Internal Resource Estimation}
+
+Although HLS synthesis reports are useful, they are not always sufficient for early design exploration. Depending on the compilation stage and code structure, reported resource numbers can be unstable, incomplete, or misleading. This creates a problem for a compiler that must make decisions before the full synthesis flow has converged.
+
+To address this, FPGAI includes an internal resource estimation mechanism that complements HLS feedback. The estimator uses operator structure, tensor dimensions, arithmetic format, and configuration parameters to predict expected resource behavior and guide early mapping decisions. This improves compilation robustness and reduces reliance on raw HLS feedback alone. It also provides a natural foundation for future data-driven compiler optimization, including machine learning, agentic or reinforcement learning based strategies that learn better mapping decisions from synthesis outcomes.
+
+\subsection{Template-Based HLS Generation}
+
+FPGAI maintains a library of parameterized HLS templates, where each template represents a configurable hardware realization of NN operator. These templates are written in synthesizable C++ and expose tunable parameters for numeric precision, parallelism, buffering, and interface organization.
+
+During code generation, the compiler instantiates these templates using the implementation plan generated during the previous stages. The result is a set of HLS-ready operator kernels together with metadata needed for validation and integration. Because the templates are modular, new operators or alternative implementations can be integrated without modifying the full compiler pipeline. This also supports contributor-added layers and more specialized kernels without sacrificing compiler coherence.
+
+\subsection{Validation, Testbench Generation, and Runtime Packaging}
+
+A distinguishing capability of FPGAI is its built-in validation flow. The framework does not only generate hardware code, but also produces validation artifacts that compare the compiled implementation against ONNX reference behavior. This includes both end-to-end output benchmarking and intermediate layer-by-layer comparison, allowing the first point of numerical divergence to be localized when mismatches occur. As a result, FPGAI supports not only deployment, but also systematic debugging and compiler verification.
+
+To support this process, FPGAI automatically generates HLS testbench infrastructure together with reference data packaging. In addition, the framework generates runtime artifacts needed for deployment on the target platform, including packaged parameters, execution metadata, and host-side support code. This unifies compilation, validation, and deployment within one flow rather than leaving correctness checking and runtime integration as external manual steps.\subsection{Communication-Aware PS--PL Compilation}
+
+In FPGA-SoC systems, communication between the processing system (PS) and programmable logic (PL) can become a major source of overhead. This communication includes not only control signals, but also inputs, feature maps, weights, bias values, and other execution-related tensors that must cross the PS--PL boundary. If these transfers are not organized carefully, communication cost can limit overall system performance even when the generated compute kernels are efficient.
+
+FPGAI addresses this issue by treating PS--PL communication as part of compilation rather than leaving it entirely to host-side runtime logic. During compilation, the framework analyzes which tensors must be transferred, how they are represented, and how they should be packed for efficient movement between PS and PL. These decisions are made together with other compiler choices such as precision selection, memory organization, and execution mode.
+
+One representative optimization is precision-aware compression for sparse input transfers. Many input tensors, especially grayscale images after preprocessing, contain long runs of zero-valued elements. Instead of transmitting all values in raw form, FPGAI can generate a compression procedure on the PS side that encodes these zero runs more compactly before transfer. Importantly, this procedure is not fixed. When the selected numerical precision changes, the packing and compression structure can also be regenerated accordingly, allowing the communication format to remain consistent with compiler-selected precision policies. The corresponding decompression logic is generated inside the PL so that the original input stream can be reconstructed before computation. Algorithm~\ref{alg:zrl_compress} shows a representative compression flow.
+
+\begin{algorithm}[t]
+\caption{Precision-Aware Zero-Run-Length Compression of Input Data}
+\label{alg:zrl_compress}
+\begin{algorithmic}[1]
+\Procedure{CompressInput}{$data[0 \ldots M-1], bits\_per\_value, word\_width$}
+    \State determine $values\_per\_word$ from $bits\_per\_value$ and $word\_width$
+    \State initialize encoding format using selected precision
+    \State $i \gets 0$
+    \While{$i < M$}
+        \If{$data[i] = 0$}
+            \State $run\_length \gets 0$
+            \While{$i < M$ and $data[i] = 0$}
+                \State $run\_length \gets run\_length + 1$
+                \State $i \gets i + 1$
+            \EndWhile
+            \State construct zero-run word using run marker and $run\_length$
+            \State \textbf{emit} encoded zero-run word
+        \Else
+            \State $count \gets 0$
+            \State initialize packed data word
+            \While{$i < M$ and $data[i] \ne 0$ and $count < values\_per\_word$}
+                \State place $data[i]$ into packed word according to $bits\_per\_value$
+                \State $count \gets count + 1$
+                \State $i \gets i + 1$
+            \EndWhile
+            \State insert metadata describing packed value count
+            \State \textbf{emit} packed data word
+        \EndIf
+    \EndWhile
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\section{Fully In-PL Training Model}
+
+A defining feature of FPGAI is support for training directly in programmable logic. In the proposed execution model, forward propagation, backward propagation, gradient accumulation, and parameter updates are all mapped to PL-generated hardware. This differs from hybrid approaches in which only the forward pass is accelerated while gradient handling or optimizer updates remain on the embedded processor.
+
+FPGAI supports two training modes. In online training, model parameters are updated after each input sample. This mode is intended for adaptive streaming workloads in which the deployed model must respond rapidly to nonstationary data. In batch training, gradients are accumulated across multiple samples and applied after a batch boundary. This mode amortizes update overhead and can improve arithmetic efficiency and numerical stability.
+
+The compiler expresses training support at the operator level. For each supported differentiable layer, FPGAI generates hardware for forward evaluation together with the corresponding backward computations needed to propagate gradients and update parameters. This preserves consistency with the layer-wise structure of the compiler while enabling a unified execution flow across inference and training.
+
+From a systems perspective, fully in-PL training changes both resource allocation and memory behavior. Inference requires primarily forward activations and weights, whereas training additionally requires storage and movement of activations, gradients, accumulation buffers, and update-related state. FPGAI therefore treats training mode as a first-class compilation target and generates different hardware configurations depending on whether the requested execution mode is inference, online training, or batch training. 
+
+%See Table~\ref{tab:op_modes} for the supported execution modes for representative FPGAI operators.
+
+% \begin{table}[t]
+% \caption{Supported execution modes for representative FPGAI operators.}
+% \label{tab:op_modes}
+% \centering
+% \scriptsize
+% \begin{tabular}{|l|c|c|c|}
+% \hline
+% \textbf{Operator} & \textbf{Inference} & \textbf{Backward} & \textbf{Update} \\
+% \hline
+% Dense & + & + & + \\
+% \hline
+% Conv & + & + & + \\
+% \hline
+% ReLU / LeakyReLU & + & + & - \\
+% \hline
+% Sigmoid & + & + & - \\
+% \hline
+% Pooling & + & + & - \\
+% \hline
+% BatchNorm & + & + & + \\
+% \hline
+% Add & + & + & - \\
+% \hline
+% \end{tabular}
+% \end{table}
+
+\section{Experimental Methodology}
+
+The evaluation of FPGAI is organized around five goals: compilation capability, numerical correctness, synthesis characteristics, training functionality, and comparative performance against software and alternative FPGA baselines. Rather than focusing only on end-to-end speed, the experiments are designed to characterize FPGAI as a compiler framework for both inference and fully in-PL learning on edge FPGA-SoCs.
+
+The first part of the evaluation measures compilation capability by examining whether representative models can be parsed, lowered, and transformed into synthesizable HLS designs. The second part measures numerical correctness by comparing FPGAI-generated behavior against software reference execution. These comparisons can be performed at both final-output and intermediate-layer levels, allowing mismatches to be localized to specific stages of the compiled network. The third part reports synthesis-oriented metrics such as resource utilization and timing-related characteristics. The fourth part evaluates learning functionality under both batch and online training modes. The fifth part compares FPGAI against CPU, GPU, and hls4ml baselines under matched workloads and measurement conditions.
+
+Experiments are conducted on representative edge FPGA platforms supported by the framework. The evaluated workloads include compact multilayer perceptron and convolutional neural-network models suitable for both inference and training studies under embedded resource constraints. CPU baselines are evaluated using software execution on the host processor, GPU baselines are measured using a CUDA-enabled implementation on a discrete GPU, and hls4ml baselines are generated from the same or equivalent model definitions wherever possible. To ensure fairness, model structure, batch size, numeric precision, and measurement methodology should be matched across compared implementations as closely as possible.
+
+\subsection{Evaluation Metrics}
+
+The following metrics are used in the evaluation: (1) \textbf{compilation success:} whether the model is successfully lowered and emitted as a synthesizable design. (2) \textbf{numerical correctness:} agreement between FPGAI-generated results and the software reference, measured using task-appropriate numerical error metrics. (3) \textbf{intermediate consistency:} agreement at internal layer outputs, used to localize divergence during compilation or training. (4) \textbf{synthesis cost:} LUT, FF, DSP, BRAM, and optionally URAM utilization for generated designs. (5)\textbf{latency:} end-to-end inference or training-step latency under the selected deployment mode. (6) \textbf{throughput:} processed samples per second under continuous execution. (7) \textbf{energy or power-related metrics:} where available, energy per inference or average power during execution. (8) \textbf{training functionality:} behavior under batch and online training, including convergence-related observations and execution characteristics.
+
+\section{Results and Discussion}
+
+\subsection{Compilation and Functional Coverage}
+
+The first set of experiments evaluates whether FPGAI can successfully process representative neural-network models and generate synthesizable operator implementations. Table~\ref{tab:compile_results} summarizes the current scope of supported compilation and validation outcomes.
+
+
+
+\subsection{Numerical Correctness}
+
+To evaluate correctness, FPGAI-generated outputs are compared with software reference outputs obtained from the original ONNX models. In addition to final-output comparison, FPGAI supports intermediate layer-level validation, allowing the first point of divergence to be identified when a mismatch occurs. This capability is important for a compiler framework because it improves debugging transparency and enables rapid diagnosis of precision, scheduling, or layout-related issues.
+
+
+\subsection{Synthesis Characteristics}
+
+The synthesis results characterize the hardware cost of the compiler-generated implementations. Table~\ref{tab:synth_results} reports representative utilization metrics for supported workloads. Training-capable configurations generally require additional storage and arithmetic resources relative to inference-only mappings because gradients, update paths, and intermediate state must also be represented in PL. Different precision settings and parameter-delivery modes can further alter the observed cost profile.
+
+
+
+\subsection{Comparative Inference Performance}
+
+We next compare FPGAI against CPU, GPU, and hls4ml baselines for representative inference workloads. The CPU baseline corresponds to software execution on the host processor, the GPU baseline corresponds to execution on a CUDA-enabled discrete GPU, and the hls4ml baseline corresponds to a matched FPGA implementation generated using the hls4ml flow. Table~\ref{tab:perf_compare} is intended to summarize latency, throughput, and accuracy across these platforms.
+
+
+This comparison is useful for characterizing where FPGAI sits in the design space. CPUs provide a software-only baseline with minimal deployment friction, GPUs provide a highly optimized throughput-oriented baseline, and hls4ml provides a closely related FPGA inference baseline. FPGAI is intended to distinguish itself not only through performance, but through its broader compiler feature set, configurable deployment modes, validation flow, and support for training-capable hardware generation.
+
+\subsection{Comparative Hardware Cost Against hls4ml}
+
+Since both FPGAI and hls4ml generate FPGA-oriented implementations, a synthesis-level comparison is also informative when the same model and precision settings can be matched. Table~\ref{tab:hls_compare} is intended to compare FPGAI and hls4ml on resource utilization and timing-related characteristics for shared workloads.
+
+
+
+\subsection{Precision and Policy Exploration}
+
+Because FPGAI exposes configurable numeric precision and compiler-level policy controls, the framework supports systematic exploration of arithmetic, scheduling, and deployment trade-offs. Lower-precision configurations can reduce logic cost and memory footprint, but may also increase numerical error and degrade correctness. In parallel, different scheduling policies, such as \textit{Resource-First}, \textit{Balanced}, and \textit{Latency-First}, expose alternative operating points between hardware efficiency and execution speed. This makes FPGAI suitable not only for code generation, but also for structured design-space exploration on practical FPGA targets.
+
+\begin{table*}[!ht]
+\centering
+\caption{FPGAI design-space exploration results on KV260 across precision and parallelization policies.}
+\label{tab:fpgai_dse}
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{4.5pt}
+\begin{tabular}{ll l c c c c c c}
+\toprule
+Model & Sweep & Policy & Pass & Latency (cycles) & LUT & FF & DSP & BRAM \\
+\midrule
+
+\multirow{3}{*}{MLP-MNIST}
+& \multirow{3}{*}{Precision}
+& Uniform-8  & No  & 103657 & 7483 & 3794 & 15 & 40 \\
+& & Uniform-12 & Yes & 103657 & 7509 & 3866 & 15 & 40 \\
+& & Uniform-16 & Yes & 103657 & 7635 & 3938 & 15 & 40 \\
+\midrule
+
+\multirow{3}{*}{CNN-MNIST}
+& \multirow{3}{*}{Precision}
+& Uniform-8  & No  & 30126 & 10135 & 5354 & 30 & 15 \\
+& & Uniform-12 & Yes & 30126 & 10235 & 5523 & 30 & 16 \\
+& & Uniform-16 & Yes & 30126 & 10365 & 5587 & 30 & 16 \\
+\midrule
+
+\multirow{3}{*}{MLP-MNIST}
+& \multirow{3}{*}{Parallel}
+& Resource-First & Yes & 103657 & 7509 & 3866 & 15 & 40 \\
+& & Balanced      & Yes & 103655 & 7527 & 3515 & 17 & 40 \\
+& & Latency-First & Yes & 103655 & 7590 & 3235 & 21 & 40 \\
+\midrule
+
+\multirow{3}{*}{CNN-MNIST}
+& \multirow{3}{*}{Parallel}
+& Resource-First & Yes & 30126 & 10235 & 5523 & 30 & 16 \\
+& & Balanced      & Yes & 30124 & 10282 & 5287 & 30 & 16 \\
+& & Latency-First & Yes & 30124 & 10303 & 5136 & 32 & 16 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Table~\ref{tab:fpgai_dse} summarizes inference-oriented FPGAI design-space exploration results on KV260 across precision and parallelization sweeps for MLP-MNIST and CNN-MNIST. A first observation is that aggressively reduced precision does not necessarily produce a usable design. For both models, the Uniform-8 fixed-point configuration slightly lowers hardware cost, but fails the correctness criterion, whereas Uniform-12 and Uniform-16 both pass. This indicates that excessive quantization can compromise numerical fidelity, while moderate fixed-point precision remains stable for representative edge inference workloads.
+
+For the passing inference configurations, latency remains nearly constant across the precision sweep. In the MLP-MNIST case, all precision variants remain at 103657 cycles, while in CNN-MNIST all variants remain at 30126 cycles. The primary effect of precision is therefore on implementation cost rather than execution schedule. Moving from Uniform-12 to Uniform-16 causes only modest increases in LUT and FF usage, while DSP and BRAM remain essentially unchanged. This behavior suggests that, for these compact networks, precision selection mainly affects correctness margins and hardware overhead, rather than raw throughput.
+
+The policy sweep exposes a different trade-off. For both models, moving from \textit{Resource-First} to \textit{Latency-First} increases hardware cost, especially DSP usage, but produces only negligible latency improvement. For MLP-MNIST, DSP usage rises from 15 to 21, while latency changes only from 103657 to 103655 cycles. For CNN-MNIST, DSP usage increases from 30 to 32, while latency changes only from 30126 to 30124 cycles. These results show that more aggressive parallelization is not automatically beneficial on an edge FPGA, since the additional hardware cost may not translate into meaningful execution-time gains. This reinforces the need for compiler-guided policy exploration rather than simply maximizing parallelism.
+
+\begin{table*}[t]
+\centering
+\caption{Training-oriented FPGAI design-space exploration on KV260.}
+\label{tab:training_dse_results_compact}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llccccccc}
+\hline
+Model & Policy & Precision & Cycles & ms & LUT & FF & DSP & BRAM \\
+\hline
+MLP & Balanced & Uniform-12 & 313 & 0.001256 & 13452 & 6508 & 28 & 1 \\
+MLP & Balanced & Uniform-16 & 318 & 0.001276 & 16243 & 10147 & 53 & 1 \\
+MLP & Balanced & Mixed-Conservative & 318 & 0.001276 & 16181 & 9931 & 53 & 1 \\
+MLP & Throughput-First & Uniform-12 & 313 & 0.001256 & 13688 & 6445 & 36 & 1 \\
+MLP & Throughput-First & Uniform-16 & 314 & 0.001517 & 17408 & 10328 & 65 & 1 \\
+MLP & Throughput-First & Mixed-Conservative & 314 & 0.001517 & 17376 & 10116 & 65 & 1 \\
+MLP & Latency-First & Uniform-12 & 288 & 0.001156 & 13044 & 6405 & 43 & 1 \\
+MLP & Latency-First & Uniform-16 & 300 & 0.001450 & 17616 & 10599 & 80 & 1 \\
+MLP & Latency-First & Mixed-Conservative & 300 & 0.001450 & 17504 & 10287 & 80 & 1 \\
+\hline
+CNN-MNIST & Balanced & Uniform-12 & 75006 & 0.301074 & 39204 & 32409 & 86 & 68 \\
+CNN-MNIST & Balanced & Uniform-16 & 73330 & 0.294273 & 44223 & 39277 & 125 & 75 \\
+CNN-MNIST & Balanced & Mixed-Conservative & 73330 & 0.294273 & 44205 & 39213 & 125 & 73 \\
+CNN-MNIST & Throughput-First & Uniform-12 & 75006 & 0.301074 & 39919 & 33340 & 94 & 69 \\
+CNN-MNIST & Throughput-First & Uniform-16 & 72485 & 0.350248 & 45600 & 39728 & 137 & 76 \\
+CNN-MNIST & Throughput-First & Mixed-Conservative & 72485 & 0.350248 & 45602 & 39644 & 137 & 74 \\
+CNN-MNIST & Latency-First & Uniform-12 & 66890 & 0.268496 & 44336 & 38661 & 260 & 70 \\
+CNN-MNIST & Latency-First & Uniform-16 & 65382 & 0.345282 & 52417 & 45200 & 327 & 76 \\
+CNN-MNIST & Latency-First & Mixed-Conservative & 65382 & 0.345282 & 52487 & 45022 & 327 & 74 \\
+\hline
+\end{tabular}
+\end{table*}
+
+Table~\ref{tab:training_dse_results_compact} shows that these trade-offs become more pronounced for training-oriented compilation. In the MLP training case, all explored configurations remain relatively lightweight, with BRAM usage fixed at 1 and latency remaining in a narrow range. However, higher precision and more aggressive policies still increase LUT, FF, and DSP consumption noticeably. This indicates that even small training workloads remain sensitive to compiler decisions, although their absolute cost is still modest enough to fit comfortably on the target device.
+
+The CNN-MNIST training results exhibit a much stronger resource--performance tension. Compared with the MLP case, LUT, FF, DSP, and BRAM usage all grow sharply, reflecting the added cost of storing activations, gradients, and optimizer-related state during backpropagation. Under the \textit{Balanced} policy, the Uniform-12 configuration requires 39204 LUTs, 32409 FFs, 86 DSPs, and 68 BRAMs, while the corresponding Uniform-16 configuration rises to 44223 LUTs, 39277 FFs, 125 DSPs, and 75 BRAMs. Thus, increasing precision in training has a much more visible implementation cost than in inference.
+
+The effect of policy is also clearer for CNN training than for inference. Under Uniform-12 precision, moving from \textit{Balanced} to \textit{Latency-First} reduces the cycle count from 75006 to 66890, but DSP usage increases from 86 to 260, accompanied by major LUT and FF growth. A similar pattern appears under Uniform-16 and Mixed-Conservative settings, where lower latency is achievable only by consuming substantially more parallel hardware. In other words, training-oriented optimization can provide measurable cycle-count reductions, but the cost is much steeper resource pressure. This makes policy selection substantially more important once the compiler targets backpropagation rather than inference alone.
+
+
+Overall, the results in Tables~\ref{tab:fpgai_dse} and~\ref{tab:training_dse_results_compact} show that FPGAI exposes meaningful design-space trade-offs across both inference and training scenarios. Precision selection primarily determines whether a design remains numerically reliable and how much implementation overhead it incurs, while policy selection controls the balance between hardware efficiency and execution speed. For compact inference workloads, aggressive parallelism brings little practical benefit, whereas for training workloads it can reduce latency but only at substantial hardware cost. These results support the view that FPGAI is not merely a code generator, but a compiler framework that makes precision and scheduling decisions explicit, measurable, and tunable for FPGA deployment.
+
+\subsection{Batch and Online Training Behavior}
+
+The final part of the evaluation focuses on fully in-PL learning. FPGAI supports both online training and batch training without offloading gradient processing or parameter updates to the processing system. Online training is intended for adaptive streaming scenarios, while batch training provides a more conventional update regime with gradient accumulation across multiple samples.
+
+The comparison between these modes highlights a trade-off between responsiveness and amortization. Online training enables immediate parameter adaptation after each sample, but introduces more frequent update activity. Batch training reduces update frequency and can improve arithmetic efficiency, at the cost of delayed adaptation. FPGAI exposes both modes within the same compilation framework, allowing the target behavior to be selected according to application needs.
+
+
+
+\subsection{Discussion}
+
+Overall, the results indicate that FPGAI functions as more than a code generator. It provides a structured compiler flow that maps ONNX models into hardware realizations while preserving numerical behavior and supporting both inference and fully in-PL training. The layer-wise design is especially valuable for extensibility and for the explicit handling of adaptive execution modes. The framework’s support for configurable precisions, alternative weight-delivery modes, runtime packaging, auto-generated testbenches, and intermediate validation further makes it useful as a practical compiler system rather than only an accelerator template library. Comparative results against CPU, GPU, and hls4ml help place FPGAI within a broader systems context: CPU and GPU baselines reflect general-purpose execution points, while hls4ml provides a closely related FPGA inference baseline. The results also suggest that training-aware FPGA compilation introduces additional hardware costs that must be managed carefully, reinforcing the importance of resource-aware mapping on edge devices.
+
+\section{Conclusion}
+
+
+The presented methodology and results position FPGAI as a practical framework for adaptive edge intelligence, where deployment must account for both hardware constraints and post-deployment learning requirements. Future work will extend operator coverage, broaden evaluation across larger models and platforms, and further refine the resource trade-offs between inference-oriented and training-capable configurations. FPGAI is also intended as a compiler foundation for future machine-learning-, agentic-, and reinforcement-learning-driven optimization of hardware mapping and resource-allocation decisions.
+
+\begin{thebibliography}{00}
+\bibitem{KARAMIMANESH2025}
+M. Karamimanesh, E. Abiri, M. Shahsavari, K. Hassanli, A. van Schaik, and J. Eshraghian, 
+``Spiking neural networks on FPGA: A survey of methodologies and recent advancements,'' 
+\emph{Neural Networks}, vol. 186, p. 107256, 2025, doi: 10.1016/j.neunet.2025.107256.
+
+\bibitem{Shahsavari2023}
+M. Shahsavari, D. Thomas, M. van Gerven, A. Brown, and W. Luk, 
+``Advancements in spiking neural network communication and synchronization techniques for event-driven neuromorphic systems,'' 
+\emph{Array}, vol. 20, p. 100323, 2023, doi: 10.1016/j.array.2023.100323.
+\bibitem{finn2017}
+Y. Umuroglu, N. J. Fraser, G. Gambardella, M. Blott, P. H. W. Leong, M. Jahre, and K. Vissers,
+``FINN: A framework for fast, scalable binarized neural network inference,''
+in \emph{Proceedings of the 2017 ACM/SIGDA International Symposium on Field-Programmable Gate Arrays (FPGA)}, 2017, pp. 65--74.
+
+\bibitem{finnr2018}
+M. Blott, T. B. Preu{\ss}er, N. J. Fraser, G. Gambardella, K. O'Brien, Y. Umuroglu, M. Leeser, and K. Vissers,
+``FINN-R: An end-to-end deep-learning framework for fast exploration of quantized neural networks,''
+\emph{ACM Transactions on Reconfigurable Technology and Systems}, vol. 11, no. 3, pp. 1--23, 2018.
+
+\bibitem{hls4ml2021}
+F. Fahim, J. Duarte, Z. Han, A. Jindal, T. M. Hong, A. J. Ngadiuba, M. Pierini, M. Spiropulu, S. Summers, and Y. Wei,
+``hls4ml: An open-source codesign workflow to empower scientific low-power machine learning devices,''
+\emph{arXiv preprint arXiv:2103.05579}, 2021.
+
+\bibitem{dnnweaver2016}
+H. Sharma, J. Park, E. Amaro, B. Thwaites, P. Kotha, A. Gupta, J. K. Kim, A. Mishra, and H. Esmaeilzadeh,
+``From high-level deep neural models to FPGAs,''
+in \emph{Proceedings of the 49th Annual IEEE/ACM International Symposium on Microarchitecture (MICRO)}, 2016, pp. 1--12.
+
+\end{thebibliography}
+
+\end{document}

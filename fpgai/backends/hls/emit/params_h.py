@@ -34,7 +34,7 @@ def _numel_from_graph_named(graph, tensor_name: str) -> int:
     return 0
 
 
-def emit_params_h_stub(graph, *, weights_mode: str = "embedded") -> str:
+def emit_params_h(graph, *, weights_mode: str = "embedded") -> str:
     lines: List[str] = []
     lines.append("#pragma once")
     lines.append('#include "fpgai_types.h"')
@@ -80,3 +80,8 @@ def emit_params_h_stub(graph, *, weights_mode: str = "embedded") -> str:
     lines.append("} // namespace fpgai")
     lines.append("")
     return "\n".join(lines)
+
+
+# backward-compatible alias
+def emit_params_h_stub(graph, *, weights_mode: str = "embedded") -> str:
+    return emit_params_h(graph, weights_mode=weights_mode)

@@ -112,7 +112,13 @@ int main(int argc, char** argv) {{
     const int expected_words = {int(weight_words)};
 
     if ((int)grads.size() != expected_words) {{
-        fprintf(stderr, "[TB-TRAIN] Unexpected output words. got=%zu expected=%d\\n", grads.size(), expected_words);
+        fprintf(
+            stderr,
+            "[TB-TRAIN] Unexpected output words. got=%zu expected=%d delta=%lld\\n",
+            grads.size(),
+            expected_words,
+            (long long)grads.size() - (long long)expected_words
+        );
         return 2;
     }}
 
