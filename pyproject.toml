@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fpgai-compiler"
+version = "1.3.1"
+description = "ONNX-to-FPGA/SoC compiler framework for FPGA AI inference and training"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Umut Can Altin" }
+]
+license = { text = "MIT" }
+keywords = [
+  "fpga",
+  "hls",
+  "onnx",
+  "compiler",
+  "vitis",
+  "machine-learning",
+]
+dependencies = [
+  "numpy>=1.26",
+  "onnx>=1.16",
+  "onnxruntime>=1.18",
+  "pyyaml>=6.0",
+  "matplotlib>=3.8",
+  "protobuf>=5.0",
+  "packaging>=23.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.6",
+  "black>=24.0",
+  "mypy>=1.10",
+  "torch>=2.2",
+]
+
+[project.scripts]
+fpgai = "fpgai.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["fpgai*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
