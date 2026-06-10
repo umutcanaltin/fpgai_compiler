@@ -9,8 +9,12 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11"]
+        python-version:
+          - "3.10"
+          - "3.11"
+          - "3.12"
 
     steps:
       - name: Checkout
@@ -20,6 +24,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install package
         run: |
@@ -31,10 +36,20 @@ jobs:
           python - <<'PY'
           import fpgai
           from fpgai.cli import main
+          from fpgai.config.loader import load_config
           from fpgai.engine.compiler import Compiler
+
           print("FPGAI import OK")
           PY
 
-      - name: Run unit tests
+      - name: Check formatting
         run: |
-          pytest -q
+          black --check fpgai tests main.py
+
+      - name: Run Ruff
+        run: |
+          ruff check fpgai tests main.py
+
+      - name: Run fast tests
+        run: |
+          pytest -q -m "not integration"

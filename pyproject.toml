@@ -36,6 +36,9 @@ dev = [
   "ruff>=0.6",
   "black>=24.0",
   "mypy>=1.10",
+]
+
+operator-tests = [
   "torch>=2.2",
 ]
 
@@ -54,9 +57,20 @@ line-length = 100
 target-version = "py310"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "B", "UP"]
-ignore = ["E501"]
+select = [
+  "E",
+  "F",
+  "I",
+  "B",
+  "UP",
+]
+ignore = [
+  "E501",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+  "integration: tests requiring an external FPGA toolchain such as Vitis HLS",
+]
