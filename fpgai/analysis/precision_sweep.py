@@ -1,77 +1,152 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict, List
 import copy
 import csv
 import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List
 
-from fpgai.analysis.quantization_report import run_quantization_report
+from fpgai.analysis.quantization_report import (
+    run_quantization_report,
+)
+from fpgai.numerics.precision_policy import (
+    DEFAULT_PRECISION,
+    PRECISION_ROLES,
+    normalize_precision_spec,
+    sweep_layer_override_mode,
+)
 
 
-def _cfg_get(d: Dict[str, Any], path: str, default=None):
-    cur = d
-    for k in path.split("."):
-        if not isinstance(cur, dict) or k not in cur:
+def _cfg_get(
+    data: Dict[str, Any],
+    path: str,
+    default: Any = None,
+) -> Any:
+    current: Any = data
+
+    for key in path.split("."):
+        if (
+            not isinstance(current, dict)
+            or key not in current
+        ):
             return default
-        cur = cur[k]
-    return cur
+
+        current = current[key]
+
+    return current
 
 
-def _set_cfg(d: Dict[str, Any], path: str, value: Any) -> None:
+def _set_cfg(
+    data: Dict[str, Any],
+    path: str,
+    value: Any,
+) -> None:
     parts = path.split(".")
-    cur = d
-    for k in parts[:-1]:
-        if k not in cur or not isinstance(cur[k], dict):
-            cur[k] = {}
-        cur = cur[k]
-    cur[parts[-1]] = value
+    current = data
+
+    for key in parts[:-1]:
+        if (
+            key not in current
+            or not isinstance(current[key], dict)
+        ):
+            current[key] = {}
+
+        current = current[key]
+
+    current[parts[-1]] = value
 
 
-def _candidate_defaults(cand: Dict[str, Any]) -> Dict[str, Any]:
-    d = cand.get("defaults", {}) or {}
+def _candidate_defaults(
+    candidate: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    defaults = candidate.get(
+        "defaults",
+        {},
+    ) or {}
+
     return {
-        "activation": dict(d.get("activation", {"type": "ap_fixed", "total_bits": 16, "int_bits": 6})),
-        "weight": dict(d.get("weight", {"type": "ap_fixed", "total_bits": 16, "int_bits": 6})),
-        "bias": dict(d.get("bias", {"type": "ap_fixed", "total_bits": 24, "int_bits": 10})),
-        "accum": dict(d.get("accum", {"type": "ap_fixed", "total_bits": 24, "int_bits": 10})),
+        role: normalize_precision_spec(
+            defaults.get(role),
+            fallback=DEFAULT_PRECISION[role],
+            path=(
+                "analysis.precision_sweep."
+                f"candidates[].defaults.{role}"
+            ),
+        )
+        for role in PRECISION_ROLES
     }
 
 
-def _fmt_spec(spec: Dict[str, Any]) -> str:
-    return f"ap_fixed<{int(spec['total_bits'])},{int(spec['int_bits'])}>"
+def _format_spec(
+    spec: Dict[str, Any],
+) -> str:
+    return (
+        f"ap_fixed<"
+        f"{int(spec['total_bits'])},"
+        f"{int(spec['int_bits'])}>"
+    )
 
 
-def _recommend_candidate(rows: List[Dict[str, Any]]) -> Dict[str, Any] | None:
+def _recommend_candidate(
+    rows: List[Dict[str, Any]],
+    *,
+    require_prediction_match: bool,
+    minimum_cosine: float,
+) -> Dict[str, Any] | None:
     if not rows:
         return None
 
-    pred_ok = [r for r in rows if r.get("prediction_match", False)]
-    cosine_ok = [r for r in pred_ok if float(r.get("output_cosine", 0.0)) >= 0.99]
+    valid = []
 
-    if cosine_ok:
-        # Smallest activation bits first, then lowest MSE
-        return sorted(
-            cosine_ok,
-            key=lambda r: (
-                int(r["activation_bits"]),
-                int(r["weight_bits"]),
-                float(r["output_mse"]),
+    for row in rows:
+        if (
+            require_prediction_match
+            and not row["prediction_match"]
+        ):
+            continue
+
+        if float(row["output_cosine"]) < minimum_cosine:
+            continue
+
+        valid.append(row)
+
+    if valid:
+        return min(
+            valid,
+            key=lambda row: (
+                int(row["activation_bits"]),
+                int(row["weight_bits"]),
+                int(row["bias_bits"]),
+                int(row["accum_bits"]),
+                float(row["output_mse"]),
             ),
-        )[0]
+        )
 
-    if pred_ok:
-        return sorted(
-            pred_ok,
-            key=lambda r: (
-                int(r["activation_bits"]),
-                int(r["weight_bits"]),
-                float(r["output_mse"]),
+    prediction_matches = [
+        row
+        for row in rows
+        if row["prediction_match"]
+    ]
+
+    if prediction_matches:
+        return min(
+            prediction_matches,
+            key=lambda row: (
+                -float(row["output_cosine"]),
+                float(row["output_mse"]),
+                int(row["activation_bits"]),
+                int(row["weight_bits"]),
             ),
-        )[0]
+        )
 
-    return sorted(rows, key=lambda r: float(r["output_mse"]))[0]
+    return min(
+        rows,
+        key=lambda row: (
+            float(row["output_mse"]),
+            -float(row["output_cosine"]),
+        ),
+    )
 
 
 @dataclass(frozen=True)
@@ -89,166 +164,415 @@ def run_precision_sweep(
     raw_cfg: Dict[str, Any],
     out_dir: str | Path,
 ) -> PrecisionSweepResult:
-    out_dir = Path(out_dir).resolve()
-    sdir = out_dir / "precision_sweep"
-    if sdir.exists():
-        for p in sdir.glob("**/*"):
-            if p.is_file():
-                p.unlink()
-    sdir.mkdir(parents=True, exist_ok=True)
+    output_root = Path(out_dir).resolve()
+    sweep_dir = output_root / "precision_sweep"
 
-    sweep_cfg = _cfg_get(raw_cfg, "analysis.precision_sweep", {}) or {}
-    candidates = sweep_cfg.get("candidates", []) or []
+    if sweep_dir.exists():
+        for path in sweep_dir.glob("**/*"):
+            if path.is_file():
+                path.unlink()
+
+    sweep_dir.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    sweep_cfg = _cfg_get(
+        raw_cfg,
+        "analysis.precision_sweep",
+        {},
+    ) or {}
+
+    candidates = sweep_cfg.get(
+        "candidates",
+        [],
+    ) or []
 
     if not candidates:
-        raise RuntimeError("Precision sweep enabled but no analysis.precision_sweep.candidates provided")
+        raise RuntimeError(
+            "Precision sweep enabled but no "
+            "analysis.precision_sweep.candidates "
+            "were provided"
+        )
 
+    if not isinstance(candidates, list):
+        raise RuntimeError(
+            "analysis.precision_sweep.candidates "
+            "must be a list"
+        )
+
+    seen_names: set[str] = set()
     rows: List[Dict[str, Any]] = []
     detailed_results: List[Dict[str, Any]] = []
 
-    for idx, cand in enumerate(candidates):
-        name = str(cand.get("name", f"candidate_{idx}"))
-        c_defaults = _candidate_defaults(cand)
+    for index, candidate in enumerate(candidates):
+        if not isinstance(candidate, dict):
+            raise RuntimeError(
+                "Precision sweep candidate "
+                f"{index} must be a mapping"
+            )
 
-        cand_cfg = copy.deepcopy(raw_cfg)
-        _set_cfg(cand_cfg, "numerics.defaults.activation", c_defaults["activation"])
-        _set_cfg(cand_cfg, "numerics.defaults.weight", c_defaults["weight"])
-        _set_cfg(cand_cfg, "numerics.defaults.bias", c_defaults["bias"])
-        _set_cfg(cand_cfg, "numerics.defaults.accum", c_defaults["accum"])
+        name = str(
+            candidate.get(
+                "name",
+                f"candidate_{index}",
+            )
+        ).strip()
 
-        # keep layerwise overrides if user wants them
-        # quant report must stay enabled for the subrun
-        _set_cfg(cand_cfg, "analysis.quantization_report.enabled", True)
+        if not name:
+            raise RuntimeError(
+                "Precision sweep candidate names "
+                "cannot be empty"
+            )
 
-        cand_out_dir = sdir / name
-        cand_out_dir.mkdir(parents=True, exist_ok=True)
+        if name in seen_names:
+            raise RuntimeError(
+                "Duplicate precision sweep "
+                f"candidate name: {name}"
+            )
 
-        qres = run_quantization_report(
-            model_path=model_path,
-            raw_cfg=cand_cfg,
-            out_dir=cand_out_dir,
+        seen_names.add(name)
+
+        defaults = _candidate_defaults(candidate)
+        override_mode = sweep_layer_override_mode(
+            sweep_cfg,
+            candidate,
         )
 
-        qmetrics = json.loads(qres.metrics_json.read_text(encoding="utf-8"))
-        final = qmetrics["final"]
-        worst = qmetrics.get("worst_layer") or {}
+        candidate_cfg = copy.deepcopy(raw_cfg)
+
+        for role in PRECISION_ROLES:
+            _set_cfg(
+                candidate_cfg,
+                f"numerics.defaults.{role}",
+                defaults[role],
+            )
+
+        if override_mode == "clear":
+            _set_cfg(
+                candidate_cfg,
+                "numerics.layers",
+                [],
+            )
+
+        _set_cfg(
+            candidate_cfg,
+            "analysis.quantization_report.enabled",
+            True,
+        )
+
+        candidate_dir = sweep_dir / name
+        candidate_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        quant_result = run_quantization_report(
+            model_path=model_path,
+            raw_cfg=candidate_cfg,
+            out_dir=candidate_dir,
+        )
+
+        quant_metrics = json.loads(
+            quant_result.metrics_json.read_text(
+                encoding="utf-8"
+            )
+        )
+
+        final = quant_metrics["final"]
+        worst = quant_metrics.get(
+            "worst_layer",
+        ) or {}
 
         row = {
             "name": name,
-            "activation_bits": int(c_defaults["activation"]["total_bits"]),
-            "activation_int_bits": int(c_defaults["activation"]["int_bits"]),
-            "weight_bits": int(c_defaults["weight"]["total_bits"]),
-            "weight_int_bits": int(c_defaults["weight"]["int_bits"]),
-            "bias_bits": int(c_defaults["bias"]["total_bits"]),
-            "bias_int_bits": int(c_defaults["bias"]["int_bits"]),
-            "accum_bits": int(c_defaults["accum"]["total_bits"]),
-            "accum_int_bits": int(c_defaults["accum"]["int_bits"]),
-            "output_mse": float(final["output_mse"]),
-            "output_mae": float(final["output_mae"]),
-            "output_max_abs": float(final["output_max_abs"]),
-            "output_cosine": float(final["output_cosine"]),
-            "float_top1": int(final["float_top1"]),
-            "quant_top1": int(final["quant_top1"]),
-            "prediction_match": bool(final["prediction_match"]),
-            "worst_layer_name": str(worst.get("layer_name", "")),
-            "worst_layer_type": str(worst.get("op_type", "")),
-            "worst_layer_mse": float(worst.get("mse", 0.0)),
-            "quant_metrics_json": str(qres.metrics_json),
-            "quant_summary_txt": str(qres.summary_txt),
-            "quant_layerwise_csv": str(qres.layerwise_csv),
+            "layer_overrides": override_mode,
+            "activation_bits": int(
+                defaults["activation"]["total_bits"]
+            ),
+            "activation_int_bits": int(
+                defaults["activation"]["int_bits"]
+            ),
+            "weight_bits": int(
+                defaults["weight"]["total_bits"]
+            ),
+            "weight_int_bits": int(
+                defaults["weight"]["int_bits"]
+            ),
+            "bias_bits": int(
+                defaults["bias"]["total_bits"]
+            ),
+            "bias_int_bits": int(
+                defaults["bias"]["int_bits"]
+            ),
+            "accum_bits": int(
+                defaults["accum"]["total_bits"]
+            ),
+            "accum_int_bits": int(
+                defaults["accum"]["int_bits"]
+            ),
+            "output_mse": float(
+                final["output_mse"]
+            ),
+            "output_mae": float(
+                final["output_mae"]
+            ),
+            "output_max_abs": float(
+                final["output_max_abs"]
+            ),
+            "output_cosine": float(
+                final["output_cosine"]
+            ),
+            "float_top1": int(
+                final["float_top1"]
+            ),
+            "quant_top1": int(
+                final["quant_top1"]
+            ),
+            "prediction_match": bool(
+                final["prediction_match"]
+            ),
+            "worst_layer_name": str(
+                worst.get(
+                    "layer_name",
+                    "",
+                )
+            ),
+            "worst_layer_type": str(
+                worst.get(
+                    "op_type",
+                    "",
+                )
+            ),
+            "worst_layer_mse": float(
+                worst.get(
+                    "mse",
+                    0.0,
+                )
+            ),
+            "quant_metrics_json": str(
+                quant_result.metrics_json
+            ),
+            "quant_summary_txt": str(
+                quant_result.summary_txt
+            ),
+            "quant_layerwise_csv": str(
+                quant_result.layerwise_csv
+            ),
         }
+
         rows.append(row)
 
         detailed_results.append(
             {
                 "name": name,
-                "defaults": c_defaults,
-                "quant_report": qmetrics,
+                "defaults": defaults,
+                "layer_overrides": override_mode,
+                "effective_layer_rules": (
+                    candidate_cfg
+                    .get("numerics", {})
+                    .get("layers", [])
+                ),
+                "quant_report": quant_metrics,
             }
         )
 
-    recommended = _recommend_candidate(rows)
+    require_prediction_match = bool(
+        sweep_cfg.get(
+            "require_prediction_match",
+            True,
+        )
+    )
 
-    results_json = sdir / "results.json"
-    results_csv = sdir / "results.csv"
-    summary_txt = sdir / "summary.txt"
+    minimum_cosine = float(
+        sweep_cfg.get(
+            "minimum_cosine",
+            0.99,
+        )
+    )
+
+    recommended = _recommend_candidate(
+        rows,
+        require_prediction_match=(
+            require_prediction_match
+        ),
+        minimum_cosine=minimum_cosine,
+    )
+
+    results_json = sweep_dir / "results.json"
+    results_csv = sweep_dir / "results.csv"
+    summary_txt = sweep_dir / "summary.txt"
 
     payload = {
         "model_path": str(model_path),
+        "settings": {
+            "require_prediction_match": (
+                require_prediction_match
+            ),
+            "minimum_cosine": minimum_cosine,
+            "default_layer_overrides": (
+                sweep_cfg.get(
+                    "layer_overrides",
+                    "clear",
+                )
+            ),
+        },
         "recommended": recommended,
         "results": rows,
         "detailed_results": detailed_results,
     }
-    results_json.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
-    with results_csv.open("w", newline="", encoding="utf-8") as f:
+    results_json.write_text(
+        json.dumps(
+            payload,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    csv_fields = [
+        "name",
+        "layer_overrides",
+        "activation_bits",
+        "activation_int_bits",
+        "weight_bits",
+        "weight_int_bits",
+        "bias_bits",
+        "bias_int_bits",
+        "accum_bits",
+        "accum_int_bits",
+        "output_mse",
+        "output_mae",
+        "output_max_abs",
+        "output_cosine",
+        "float_top1",
+        "quant_top1",
+        "prediction_match",
+        "worst_layer_name",
+        "worst_layer_type",
+        "worst_layer_mse",
+        "quant_metrics_json",
+        "quant_summary_txt",
+        "quant_layerwise_csv",
+    ]
+
+    with results_csv.open(
+        "w",
+        newline="",
+        encoding="utf-8",
+    ) as output_file:
         writer = csv.DictWriter(
-            f,
-            fieldnames=[
-                "name",
-                "activation_bits",
-                "activation_int_bits",
-                "weight_bits",
-                "weight_int_bits",
-                "bias_bits",
-                "bias_int_bits",
-                "accum_bits",
-                "accum_int_bits",
-                "output_mse",
-                "output_mae",
-                "output_max_abs",
-                "output_cosine",
-                "float_top1",
-                "quant_top1",
-                "prediction_match",
-                "worst_layer_name",
-                "worst_layer_type",
-                "worst_layer_mse",
-                "quant_metrics_json",
-                "quant_summary_txt",
-                "quant_layerwise_csv",
-            ],
+            output_file,
+            fieldnames=csv_fields,
         )
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
 
-    lines: List[str] = []
-    lines.append("=============== FPGAI Precision Sweep ===============")
-    lines.append(f"Model path         : {model_path}")
-    lines.append(f"Candidates         : {len(rows)}")
-    lines.append("-----------------------------------------------------")
-    lines.append("Name       Act       Wgt       Bias      Acc       MSE         MAE         Cosine      PredMatch")
-    for r in rows:
-        lines.append(
-            f"{r['name']:<10} "
-            f"{_fmt_spec({'total_bits': r['activation_bits'], 'int_bits': r['activation_int_bits']}):<10} "
-            f"{_fmt_spec({'total_bits': r['weight_bits'], 'int_bits': r['weight_int_bits']}):<10} "
-            f"{_fmt_spec({'total_bits': r['bias_bits'], 'int_bits': r['bias_int_bits']}):<11} "
-            f"{_fmt_spec({'total_bits': r['accum_bits'], 'int_bits': r['accum_int_bits']}):<11} "
-            f"{r['output_mse']:<11.8f} "
-            f"{r['output_mae']:<11.8f} "
-            f"{r['output_cosine']:<11.8f} "
-            f"{str(r['prediction_match'])}"
+        writer.writeheader()
+        writer.writerows(rows)
+
+    lines: List[str] = [
+        "=============== FPGAI Precision Sweep ===============",
+        f"Model path         : {model_path}",
+        f"Candidates         : {len(rows)}",
+        (
+            "Layer overrides    : "
+            f"{sweep_cfg.get('layer_overrides', 'clear')}"
+        ),
+        (
+            "Minimum cosine     : "
+            f"{minimum_cosine}"
+        ),
+        (
+            "Require pred match : "
+            f"{require_prediction_match}"
+        ),
+        "-----------------------------------------------------",
+        (
+            "Name       Overrides Act          Wgt          "
+            "Bias         Acc          MSE         "
+            "Cosine      Match"
+        ),
+    ]
+
+    for row in rows:
+        activation = _format_spec(
+            {
+                "total_bits": row["activation_bits"],
+                "int_bits": (
+                    row["activation_int_bits"]
+                ),
+            }
         )
+        weight = _format_spec(
+            {
+                "total_bits": row["weight_bits"],
+                "int_bits": row["weight_int_bits"],
+            }
+        )
+        bias = _format_spec(
+            {
+                "total_bits": row["bias_bits"],
+                "int_bits": row["bias_int_bits"],
+            }
+        )
+        accum = _format_spec(
+            {
+                "total_bits": row["accum_bits"],
+                "int_bits": row["accum_int_bits"],
+            }
+        )
+
+        lines.append(
+            f"{row['name']:<10} "
+            f"{row['layer_overrides']:<9} "
+            f"{activation:<12} "
+            f"{weight:<12} "
+            f"{bias:<12} "
+            f"{accum:<12} "
+            f"{row['output_mse']:<11.8f} "
+            f"{row['output_cosine']:<11.8f} "
+            f"{row['prediction_match']}"
+        )
+
+    lines.append(
+        "-----------------------------------------------------"
+    )
 
     if recommended is not None:
-        lines.append("-----------------------------------------------------")
-        lines.append(f"Recommended        : {recommended['name']}")
         lines.append(
-            "Reason             : smallest candidate with good numerical behavior "
-            f"(prediction_match={recommended['prediction_match']}, cosine={recommended['output_cosine']:.6f})"
+            f"Recommended        : {recommended['name']}"
+        )
+        lines.append(
+            "Recommendation     : "
+            f"prediction_match="
+            f"{recommended['prediction_match']}, "
+            f"cosine="
+            f"{recommended['output_cosine']:.8f}, "
+            f"mse="
+            f"{recommended['output_mse']:.8f}"
+        )
+    else:
+        lines.append(
+            "Recommended        : None"
         )
 
-    lines.append("-----------------------------------------------------")
-    lines.append(f"Results JSON       : {results_json}")
-    lines.append(f"Results CSV        : {results_csv}")
-    lines.append(f"Summary TXT        : {summary_txt}")
-    lines.append("=====================================================")
-    summary_txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    lines.extend(
+        [
+            "-----------------------------------------------------",
+            f"Results JSON       : {results_json}",
+            f"Results CSV        : {results_csv}",
+            f"Summary TXT        : {summary_txt}",
+            "=====================================================",
+        ]
+    )
+
+    summary_txt.write_text(
+        "\n".join(lines) + "\n",
+        encoding="utf-8",
+    )
 
     return PrecisionSweepResult(
-        out_dir=sdir,
+        out_dir=sweep_dir,
         results_json=results_json,
         summary_txt=summary_txt,
         results_csv=results_csv,

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 def emit_activations_h() -> str:
     return r'''#pragma once
+
 #include "fpgai_types.h"
 
 #ifndef FPGAI_PIPELINE_II
@@ -15,174 +16,773 @@ def emit_activations_h() -> str:
 
 namespace fpgai {
 
-static inline act_t sigmoid_approx_scalar(act_t x) {
-    if (x <= (act_t)-4) return (act_t)0;
-    if (x >= (act_t)4)  return (act_t)1;
-    return (act_t)0.5 + (x / (act_t)8);
-}
+template<
+    typename OUT_T,
+    typename IN_T,
+    typename ACC_T
+>
+static inline OUT_T sigmoid_approx_scalar_typed(
+    IN_T input
+) {
+    const ACC_T value = (ACC_T)input;
 
-static inline act_t exp_approx_neg_scalar(act_t x) {
-    if (x <= (act_t)-8) return (act_t)0;
-    if (x >= (act_t)0)  return (act_t)1;
-    acc_t x1 = (acc_t)x;
-    acc_t x2 = x1 * x1;
-    acc_t y = (acc_t)1 + x1 + (x2 * (acc_t)0.5);
-    if (y < (acc_t)0) y = (acc_t)0;
-    return (act_t)y;
-}
-
-template<int N>
-void relu(const act_t* x, act_t* y) {
-#pragma HLS INLINE off
-    for (int i0 = 0; i0 < N; i0 += FPGAI_ACT_UNROLL) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-        for (int u = 0; u < FPGAI_ACT_UNROLL; ++u) {
-#pragma HLS UNROLL
-            int i = i0 + u;
-            if (i < N) y[i] = (x[i] > (act_t)0) ? x[i] : (act_t)0;
-        }
+    if (value <= (ACC_T)-4) {
+        return (OUT_T)0;
     }
-}
 
-template<int N>
-void relu_backward_from_output(const act_t* y, const grad_act_t* dY, grad_act_t* dX) {
-#pragma HLS INLINE off
-    for (int i0 = 0; i0 < N; i0 += FPGAI_ACT_UNROLL) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-        for (int u = 0; u < FPGAI_ACT_UNROLL; ++u) {
-#pragma HLS UNROLL
-            int i = i0 + u;
-            if (i < N) dX[i] = (y[i] > (act_t)0) ? dY[i] : (grad_act_t)0;
-        }
+    if (value >= (ACC_T)4) {
+        return (OUT_T)1;
     }
+
+    return (OUT_T)(
+        (ACC_T)0.5
+        + value / (ACC_T)8
+    );
 }
 
-template<int N>
-void leaky_relu(const act_t* x, act_t* y, act_t alpha = (act_t)0.1) {
-#pragma HLS INLINE off
-    for (int i0 = 0; i0 < N; i0 += FPGAI_ACT_UNROLL) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-        for (int u = 0; u < FPGAI_ACT_UNROLL; ++u) {
-#pragma HLS UNROLL
-            int i = i0 + u;
-            if (i < N) y[i] = (x[i] > (act_t)0) ? x[i] : (act_t)(alpha * x[i]);
-        }
+
+static inline act_t sigmoid_approx_scalar(
+    act_t input
+) {
+    return sigmoid_approx_scalar_typed<
+        act_t,
+        act_t,
+        acc_t
+    >(input);
+}
+
+
+template<
+    typename OUT_T,
+    typename IN_T,
+    typename ACC_T
+>
+static inline OUT_T exp_approx_neg_scalar_typed(
+    IN_T input
+) {
+    const ACC_T value = (ACC_T)input;
+
+    if (value <= (ACC_T)-8) {
+        return (OUT_T)0;
     }
-}
 
-template<int N>
-void leaky_relu_backward_from_input(const act_t* x, const grad_act_t* dY, grad_act_t* dX, act_t alpha = (act_t)0.1) {
-#pragma HLS INLINE off
-    for (int i0 = 0; i0 < N; i0 += FPGAI_ACT_UNROLL) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-        for (int u = 0; u < FPGAI_ACT_UNROLL; ++u) {
-#pragma HLS UNROLL
-            int i = i0 + u;
-            if (i < N) dX[i] = (x[i] > (act_t)0) ? dY[i] : (grad_act_t)((acc_t)alpha * (acc_t)dY[i]);
-        }
+    if (value >= (ACC_T)0) {
+        return (OUT_T)1;
     }
-}
 
-template<int N>
-void sigmoid(const act_t* x, act_t* y) {
-#pragma HLS INLINE off
-    for (int i0 = 0; i0 < N; i0 += FPGAI_ACT_UNROLL) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-        for (int u = 0; u < FPGAI_ACT_UNROLL; ++u) {
-#pragma HLS UNROLL
-            int i = i0 + u;
-            if (i < N) y[i] = sigmoid_approx_scalar(x[i]);
-        }
+    const ACC_T squared = value * value;
+
+    ACC_T result = (
+        (ACC_T)1
+        + value
+        + squared * (ACC_T)0.5
+    );
+
+    if (result < (ACC_T)0) {
+        result = (ACC_T)0;
     }
+
+    return (OUT_T)result;
 }
 
-template<int N>
-void sigmoid_backward_from_output(const act_t* y, const grad_act_t* dY, grad_act_t* dX) {
+
+static inline act_t exp_approx_neg_scalar(
+    act_t input
+) {
+    return exp_approx_neg_scalar_typed<
+        act_t,
+        act_t,
+        acc_t
+    >(input);
+}
+
+
+template<
+    int N,
+    typename IN_T = act_t,
+    typename OUT_T = act_t
+>
+void relu_typed(
+    const IN_T x[N],
+    OUT_T y[N]
+) {
 #pragma HLS INLINE off
-    for (int i0 = 0; i0 < N; i0 += FPGAI_ACT_UNROLL) {
+
+    for (
+        int base = 0;
+        base < N;
+        base += FPGAI_ACT_UNROLL
+    ) {
 #pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-        for (int u = 0; u < FPGAI_ACT_UNROLL; ++u) {
+
+        for (
+            int lane = 0;
+            lane < FPGAI_ACT_UNROLL;
+            ++lane
+        ) {
 #pragma HLS UNROLL
-            int i = i0 + u;
-            if (i < N) {
-                acc_t yy = (acc_t)y[i];
-                dX[i] = (grad_act_t)((acc_t)dY[i] * yy * ((acc_t)1 - yy));
+
+            const int index = base + lane;
+
+            if (index < N) {
+                y[index] = (
+                    x[index] > (IN_T)0
+                    ? (OUT_T)x[index]
+                    : (OUT_T)0
+                );
             }
         }
     }
 }
 
+
 template<int N>
-void softmax(const act_t* x, act_t* y) {
-#pragma HLS INLINE off
-    act_t maxv = x[0];
-    for (int i = 1; i < N; ++i) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-        if (x[i] > maxv) maxv = x[i];
-    }
-
-    act_t tmp[N];
-#pragma HLS ARRAY_PARTITION variable=tmp cyclic factor=FPGAI_ACT_UNROLL
-
-    acc_t sum = 0;
-    for (int i = 0; i < N; ++i) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-        act_t shifted = x[i] - maxv;
-        act_t e = exp_approx_neg_scalar(shifted);
-        tmp[i] = e;
-        sum += (acc_t)e;
-    }
-
-    if (sum <= (acc_t)0) sum = (acc_t)1;
-
-    for (int i = 0; i < N; ++i) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-        y[i] = (act_t)((acc_t)tmp[i] / sum);
-    }
+void relu(
+    const act_t* x,
+    act_t* y
+) {
+    relu_typed<
+        N,
+        act_t,
+        act_t
+    >(x, y);
 }
 
-template<int N>
-void softmax_backward(const act_t* y, const grad_act_t* dY, grad_act_t* dX) {
+
+template<
+    int N,
+    typename IN_T = act_t,
+    typename OUT_T = act_t,
+    typename ACC_T = acc_t
+>
+void leaky_relu_typed(
+    const IN_T x[N],
+    OUT_T y[N],
+    ACC_T alpha = (ACC_T)0.1
+) {
 #pragma HLS INLINE off
-    for (int i = 0; i < N; ++i) {
+
+    for (
+        int base = 0;
+        base < N;
+        base += FPGAI_ACT_UNROLL
+    ) {
 #pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-        acc_t acc = 0;
-        for (int j = 0; j < N; ++j) {
-            acc_t jac = (i == j)
-                ? ((acc_t)y[i] * ((acc_t)1 - (acc_t)y[i]))
-                : (-(acc_t)y[i] * (acc_t)y[j]);
-            acc += jac * (acc_t)dY[j];
+
+        for (
+            int lane = 0;
+            lane < FPGAI_ACT_UNROLL;
+            ++lane
+        ) {
+#pragma HLS UNROLL
+
+            const int index = base + lane;
+
+            if (index < N) {
+                const ACC_T value = (
+                    (ACC_T)x[index]
+                );
+
+                y[index] = (
+                    value > (ACC_T)0
+                    ? (OUT_T)value
+                    : (OUT_T)(alpha * value)
+                );
+            }
         }
-        dX[i] = (grad_act_t)acc;
     }
 }
 
+
 template<int N>
-void reshape_copy(const act_t* x, act_t* y) {
+void leaky_relu(
+    const act_t* x,
+    act_t* y,
+    act_t alpha = (act_t)0.1
+) {
+    leaky_relu_typed<
+        N,
+        act_t,
+        act_t,
+        acc_t
+    >(
+        x,
+        y,
+        (acc_t)alpha
+    );
+}
+
+
+template<
+    int N,
+    typename IN_T = act_t,
+    typename OUT_T = act_t,
+    typename ACC_T = acc_t
+>
+void sigmoid_typed(
+    const IN_T x[N],
+    OUT_T y[N]
+) {
 #pragma HLS INLINE off
-    for (int i = 0; i < N; ++i) {
+
+    for (
+        int base = 0;
+        base < N;
+        base += FPGAI_ACT_UNROLL
+    ) {
 #pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-        y[i] = x[i];
+
+        for (
+            int lane = 0;
+            lane < FPGAI_ACT_UNROLL;
+            ++lane
+        ) {
+#pragma HLS UNROLL
+
+            const int index = base + lane;
+
+            if (index < N) {
+                y[index] = (
+                    sigmoid_approx_scalar_typed<
+                        OUT_T,
+                        IN_T,
+                        ACC_T
+                    >(x[index])
+                );
+            }
+        }
     }
 }
 
+
 template<int N>
-void add_vec(const act_t* a, const act_t* b, act_t* y) {
+void sigmoid(
+    const act_t* x,
+    act_t* y
+) {
+    sigmoid_typed<
+        N,
+        act_t,
+        act_t,
+        acc_t
+    >(x, y);
+}
+
+
+template<
+    int N,
+    typename IN_T = act_t,
+    typename OUT_T = act_t,
+    typename ACC_T = acc_t
+>
+void softmax_typed(
+    const IN_T x[N],
+    OUT_T y[N]
+) {
 #pragma HLS INLINE off
-    for (int i = 0; i < N; ++i) {
+
+    ACC_T maximum = (ACC_T)x[0];
+
+    for (
+        int index = 1;
+        index < N;
+        ++index
+    ) {
 #pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-        y[i] = (act_t)((acc_t)a[i] + (acc_t)b[i]);
+
+        const ACC_T value = (
+            (ACC_T)x[index]
+        );
+
+        if (value > maximum) {
+            maximum = value;
+        }
+    }
+
+    OUT_T temporary[N];
+
+#pragma HLS ARRAY_PARTITION variable=temporary cyclic factor=FPGAI_ACT_UNROLL
+
+    ACC_T sum = (ACC_T)0;
+
+    for (
+        int index = 0;
+        index < N;
+        ++index
+    ) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+
+        const ACC_T shifted = (
+            (ACC_T)x[index]
+            - maximum
+        );
+
+        const OUT_T exponential = (
+            exp_approx_neg_scalar_typed<
+                OUT_T,
+                ACC_T,
+                ACC_T
+            >(shifted)
+        );
+
+        temporary[index] = exponential;
+        sum += (ACC_T)exponential;
+    }
+
+    if (sum <= (ACC_T)0) {
+        sum = (ACC_T)1;
+    }
+
+    for (
+        int index = 0;
+        index < N;
+        ++index
+    ) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+
+        y[index] = (
+            (OUT_T)(
+                (ACC_T)temporary[index]
+                / sum
+            )
+        );
     }
 }
 
+
 template<int N>
-void add_backward(const grad_act_t* dY, grad_act_t* dA, grad_act_t* dB) {
+void softmax(
+    const act_t* x,
+    act_t* y
+) {
+    softmax_typed<
+        N,
+        act_t,
+        act_t,
+        acc_t
+    >(x, y);
+}
+
+
+template<
+    int N,
+    typename IN_T = act_t,
+    typename OUT_T = act_t
+>
+void reshape_copy_typed(
+    const IN_T x[N],
+    OUT_T y[N]
+) {
 #pragma HLS INLINE off
-    for (int i = 0; i < N; ++i) {
+
+    for (
+        int index = 0;
+        index < N;
+        ++index
+    ) {
 #pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-        dA[i] += dY[i];
-        dB[i] += dY[i];
+
+        y[index] = (OUT_T)x[index];
     }
+}
+
+
+template<int N>
+void reshape_copy(
+    const act_t* x,
+    act_t* y
+) {
+    reshape_copy_typed<
+        N,
+        act_t,
+        act_t
+    >(x, y);
+}
+
+
+template<
+    int N,
+    typename LEFT_T = act_t,
+    typename RIGHT_T = act_t,
+    typename OUT_T = act_t,
+    typename ACC_T = acc_t
+>
+void add_vec_typed(
+    const LEFT_T left[N],
+    const RIGHT_T right[N],
+    OUT_T output[N]
+) {
+#pragma HLS INLINE off
+
+    for (
+        int index = 0;
+        index < N;
+        ++index
+    ) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+
+        output[index] = (
+            (OUT_T)(
+                (ACC_T)left[index]
+                + (ACC_T)right[index]
+            )
+        );
+    }
+}
+
+
+template<int N>
+void add_vec(
+    const act_t* left,
+    const act_t* right,
+    act_t* output
+) {
+    add_vec_typed<
+        N,
+        act_t,
+        act_t,
+        act_t,
+        acc_t
+    >(
+        left,
+        right,
+        output
+    );
+}
+
+
+template<
+    int N,
+    typename ACT_T = act_t,
+    typename GRAD_OUT_T = grad_act_t,
+    typename GRAD_IN_T = grad_act_t
+>
+void relu_backward_from_output_typed(
+    const ACT_T y[N],
+    const GRAD_OUT_T dY[N],
+    GRAD_IN_T dX[N]
+) {
+#pragma HLS INLINE off
+
+    for (
+        int base = 0;
+        base < N;
+        base += FPGAI_ACT_UNROLL
+    ) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+
+        for (
+            int lane = 0;
+            lane < FPGAI_ACT_UNROLL;
+            ++lane
+        ) {
+#pragma HLS UNROLL
+
+            const int index = base + lane;
+
+            if (index < N) {
+                dX[index] = (
+                    y[index] > (ACT_T)0
+                    ? (GRAD_IN_T)dY[index]
+                    : (GRAD_IN_T)0
+                );
+            }
+        }
+    }
+}
+
+
+template<int N>
+void relu_backward_from_output(
+    const act_t* y,
+    const grad_act_t* dY,
+    grad_act_t* dX
+) {
+    relu_backward_from_output_typed<
+        N,
+        act_t,
+        grad_act_t,
+        grad_act_t
+    >(
+        y,
+        dY,
+        dX
+    );
+}
+
+
+template<
+    int N,
+    typename ACT_T = act_t,
+    typename GRAD_OUT_T = grad_act_t,
+    typename GRAD_IN_T = grad_act_t,
+    typename ACC_T = acc_t
+>
+void leaky_relu_backward_from_input_typed(
+    const ACT_T x[N],
+    const GRAD_OUT_T dY[N],
+    GRAD_IN_T dX[N],
+    ACC_T alpha = (ACC_T)0.1
+) {
+#pragma HLS INLINE off
+
+    for (
+        int base = 0;
+        base < N;
+        base += FPGAI_ACT_UNROLL
+    ) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+
+        for (
+            int lane = 0;
+            lane < FPGAI_ACT_UNROLL;
+            ++lane
+        ) {
+#pragma HLS UNROLL
+
+            const int index = base + lane;
+
+            if (index < N) {
+                dX[index] = (
+                    x[index] > (ACT_T)0
+                    ? (GRAD_IN_T)dY[index]
+                    : (
+                        (GRAD_IN_T)(
+                            alpha
+                            * (ACC_T)dY[index]
+                        )
+                    )
+                );
+            }
+        }
+    }
+}
+
+
+template<int N>
+void leaky_relu_backward_from_input(
+    const act_t* x,
+    const grad_act_t* dY,
+    grad_act_t* dX,
+    act_t alpha = (act_t)0.1
+) {
+    leaky_relu_backward_from_input_typed<
+        N,
+        act_t,
+        grad_act_t,
+        grad_act_t,
+        acc_t
+    >(
+        x,
+        dY,
+        dX,
+        (acc_t)alpha
+    );
+}
+
+
+template<
+    int N,
+    typename ACT_T = act_t,
+    typename GRAD_OUT_T = grad_act_t,
+    typename GRAD_IN_T = grad_act_t,
+    typename ACC_T = acc_t
+>
+void sigmoid_backward_from_output_typed(
+    const ACT_T y[N],
+    const GRAD_OUT_T dY[N],
+    GRAD_IN_T dX[N]
+) {
+#pragma HLS INLINE off
+
+    for (
+        int base = 0;
+        base < N;
+        base += FPGAI_ACT_UNROLL
+    ) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+
+        for (
+            int lane = 0;
+            lane < FPGAI_ACT_UNROLL;
+            ++lane
+        ) {
+#pragma HLS UNROLL
+
+            const int index = base + lane;
+
+            if (index < N) {
+                const ACC_T output = (
+                    (ACC_T)y[index]
+                );
+
+                dX[index] = (
+                    (GRAD_IN_T)(
+                        (ACC_T)dY[index]
+                        * output
+                        * (
+                            (ACC_T)1
+                            - output
+                        )
+                    )
+                );
+            }
+        }
+    }
+}
+
+
+template<int N>
+void sigmoid_backward_from_output(
+    const act_t* y,
+    const grad_act_t* dY,
+    grad_act_t* dX
+) {
+    sigmoid_backward_from_output_typed<
+        N,
+        act_t,
+        grad_act_t,
+        grad_act_t,
+        acc_t
+    >(
+        y,
+        dY,
+        dX
+    );
+}
+
+
+template<
+    int N,
+    typename ACT_T = act_t,
+    typename GRAD_OUT_T = grad_act_t,
+    typename GRAD_IN_T = grad_act_t,
+    typename ACC_T = acc_t
+>
+void softmax_backward_typed(
+    const ACT_T y[N],
+    const GRAD_OUT_T dY[N],
+    GRAD_IN_T dX[N]
+) {
+#pragma HLS INLINE off
+
+    for (
+        int output_index = 0;
+        output_index < N;
+        ++output_index
+    ) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+
+        ACC_T accumulator = (ACC_T)0;
+
+        for (
+            int input_index = 0;
+            input_index < N;
+            ++input_index
+        ) {
+            const ACC_T jacobian = (
+                output_index == input_index
+                ? (
+                    (ACC_T)y[output_index]
+                    * (
+                        (ACC_T)1
+                        - (ACC_T)y[output_index]
+                    )
+                )
+                : (
+                    -(ACC_T)y[output_index]
+                    * (ACC_T)y[input_index]
+                )
+            );
+
+            accumulator += (
+                jacobian
+                * (ACC_T)dY[input_index]
+            );
+        }
+
+        dX[output_index] = (
+            (GRAD_IN_T)accumulator
+        );
+    }
+}
+
+
+template<int N>
+void softmax_backward(
+    const act_t* y,
+    const grad_act_t* dY,
+    grad_act_t* dX
+) {
+    softmax_backward_typed<
+        N,
+        act_t,
+        grad_act_t,
+        grad_act_t,
+        acc_t
+    >(
+        y,
+        dY,
+        dX
+    );
+}
+
+
+template<
+    int N,
+    typename GRAD_OUT_T = grad_act_t,
+    typename GRAD_LEFT_T = grad_act_t,
+    typename GRAD_RIGHT_T = grad_act_t,
+    typename ACC_T = acc_t
+>
+void add_backward_typed(
+    const GRAD_OUT_T dY[N],
+    GRAD_LEFT_T dLeft[N],
+    GRAD_RIGHT_T dRight[N]
+) {
+#pragma HLS INLINE off
+
+    for (
+        int index = 0;
+        index < N;
+        ++index
+    ) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+
+        dLeft[index] = (
+            (GRAD_LEFT_T)(
+                (ACC_T)dLeft[index]
+                + (ACC_T)dY[index]
+            )
+        );
+
+        dRight[index] = (
+            (GRAD_RIGHT_T)(
+                (ACC_T)dRight[index]
+                + (ACC_T)dY[index]
+            )
+        );
+    }
+}
+
+
+template<int N>
+void add_backward(
+    const grad_act_t* dY,
+    grad_act_t* dLeft,
+    grad_act_t* dRight
+) {
+    add_backward_typed<
+        N,
+        grad_act_t,
+        grad_act_t,
+        grad_act_t,
+        acc_t
+    >(
+        dY,
+        dLeft,
+        dRight
+    );
 }
 
 } // namespace fpgai

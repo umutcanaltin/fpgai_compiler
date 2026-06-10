@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Any, Dict, List
-import os
+
 import yaml
+from yaml.constructor import ConstructorError
+from yaml.nodes import MappingNode
 
 
-@dataclass
+@dataclass(frozen=True)
 class ConfigIssue:
     path: str
     message: str
@@ -19,18 +22,134 @@ class ConfigError(Exception):
 
     def __str__(self) -> str:
         lines = ["FPGAI config validation failed:"]
-        for it in self.issues:
-            lines.append(f" - {it.path}: {it.message}")
+        for issue in self.issues:
+            lines.append(f" - {issue.path}: {issue.message}")
         return "\n".join(lines)
 
 
-def _deep_get(d: Dict[str, Any], path: str, default: Any = None) -> Any:
-    cur: Any = d
-    for k in path.split("."):
-        if not isinstance(cur, dict) or k not in cur:
+class _UniqueKeyLoader(yaml.SafeLoader):
+    def construct_mapping(
+        self,
+        node: MappingNode,
+        deep: bool = False,
+    ) -> Dict[str, Any]:
+        if not isinstance(node, MappingNode):
+            raise ConstructorError(
+                None,
+                None,
+                f"Expected mapping node, got {node.id}",
+                node.start_mark,
+            )
+
+        self.flatten_mapping(node)
+        mapping: Dict[str, Any] = {}
+
+        for key_node, value_node in node.value:
+            key = self.construct_object(
+                key_node,
+                deep=deep,
+            )
+
+            try:
+                duplicate = key in mapping
+            except TypeError as exc:
+                raise ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    "found an unhashable mapping key",
+                    key_node.start_mark,
+                ) from exc
+
+            if duplicate:
+                raise ConstructorError(
+                    "while constructing a mapping",
+                    node.start_mark,
+                    f"found duplicate key {key!r}",
+                    key_node.start_mark,
+                )
+
+            mapping[key] = self.construct_object(
+                value_node,
+                deep=deep,
+            )
+
+        return mapping
+
+
+def _load_yaml(path: str) -> Dict[str, Any]:
+    try:
+        with open(path, "r", encoding="utf-8") as config_file:
+            raw = yaml.load(
+                config_file,
+                Loader=_UniqueKeyLoader,
+            ) or {}
+    except OSError as exc:
+        raise ConfigError(
+            [
+                ConfigIssue(
+                    "config",
+                    f"Could not read file: {exc}",
+                )
+            ]
+        ) from exc
+    except yaml.YAMLError as exc:
+        mark = getattr(
+            exc,
+            "problem_mark",
+            None,
+        )
+        location = ""
+
+        if mark is not None:
+            location = (
+                f" at line {mark.line + 1}, "
+                f"column {mark.column + 1}"
+            )
+
+        problem = (
+            getattr(exc, "problem", None)
+            or str(exc)
+        )
+
+        raise ConfigError(
+            [
+                ConfigIssue(
+                    "config",
+                    f"Invalid YAML{location}: {problem}",
+                )
+            ]
+        ) from exc
+
+    if not isinstance(raw, dict):
+        raise ConfigError(
+            [
+                ConfigIssue(
+                    "root",
+                    "Top-level YAML must be a mapping/dict",
+                )
+            ]
+        )
+
+    return raw
+
+
+def _deep_get(
+    data: Dict[str, Any],
+    path: str,
+    default: Any = None,
+) -> Any:
+    current: Any = data
+
+    for key in path.split("."):
+        if (
+            not isinstance(current, dict)
+            or key not in current
+        ):
             return default
-        cur = cur[k]
-    return cur
+
+        current = current[key]
+
+    return current
 
 
 @dataclass(frozen=True)
@@ -57,102 +176,330 @@ class FPGAIConfig:
     raw: Dict[str, Any]
 
 
-PIPELINE_MODES_V1 = {"inference", "training_on_device"}
+PIPELINE_MODES_V1 = {
+    "inference",
+    "training_on_device",
+}
 
-DEFAULT_NUMERIC_ROLES = {"activation", "weight", "bias", "accum"}
+DEFAULT_NUMERIC_ROLES = {
+    "activation",
+    "weight",
+    "bias",
+    "accum",
+}
 
 TRAINING_NUMERIC_ROLE_ALIASES = {
-    # canonical names
     "grad": "grad",
     "grad_accum": "grad_accum",
     "master_weight": "master_weight",
     "optimizer_state": "optimizer_state",
-    # backwards-compatible aliases
     "gradient": "grad",
     "gradient_accum": "grad_accum",
     "weight_master": "master_weight",
 }
 
 
-def _is_valid_precision_spec(x: Any) -> bool:
-    if not isinstance(x, dict):
+def _is_valid_precision_spec(
+    value: Any,
+) -> bool:
+    if not isinstance(value, dict):
         return False
-    if x.get("type") != "ap_fixed":
+
+    if value.get("type") != "ap_fixed":
         return False
-    tb = x.get("total_bits")
-    ib = x.get("int_bits")
-    if not isinstance(tb, int) or not isinstance(ib, int):
+
+    total_bits = value.get("total_bits")
+    int_bits = value.get("int_bits")
+
+    # bool is a subclass of int, so use exact type checks.
+    if (
+        type(total_bits) is not int
+        or type(int_bits) is not int
+    ):
         return False
-    if tb <= 0 or ib <= 0 or ib > tb:
+
+    if total_bits <= 0 or int_bits <= 0:
         return False
+
+    if int_bits > total_bits:
+        return False
+
     return True
 
 
+def _precision_error_message() -> str:
+    return (
+        "Expected {type: ap_fixed, total_bits: int, "
+        "int_bits: int} with positive values and "
+        "int_bits <= total_bits"
+    )
+
+
 def _ap_str(node: Any) -> str:
-    if isinstance(node, dict) and node.get("type") == "ap_fixed":
-        return f"ap_fixed<{int(node.get('total_bits', 16))},{int(node.get('int_bits', 6))}>"
+    if (
+        isinstance(node, dict)
+        and node.get("type") == "ap_fixed"
+    ):
+        return (
+            f"ap_fixed<"
+            f"{int(node.get('total_bits', 16))},"
+            f"{int(node.get('int_bits', 6))}>"
+        )
+
     return "float"
 
 
-def _validate_default_numerics(raw: Dict[str, Any], issues: List[ConfigIssue]) -> None:
-    for key in DEFAULT_NUMERIC_ROLES:
-        spec = _deep_get(raw, f"numerics.defaults.{key}", None)
-        if spec is not None and not _is_valid_precision_spec(spec):
+def _validate_default_numerics(
+    raw: Dict[str, Any],
+    issues: List[ConfigIssue],
+) -> None:
+    defaults = _deep_get(
+        raw,
+        "numerics.defaults",
+        None,
+    )
+
+    if defaults is None:
+        return
+
+    if not isinstance(defaults, dict):
+        issues.append(
+            ConfigIssue(
+                "numerics.defaults",
+                "Expected a mapping",
+            )
+        )
+        return
+
+    unknown_roles = (
+        set(defaults)
+        - DEFAULT_NUMERIC_ROLES
+    )
+
+    for role in sorted(unknown_roles):
+        issues.append(
+            ConfigIssue(
+                f"numerics.defaults.{role}",
+                f"Unknown numeric role {role!r}",
+            )
+        )
+
+    for role in DEFAULT_NUMERIC_ROLES:
+        spec = defaults.get(role)
+
+        if (
+            spec is not None
+            and not _is_valid_precision_spec(spec)
+        ):
             issues.append(
                 ConfigIssue(
-                    f"numerics.defaults.{key}",
-                    "Expected {type: ap_fixed, total_bits: int, int_bits: int} with int_bits <= total_bits",
+                    f"numerics.defaults.{role}",
+                    _precision_error_message(),
                 )
             )
 
 
-def _validate_layerwise_numerics(raw: Dict[str, Any], issues: List[ConfigIssue]) -> None:
-    layer_rules = _deep_get(raw, "numerics.layers", [])
+def _validate_layer_match(
+    match: Any,
+    path: str,
+    issues: List[ConfigIssue],
+) -> None:
+    if not isinstance(match, dict):
+        issues.append(
+            ConfigIssue(
+                path,
+                "Missing or invalid match mapping",
+            )
+        )
+        return
+
+    allowed_keys = {
+        "name",
+        "op_type",
+        "index",
+    }
+
+    unknown_keys = set(match) - allowed_keys
+
+    for key in sorted(unknown_keys):
+        issues.append(
+            ConfigIssue(
+                f"{path}.{key}",
+                f"Unknown match field {key!r}",
+            )
+        )
+
+    if not any(
+        key in match
+        for key in allowed_keys
+    ):
+        issues.append(
+            ConfigIssue(
+                path,
+                "At least one of name, op_type, or "
+                "index must be provided",
+            )
+        )
+
+    if (
+        "name" in match
+        and (
+            not isinstance(match["name"], str)
+            or not match["name"].strip()
+        )
+    ):
+        issues.append(
+            ConfigIssue(
+                f"{path}.name",
+                "Expected a non-empty string",
+            )
+        )
+
+    if (
+        "op_type" in match
+        and (
+            not isinstance(match["op_type"], str)
+            or not match["op_type"].strip()
+        )
+    ):
+        issues.append(
+            ConfigIssue(
+                f"{path}.op_type",
+                "Expected a non-empty string",
+            )
+        )
+
+    if (
+        "index" in match
+        and type(match["index"]) is not int
+    ):
+        issues.append(
+            ConfigIssue(
+                f"{path}.index",
+                "Expected an integer",
+            )
+        )
+
+    if (
+        "index" in match
+        and type(match["index"]) is int
+        and match["index"] < 0
+    ):
+        issues.append(
+            ConfigIssue(
+                f"{path}.index",
+                "Expected a non-negative integer",
+            )
+        )
+
+
+def _validate_layerwise_numerics(
+    raw: Dict[str, Any],
+    issues: List[ConfigIssue],
+) -> None:
+    layer_rules = _deep_get(
+        raw,
+        "numerics.layers",
+        [],
+    )
+
     if layer_rules is None:
         return
 
     if not isinstance(layer_rules, list):
-        issues.append(ConfigIssue("numerics.layers", "Expected a list of layer precision rules"))
+        issues.append(
+            ConfigIssue(
+                "numerics.layers",
+                "Expected a list of layer precision rules",
+            )
+        )
         return
 
-    for i, rule in enumerate(layer_rules):
-        p = f"numerics.layers[{i}]"
+    allowed_rule_keys = (
+        DEFAULT_NUMERIC_ROLES
+        | {"match"}
+    )
+
+    for index, rule in enumerate(layer_rules):
+        path = f"numerics.layers[{index}]"
+
         if not isinstance(rule, dict):
-            issues.append(ConfigIssue(p, "Each entry must be a mapping"))
+            issues.append(
+                ConfigIssue(
+                    path,
+                    "Each entry must be a mapping",
+                )
+            )
             continue
 
-        match = rule.get("match")
-        if not isinstance(match, dict):
-            issues.append(ConfigIssue(f"{p}.match", "Missing/invalid match mapping"))
-        else:
-            if not any(k in match for k in ("name", "op_type", "index")):
+        unknown_keys = (
+            set(rule)
+            - allowed_rule_keys
+        )
+
+        for key in sorted(unknown_keys):
+            issues.append(
+                ConfigIssue(
+                    f"{path}.{key}",
+                    f"Unknown layer precision field {key!r}",
+                )
+            )
+
+        _validate_layer_match(
+            rule.get("match"),
+            f"{path}.match",
+            issues,
+        )
+
+        for role in DEFAULT_NUMERIC_ROLES:
+            if (
+                role in rule
+                and not _is_valid_precision_spec(
+                    rule[role]
+                )
+            ):
                 issues.append(
                     ConfigIssue(
-                        f"{p}.match",
-                        "At least one of {name, op_type, index} must be provided",
+                        f"{path}.{role}",
+                        _precision_error_message(),
                     )
                 )
 
-        for key in DEFAULT_NUMERIC_ROLES:
-            if key in rule and not _is_valid_precision_spec(rule[key]):
-                issues.append(
-                    ConfigIssue(
-                        f"{p}.{key}",
-                        "Expected {type: ap_fixed, total_bits: int, int_bits: int} with int_bits <= total_bits",
-                    )
-                )
 
+def _validate_and_normalize_training_numerics(
+    raw: Dict[str, Any],
+    issues: List[ConfigIssue],
+) -> None:
+    numerics = raw.setdefault(
+        "numerics",
+        {},
+    )
 
-def _validate_and_normalize_training_numerics(raw: Dict[str, Any], issues: List[ConfigIssue]) -> None:
-    numerics = raw.setdefault("numerics", {})
-    training = numerics.get("training", {})
+    if not isinstance(numerics, dict):
+        issues.append(
+            ConfigIssue(
+                "numerics",
+                "Expected a mapping",
+            )
+        )
+        return
+
+    training = numerics.get(
+        "training",
+        {},
+    )
 
     if training is None:
         numerics["training"] = {}
         return
 
     if not isinstance(training, dict):
-        issues.append(ConfigIssue("numerics.training", "Expected a mapping"))
+        issues.append(
+            ConfigIssue(
+                "numerics.training",
+                "Expected a mapping",
+            )
+        )
         return
 
     normalized: Dict[str, Any] = {}
@@ -162,18 +509,30 @@ def _validate_and_normalize_training_numerics(raw: Dict[str, Any], issues: List[
             issues.append(
                 ConfigIssue(
                     f"numerics.training.{role}",
-                    f"Unknown training numeric role '{role}'",
+                    f"Unknown training numeric role {role!r}",
                 )
             )
             continue
 
-        canonical_role = TRAINING_NUMERIC_ROLE_ALIASES[role]
+        canonical_role = (
+            TRAINING_NUMERIC_ROLE_ALIASES[role]
+        )
 
         if not _is_valid_precision_spec(spec):
             issues.append(
                 ConfigIssue(
                     f"numerics.training.{role}",
-                    "Expected {type: ap_fixed, total_bits: int, int_bits: int} with int_bits <= total_bits",
+                    _precision_error_message(),
+                )
+            )
+            continue
+
+        if canonical_role in normalized:
+            issues.append(
+                ConfigIssue(
+                    f"numerics.training.{role}",
+                    f"Duplicate alias for training numeric "
+                    f"role {canonical_role!r}",
                 )
             )
             continue
@@ -183,100 +542,485 @@ def _validate_and_normalize_training_numerics(raw: Dict[str, Any], issues: List[
     numerics["training"] = normalized
 
 
-def _validate_analysis_cfg(raw: Dict[str, Any], issues: List[ConfigIssue]) -> None:
-    qrep = _deep_get(raw, "analysis.quantization_report", None)
-    if qrep is not None and not isinstance(qrep, dict):
-        issues.append(ConfigIssue("analysis.quantization_report", "Expected a mapping"))
+def _validate_quantization_report(
+    raw: Dict[str, Any],
+    issues: List[ConfigIssue],
+) -> None:
+    report = _deep_get(
+        raw,
+        "analysis.quantization_report",
+        None,
+    )
 
-    psweep = _deep_get(raw, "analysis.precision_sweep", None)
-    if psweep is not None and not isinstance(psweep, dict):
-        issues.append(ConfigIssue("analysis.precision_sweep", "Expected a mapping"))
+    if report is None:
+        return
 
-    if isinstance(psweep, dict):
-        candidates = psweep.get("candidates", [])
-        if psweep.get("enabled", False):
-            if not isinstance(candidates, list) or not candidates:
-                issues.append(
-                    ConfigIssue(
-                        "analysis.precision_sweep.candidates",
-                        "Must be a non-empty list when enabled",
-                    )
+    if not isinstance(report, dict):
+        issues.append(
+            ConfigIssue(
+                "analysis.quantization_report",
+                "Expected a mapping",
+            )
+        )
+        return
+
+    enabled = report.get(
+        "enabled",
+        False,
+    )
+
+    if not isinstance(enabled, bool):
+        issues.append(
+            ConfigIssue(
+                "analysis.quantization_report.enabled",
+                "Expected a boolean",
+            )
+        )
+
+    seed = report.get(
+        "seed",
+        0,
+    )
+
+    if type(seed) is not int:
+        issues.append(
+            ConfigIssue(
+                "analysis.quantization_report.seed",
+                "Expected an integer",
+            )
+        )
+
+    input_npy = report.get(
+        "input_npy",
+        None,
+    )
+
+    if (
+        input_npy is not None
+        and not isinstance(input_npy, str)
+    ):
+        issues.append(
+            ConfigIssue(
+                "analysis.quantization_report.input_npy",
+                "Expected a filesystem path string",
+            )
+        )
+
+
+def _validate_precision_sweep_candidate(
+    candidate: Any,
+    index: int,
+    *,
+    default_override_mode: str,
+    seen_names: set[str],
+    issues: List[ConfigIssue],
+) -> None:
+    path = (
+        f"analysis.precision_sweep."
+        f"candidates[{index}]"
+    )
+
+    if not isinstance(candidate, dict):
+        issues.append(
+            ConfigIssue(
+                path,
+                "Each candidate must be a mapping",
+            )
+        )
+        return
+
+    name = candidate.get(
+        "name",
+        f"candidate_{index}",
+    )
+
+    if (
+        not isinstance(name, str)
+        or not name.strip()
+    ):
+        issues.append(
+            ConfigIssue(
+                f"{path}.name",
+                "Expected a non-empty string",
+            )
+        )
+        name = f"candidate_{index}"
+    else:
+        name = name.strip()
+
+    if name in seen_names:
+        issues.append(
+            ConfigIssue(
+                f"{path}.name",
+                "Duplicate precision sweep candidate "
+                f"name: {name}",
+            )
+        )
+
+    seen_names.add(name)
+
+    override_mode = candidate.get(
+        "layer_overrides",
+        default_override_mode,
+    )
+
+    if override_mode not in {
+        "clear",
+        "preserve",
+    }:
+        issues.append(
+            ConfigIssue(
+                f"{path}.layer_overrides",
+                "Must be one of ['clear', 'preserve']",
+            )
+        )
+
+    defaults = candidate.get(
+        "defaults",
+        {},
+    )
+
+    if not isinstance(defaults, dict):
+        issues.append(
+            ConfigIssue(
+                f"{path}.defaults",
+                "Expected a mapping",
+            )
+        )
+        return
+
+    unknown_roles = (
+        set(defaults)
+        - DEFAULT_NUMERIC_ROLES
+    )
+
+    for role in sorted(unknown_roles):
+        issues.append(
+            ConfigIssue(
+                f"{path}.defaults.{role}",
+                f"Unknown numeric role {role!r}",
+            )
+        )
+
+    for role in DEFAULT_NUMERIC_ROLES:
+        spec = defaults.get(role)
+
+        if spec is None:
+            issues.append(
+                ConfigIssue(
+                    f"{path}.defaults.{role}",
+                    "Missing precision specification",
                 )
-            else:
-                for i, cand in enumerate(candidates):
-                    p = f"analysis.precision_sweep.candidates[{i}]"
-                    if not isinstance(cand, dict):
-                        issues.append(ConfigIssue(p, "Each candidate must be a mapping"))
-                        continue
+            )
+        elif not _is_valid_precision_spec(spec):
+            issues.append(
+                ConfigIssue(
+                    f"{path}.defaults.{role}",
+                    _precision_error_message(),
+                )
+            )
 
-                    defaults = cand.get("defaults", {})
-                    if not isinstance(defaults, dict):
-                        issues.append(ConfigIssue(f"{p}.defaults", "Must be a mapping"))
-                        continue
 
-                    for key in DEFAULT_NUMERIC_ROLES:
-                        spec = defaults.get(key)
-                        if spec is None or not _is_valid_precision_spec(spec):
-                            issues.append(
-                                ConfigIssue(
-                                    f"{p}.defaults.{key}",
-                                    "Expected valid ap_fixed precision spec",
-                                )
-                            )
+def _validate_precision_sweep(
+    raw: Dict[str, Any],
+    issues: List[ConfigIssue],
+) -> None:
+    sweep = _deep_get(
+        raw,
+        "analysis.precision_sweep",
+        None,
+    )
+
+    if sweep is None:
+        return
+
+    if not isinstance(sweep, dict):
+        issues.append(
+            ConfigIssue(
+                "analysis.precision_sweep",
+                "Expected a mapping",
+            )
+        )
+        return
+
+    enabled = sweep.get(
+        "enabled",
+        False,
+    )
+
+    if not isinstance(enabled, bool):
+        issues.append(
+            ConfigIssue(
+                "analysis.precision_sweep.enabled",
+                "Expected a boolean",
+            )
+        )
+
+    override_mode = sweep.get(
+        "layer_overrides",
+        "clear",
+    )
+
+    if override_mode not in {
+        "clear",
+        "preserve",
+    }:
+        issues.append(
+            ConfigIssue(
+                "analysis.precision_sweep.layer_overrides",
+                "Must be one of ['clear', 'preserve']",
+            )
+        )
+
+    require_match = sweep.get(
+        "require_prediction_match",
+        True,
+    )
+
+    if not isinstance(require_match, bool):
+        issues.append(
+            ConfigIssue(
+                "analysis.precision_sweep."
+                "require_prediction_match",
+                "Expected a boolean",
+            )
+        )
+
+    minimum_cosine = sweep.get(
+        "minimum_cosine",
+        0.99,
+    )
+
+    if (
+        type(minimum_cosine) not in {
+            int,
+            float,
+        }
+        or not 0.0 <= float(minimum_cosine) <= 1.0
+    ):
+        issues.append(
+            ConfigIssue(
+                "analysis.precision_sweep.minimum_cosine",
+                "Expected a number between 0 and 1",
+            )
+        )
+
+    candidates = sweep.get(
+        "candidates",
+        [],
+    )
+
+    if not isinstance(candidates, list):
+        issues.append(
+            ConfigIssue(
+                "analysis.precision_sweep.candidates",
+                "Expected a list",
+            )
+        )
+        return
+
+    if enabled and not candidates:
+        issues.append(
+            ConfigIssue(
+                "analysis.precision_sweep.candidates",
+                "Must be a non-empty list when enabled",
+            )
+        )
+
+    seen_names: set[str] = set()
+
+    for index, candidate in enumerate(candidates):
+        _validate_precision_sweep_candidate(
+            candidate,
+            index,
+            default_override_mode=override_mode,
+            seen_names=seen_names,
+            issues=issues,
+        )
+
+
+def _validate_analysis_cfg(
+    raw: Dict[str, Any],
+    issues: List[ConfigIssue],
+) -> None:
+    analysis = raw.get(
+        "analysis",
+        {},
+    )
+
+    if analysis is None:
+        return
+
+    if not isinstance(analysis, dict):
+        issues.append(
+            ConfigIssue(
+                "analysis",
+                "Expected a mapping",
+            )
+        )
+        return
+
+    _validate_quantization_report(
+        raw,
+        issues,
+    )
+    _validate_precision_sweep(
+        raw,
+        issues,
+    )
 
 
 def load_config(path: str) -> FPGAIConfig:
     if not os.path.exists(path):
-        raise ConfigError([ConfigIssue("config", f"File not found: {path}")])
+        raise ConfigError(
+            [
+                ConfigIssue(
+                    "config",
+                    f"File not found: {path}",
+                )
+            ]
+        )
 
-    with open(path, "r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
-
-    if not isinstance(raw, dict):
-        raise ConfigError([ConfigIssue("root", "Top-level YAML must be a mapping/dict")])
-
+    raw = _load_yaml(path)
     issues: List[ConfigIssue] = []
 
-    version = raw.get("version", 1)
-    if not isinstance(version, int):
-        issues.append(ConfigIssue("version", "Must be an integer"))
-        version = 1
-    if version != 1:
-        issues.append(ConfigIssue("version", f"Unsupported version {version} (only 1 supported)"))
+    version = raw.get(
+        "version",
+        1,
+    )
 
-    model_path = _deep_get(raw, "model.path", None)
-    if not isinstance(model_path, str) or not model_path.strip():
-        issues.append(ConfigIssue("model.path", "Missing/invalid model.path"))
+    if type(version) is not int:
+        issues.append(
+            ConfigIssue(
+                "version",
+                "Must be an integer",
+            )
+        )
+        version = 1
+
+    if version != 1:
+        issues.append(
+            ConfigIssue(
+                "version",
+                f"Unsupported version {version}; "
+                "only version 1 is supported",
+            )
+        )
+
+    model_path = _deep_get(
+        raw,
+        "model.path",
+        None,
+    )
+
+    if (
+        not isinstance(model_path, str)
+        or not model_path.strip()
+    ):
+        issues.append(
+            ConfigIssue(
+                "model.path",
+                "Missing or invalid model.path",
+            )
+        )
         model_path = ""
     else:
         model_path = model_path.strip()
-        if not os.path.exists(model_path):
-            issues.append(ConfigIssue("model.path", f"File does not exist: {model_path}"))
 
-    mode = _deep_get(raw, "pipeline.mode", "inference")
-    if not isinstance(mode, str) or mode not in PIPELINE_MODES_V1:
-        issues.append(ConfigIssue("pipeline.mode", f"Must be one of {sorted(PIPELINE_MODES_V1)}"))
+        if not os.path.exists(model_path):
+            issues.append(
+                ConfigIssue(
+                    "model.path",
+                    f"File does not exist: {model_path}",
+                )
+            )
+
+    mode = _deep_get(
+        raw,
+        "pipeline.mode",
+        "inference",
+    )
+
+    if (
+        not isinstance(mode, str)
+        or mode not in PIPELINE_MODES_V1
+    ):
+        issues.append(
+            ConfigIssue(
+                "pipeline.mode",
+                f"Must be one of "
+                f"{sorted(PIPELINE_MODES_V1)}",
+            )
+        )
         mode = "inference"
 
-    ops = _deep_get(raw, "operators.supported", None)
-    if not isinstance(ops, list) or not ops or not all(isinstance(x, str) and x.strip() for x in ops):
-        issues.append(ConfigIssue("operators.supported", "Expected non-empty list of strings"))
-        ops = []
-    ops = [x.strip() for x in ops]
+    operators = _deep_get(
+        raw,
+        "operators.supported",
+        None,
+    )
 
-    _validate_default_numerics(raw, issues)
-    _validate_layerwise_numerics(raw, issues)
-    _validate_and_normalize_training_numerics(raw, issues)
-    _validate_analysis_cfg(raw, issues)
+    if (
+        not isinstance(operators, list)
+        or not operators
+        or not all(
+            isinstance(operator, str)
+            and operator.strip()
+            for operator in operators
+        )
+    ):
+        issues.append(
+            ConfigIssue(
+                "operators.supported",
+                "Expected a non-empty list of strings",
+            )
+        )
+        operators = []
+
+    operators = [
+        operator.strip()
+        for operator in operators
+    ]
+
+    if len(set(operators)) != len(operators):
+        issues.append(
+            ConfigIssue(
+                "operators.supported",
+                "Duplicate operator names are not allowed",
+            )
+        )
+
+    _validate_default_numerics(
+        raw,
+        issues,
+    )
+    _validate_layerwise_numerics(
+        raw,
+        issues,
+    )
+    _validate_and_normalize_training_numerics(
+        raw,
+        issues,
+    )
+    _validate_analysis_cfg(
+        raw,
+        issues,
+    )
 
     if issues:
         raise ConfigError(issues)
 
     return FPGAIConfig(
         version=version,
-        model=ModelCfg(path=model_path),
-        pipeline=PipelineCfg(mode=mode),
-        operators=OperatorsCfg(supported=ops),
+        model=ModelCfg(
+            path=model_path,
+        ),
+        pipeline=PipelineCfg(
+            mode=mode,
+        ),
+        operators=OperatorsCfg(
+            supported=operators,
+        ),
         raw=raw,
     )
 
@@ -284,54 +1028,148 @@ def load_config(path: str) -> FPGAIConfig:
 def print_summary(cfg: FPGAIConfig) -> None:
     raw = cfg.raw
 
-    def g(p, d=None):
-        return _deep_get(raw, p, d)
+    def get(
+        path: str,
+        default: Any = None,
+    ) -> Any:
+        return _deep_get(
+            raw,
+            path,
+            default,
+        )
 
-    board = g("targets.platform.board", "kv260")
-    part = g("targets.platform.part", "xck26-sfvc784-2LV-c")
-    clk = g("targets.platform.clocks.0.target_mhz", 200)
+    board = get(
+        "targets.platform.board",
+        "kv260",
+    )
+    part = get(
+        "targets.platform.part",
+        "xck26-sfvc784-2LV-c",
+    )
+    clock = get(
+        "targets.platform.clocks.0.target_mhz",
+        200,
+    )
 
-    act = g("numerics.defaults.activation", {})
-    wgt = g("numerics.defaults.weight", {})
-    bias = g("numerics.defaults.bias", {})
-    acc = g("numerics.defaults.accum", {})
-    layer_rules = g("numerics.layers", []) or []
-    training_rules = g("numerics.training", {}) or {}
+    activation = get(
+        "numerics.defaults.activation",
+        {},
+    )
+    weight = get(
+        "numerics.defaults.weight",
+        {},
+    )
+    bias = get(
+        "numerics.defaults.bias",
+        {},
+    )
+    accum = get(
+        "numerics.defaults.accum",
+        {},
+    )
 
-    compression = bool(g("data_movement.ps_pl.compression.enabled", False))
-    vitis = bool(g("toolchain.vitis_hls.enabled", True))
-    vivado = bool(g("toolchain.vivado.enabled", True))
-    verbose = bool(g("debug.verbose", False))
-    qrep_enabled = bool(g("analysis.quantization_report.enabled", False))
-    psweep_enabled = bool(g("analysis.precision_sweep.enabled", False))
+    layer_rules = get(
+        "numerics.layers",
+        [],
+    ) or []
+    training_rules = get(
+        "numerics.training",
+        {},
+    ) or {}
 
-    print("\n================ FPGAI Config Summary ================")
+    compression = bool(
+        get(
+            "data_movement.ps_pl."
+            "compression.enabled",
+            False,
+        )
+    )
+    vitis = bool(
+        get(
+            "toolchain.vitis_hls.enabled",
+            True,
+        )
+    )
+    vivado = bool(
+        get(
+            "toolchain.vivado.enabled",
+            True,
+        )
+    )
+    verbose = bool(
+        get(
+            "debug.verbose",
+            False,
+        )
+    )
+    quant_enabled = bool(
+        get(
+            "analysis.quantization_report.enabled",
+            False,
+        )
+    )
+    sweep_enabled = bool(
+        get(
+            "analysis.precision_sweep.enabled",
+            False,
+        )
+    )
+    sweep_override_mode = get(
+        "analysis.precision_sweep."
+        "layer_overrides",
+        "clear",
+    )
+
+    print(
+        "\n================ FPGAI Config Summary "
+        "================"
+    )
     print(f"Config version        : {cfg.version}")
     print(f"Model path            : {cfg.model.path}")
     print(f"Pipeline mode         : {cfg.pipeline.mode}")
-    print("------------------------------------------------------")
+    print(
+        "------------------------------------------------------"
+    )
     print(f"Target board          : {board}")
     print(f"Target part           : {part}")
-    print(f"Target clock (MHz)    : {clk}")
-    print("------------------------------------------------------")
+    print(f"Target clock (MHz)    : {clock}")
+    print(
+        "------------------------------------------------------"
+    )
     print("Precision kind        : fixed")
-    print(f" activation           : {_ap_str(act)}")
-    print(f" weight               : {_ap_str(wgt)}")
+    print(f" activation           : {_ap_str(activation)}")
+    print(f" weight               : {_ap_str(weight)}")
     print(f" bias                 : {_ap_str(bias)}")
-    print(f" accum                : {_ap_str(acc)}")
+    print(f" accum                : {_ap_str(accum)}")
     print(f"Layerwise overrides   : {len(layer_rules)}")
-    print(f"Training numerics     : {sorted(training_rules.keys())}")
-    print("------------------------------------------------------")
+    print(
+        f"Training numerics     : "
+        f"{sorted(training_rules.keys())}"
+    )
+    print(
+        "------------------------------------------------------"
+    )
     print("Operator allowlist    :")
-    for op in cfg.operators.supported:
-        print(f" - {op}")
-    print("------------------------------------------------------")
+
+    for operator in cfg.operators.supported:
+        print(f" - {operator}")
+
+    print(
+        "------------------------------------------------------"
+    )
     print(f"Compression enabled   : {compression}")
-    print(f"Quant report enabled  : {qrep_enabled}")
-    print(f"Precision sweep       : {psweep_enabled}")
-    print("------------------------------------------------------")
+    print(f"Quant report enabled  : {quant_enabled}")
+    print(f"Precision sweep       : {sweep_enabled}")
+    print(f"Sweep layer overrides : {sweep_override_mode}")
+    print(
+        "------------------------------------------------------"
+    )
     print(f"Toolchain.vitis_hls   : {vitis}")
     print(f"Toolchain.vivado      : {vivado}")
-    print("------------------------------------------------------")
+    print(
+        "------------------------------------------------------"
+    )
     print(f"Debug.verbose         : {verbose}")
-    print("======================================================\n")
+    print(
+        "======================================================\n"
+    )

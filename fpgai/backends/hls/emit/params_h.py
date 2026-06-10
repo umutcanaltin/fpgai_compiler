@@ -1,87 +1,468 @@
 from __future__ import annotations
 
 from typing import List
+
 import numpy as np
 
 
-def _numel_from_graph_named(graph, tensor_name: str) -> int:
-    if tensor_name is None:
+def _numel_from_graph_named(
+    graph,
+    tensor_name: str | None,
+) -> int:
+    if not tensor_name:
         return 0
 
-    if hasattr(graph, "constants") and tensor_name in graph.constants:
-        return int(np.asarray(graph.constants[tensor_name]).size)
+    constants = getattr(
+        graph,
+        "constants",
+        {},
+    ) or {}
 
-    if hasattr(graph, "params") and tensor_name in graph.params:
-        return int(np.asarray(graph.params[tensor_name]).size)
+    if tensor_name in constants:
+        return int(
+            np.asarray(
+                constants[tensor_name]
+            ).size
+        )
+
+    params = getattr(
+        graph,
+        "params",
+        {},
+    ) or {}
+
+    if tensor_name in params:
+        return int(
+            np.asarray(
+                params[tensor_name]
+            ).size
+        )
 
     try:
-        t = graph.get_tensor(tensor_name)
+        tensor = graph.get_tensor(
+            tensor_name
+        )
     except Exception:
-        t = None
+        tensor = None
 
-    if t is not None:
-        shape = getattr(t, "shape", None)
-        if shape is not None:
-            n = 1
-            for d in shape:
-                n *= int(d)
-            return int(n)
+    if tensor is None:
+        return 0
 
-        data = getattr(t, "data", None)
-        if data is not None:
-            return int(np.asarray(data).size)
+    shape = getattr(
+        tensor,
+        "shape",
+        None,
+    )
+
+    if shape:
+        count = 1
+
+        for dimension in shape:
+            count *= int(dimension)
+
+        return int(count)
+
+    data = getattr(
+        tensor,
+        "data",
+        None,
+    )
+
+    if data is not None:
+        return int(
+            np.asarray(data).size
+        )
 
     return 0
 
 
-def emit_params_h(graph, *, weights_mode: str = "embedded") -> str:
-    lines: List[str] = []
-    lines.append("#pragma once")
-    lines.append('#include "fpgai_types.h"')
-    lines.append("")
-    lines.append("namespace fpgai {")
-    lines.append("")
+def _numeric_attr_numel(
+    graph,
+    op,
+    keys: tuple[str, ...],
+) -> int:
+    attrs = getattr(
+        op,
+        "attrs",
+        {},
+    ) or {}
 
-    if weights_mode == "embedded":
-        param_op_idx = 0
+    for key in keys:
+        if key not in attrs:
+            continue
 
-        for op in graph.ops:
+        value = attrs[key]
+
+        if isinstance(value, str):
+            count = _numel_from_graph_named(
+                graph,
+                value,
+            )
+
+            if count > 0:
+                return count
+
+            continue
+
+        try:
+            array = np.asarray(value)
+        except Exception:
+            continue
+
+        if array.dtype.kind in {
+            "U",
+            "S",
+            "O",
+        }:
+            continue
+
+        if array.size > 0:
+            return int(array.size)
+
+    return 0
+
+
+def _dense_sizes(
+    graph,
+    op,
+) -> tuple[int, int]:
+    input_features = int(
+        op.attrs.get(
+            "in_features",
+            0,
+        )
+        or 0
+    )
+    output_features = int(
+        op.attrs.get(
+            "out_features",
+            0,
+        )
+        or 0
+    )
+
+    weight_count = 0
+    bias_count = 0
+
+    if len(op.inputs) > 1:
+        weight_count = _numel_from_graph_named(
+            graph,
+            op.inputs[1],
+        )
+
+    if len(op.inputs) > 2:
+        bias_count = _numel_from_graph_named(
+            graph,
+            op.inputs[2],
+        )
+
+    if weight_count == 0:
+        weight_count = _numeric_attr_numel(
+            graph,
+            op,
+            (
+                "weights",
+                "weight",
+                "kernel",
+                "W",
+                "w",
+                "weight_data",
+                "weights_data",
+                "kernel_data",
+                "weight_values",
+                "weights_values",
+                "kernel_values",
+                "weights_name",
+                "weight_name",
+            ),
+        )
+
+    if bias_count == 0:
+        bias_count = _numeric_attr_numel(
+            graph,
+            op,
+            (
+                "bias",
+                "biases",
+                "B",
+                "b",
+                "bias_data",
+                "bias_values",
+                "bias_name",
+            ),
+        )
+
+    if (
+        weight_count == 0
+        and input_features > 0
+        and output_features > 0
+    ):
+        weight_count = (
+            input_features
+            * output_features
+        )
+
+    # Dense inference always receives a bias array.
+    # When ONNX has no bias, params_cpp emits zeros.
+    if (
+        bias_count == 0
+        and output_features > 0
+    ):
+        bias_count = output_features
+
+    return weight_count, bias_count
+
+
+def _conv_sizes(
+    graph,
+    op,
+) -> tuple[int, int]:
+    weight_count = 0
+    bias_count = 0
+
+    if len(op.inputs) > 1:
+        weight_count = _numel_from_graph_named(
+            graph,
+            op.inputs[1],
+        )
+
+    if len(op.inputs) > 2:
+        bias_count = _numel_from_graph_named(
+            graph,
+            op.inputs[2],
+        )
+
+    if weight_count == 0:
+        weight_count = _numeric_attr_numel(
+            graph,
+            op,
+            (
+                "weights",
+                "weight",
+                "kernel",
+                "W",
+                "w",
+                "weight_data",
+                "weights_data",
+                "kernel_data",
+                "weight_values",
+                "weights_values",
+                "kernel_values",
+                "weights_name",
+                "weight_name",
+            ),
+        )
+
+    if bias_count == 0:
+        bias_count = _numeric_attr_numel(
+            graph,
+            op,
+            (
+                "bias",
+                "biases",
+                "B",
+                "b",
+                "bias_data",
+                "bias_values",
+                "bias_name",
+            ),
+        )
+
+    if bias_count == 0 and weight_count > 0:
+        output_channels = 0
+
+        if len(op.inputs) > 1:
+            weight_name = op.inputs[1]
+
+            constants = getattr(
+                graph,
+                "constants",
+                {},
+            ) or {}
+
+            if weight_name in constants:
+                shape = np.asarray(
+                    constants[weight_name]
+                ).shape
+
+                if shape:
+                    output_channels = int(
+                        shape[0]
+                    )
+
+            if output_channels == 0:
+                try:
+                    tensor = graph.get_tensor(
+                        weight_name
+                    )
+                except Exception:
+                    tensor = None
+
+                if (
+                    tensor is not None
+                    and getattr(
+                        tensor,
+                        "shape",
+                        None,
+                    )
+                ):
+                    output_channels = int(
+                        tensor.shape[0]
+                    )
+
+        if output_channels == 0:
+            output_channels = int(
+                op.attrs.get(
+                    "out_channels",
+                    0,
+                )
+                or 0
+            )
+
+        # Conv inference always receives a bias array.
+        # Bias-free convolutions use a generated zero array.
+        bias_count = output_channels
+
+    return weight_count, bias_count
+
+
+def _precision_tag(
+    op,
+    graph_index: int,
+) -> str:
+    attrs = getattr(
+        op,
+        "attrs",
+        {},
+    ) or {}
+
+    return str(
+        attrs.get(
+            "precision_tag",
+            f"op{graph_index}",
+        )
+    )
+
+
+def emit_params_h(
+    graph,
+    *,
+    weights_mode: str = "embedded",
+) -> str:
+    lines: List[str] = [
+        "#pragma once",
+        '#include "fpgai_types.h"',
+        "",
+        "namespace fpgai {",
+        "",
+    ]
+
+    normalized_mode = str(
+        weights_mode
+    ).strip().lower()
+
+    if normalized_mode == "embedded":
+        parameter_index = 0
+
+        for graph_index, op in enumerate(
+            graph.ops
+        ):
+            if op.op_type not in {
+                "Conv",
+                "Dense",
+            }:
+                continue
+
+            precision_tag = _precision_tag(
+                op,
+                graph_index,
+            )
+
             if op.op_type == "Conv":
-                w_n = 0
-                b_n = 0
+                weight_count, bias_count = (
+                    _conv_sizes(
+                        graph,
+                        op,
+                    )
+                )
+            else:
+                weight_count, bias_count = (
+                    _dense_sizes(
+                        graph,
+                        op,
+                    )
+                )
 
-                if len(op.inputs) > 1:
-                    w_n = _numel_from_graph_named(graph, op.inputs[1])
-                if len(op.inputs) > 2:
-                    b_n = _numel_from_graph_named(graph, op.inputs[2])
+            if weight_count <= 0:
+                raise ValueError(
+                    f"{op.op_type} weights could not "
+                    f"be resolved for op {op.name!r}"
+                )
 
-                if w_n > 0:
-                    lines.append(f"extern const wgt_t W{param_op_idx}[{w_n}];")
-                if b_n > 0:
-                    lines.append(f"extern const bias_t B{param_op_idx}[{b_n}];")
+            if bias_count <= 0:
+                raise ValueError(
+                    f"{op.op_type} bias size could not "
+                    f"be resolved for op {op.name!r}"
+                )
 
-                param_op_idx += 1
+            lines.append(
+                f"extern const "
+                f"{precision_tag}_wgt_t "
+                f"W{parameter_index}"
+                f"[{weight_count}];"
+            )
+            lines.append(
+                f"extern const "
+                f"{precision_tag}_bias_t "
+                f"B{parameter_index}"
+                f"[{bias_count}];"
+            )
+            lines.append("")
 
-            elif op.op_type == "Dense":
-                in_f = int(op.attrs.get("in_features") or 0)
-                out_f = int(op.attrs.get("out_features") or 0)
+            parameter_index += 1
 
-                w_n = out_f * in_f if in_f > 0 and out_f > 0 else 0
-                b_n = out_f if out_f > 0 else 0
+    elif normalized_mode in {
+        "stream",
+        "streamed",
+    }:
+        lines.append(
+            "// Parameters are loaded through "
+            "the runtime weight stream."
+        )
+        lines.append("")
 
-                if w_n > 0:
-                    lines.append(f"extern const wgt_t W{param_op_idx}[{w_n}];")
-                if b_n > 0:
-                    lines.append(f"extern const bias_t B{param_op_idx}[{b_n}];")
+    elif normalized_mode in {
+        "ddr",
+        "dma_ddr",
+    }:
+        lines.append(
+            "// DDR parameter declarations are "
+            "provided by the runtime backend."
+        )
+        lines.append("")
 
-                param_op_idx += 1
+    else:
+        raise ValueError(
+            f"Unsupported weights mode: "
+            f"{weights_mode!r}"
+        )
 
-    lines.append("")
-    lines.append("} // namespace fpgai")
-    lines.append("")
+    lines.extend(
+        [
+            "} // namespace fpgai",
+            "",
+        ]
+    )
+
     return "\n".join(lines)
 
 
-# backward-compatible alias
-def emit_params_h_stub(graph, *, weights_mode: str = "embedded") -> str:
-    return emit_params_h(graph, weights_mode=weights_mode)
+def emit_params_h_stub(
+    graph,
+    *,
+    weights_mode: str = "embedded",
+) -> str:
+    return emit_params_h(
+        graph,
+        weights_mode=weights_mode,
+    )
