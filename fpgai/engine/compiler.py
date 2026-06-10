@@ -19,7 +19,7 @@ from fpgai.engine.training import build_training_plan, emit_training_artifacts
 from fpgai.analysis.quantization_report import run_quantization_report
 from fpgai.analysis.precision_sweep import run_precision_sweep
 from fpgai.analysis.design_space_report import run_design_space_report
-from fpgai.analysis.hls_estimate_compare import run_estimate_vs_hls_compare
+from fpgai.analysis.post_synthesis import run_post_synthesis_analysis
 from fpgai.analysis.training_resource_estimate import run_training_resource_estimate
 from fpgai.benchmark.training_reference import run_training_reference_step
 from fpgai.benchmark.training_compare import compare_training_artifacts
@@ -125,6 +125,7 @@ class Compiler:
         hls_run = self._maybe_run_vitis_hls(hls_dir) if enable_hls and hls_dir is not None else None
 
         estimate_vs_hls_result = None
+        hls_module_breakdown_result = None
         if design_result is not None:
             best = None
             try:
@@ -137,13 +138,15 @@ class Compiler:
             except Exception:
                 best = None
             if best is not None:
-                estimate_vs_hls_result = run_estimate_vs_hls_compare(
+                post_synthesis_result = run_post_synthesis_analysis(
                     out_dir=out_dir,
                     design_space_summary=best,
                     csynth_report_path=(hls_run.csynth_report if hls_run is not None else None),
                     clock_mhz=float(_cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0)),
+                    top_name=top_name,
                 )
-                print("\n" + estimate_vs_hls_result.terminal_summary + "\n")
+                estimate_vs_hls_result = post_synthesis_result.estimate_comparison
+                hls_module_breakdown_result = post_synthesis_result.module_breakdown
 
         if emit_manifest:
             self._emit_manifest(
@@ -160,6 +163,7 @@ class Compiler:
                 sweep_result=sweep_result,
                 design_result=design_result,
                 estimate_vs_hls_result=estimate_vs_hls_result,
+                hls_module_breakdown_result=hls_module_breakdown_result,
                 training_plan=None,
                 training_reference_result=None,
                 training_compare_result=None,
@@ -176,6 +180,11 @@ class Compiler:
                 print("[FPGAI] design_space:", design_result.summary_txt)
             if estimate_vs_hls_result is not None:
                 print("[FPGAI] estimate_vs_hls:", estimate_vs_hls_result.summary_txt)
+            if hls_module_breakdown_result is not None:
+                print(
+                    "[FPGAI] hls_module_breakdown:",
+                    hls_module_breakdown_result.summary_txt,
+                )
 
         return CompileResult(
             out_dir=out_dir,
@@ -200,7 +209,47 @@ class Compiler:
             design_space_results_json=(design_result.results_json if design_result is not None else None),
             design_space_summary_txt=(design_result.summary_txt if design_result is not None else None),
             design_space_results_csv=(design_result.results_csv if design_result is not None else None),
+            design_space_layer_breakdown_csv=(
+                design_result.out_dir / "layer_breakdown.csv"
+                if design_result is not None
+                else None
+            ),
             design_space_terminal_summary=(design_result.terminal_summary if design_result is not None else None),
+            estimate_vs_hls_dir=(
+                estimate_vs_hls_result.out_dir
+                if estimate_vs_hls_result is not None
+                else None
+            ),
+            estimate_vs_hls_results_json=(
+                estimate_vs_hls_result.results_json
+                if estimate_vs_hls_result is not None
+                else None
+            ),
+            estimate_vs_hls_summary_txt=(
+                estimate_vs_hls_result.summary_txt
+                if estimate_vs_hls_result is not None
+                else None
+            ),
+            hls_module_breakdown_dir=(
+                hls_module_breakdown_result.out_dir
+                if hls_module_breakdown_result is not None
+                else None
+            ),
+            hls_module_breakdown_json=(
+                hls_module_breakdown_result.results_json
+                if hls_module_breakdown_result is not None
+                else None
+            ),
+            hls_module_breakdown_csv=(
+                hls_module_breakdown_result.results_csv
+                if hls_module_breakdown_result is not None
+                else None
+            ),
+            hls_module_breakdown_summary_txt=(
+                hls_module_breakdown_result.summary_txt
+                if hls_module_breakdown_result is not None
+                else None
+            ),
             training_plan_json=None,
             training_summary_txt=None,
         )
@@ -300,6 +349,7 @@ class Compiler:
                 sweep_result=None,
                 design_result=None,
                 estimate_vs_hls_result=None,
+                hls_module_breakdown_result=None,
                 training_plan=training_plan,
                 training_reference_result=training_reference_result,
                 training_compare_result=training_compare_result,
@@ -342,7 +392,15 @@ class Compiler:
             design_space_results_json=None,
             design_space_summary_txt=None,
             design_space_results_csv=None,
+            design_space_layer_breakdown_csv=None,
             design_space_terminal_summary=None,
+            estimate_vs_hls_dir=None,
+            estimate_vs_hls_results_json=None,
+            estimate_vs_hls_summary_txt=None,
+            hls_module_breakdown_dir=None,
+            hls_module_breakdown_json=None,
+            hls_module_breakdown_csv=None,
+            hls_module_breakdown_summary_txt=None,
             training_plan_json=(out_dir / "training" / "training_plan.json"),
             training_summary_txt=(out_dir / "training" / "summary.txt"),
         )
@@ -807,6 +865,23 @@ class Compiler:
                 "results_json": str(kwargs["estimate_vs_hls_result"].results_json),
                 "summary_txt": str(kwargs["estimate_vs_hls_result"].summary_txt),
             },
+            "hls_module_breakdown": (
+                None
+                if kwargs["hls_module_breakdown_result"] is None
+                else {
+                    "available": kwargs["hls_module_breakdown_result"].available,
+                    "out_dir": str(kwargs["hls_module_breakdown_result"].out_dir),
+                    "results_json": str(
+                        kwargs["hls_module_breakdown_result"].results_json
+                    ),
+                    "results_csv": str(
+                        kwargs["hls_module_breakdown_result"].results_csv
+                    ),
+                    "summary_txt": str(
+                        kwargs["hls_module_breakdown_result"].summary_txt
+                    ),
+                }
+            ),
             "hls_ran": kwargs["hls_run"] is not None,
             "hls_ok": (kwargs["hls_run"].ok if kwargs["hls_run"] is not None else None),
             "hls_returncode": (kwargs["hls_run"].returncode if kwargs["hls_run"] is not None else None),

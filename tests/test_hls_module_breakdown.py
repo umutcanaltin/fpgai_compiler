@@ -112,7 +112,12 @@ def test_collects_and_classifies_module_reports(
     )
 
     assert payload["available"] is True
+    assert payload["format"] == (
+        "fpgai.hls_module_breakdown.v2"
+    )
     assert payload["module_count"] == 5
+    assert payload["primary_module_count"] == 4
+    assert payload["helper_module_count"] == 0
     assert payload["child_module_count"] == 4
 
     top = payload["top_report"]
@@ -120,6 +125,7 @@ def test_collects_and_classifies_module_reports(
     assert top is not None
     assert top["module"] == "deeplearn"
     assert top["is_top"] is True
+    assert top["hierarchy_role"] == "top"
     assert top["dsp"] == 165
     assert top["latency_cycles"] == 14800
 
@@ -133,8 +139,11 @@ def test_collects_and_classifies_module_reports(
     assert modules["softmax_typed_0"]["op_type"] == "Softmax"
     assert modules["relu_typed_0"]["op_type"] == "Relu"
 
+    assert modules["conv2d_0"]["hierarchy_role"] == "primary"
+    assert modules["conv2d_0"]["is_generated_helper"] is False
 
-def test_aggregates_resources_by_operator(
+
+def test_aggregates_primary_resources_by_operator(
     tmp_path: Path,
 ) -> None:
     report_dir = tmp_path / "reports"
@@ -158,18 +167,127 @@ def test_aggregates_resources_by_operator(
     assert by_operator["Softmax"]["dsp"] == 30
     assert by_operator["Relu"]["dsp"] == 0
 
-    assert payload["child_sum"] == {
+    expected = {
         "lut": 10500,
         "ff": 12250,
         "dsp": 160,
         "bram18": 22,
     }
 
+    assert payload["primary_sum"] == expected
+    assert payload["child_sum"] == expected
+    assert payload["helper_sum"] == {
+        "lut": 0,
+        "ff": 0,
+        "dsp": 0,
+        "bram18": 0,
+    }
+
+    assert payload["unassigned_top_resources"] == {
+        "lut": 7945,
+        "ff": 7572,
+        "dsp": 5,
+        "bram18": 8,
+    }
+
+
+def test_generated_pipeline_helpers_are_not_double_counted(
+    tmp_path: Path,
+) -> None:
+    report_dir = tmp_path / "reports"
+
+    _write_report(
+        report_dir / "deeplearn_csynth.xml",
+        module="deeplearn",
+        lut=18445,
+        ff=19822,
+        dsp=165,
+        bram=30,
+        latency=14800,
+    )
+    _write_report(
+        report_dir / "conv2d_csynth.xml",
+        module="conv2d",
+        lut=10385,
+        ff=14264,
+        dsp=154,
+        bram=0,
+        latency=3045,
+    )
+    _write_report(
+        report_dir
+        / "conv2d_Pipeline_VITIS_LOOP_48_2_csynth.xml",
+        module="conv2d_Pipeline_VITIS_LOOP_48_2",
+        lut=10208,
+        ff=14080,
+        dsp=154,
+        bram=0,
+        latency=758,
+    )
+    _write_report(
+        report_dir / "dense_out_in_csynth.xml",
+        module="dense_out_in",
+        lut=416,
+        ff=624,
+        dsp=2,
+        bram=3,
+        latency=6768,
+    )
+
+    payload = collect_hls_module_reports(
+        report_dir,
+        top_name="deeplearn",
+    )
+
+    assert payload["primary_module_count"] == 2
+    assert payload["helper_module_count"] == 1
+
+    assert payload["by_operator"]["Conv"] == {
+        "module_count": 1,
+        "lut": 10385,
+        "ff": 14264,
+        "dsp": 154,
+        "bram18": 0,
+    }
+
+    assert payload["helper_by_operator"]["Conv"] == {
+        "module_count": 1,
+        "lut": 10208,
+        "ff": 14080,
+        "dsp": 154,
+        "bram18": 0,
+    }
+
+    assert payload["primary_sum"]["dsp"] == 156
+    assert payload["helper_sum"]["dsp"] == 154
+
+    primary_names = {
+        row["module"]
+        for row in payload["primary_modules"]
+    }
+    helper_names = {
+        row["module"]
+        for row in payload["helper_modules"]
+    }
+
+    assert primary_names == {
+        "conv2d",
+        "dense_out_in",
+    }
+    assert helper_names == {
+        "conv2d_Pipeline_VITIS_LOOP_48_2",
+    }
+
 
 def test_discovers_reports_recursively(
     tmp_path: Path,
 ) -> None:
-    report_dir = tmp_path / "solution" / "syn" / "report"
+    report_dir = (
+        tmp_path
+        / "solution"
+        / "syn"
+        / "report"
+    )
 
     _write_report(
         report_dir / "deeplearn_csynth.xml",
@@ -181,7 +299,9 @@ def test_discovers_reports_recursively(
         latency=500,
     )
     _write_report(
-        report_dir / "nested" / "conv2d_csynth.xml",
+        report_dir
+        / "nested"
+        / "conv2d_csynth.xml",
         module="conv2d",
         lut=500,
         ff=600,
@@ -206,7 +326,9 @@ def test_duplicate_module_reports_use_larger_result(
     report_dir = tmp_path / "reports"
 
     _write_report(
-        report_dir / "first" / "conv2d_csynth.xml",
+        report_dir
+        / "first"
+        / "conv2d_csynth.xml",
         module="conv2d",
         lut=100,
         ff=100,
@@ -215,7 +337,9 @@ def test_duplicate_module_reports_use_larger_result(
         latency=100,
     )
     _write_report(
-        report_dir / "second" / "conv2d_csynth.xml",
+        report_dir
+        / "second"
+        / "conv2d_csynth.xml",
         module="conv2d",
         lut=500,
         ff=600,
@@ -270,7 +394,9 @@ def test_writes_module_breakdown_artifacts(
         newline="",
         encoding="utf-8",
     ) as input_file:
-        rows = list(csv.DictReader(input_file))
+        rows = list(
+            csv.DictReader(input_file)
+        )
 
     assert len(rows) == 5
     assert {
@@ -287,7 +413,10 @@ def test_writes_module_breakdown_artifacts(
     assert "FPGAI HLS Module Breakdown" in (
         result.terminal_summary
     )
-    assert "Aggregated child reports by operator" in (
+    assert "Primary resources by operator" in (
+        result.terminal_summary
+    )
+    assert "Generated helper reports are" in (
         result.terminal_summary
     )
 
@@ -314,4 +443,6 @@ def test_missing_reports_produce_valid_empty_artifacts(
 
     assert payload["available"] is False
     assert payload["module_count"] == 0
+    assert payload["primary_module_count"] == 0
+    assert payload["helper_module_count"] == 0
     assert payload["modules"] == []
