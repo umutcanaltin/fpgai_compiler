@@ -5,77 +5,36 @@ import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 
 RESOURCE_FIELDS = {
-    "lut": (
-        "predicted_lut",
-        "actual_lut",
-    ),
-    "ff": (
-        "predicted_ff",
-        "actual_ff",
-    ),
-    "dsp": (
-        "predicted_dsp",
-        "actual_dsp",
-    ),
-    "bram18": (
-        "predicted_bram18",
-        "actual_bram18",
-    ),
+    "lut": ("predicted_lut", "actual_lut"),
+    "ff": ("predicted_ff", "actual_ff"),
+    "dsp": ("predicted_dsp", "actual_dsp"),
+    "bram18": ("predicted_bram18", "actual_bram18"),
 }
 
 
-def _safe_int(
-    value: Any,
-    default: int = 0,
-) -> int:
+def _safe_int(value: Any, default: int = 0) -> int:
     try:
-        text = str(value).replace(
-            ",",
-            "",
-        ).strip()
-        return int(float(text))
-    except (
-        TypeError,
-        ValueError,
-    ):
+        return int(float(str(value).replace(",", "").strip()))
+    except (TypeError, ValueError):
         return default
 
 
-def _safe_float(
-    value: Any,
-    default: float = 0.0,
-) -> float:
+def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
-        text = str(value).replace(
-            ",",
-            "",
-        ).strip()
-        result = float(text)
-    except (
-        TypeError,
-        ValueError,
-    ):
+        result = float(str(value).replace(",", "").strip())
+    except (TypeError, ValueError):
         return default
 
-    if not math.isfinite(result):
-        return default
-
-    return result
+    return result if math.isfinite(result) else default
 
 
-def _find_best_report_path(
-    report_path: str | Path,
-) -> Path:
+def _find_best_report_path(report_path: str | Path) -> Path:
     requested = Path(report_path)
-
-    if requested.is_dir():
-        parent = requested
-    else:
-        parent = requested.parent
+    parent = requested if requested.is_dir() else requested.parent
 
     preferred_names = [
         "deeplearn_csynth.xml",
@@ -90,16 +49,12 @@ def _find_best_report_path(
         if candidate.is_file():
             return candidate
 
-    xml_candidates = sorted(
-        parent.glob("*_csynth.xml")
-    )
+    xml_candidates = sorted(parent.glob("*_csynth.xml"))
 
     if xml_candidates:
         return xml_candidates[0]
 
-    report_candidates = sorted(
-        parent.glob("*_csynth.rpt")
-    )
+    report_candidates = sorted(parent.glob("*_csynth.rpt"))
 
     if report_candidates:
         return report_candidates[0]
@@ -132,20 +87,12 @@ def _extract_xml_tag(
         return default
 
     if isinstance(default, float):
-        return _safe_float(
-            match.group(1),
-            default,
-        )
+        return _safe_float(match.group(1), default)
 
-    return _safe_int(
-        match.group(1),
-        int(default),
-    )
+    return _safe_int(match.group(1), int(default))
 
 
-def _extract_latency_from_xml(
-    text: str,
-) -> float:
+def _extract_latency_from_xml(text: str) -> float:
     tags = [
         "Average-caseLatency",
         "Worst-caseLatency",
@@ -154,70 +101,43 @@ def _extract_latency_from_xml(
     ]
 
     for tag in tags:
-        value = _extract_xml_tag(
-            text,
-            tag,
-            0.0,
-        )
+        value = float(_extract_xml_tag(text, tag, 0.0))
 
-        if float(value) > 0.0:
-            return float(value)
+        if value > 0.0:
+            return value
 
     return 0.0
 
 
-def _extract_from_xml(
-    xml_path: Path,
-) -> Dict[str, float]:
+def _extract_from_xml(xml_path: Path) -> Dict[str, float]:
     text = xml_path.read_text(
         encoding="utf-8",
         errors="ignore",
     )
 
-    result = _empty_actual()
-
-    result["actual_lut"] = _safe_int(
-        _extract_xml_tag(
-            text,
-            "LUT",
-            0,
-        )
-    )
-    result["actual_ff"] = _safe_int(
-        _extract_xml_tag(
-            text,
-            "FF",
-            0,
-        )
-    )
-    result["actual_dsp"] = _safe_int(
-        _extract_xml_tag(
-            text,
-            "DSP",
-            0,
-        )
-    )
-    result["actual_bram18"] = _safe_int(
-        _extract_xml_tag(
-            text,
-            "BRAM_18K",
-            0,
-        )
-    )
-    result["actual_latency_cycles"] = (
-        _extract_latency_from_xml(text)
-    )
-
-    return result
+    return {
+        "actual_lut": _safe_int(
+            _extract_xml_tag(text, "LUT", 0)
+        ),
+        "actual_ff": _safe_int(
+            _extract_xml_tag(text, "FF", 0)
+        ),
+        "actual_dsp": _safe_int(
+            _extract_xml_tag(text, "DSP", 0)
+        ),
+        "actual_bram18": _safe_int(
+            _extract_xml_tag(text, "BRAM_18K", 0)
+        ),
+        "actual_latency_cycles": _extract_latency_from_xml(
+            text
+        ),
+    }
 
 
-def _parse_total_resource_row(
-    text: str,
-) -> Dict[str, float]:
+def _parse_total_resource_row(text: str) -> Dict[str, float]:
     result = _empty_actual()
 
     patterns = [
-        # BRAM_18K, DSP, FF, LUT
         (
             r"\|\s*Total\s*\|"
             r"\s*([0-9,]+)\s*\|"
@@ -240,70 +160,41 @@ def _parse_total_resource_row(
         match = re.search(
             pattern,
             text,
-            flags=(
-                re.IGNORECASE
-                | re.DOTALL
-            ),
+            flags=re.IGNORECASE | re.DOTALL,
         )
 
         if match is None:
             continue
 
-        result["actual_bram18"] = (
-            _safe_int(match.group(1))
-        )
-        result["actual_dsp"] = (
-            _safe_int(match.group(2))
-        )
-        result["actual_ff"] = (
-            _safe_int(match.group(3))
-        )
-        result["actual_lut"] = (
-            _safe_int(match.group(4))
-        )
+        result["actual_bram18"] = _safe_int(match.group(1))
+        result["actual_dsp"] = _safe_int(match.group(2))
+        result["actual_ff"] = _safe_int(match.group(3))
+        result["actual_lut"] = _safe_int(match.group(4))
         break
 
     return result
 
 
-def _parse_latency_from_report(
-    text: str,
-) -> float:
+def _parse_latency_from_report(text: str) -> float:
     patterns = [
         (
             r"\|\s*Latency\s*\([^)]*\)"
-            r".*?"
-            r"\|\s*([0-9,]+)\s*\|"
+            r".*?\|\s*([0-9,]+)\s*\|"
         ),
-        (
-            r"Average-caseLatency"
-            r"[^0-9]*([0-9,]+)"
-        ),
-        (
-            r"Latency.*?"
-            r"min\s*=\s*([0-9,]+)"
-        ),
-        (
-            r"\|\s*Latency\s*\|"
-            r"\s*([0-9,]+)\s*\|"
-        ),
+        r"Average-caseLatency[^0-9]*([0-9,]+)",
+        r"Latency.*?min\s*=\s*([0-9,]+)",
+        r"\|\s*Latency\s*\|\s*([0-9,]+)\s*\|",
     ]
 
     for pattern in patterns:
         match = re.search(
             pattern,
             text,
-            flags=(
-                re.IGNORECASE
-                | re.DOTALL
-            ),
+            flags=re.IGNORECASE | re.DOTALL,
         )
 
         if match is not None:
-            value = _safe_float(
-                match.group(1),
-                0.0,
-            )
+            value = _safe_float(match.group(1))
 
             if value > 0.0:
                 return value
@@ -311,9 +202,7 @@ def _parse_latency_from_report(
     return 0.0
 
 
-def _count_dsp_bindings(
-    text: str,
-) -> int:
+def _count_dsp_bindings(text: str) -> int:
     names = set()
 
     for match in re.finditer(
@@ -322,37 +211,26 @@ def _count_dsp_bindings(
             r".*?\|\s*dsp_slice\s*\|"
         ),
         text,
-        flags=(
-            re.MULTILINE
-            | re.IGNORECASE
-        ),
+        flags=re.MULTILINE | re.IGNORECASE,
     ):
-        names.add(
-            match.group(1).strip()
-        )
+        names.add(match.group(1).strip())
 
     return len(names)
 
 
-def _extract_from_report(
-    report_path: Path,
-) -> Dict[str, float]:
+def _extract_from_report(report_path: Path) -> Dict[str, float]:
     text = report_path.read_text(
         encoding="utf-8",
         errors="ignore",
     )
 
-    result = _parse_total_resource_row(
-        text
-    )
+    result = _parse_total_resource_row(text)
     result["actual_latency_cycles"] = (
         _parse_latency_from_report(text)
     )
 
     if result["actual_dsp"] == 0:
-        result["actual_dsp"] = (
-            _count_dsp_bindings(text)
-        )
+        result["actual_dsp"] = _count_dsp_bindings(text)
 
     return result
 
@@ -360,21 +238,15 @@ def _extract_from_report(
 def parse_hls_csynth_report(
     report_path: str | Path,
 ) -> Dict[str, float]:
-    selected = _find_best_report_path(
-        report_path
-    )
+    selected = _find_best_report_path(report_path)
 
     if not selected.is_file():
         return _empty_actual()
 
     if selected.suffix.lower() == ".xml":
-        return _extract_from_xml(
-            selected
-        )
+        return _extract_from_xml(selected)
 
-    return _extract_from_report(
-        selected
-    )
+    return _extract_from_report(selected)
 
 
 def _relative_error(
@@ -384,24 +256,19 @@ def _relative_error(
     if actual <= 0.0:
         return None
 
-    return (
-        predicted - actual
-    ) / actual
+    return (predicted - actual) / actual
 
 
 def _absolute_percentage_error(
     predicted: float,
     actual: float,
 ) -> float | None:
-    relative = _relative_error(
-        predicted,
-        actual,
-    )
+    relative_error = _relative_error(predicted, actual)
 
-    if relative is None:
+    if relative_error is None:
         return None
 
-    return abs(relative) * 100.0
+    return abs(relative_error) * 100.0
 
 
 def _actual_to_predicted_ratio(
@@ -432,22 +299,25 @@ def _quality_label(
     return "poor"
 
 
+def _error_direction(
+    predicted: float,
+    actual: float,
+) -> str:
+    if actual <= 0.0:
+        return "unavailable"
+
+    if math.isclose(predicted, actual):
+        return "matched"
+
+    return "overestimated" if predicted > actual else "underestimated"
+
+
 def _comparison_row(
     *,
     predicted: float,
     actual: float,
 ) -> Dict[str, Any]:
-    relative_error = _relative_error(
-        predicted,
-        actual,
-    )
-    percentage_error = (
-        _absolute_percentage_error(
-            predicted,
-            actual,
-        )
-    )
-    ratio = _actual_to_predicted_ratio(
+    percentage_error = _absolute_percentage_error(
         predicted,
         actual,
     )
@@ -455,68 +325,134 @@ def _comparison_row(
     return {
         "predicted": predicted,
         "actual": actual,
-        "signed_relative_error": (
-            relative_error
+        "signed_error": predicted - actual,
+        "signed_relative_error": _relative_error(
+            predicted,
+            actual,
         ),
-        "absolute_percentage_error": (
-            percentage_error
+        "absolute_percentage_error": percentage_error,
+        "actual_to_predicted_ratio": (
+            _actual_to_predicted_ratio(
+                predicted,
+                actual,
+            )
         ),
-        "actual_to_predicted_ratio": ratio,
-        "quality": _quality_label(
-            percentage_error
+        "direction": _error_direction(
+            predicted,
+            actual,
         ),
+        "quality": _quality_label(percentage_error),
     }
 
 
-def _resource_calibration_recommendation(
-    design_space_summary: Dict[str, Any],
-    actual: Dict[str, float],
+def _diagnostic_ratio_payload(
+    design_space_summary: Mapping[str, Any],
+    actual: Mapping[str, float],
+    predicted_cycles: float,
+    actual_cycles: float,
 ) -> Dict[str, Any]:
-    recommendations: Dict[str, Any] = {}
+    resources: Dict[str, float | None] = {}
 
     for resource_name, (
         predicted_key,
         actual_key,
     ) in RESOURCE_FIELDS.items():
-        predicted = float(
-            design_space_summary.get(
-                predicted_key,
-                0,
+        resources[f"{resource_name}_scale"] = (
+            _actual_to_predicted_ratio(
+                float(
+                    design_space_summary.get(
+                        predicted_key,
+                        0,
+                    )
+                    or 0
+                ),
+                float(actual.get(actual_key, 0) or 0),
             )
-            or 0
-        )
-        actual_value = float(
-            actual.get(
-                actual_key,
-                0,
-            )
-            or 0
         )
 
-        ratio = _actual_to_predicted_ratio(
-            predicted,
-            actual_value,
+    performance = {
+        "cycle_scale": _actual_to_predicted_ratio(
+            predicted_cycles,
+            actual_cycles,
         )
-
-        recommendations[
-            f"{resource_name}_scale"
-        ] = ratio
-
-    return recommendations
-
-
-def _performance_calibration_recommendation(
-    *,
-    predicted_cycles: float,
-    actual_cycles: float,
-) -> Dict[str, Any]:
-    ratio = _actual_to_predicted_ratio(
-        predicted_cycles,
-        actual_cycles,
-    )
+    }
 
     return {
-        "cycle_scale": ratio,
+        "resources": resources,
+        "performance": performance,
+        "yaml": {
+            "analysis": {
+                "design_space": {
+                    "calibration": {
+                        "resources": resources,
+                        "performance": performance,
+                    }
+                }
+            }
+        },
+        "deprecated": True,
+        "note": (
+            "These ratios are retained for backward compatibility. "
+            "They are diagnostic residual ratios, not a replacement "
+            "for correcting operator, memory, interface, or schedule models."
+        ),
+    }
+
+
+def _model_diagnostics(
+    comparison: Mapping[str, Mapping[str, Any]],
+) -> Dict[str, Any]:
+    poor_fields = []
+    underestimated_fields = []
+    overestimated_fields = []
+
+    for name, row in comparison.items():
+        if row.get("quality") == "poor":
+            poor_fields.append(name)
+
+        if row.get("direction") == "underestimated":
+            underestimated_fields.append(name)
+        elif row.get("direction") == "overestimated":
+            overestimated_fields.append(name)
+
+    likely_causes = []
+
+    if "dsp" in underestimated_fields:
+        likely_causes.append(
+            "DSP underestimation: inspect generated multiplier, "
+            "division, exponential, and type-conversion operators."
+        )
+
+    if "bram18" in underestimated_fields:
+        likely_causes.append(
+            "BRAM underestimation: inspect array partitioning, banking, "
+            "line buffers, parameter storage, and duplicated memories."
+        )
+
+    if "lut" in underestimated_fields or "ff" in underestimated_fields:
+        likely_causes.append(
+            "Logic underestimation: inspect top-level interfaces, "
+            "conversion loops, control FSMs, and operator implementation costs."
+        )
+
+    if "latency_cycles" in underestimated_fields:
+        likely_causes.append(
+            "Latency underestimation: inspect loop initiation intervals, "
+            "pipeline stalls, function boundaries, and memory dependencies."
+        )
+
+    if "latency_cycles" in overestimated_fields:
+        likely_causes.append(
+            "Latency overestimation: inspect overlapping loops, dataflow, "
+            "pipeline concurrency, and actual achieved initiation intervals."
+        )
+
+    return {
+        "poor_fields": poor_fields,
+        "underestimated_fields": underestimated_fields,
+        "overestimated_fields": overestimated_fields,
+        "likely_causes": likely_causes,
+        "requires_model_revision": bool(poor_fields),
     }
 
 
@@ -528,12 +464,63 @@ def _format_number(
     if value is None:
         return "n/a"
 
-    numeric = _safe_float(
-        value,
-        0.0,
+    return f"{_safe_float(value):.{digits}f}"
+
+
+def _write_unavailable_result(
+    *,
+    comparison_dir: Path,
+    results_json: Path,
+    summary_txt: Path,
+    reason: str,
+    terminal_message: str,
+    design_space_summary: Mapping[str, Any],
+    requested_path: str | Path | None = None,
+    selected_path: Path | None = None,
+) -> "EstimateVsHlsResult":
+    terminal_summary = "\n".join(
+        [
+            "=============== FPGAI Estimate vs HLS ===============",
+            terminal_message,
+            "=====================================================",
+        ]
     )
 
-    return f"{numeric:.{digits}f}"
+    payload: Dict[str, Any] = {
+        "available": False,
+        "reason": reason,
+        "estimated": dict(design_space_summary),
+        "actual": None,
+        "comparison": None,
+        "model_diagnostics": None,
+        "calibration_recommendation": None,
+    }
+
+    if requested_path is not None:
+        payload["csynth_report_path_requested"] = str(
+            requested_path
+        )
+
+    if selected_path is not None:
+        payload["csynth_report_path_used"] = str(
+            selected_path
+        )
+
+    results_json.write_text(
+        json.dumps(payload, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    summary_txt.write_text(
+        terminal_summary + "\n",
+        encoding="utf-8",
+    )
+
+    return EstimateVsHlsResult(
+        out_dir=comparison_dir,
+        results_json=results_json,
+        summary_txt=summary_txt,
+        terminal_summary=terminal_summary,
+    )
 
 
 @dataclass(frozen=True)
@@ -552,60 +539,20 @@ def run_estimate_vs_hls_compare(
     clock_mhz: float,
 ) -> EstimateVsHlsResult:
     output_root = Path(out_dir).resolve()
-    comparison_dir = (
-        output_root / "estimate_vs_hls"
-    )
-    comparison_dir.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    comparison_dir = output_root / "estimate_vs_hls"
+    comparison_dir.mkdir(parents=True, exist_ok=True)
 
-    results_json = (
-        comparison_dir / "results.json"
-    )
-    summary_txt = (
-        comparison_dir / "summary.txt"
-    )
+    results_json = comparison_dir / "results.json"
+    summary_txt = comparison_dir / "summary.txt"
 
     if not csynth_report_path:
-        terminal_summary = "\n".join(
-            [
-                "=============== FPGAI Estimate vs HLS ===============",
-                "HLS synthesis report unavailable.",
-                "=====================================================",
-            ]
-        )
-
-        payload = {
-            "available": False,
-            "reason": (
-                "No HLS synthesis report path "
-                "was provided"
-            ),
-            "estimated": design_space_summary,
-            "actual": None,
-            "comparison": None,
-            "calibration_recommendation": None,
-        }
-
-        results_json.write_text(
-            json.dumps(
-                payload,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        summary_txt.write_text(
-            terminal_summary + "\n",
-            encoding="utf-8",
-        )
-
-        return EstimateVsHlsResult(
-            out_dir=comparison_dir,
+        return _write_unavailable_result(
+            comparison_dir=comparison_dir,
             results_json=results_json,
             summary_txt=summary_txt,
-            terminal_summary=terminal_summary,
+            reason="No HLS synthesis report path was provided",
+            terminal_message="HLS synthesis report unavailable.",
+            design_space_summary=design_space_summary,
         )
 
     selected_report = _find_best_report_path(
@@ -613,59 +560,21 @@ def run_estimate_vs_hls_compare(
     )
 
     if not selected_report.is_file():
-        terminal_summary = "\n".join(
-            [
-                "=============== FPGAI Estimate vs HLS ===============",
-                (
-                    "HLS synthesis report was not found: "
-                    f"{selected_report}"
-                ),
-                "=====================================================",
-            ]
-        )
-
-        payload = {
-            "available": False,
-            "reason": (
-                "HLS synthesis report file "
-                "does not exist"
-            ),
-            "csynth_report_path_requested": str(
-                csynth_report_path
-            ),
-            "csynth_report_path_used": str(
-                selected_report
-            ),
-            "estimated": design_space_summary,
-            "actual": None,
-            "comparison": None,
-            "calibration_recommendation": None,
-        }
-
-        results_json.write_text(
-            json.dumps(
-                payload,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
-        summary_txt.write_text(
-            terminal_summary + "\n",
-            encoding="utf-8",
-        )
-
-        return EstimateVsHlsResult(
-            out_dir=comparison_dir,
+        return _write_unavailable_result(
+            comparison_dir=comparison_dir,
             results_json=results_json,
             summary_txt=summary_txt,
-            terminal_summary=terminal_summary,
+            reason="HLS synthesis report file does not exist",
+            terminal_message=(
+                "HLS synthesis report was not found: "
+                f"{selected_report}"
+            ),
+            design_space_summary=design_space_summary,
+            requested_path=csynth_report_path,
+            selected_path=selected_report,
         )
 
-    actual = parse_hls_csynth_report(
-        selected_report
-    )
-
+    actual = parse_hls_csynth_report(selected_report)
     effective_clock_mhz = max(
         1e-9,
         float(clock_mhz),
@@ -676,10 +585,7 @@ def run_estimate_vs_hls_compare(
     )
     actual_latency_ms = (
         actual_latency_cycles
-        / (
-            effective_clock_mhz
-            * 1_000.0
-        )
+        / (effective_clock_mhz * 1_000.0)
         if actual_latency_cycles > 0.0
         else 0.0
     )
@@ -694,9 +600,11 @@ def run_estimate_vs_hls_compare(
     predicted_cycles = float(
         design_space_summary.get(
             "predicted_cycles",
-            predicted_latency_ms
-            * effective_clock_mhz
-            * 1_000.0,
+            (
+                predicted_latency_ms
+                * effective_clock_mhz
+                * 1_000.0
+            ),
         )
         or 0.0
     )
@@ -710,9 +618,7 @@ def run_estimate_vs_hls_compare(
                 )
                 or 0
             ),
-            actual=float(
-                actual["actual_lut"]
-            ),
+            actual=float(actual["actual_lut"]),
         ),
         "ff": _comparison_row(
             predicted=float(
@@ -722,9 +628,7 @@ def run_estimate_vs_hls_compare(
                 )
                 or 0
             ),
-            actual=float(
-                actual["actual_ff"]
-            ),
+            actual=float(actual["actual_ff"]),
         ),
         "dsp": _comparison_row(
             predicted=float(
@@ -734,9 +638,7 @@ def run_estimate_vs_hls_compare(
                 )
                 or 0
             ),
-            actual=float(
-                actual["actual_dsp"]
-            ),
+            actual=float(actual["actual_dsp"]),
         ),
         "bram18": _comparison_row(
             predicted=float(
@@ -746,9 +648,7 @@ def run_estimate_vs_hls_compare(
                 )
                 or 0
             ),
-            actual=float(
-                actual["actual_bram18"]
-            ),
+            actual=float(actual["actual_bram18"]),
         ),
         "latency_cycles": _comparison_row(
             predicted=predicted_cycles,
@@ -760,48 +660,20 @@ def run_estimate_vs_hls_compare(
         ),
     }
 
-    resource_recommendation = (
-        _resource_calibration_recommendation(
-            design_space_summary,
-            actual,
-        )
-    )
-    performance_recommendation = (
-        _performance_calibration_recommendation(
-            predicted_cycles=predicted_cycles,
-            actual_cycles=actual_latency_cycles,
-        )
-    )
+    diagnostics = _model_diagnostics(comparison)
 
-    calibration_recommendation = {
-        "resources": resource_recommendation,
-        "performance": (
-            performance_recommendation
-        ),
-        "yaml": {
-            "analysis": {
-                "design_space": {
-                    "calibration": {
-                        "resources": (
-                            resource_recommendation
-                        ),
-                        "performance": (
-                            performance_recommendation
-                        ),
-                    }
-                }
-            }
-        },
-        "note": (
-            "Apply calibration only to the same "
-            "board, toolchain, clock, HLS architecture, "
-            "and similar model family. Collect several "
-            "synthesis runs before treating it as stable."
-        ),
-    }
+    # Compatibility field for existing readers and tests. These ratios
+    # are no longer presented as the primary estimator solution.
+    legacy_ratios = _diagnostic_ratio_payload(
+        design_space_summary,
+        actual,
+        predicted_cycles,
+        actual_latency_cycles,
+    )
 
     payload = {
         "available": True,
+        "comparison_model": "analytical_validation_v2",
         "csynth_report_path_requested": str(
             csynth_report_path
         ),
@@ -812,26 +684,23 @@ def run_estimate_vs_hls_compare(
         "estimated": design_space_summary,
         "actual": {
             **actual,
-            "actual_latency_ms": (
-                actual_latency_ms
-            ),
+            "actual_latency_ms": actual_latency_ms,
         },
         "comparison": comparison,
         "relative_error": {
-            name: values[
-                "signed_relative_error"
-            ]
-            for name, values in comparison.items()
+            name: row["signed_relative_error"]
+            for name, row in comparison.items()
         },
         "absolute_percentage_error": {
-            name: values[
-                "absolute_percentage_error"
-            ]
-            for name, values in comparison.items()
+            name: row["absolute_percentage_error"]
+            for name, row in comparison.items()
         },
-        "calibration_recommendation": (
-            calibration_recommendation
-        ),
+        "model_diagnostics": diagnostics,
+        "observed_residual_ratios": {
+            "resources": legacy_ratios["resources"],
+            "performance": legacy_ratios["performance"],
+        },
+        "calibration_recommendation": legacy_ratios,
     }
 
     terminal_lines = [
@@ -852,59 +721,79 @@ def run_estimate_vs_hls_compare(
             f"pred={int(row['predicted'])}  "
             f"actual={int(row['actual'])}  "
             f"error={_format_number(row['absolute_percentage_error'])}%  "
+            f"direction={row['direction']}  "
             f"quality={row['quality']}"
         )
 
-    latency_row = comparison[
-        "latency_ms"
-    ]
+    latency_row = comparison["latency_ms"]
 
     terminal_lines.append(
         "Latency  "
         f"pred={predicted_latency_ms:.4f} ms  "
         f"actual={actual_latency_ms:.4f} ms  "
         f"error={_format_number(latency_row['absolute_percentage_error'])}%  "
+        f"direction={latency_row['direction']}  "
         f"quality={latency_row['quality']}"
     )
+
+    terminal_lines.append(
+        "-----------------------------------------------------"
+    )
+
+    if diagnostics["requires_model_revision"]:
+        terminal_lines.append(
+            "Analytical model revision required:"
+        )
+
+        for cause in diagnostics["likely_causes"]:
+            terminal_lines.append(f" - {cause}")
+    else:
+        terminal_lines.append(
+            "Analytical estimates are within the current quality limits."
+        )
+
+    resources = legacy_ratios["resources"]
+    performance = legacy_ratios["performance"]
 
     terminal_lines.extend(
         [
             "-----------------------------------------------------",
-            "Suggested calibration scales:",
+            (
+                "Suggested calibration scales "
+                "(legacy diagnostic ratios only):"
+            ),
             (
                 " LUT    : "
-                f"{_format_number(resource_recommendation['lut_scale'], digits=4)}"
+                f"{_format_number(resources['lut_scale'], digits=4)}"
             ),
             (
                 " FF     : "
-                f"{_format_number(resource_recommendation['ff_scale'], digits=4)}"
+                f"{_format_number(resources['ff_scale'], digits=4)}"
             ),
             (
                 " DSP    : "
-                f"{_format_number(resource_recommendation['dsp_scale'], digits=4)}"
+                f"{_format_number(resources['dsp_scale'], digits=4)}"
             ),
             (
                 " BRAM18 : "
-                f"{_format_number(resource_recommendation['bram18_scale'], digits=4)}"
+                f"{_format_number(resources['bram18_scale'], digits=4)}"
             ),
             (
                 " Cycles : "
-                f"{_format_number(performance_recommendation['cycle_scale'], digits=4)}"
+                f"{_format_number(performance['cycle_scale'], digits=4)}"
+            ),
+            (
+                "Ratios are diagnostic. Correct the responsible "
+                "operator or schedule model instead of applying them globally."
             ),
             "=====================================================",
         ]
     )
 
-    terminal_summary = "\n".join(
-        terminal_lines
-    )
+    terminal_summary = "\n".join(terminal_lines)
 
     results_json.write_text(
-        json.dumps(
-            payload,
-            indent=2,
-        )
-        + "\n",
+        json.dumps(payload, indent=2) + "\n",
         encoding="utf-8",
     )
     summary_txt.write_text(
