@@ -7,9 +7,7 @@ from fpgai.analysis.hls_estimate_compare import (
     parse_hls_csynth_report,
     run_estimate_vs_hls_compare,
 )
-from fpgai.analysis.performance_estimator import (
-    estimate_performance,
-)
+from fpgai.analysis.performance_estimator import estimate_performance
 from fpgai.analysis.resource_estimator import (
     estimate_resources_from_descriptors,
 )
@@ -247,9 +245,7 @@ def test_conv_dimensions_and_line_buffer_are_reported() -> None:
     assert dimensions["kernel_height"] == 3
     assert dimensions["kernel_width"] == 3
 
-    assert layer["resource_components"][
-        "line_buffer_bram18"
-    ] > 0
+    assert layer["resource_components"]["line_buffer_bram18"] > 0
 
 
 def test_more_parallelism_increases_structural_resources() -> None:
@@ -281,7 +277,7 @@ def test_more_parallelism_increases_structural_resources() -> None:
     )
 
 
-def test_wider_precision_increases_structural_cost() -> None:
+def test_wider_operand_precision_increases_logic_not_dsp_when_accum_is_fixed() -> None:
     narrow = estimate_resources_from_descriptors(
         [_dense_descriptor()],
         _config(
@@ -305,10 +301,20 @@ def test_wider_precision_increases_structural_cost() -> None:
         wide["totals"]["predicted_ff"]
         > narrow["totals"]["predicted_ff"]
     )
+
+    # Dense operands are cast to the same 24-bit ACC_T before multiplication.
     assert (
         wide["totals"]["predicted_dsp"]
-        > narrow["totals"]["predicted_dsp"]
+        == narrow["totals"]["predicted_dsp"]
     )
+
+    narrow_arithmetic = narrow["layers"][0]["architecture"]["arithmetic"]
+    wide_arithmetic = wide["layers"][0]["architecture"]["arithmetic"]
+
+    assert narrow_arithmetic["multiply_left_bits"] == 24
+    assert narrow_arithmetic["multiply_right_bits"] == 24
+    assert wide_arithmetic["multiply_left_bits"] == 24
+    assert wide_arithmetic["multiply_right_bits"] == 24
 
 
 def test_calibration_is_only_applied_when_explicitly_configured() -> None:
@@ -502,18 +508,10 @@ def test_comparison_reports_model_diagnostics(
     assert payload["comparison_model"] == (
         "analytical_validation_v2"
     )
-    assert payload["model_diagnostics"][
-        "requires_model_revision"
-    ] is True
-    assert "dsp" in payload["model_diagnostics"][
-        "poor_fields"
-    ]
-    assert payload["calibration_recommendation"][
-        "deprecated"
-    ] is True
-    assert "Analytical model revision required" in (
-        result.terminal_summary
-    )
+    assert payload["model_diagnostics"]["requires_model_revision"] is True
+    assert "dsp" in payload["model_diagnostics"]["poor_fields"]
+    assert payload["calibration_recommendation"]["deprecated"] is True
+    assert "Analytical model revision required" in result.terminal_summary
 
 
 def test_comparison_handles_missing_report(
