@@ -2,20 +2,9 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
 
+from fpgai.config.access import get_path
 
-def _get(
-    data: Mapping[str, Any],
-    path: str,
-    default: Any = None,
-) -> Any:
-    current: Any = data
-
-    for key in path.split("."):
-        if not isinstance(current, Mapping) or key not in current:
-            return default
-        current = current[key]
-
-    return current
+_get = get_path
 
 
 def _positive_int(

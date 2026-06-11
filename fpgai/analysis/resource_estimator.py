@@ -10,25 +10,13 @@ from fpgai.analysis.hls_architecture import (
     HLSArchitecture,
     build_hls_architecture,
 )
+from fpgai.config.access import get_path
 
 
 BRAM18_BITS = 18_432
 
 
-def _get(
-    data: Mapping[str, Any],
-    path: str,
-    default: Any = None,
-) -> Any:
-    current: Any = data
-
-    for key in path.split("."):
-        if not isinstance(current, Mapping) or key not in current:
-            return default
-
-        current = current[key]
-
-    return current
+_get = get_path
 
 
 def _positive_float(

@@ -12,6 +12,7 @@ import onnx
 import onnxruntime as ort
 from onnx import TensorProto, helper, numpy_helper
 
+from fpgai.config.access import get_path
 from fpgai.numerics.fixed_emulation import (
     cosine_similarity,
     mae,
@@ -38,23 +39,7 @@ NUMERIC_WEIGHT_OPS = {
 }
 
 
-def _cfg_get(
-    data: Dict[str, Any],
-    path: str,
-    default: Any = None,
-) -> Any:
-    current: Any = data
-
-    for key in path.split("."):
-        if (
-            not isinstance(current, dict)
-            or key not in current
-        ):
-            return default
-
-        current = current[key]
-
-    return current
+_cfg_get = get_path
 
 
 def _stable_node_aliases(

@@ -7,6 +7,7 @@ import json
 import time
 import numpy as np
 
+from fpgai.config.access import get_path
 from fpgai.config.loader import FPGAIConfig
 from fpgai.engine.analysis import analyze_graph
 from fpgai.engine.communication import make_communication_plan
@@ -44,13 +45,7 @@ from fpgai.backends.hls.testbench import emit_tb_cpp
 from fpgai.backends.hls.testbench_train import emit_tb_train_cpp
 
 
-def _cfg_get(raw: Dict[str, Any], path: str, default: Any = None) -> Any:
-    cur: Any = raw
-    for k in path.split("."):
-        if not isinstance(cur, dict) or k not in cur:
-            return default
-        cur = cur[k]
-    return cur
+_cfg_get = get_path
 
 
 @dataclass
@@ -794,6 +789,52 @@ class Compiler:
             "pipeline_mode": self.cfg.pipeline.mode,
             "top_kernel_name": kwargs["top_name"],
             "weights_mode": kwargs["weights_mode"],
+            "configuration": {
+                "requested": {
+                    "clock_mhz": _cfg_get(
+                        self.cfg.raw,
+                        "targets.platform.clocks.0.target_mhz",
+                        None,
+                    ),
+                    "parallel_policy": _cfg_get(
+                        self.cfg.raw,
+                        "optimization.parallel_policy",
+                        _cfg_get(
+                            self.cfg.raw,
+                            "analysis.design_space.policy_name",
+                            "Balanced",
+                        ),
+                    ),
+                    "weights_mode": _cfg_get(
+                        self.cfg.raw,
+                        "data_movement.ps_pl.weights.mode",
+                        "embedded",
+                    ),
+                    "top_kernel_name": _cfg_get(
+                        self.cfg.raw,
+                        "pipeline.outputs.top_kernel_name",
+                        "deeplearn",
+                    ),
+                    "hls_enabled": _cfg_get(
+                        self.cfg.raw,
+                        "backends.hls.enabled",
+                        True,
+                    ),
+                    "host_cpp_enabled": _cfg_get(
+                        self.cfg.raw,
+                        "backends.host_cpp.enabled",
+                        True,
+                    ),
+                },
+                "effective": {
+                    "clock_mhz": kwargs["compile_plan"].clock_mhz,
+                    "parallel_policy": kwargs["compile_plan"].notes.get(
+                        "parallel_policy"
+                    ),
+                    "weights_mode": kwargs["weights_mode"],
+                    "top_kernel_name": kwargs["top_name"],
+                },
+            },
             "out_dir": str(out_dir),
             "num_ops": len(kwargs["graph"].ops),
             "num_params": len(kwargs["graph"].params),

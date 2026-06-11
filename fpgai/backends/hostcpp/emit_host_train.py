@@ -3,16 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
+from fpgai.config.access import get_path
 from fpgai.util.fs import ensure_clean_dir, write_text
 
 
-def _cfg_get(raw: Dict[str, Any], path: str, default: Any = None) -> Any:
-    cur: Any = raw
-    for k in path.split("."):
-        if not isinstance(cur, dict) or k not in cur:
-            return default
-        cur = cur[k]
-    return cur
+_cfg_get = get_path
 
 
 def _infer_in_out_words(graph) -> Tuple[int, int]:

@@ -401,6 +401,8 @@ def estimate_architecture_layer_resources(
     layer: LayerArchitecture,
     raw_cfg: Mapping[str, Any],
 ) -> dict[str, Any]:
+    elementwise_dsp = 0
+
     if layer.op_type == "Dense":
         lut, ff = _dense_logic(layer)
     elif layer.op_type == "Conv":
@@ -489,7 +491,10 @@ def estimate_architecture_layer_resources(
             )
         ),
         "partition_factor": int(
-            layer.memory["partition_factor"]
+            layer.memory.get(
+                "partition_factor",
+                1,
+            )
         ),
         "multiplier_lanes": multiplier_units,
         "multiplier_dsp_per_lane": (

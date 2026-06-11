@@ -16,6 +16,7 @@ from fpgai.analysis.precision_sweep import (
 from fpgai.analysis.resource_estimator import (
     estimate_resources_from_descriptors,
 )
+from fpgai.config.access import get_path
 from fpgai.engine.analysis import analyze_graph
 from fpgai.numerics.precision_policy import (
     DEFAULT_PRECISION,
@@ -25,19 +26,7 @@ from fpgai.numerics.precision_policy import (
 )
 
 
-def _cfg_get(
-    data: Mapping[str, Any],
-    path: str,
-    default: Any = None,
-) -> Any:
-    current: Any = data
-
-    for key in path.split("."):
-        if not isinstance(current, Mapping) or key not in current:
-            return default
-        current = current[key]
-
-    return current
+_cfg_get = get_path
 
 
 def _set_cfg(

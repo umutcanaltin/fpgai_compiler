@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 from fpgai.analysis.quantization_report import (
     run_quantization_report,
 )
+from fpgai.config.access import get_path
 from fpgai.numerics.precision_policy import (
     DEFAULT_PRECISION,
     PRECISION_ROLES,
@@ -18,23 +19,7 @@ from fpgai.numerics.precision_policy import (
 )
 
 
-def _cfg_get(
-    data: Dict[str, Any],
-    path: str,
-    default: Any = None,
-) -> Any:
-    current: Any = data
-
-    for key in path.split("."):
-        if (
-            not isinstance(current, dict)
-            or key not in current
-        ):
-            return default
-
-        current = current[key]
-
-    return current
+_cfg_get = get_path
 
 
 def _set_cfg(

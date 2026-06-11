@@ -7,6 +7,7 @@ import shutil
 
 import numpy as np
 
+from fpgai.config.access import get_path
 from fpgai.benchmark.reference import run_onnx_reference
 from fpgai.benchmark.compare import compare_outputs, write_metrics
 from fpgai.benchmark.reference_intermediate import run_onnx_intermediate_reference
@@ -29,13 +30,7 @@ class BenchmarkResult:
     precision_sweep_summary_txt: Path | None = None
 
 
-def _cfg_get(raw: dict, path: str, default=None):
-    cur = raw
-    for k in path.split("."):
-        if not isinstance(cur, dict) or k not in cur:
-            return default
-        cur = cur[k]
-    return cur
+_cfg_get = get_path
 
 
 def _write_input_bin_from_npy(input_npy: Path, build_dir: Path) -> Path:

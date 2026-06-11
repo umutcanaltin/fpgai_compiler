@@ -7,9 +7,8 @@ project:
 
 pipeline:
   mode: training_on_device
-
-outputs:
-  top_kernel_name: deeplearn
+  outputs:
+    top_kernel_name: deeplearn
 
 training:
   debug:
@@ -33,23 +32,22 @@ training:
     store_pool_indices: true
     gradient_checkpointing: false
     store_step_snapshots: true
-
-estimator:
-  enabled: true
-  include_forward: true
-  include_backward_input: true
-  include_backward_params: true
-  include_update: true
-  include_buffers: true
+  estimator:
+    enabled: true
+    include_forward: true
+    include_backward_input: true
+    include_backward_params: true
+    include_update: true
+    include_buffers: true
   phase_overrides: {}
 
 targets:
   platform:
     board: kv260
     part: xck26-sfvc784-2LV-c
-  clocks:
-    - name: pl_clk0
-      target_mhz: 200
+    clocks:
+      - name: pl_clk0
+        target_mhz: 200
 
 operators:
   supported:
@@ -114,16 +112,15 @@ numerics:
 analysis:
   quantization_report:
     enabled: true
-  seed: 0
-
-design_space:
-  enabled: true
-  print_terminal_summary: true
-  recommendation:
-    require_prediction_match: false
-    min_cosine: 0.95
-  performance:
-    baseline_cpu_latency_ms: 1.0
+    seed: 0
+  design_space:
+    enabled: true
+    print_terminal_summary: true
+    recommendation:
+      require_prediction_match: false
+      min_cosine: 0.95
+    performance:
+      baseline_cpu_latency_ms: 1.0
   precision_sweep:
     enabled: false
 
@@ -131,8 +128,8 @@ data_movement:
   ps_pl:
     compression:
       enabled: true
-  weights:
-    mode: embedded
+    weights:
+      mode: embedded
 
 backends:
   hls:
@@ -141,8 +138,8 @@ backends:
       enabled: true
       mode: csim
       exe: vitis_hls
-    host_cpp:
-      enabled: true
+  host_cpp:
+    enabled: true
 
 debug:
   verbose: false

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from typing import Any, Dict
+
+from fpgai.config.access import get_path
 from fpgai.ir.graph import Graph
 
 
@@ -12,13 +14,7 @@ def _spec_to_ap(spec) -> str:
     return f"ap_fixed<{tb},{ib}>"
 
 
-def _deep_get(d: Dict[str, Any], path: str, default=None):
-    cur: Any = d
-    for k in path.split("."):
-        if not isinstance(cur, dict) or k not in cur:
-            return default
-        cur = cur[k]
-    return cur
+_deep_get = get_path
 
 
 def _default_precision(raw_cfg: Dict[str, Any]) -> Dict[str, Any]:

@@ -8,6 +8,8 @@ import yaml
 from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
+from fpgai.config.access import get_path
+
 
 @dataclass(frozen=True)
 class ConfigIssue:
@@ -133,23 +135,7 @@ def _load_yaml(path: str) -> Dict[str, Any]:
     return raw
 
 
-def _deep_get(
-    data: Dict[str, Any],
-    path: str,
-    default: Any = None,
-) -> Any:
-    current: Any = data
-
-    for key in path.split("."):
-        if (
-            not isinstance(current, dict)
-            or key not in current
-        ):
-            return default
-
-        current = current[key]
-
-    return current
+_deep_get = get_path
 
 
 @dataclass(frozen=True)
@@ -179,6 +165,36 @@ class FPGAIConfig:
 PIPELINE_MODES_V1 = {
     "inference",
     "training_on_device",
+}
+
+PARALLEL_POLICIES_V1 = {
+    "Fit-First",
+    "DSP-Saver",
+    "BRAM-Saver",
+    "Balanced",
+    "Throughput-First",
+    "Latency-First",
+}
+
+TOP_LEVEL_SECTIONS_V1 = {
+    "version",
+    "project",
+    "pipeline",
+    "model",
+    "targets",
+    "operators",
+    "numerics",
+    "analysis",
+    "data_movement",
+    "memory",
+    "optimization",
+    "training",
+    "backends",
+    "toolchain",
+    "benchmark",
+    "communication",
+    "debug",
+    "metadata",
 }
 
 DEFAULT_NUMERIC_ROLES = {
@@ -870,6 +886,146 @@ def _validate_analysis_cfg(
     )
 
 
+def _validate_top_level_sections(
+    raw: Dict[str, Any],
+    issues: List[ConfigIssue],
+) -> None:
+    for key in sorted(set(raw) - TOP_LEVEL_SECTIONS_V1):
+        issues.append(
+            ConfigIssue(
+                key,
+                f"Unknown top-level configuration section {key!r}",
+            )
+        )
+
+
+def _validate_clock_config(
+    raw: Dict[str, Any],
+    issues: List[ConfigIssue],
+) -> None:
+    clocks = _deep_get(raw, "targets.platform.clocks", None)
+
+    if clocks is None and "targets" not in raw:
+        return
+
+    if not isinstance(clocks, list) or not clocks:
+        issues.append(
+            ConfigIssue(
+                "targets.platform.clocks",
+                "Expected a non-empty list of clock mappings",
+            )
+        )
+        return
+
+    for index, clock in enumerate(clocks):
+        path = f"targets.platform.clocks[{index}]"
+        if not isinstance(clock, dict):
+            issues.append(ConfigIssue(path, "Expected a mapping"))
+            continue
+
+        for key in sorted(set(clock) - {"name", "target_mhz"}):
+            issues.append(
+                ConfigIssue(
+                    f"{path}.{key}",
+                    f"Unknown clock field {key!r}",
+                )
+            )
+
+        name = clock.get("name")
+        if not isinstance(name, str) or not name.strip():
+            issues.append(
+                ConfigIssue(f"{path}.name", "Expected a non-empty string")
+            )
+
+        target_mhz = clock.get("target_mhz")
+        if (
+            type(target_mhz) not in {int, float}
+            or float(target_mhz) <= 0.0
+        ):
+            issues.append(
+                ConfigIssue(
+                    f"{path}.target_mhz",
+                    "Expected a positive number",
+                )
+            )
+
+
+def _validate_parallel_policy(
+    raw: Dict[str, Any],
+    issues: List[ConfigIssue],
+) -> None:
+    requested_paths = (
+        "optimization.parallel_policy",
+        "analysis.design_space.policy_name",
+    )
+    requested = [
+        (path, _deep_get(raw, path, None))
+        for path in requested_paths
+        if _deep_get(raw, path, None) is not None
+    ]
+
+    for path, value in requested:
+        if value not in PARALLEL_POLICIES_V1:
+            issues.append(
+                ConfigIssue(
+                    path,
+                    f"Unknown policy {value!r}; expected one of "
+                    f"{sorted(PARALLEL_POLICIES_V1)}",
+                )
+            )
+
+    if len(requested) == 2 and requested[0][1] != requested[1][1]:
+        issues.append(
+            ConfigIssue(
+                "optimization.parallel_policy",
+                "Conflicts with analysis.design_space.policy_name",
+            )
+        )
+
+
+def _validate_compiler_controls(
+    raw: Dict[str, Any],
+    issues: List[ConfigIssue],
+) -> None:
+    top_name = _deep_get(raw, "pipeline.outputs.top_kernel_name", None)
+    if top_name is not None and (
+        not isinstance(top_name, str) or not top_name.strip()
+    ):
+        issues.append(
+            ConfigIssue(
+                "pipeline.outputs.top_kernel_name",
+                "Expected a non-empty string",
+            )
+        )
+
+    weights_mode = _deep_get(
+        raw,
+        "data_movement.ps_pl.weights.mode",
+        None,
+    )
+    if weights_mode is not None and weights_mode not in {
+        "embedded",
+        "stream",
+        "ddr",
+        "dma_ddr",
+    }:
+        issues.append(
+            ConfigIssue(
+                "data_movement.ps_pl.weights.mode",
+                "Must be one of ['ddr', 'dma_ddr', 'embedded', 'stream']",
+            )
+        )
+
+    for path in (
+        "backends.hls.enabled",
+        "backends.host_cpp.enabled",
+        "toolchain.vitis_hls.enabled",
+    ):
+        value = _deep_get(raw, path, None)
+        if value is not None and not isinstance(value, bool):
+            issues.append(ConfigIssue(path, "Expected a boolean"))
+
+
 def load_config(path: str) -> FPGAIConfig:
     if not os.path.exists(path):
         raise ConfigError(
@@ -883,6 +1039,8 @@ def load_config(path: str) -> FPGAIConfig:
 
     raw = _load_yaml(path)
     issues: List[ConfigIssue] = []
+
+    _validate_top_level_sections(raw, issues)
 
     version = raw.get(
         "version",
@@ -1003,6 +1161,18 @@ def load_config(path: str) -> FPGAIConfig:
         issues,
     )
     _validate_analysis_cfg(
+        raw,
+        issues,
+    )
+    _validate_clock_config(
+        raw,
+        issues,
+    )
+    _validate_parallel_policy(
+        raw,
+        issues,
+    )
+    _validate_compiler_controls(
         raw,
         issues,
     )

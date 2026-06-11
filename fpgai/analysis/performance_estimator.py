@@ -6,24 +6,13 @@ from typing import Any, Mapping, Sequence
 from fpgai.analysis.architecture_schedule_model import (
     estimate_architecture_schedules,
 )
+from fpgai.config.access import get_path
 
 
 FLOAT_BYTES = 4
 
 
-def _get(
-    data: Mapping[str, Any],
-    path: str,
-    default: Any = None,
-) -> Any:
-    current: Any = data
-
-    for key in path.split("."):
-        if not isinstance(current, Mapping) or key not in current:
-            return default
-        current = current[key]
-
-    return current
+_get = get_path
 
 
 def _positive_float(

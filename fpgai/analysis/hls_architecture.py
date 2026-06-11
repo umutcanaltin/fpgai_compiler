@@ -5,26 +5,14 @@ from dataclasses import asdict, dataclass
 from types import SimpleNamespace
 from typing import Any, Mapping, Sequence
 
+from fpgai.config.access import get_path
 from fpgai.numerics.precision_policy import (
     canonical_op_type,
     resolve_precision_for_op,
 )
 
 
-def _get(
-    data: Mapping[str, Any],
-    path: str,
-    default: Any = None,
-) -> Any:
-    value: Any = data
-
-    for key in path.split("."):
-        if not isinstance(value, Mapping) or key not in value:
-            return default
-
-        value = value[key]
-
-    return value
+_get = get_path
 
 
 def _positive_int(value: Any, default: int = 1) -> int:

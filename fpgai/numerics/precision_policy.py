@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Mapping, Sequence
 
+from fpgai.config.access import get_path
 
 PRECISION_ROLES = ("activation", "weight", "bias", "accum")
 
@@ -36,23 +37,7 @@ OP_TYPE_ALIASES = {
 }
 
 
-def _cfg_get(
-    raw: Mapping[str, Any],
-    path: str,
-    default: Any = None,
-) -> Any:
-    current: Any = raw
-
-    for key in path.split("."):
-        if (
-            not isinstance(current, Mapping)
-            or key not in current
-        ):
-            return default
-
-        current = current[key]
-
-    return current
+_cfg_get = get_path
 
 
 def canonical_op_type(op_type: str) -> str:

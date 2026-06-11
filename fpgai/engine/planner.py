@@ -3,16 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
+from fpgai.config.access import get_path
 from fpgai.engine.models import CompilePlan, LayerDescriptor, LayerPlan
 
 
-def _cfg_get(raw: Dict[str, Any], path: str, default: Any = None) -> Any:
-    cur: Any = raw
-    for k in path.split("."):
-        if not isinstance(cur, dict) or k not in cur:
-            return default
-        cur = cur[k]
-    return cur
+_cfg_get = get_path
 
 
 @dataclass
@@ -206,7 +201,13 @@ def _policy_name(cfg) -> str:
 
 def _pick_policy(cfg) -> Policy:
     name = _policy_name(cfg)
-    return POLICIES.get(name, POLICIES["Balanced"])
+    try:
+        return POLICIES[name]
+    except KeyError as exc:
+        raise ValueError(
+            f"Unknown parallel policy {name!r}; "
+            f"expected one of {sorted(POLICIES)}"
+        ) from exc
 
 
 def _override_policy_from_cfg(cfg, base: Policy) -> Policy:
@@ -439,6 +440,12 @@ def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
             "bias_int_bits": default_precision["bias_int_bits"],
             "accum_int_bits": default_precision["accum_int_bits"],
             "parallel_policy": policy.name,
+            "requested_clock_mhz": _cfg_get(
+                raw,
+                "targets.platform.clocks.0.target_mhz",
+                None,
+            ),
+            "effective_clock_mhz": policy.target_clock_mhz,
             "parallel_pe": policy.pe,
             "parallel_simd": policy.simd,
             "parallel_unroll_factor": policy.unroll_factor,
