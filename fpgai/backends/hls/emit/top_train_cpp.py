@@ -17,6 +17,129 @@ from fpgai.engine.training_graph_utils import (
 from fpgai.ir.graph import Graph
 
 
+def _object_dict(value: Any) -> Dict[str, Any]:
+    if hasattr(value, "to_dict"):
+        result = value.to_dict()
+        return result if isinstance(result, dict) else {}
+    return value if isinstance(value, dict) else {}
+
+
+def _plan_map(
+    compile_plan: Any,
+) -> Dict[str, Dict[str, Any]]:
+    if compile_plan is None:
+        return {}
+
+    plans = getattr(
+        compile_plan,
+        "layer_plans",
+        None,
+    )
+    if plans is None and isinstance(compile_plan, dict):
+        plans = compile_plan.get("layer_plans", [])
+
+    result: Dict[str, Dict[str, Any]] = {}
+    for plan in plans or []:
+        data = _object_dict(plan)
+        name = data.get("node_name")
+        if name:
+            result[str(name)] = data
+    return result
+
+
+def _architecture_section(
+    layer_plan: Dict[str, Any],
+    section: str,
+) -> Dict[str, Any]:
+    architecture = layer_plan.get("architecture", {})
+    if not isinstance(architecture, dict):
+        return {}
+    value = architecture.get(section, {})
+    return value if isinstance(value, dict) else {}
+
+
+def _positive_codegen_int(
+    value: Any,
+    default: int = 1,
+) -> int:
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return max(1, int(default))
+
+
+def _layer_codegen_values(
+    layer_plan: Dict[str, Any],
+    *,
+    op_type: str,
+) -> Dict[str, int]:
+    pipeline = _architecture_section(
+        layer_plan,
+        "pipeline",
+    )
+    parallelism = _architecture_section(
+        layer_plan,
+        "parallelism",
+    )
+    partitioning = _architecture_section(
+        layer_plan,
+        "partitioning",
+    )
+    unroll = parallelism.get(
+        "unroll",
+        layer_plan.get("unroll", {}),
+    )
+    if not isinstance(unroll, dict):
+        unroll = {}
+    targets = partitioning.get("targets", {})
+    if not isinstance(targets, dict):
+        targets = {}
+    notes = layer_plan.get("notes", {})
+    if not isinstance(notes, dict):
+        notes = {}
+    factor = _positive_codegen_int(
+        partitioning.get(
+            "factor",
+            notes.get("partition_factor", 1),
+        )
+    )
+
+    if op_type == "Dense":
+        output_unroll = _positive_codegen_int(
+            unroll.get("out", 1)
+        )
+        input_unroll = _positive_codegen_int(
+            unroll.get("in", 1)
+        )
+    else:
+        output_unroll = _positive_codegen_int(
+            unroll.get("oc", 1)
+        )
+        input_unroll = _positive_codegen_int(
+            unroll.get("ic", 1)
+        )
+
+    return {
+        "pipeline_ii": _positive_codegen_int(
+            pipeline.get(
+                "ii",
+                layer_plan.get("pipeline_ii", 1),
+            )
+        ),
+        "input_unroll": input_unroll,
+        "output_unroll": output_unroll,
+        "input_partition": _positive_codegen_int(
+            targets.get("input", factor)
+        ),
+        "output_partition": _positive_codegen_int(
+            targets.get("output", factor)
+        ),
+        "weight_partition": _positive_codegen_int(
+            targets.get("weight", factor)
+        ),
+    }
+
+
 def _sanitize(name: str) -> str:
     sanitized = re.sub(
         r"[^0-9a-zA-Z_]",
@@ -463,9 +586,9 @@ def emit_top_train_cpp(
     memory_plan: Any = None,
     communication_plan: Any = None,
 ) -> str:
-    del compile_plan
     del memory_plan
     del communication_plan
+    plan_by_name = _plan_map(compile_plan)
 
     supported_operations = {
         "Dense",
@@ -1012,6 +1135,10 @@ def emit_top_train_cpp(
 
         if op.op_type == "Dense":
             tag = _sanitize(op.name)
+            codegen = _layer_codegen_values(
+                plan_by_name.get(op.name, {}),
+                op_type="Dense",
+            )
 
             (
                 _,
@@ -1025,13 +1152,24 @@ def emit_top_train_cpp(
 
             lines.append(
                 f"  fpgai::dense_out_in"
-                f"<{input_features}, {output_features}>"
+                f"<{input_features}, {output_features}, "
+                f"act_t, act_t, wgt_t, bias_t, acc_t, "
+                f"{codegen['pipeline_ii']}, "
+                f"{codegen['input_unroll']}, "
+                f"{codegen['output_unroll']}, "
+                f"{codegen['input_partition']}, "
+                f"{codegen['output_partition']}, "
+                f"{codegen['weight_partition']}>"
                 f"({input_buffer}, {output_buffer}, "
                 f"W_{tag}, B_{tag});"
             )
 
         elif op.op_type == "Conv":
             tag = _sanitize(op.name)
+            codegen = _layer_codegen_values(
+                plan_by_name.get(op.name, {}),
+                op_type="Conv",
+            )
 
             weight_shape = _resolve_conv_arrays(
                 graph,
@@ -1082,7 +1220,14 @@ def emit_top_train_cpp(
                 f"  fpgai::conv2d"
                 f"<{height_in}, {width_in}, {channels_in}, "
                 f"{height_out}, {width_out}, {channels_out}, "
-                f"{kernel_size}, {stride}, {pad}>"
+                f"{kernel_size}, {stride}, {pad}, "
+                f"act_t, act_t, wgt_t, bias_t, acc_t, "
+                f"{codegen['pipeline_ii']}, "
+                f"{codegen['output_unroll']}, "
+                f"{codegen['input_unroll']}, "
+                f"{codegen['input_partition']}, "
+                f"{codegen['output_partition']}, "
+                f"{codegen['weight_partition']}>"
                 f"({input_buffer}, {output_buffer}, "
                 f"W_{tag}, B_{tag});"
             )

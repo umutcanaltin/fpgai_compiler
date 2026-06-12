@@ -27,7 +27,13 @@ template<
     typename OUT_T = act_t,
     typename WGT_T = wgt_t,
     typename BIAS_T = bias_t,
-    typename ACC_T = acc_t
+    typename ACC_T = acc_t,
+    int PIPELINE_II = FPGAI_PIPELINE_II,
+    int IN_UNROLL = FPGAI_DENSE_IN_UNROLL,
+    int OUT_UNROLL = FPGAI_DENSE_OUT_UNROLL,
+    int INPUT_PARTITION = 1,
+    int OUTPUT_PARTITION = 1,
+    int WEIGHT_PARTITION = 1
 >
 void dense_out_in(
     const IN_T x[IN_F],
@@ -36,19 +42,22 @@ void dense_out_in(
     const BIAS_T B[OUT_F]
 ) {
 #pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=x cyclic factor=INPUT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=y cyclic factor=OUTPUT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=W cyclic factor=WEIGHT_PARTITION dim=1
 
     for (
         int output_base = 0;
         output_base < OUT_F;
-        output_base += FPGAI_DENSE_OUT_UNROLL
+        output_base += OUT_UNROLL
     ) {
-        ACC_T accumulators[FPGAI_DENSE_OUT_UNROLL];
+        ACC_T accumulators[OUT_UNROLL];
 
 #pragma HLS ARRAY_PARTITION variable=accumulators complete
 
         for (
             int output_lane = 0;
-            output_lane < FPGAI_DENSE_OUT_UNROLL;
+            output_lane < OUT_UNROLL;
             ++output_lane
         ) {
 #pragma HLS UNROLL
@@ -71,13 +80,13 @@ void dense_out_in(
         for (
             int input_base = 0;
             input_base < IN_F;
-            input_base += FPGAI_DENSE_IN_UNROLL
+            input_base += IN_UNROLL
         ) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+#pragma HLS PIPELINE II=PIPELINE_II
 
             for (
                 int input_lane = 0;
-                input_lane < FPGAI_DENSE_IN_UNROLL;
+                input_lane < IN_UNROLL;
                 ++input_lane
             ) {
 #pragma HLS UNROLL
@@ -96,7 +105,7 @@ void dense_out_in(
 
                 for (
                     int output_lane = 0;
-                    output_lane < FPGAI_DENSE_OUT_UNROLL;
+                    output_lane < OUT_UNROLL;
                     ++output_lane
                 ) {
 #pragma HLS UNROLL
@@ -124,7 +133,7 @@ void dense_out_in(
 
         for (
             int output_lane = 0;
-            output_lane < FPGAI_DENSE_OUT_UNROLL;
+            output_lane < OUT_UNROLL;
             ++output_lane
         ) {
 #pragma HLS UNROLL

@@ -1020,6 +1020,7 @@ def _validate_compiler_controls(
         "backends.hls.enabled",
         "backends.host_cpp.enabled",
         "toolchain.vitis_hls.enabled",
+        "optimization.capabilities.strict",
     ):
         value = _deep_get(raw, path, None)
         if value is not None and not isinstance(value, bool):

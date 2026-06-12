@@ -50,6 +50,106 @@ def _plan_map(
     return result
 
 
+def _architecture_section(
+    layer_plan: Dict[str, Any],
+    section: str,
+) -> Dict[str, Any]:
+    architecture = layer_plan.get(
+        "architecture",
+        {},
+    )
+    if not isinstance(architecture, dict):
+        return {}
+    value = architecture.get(section, {})
+    return value if isinstance(value, dict) else {}
+
+
+def _positive_codegen_int(
+    value: Any,
+    default: int = 1,
+) -> int:
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return max(1, int(default))
+
+
+def _layer_codegen_values(
+    layer_plan: Dict[str, Any],
+    *,
+    op_type: str,
+) -> Dict[str, int]:
+    pipeline = _architecture_section(
+        layer_plan,
+        "pipeline",
+    )
+    parallelism = _architecture_section(
+        layer_plan,
+        "parallelism",
+    )
+    partitioning = _architecture_section(
+        layer_plan,
+        "partitioning",
+    )
+
+    unroll = parallelism.get(
+        "unroll",
+        layer_plan.get("unroll", {}),
+    )
+    if not isinstance(unroll, dict):
+        unroll = {}
+
+    targets = partitioning.get("targets", {})
+    if not isinstance(targets, dict):
+        targets = {}
+
+    notes = layer_plan.get("notes", {})
+    if not isinstance(notes, dict):
+        notes = {}
+
+    factor = _positive_codegen_int(
+        partitioning.get(
+            "factor",
+            notes.get("partition_factor", 1),
+        )
+    )
+
+    if op_type == "Dense":
+        output_unroll = _positive_codegen_int(
+            unroll.get("out", 1)
+        )
+        input_unroll = _positive_codegen_int(
+            unroll.get("in", 1)
+        )
+    else:
+        output_unroll = _positive_codegen_int(
+            unroll.get("oc", 1)
+        )
+        input_unroll = _positive_codegen_int(
+            unroll.get("ic", 1)
+        )
+
+    return {
+        "pipeline_ii": _positive_codegen_int(
+            pipeline.get(
+                "ii",
+                layer_plan.get("pipeline_ii", 1),
+            )
+        ),
+        "input_unroll": input_unroll,
+        "output_unroll": output_unroll,
+        "input_partition": _positive_codegen_int(
+            targets.get("input", factor)
+        ),
+        "output_partition": _positive_codegen_int(
+            targets.get("output", factor)
+        ),
+        "weight_partition": _positive_codegen_int(
+            targets.get("weight", factor)
+        ),
+    }
+
+
 def _comm_map(
     communication_plan: Any,
 ) -> Dict[str, Dict[str, Any]]:
@@ -801,6 +901,20 @@ def emit_top_cpp(
         )
 
         if op.op_type == "Conv":
+            codegen = _layer_codegen_values(
+                layer_plan,
+                op_type="Conv",
+            )
+            architecture_arguments = (
+                f", {codegen['pipeline_ii']}, "
+                f"{codegen['output_unroll']}, "
+                f"{codegen['input_unroll']}, "
+                f"{codegen['input_partition']}, "
+                f"{codegen['output_partition']}, "
+                f"{codegen['weight_partition']}"
+                if layer_plan
+                else ""
+            )
             (
                 input_channels,
                 input_height,
@@ -903,6 +1017,7 @@ def emit_top_cpp(
                 f"{weight_type}, "
                 f"{bias_type}, "
                 f"{accumulator_type}"
+                f"{architecture_arguments}"
                 ">("
                 f"{current_buffer}, "
                 f"{output_buffer}, "
@@ -913,6 +1028,20 @@ def emit_top_cpp(
             parameter_index += 1
 
         elif op.op_type == "Dense":
+            codegen = _layer_codegen_values(
+                layer_plan,
+                op_type="Dense",
+            )
+            architecture_arguments = (
+                f", {codegen['pipeline_ii']}, "
+                f"{codegen['input_unroll']}, "
+                f"{codegen['output_unroll']}, "
+                f"{codegen['input_partition']}, "
+                f"{codegen['output_partition']}, "
+                f"{codegen['weight_partition']}"
+                if layer_plan
+                else ""
+            )
             input_features = _flat_size(
                 current_shape
             )
@@ -929,6 +1058,7 @@ def emit_top_cpp(
                 f"{weight_type}, "
                 f"{bias_type}, "
                 f"{accumulator_type}"
+                f"{architecture_arguments}"
                 ">("
                 f"{current_buffer}, "
                 f"{output_buffer}, "

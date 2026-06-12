@@ -9,6 +9,9 @@ import numpy as np
 
 from fpgai.config.access import get_path
 from fpgai.config.loader import FPGAIConfig
+from fpgai.compiler.architecture_capabilities import (
+    validate_architecture_capabilities,
+)
 from fpgai.engine.analysis import analyze_graph
 from fpgai.engine.communication import make_communication_plan
 from fpgai.engine.memory import make_memory_plan
@@ -91,6 +94,11 @@ class Compiler:
         compile_plan = make_compile_plan(self.cfg, descriptors)
         memory_plan = make_memory_plan(g, descriptors, compile_plan)
         communication_plan = make_communication_plan(self.cfg, memory_plan)
+        capability_report = self._validate_architecture(
+            out_dir,
+            compile_plan,
+            memory_plan,
+        )
 
         self._emit_ir_artifacts(out_dir, g, descriptors, compile_plan, memory_plan, communication_plan)
         self._emit_dummy_input(out_dir, g)
@@ -153,6 +161,7 @@ class Compiler:
                 compile_plan=compile_plan,
                 memory_plan=memory_plan,
                 communication_plan=communication_plan,
+                capability_report=capability_report,
                 hls_run=hls_run,
                 quant_result=quant_result,
                 sweep_result=sweep_result,
@@ -272,6 +281,11 @@ class Compiler:
         compile_plan = make_compile_plan(self.cfg, descriptors)
         memory_plan = make_memory_plan(g, descriptors, compile_plan)
         communication_plan = make_communication_plan(self.cfg, memory_plan)
+        capability_report = self._validate_architecture(
+            out_dir,
+            compile_plan,
+            memory_plan,
+        )
 
         self._emit_ir_artifacts(out_dir, g, descriptors, compile_plan, memory_plan, communication_plan)
 
@@ -339,6 +353,7 @@ class Compiler:
                 compile_plan=compile_plan,
                 memory_plan=memory_plan,
                 communication_plan=communication_plan,
+                capability_report=capability_report,
                 hls_run=hls_run,
                 quant_result=None,
                 sweep_result=None,
@@ -781,6 +796,46 @@ class Compiler:
         from fpgai.backends.hostcpp.emit_host_model import emit_hostcpp_project
         return emit_hostcpp_project(g, out_dir, top_name=top_name)
 
+    def _validate_architecture(
+        self,
+        out_dir: Path,
+        compile_plan,
+        memory_plan,
+    ):
+        strict = bool(
+            _cfg_get(
+                self.cfg.raw,
+                "optimization.capabilities.strict",
+                False,
+            )
+        )
+        report = validate_architecture_capabilities(
+            compile_plan,
+            memory_plan=memory_plan,
+            pipeline_mode=self.cfg.pipeline.mode,
+            strict=False,
+        )
+        analysis_dir = out_dir / "analysis"
+        analysis_dir.mkdir(parents=True, exist_ok=True)
+        write_text(
+            analysis_dir / "architecture_capabilities.json",
+            json.dumps(report.to_dict(), indent=2),
+        )
+        write_text(
+            analysis_dir / "architecture_capabilities.txt",
+            report.summary(),
+        )
+
+        if strict:
+            return validate_architecture_capabilities(
+                compile_plan,
+                memory_plan=memory_plan,
+                pipeline_mode=self.cfg.pipeline.mode,
+                strict=True,
+            )
+
+        return report
+
     def _emit_manifest(self, **kwargs) -> None:
         out_dir = kwargs["out_dir"]
         manifest = {
@@ -840,6 +895,12 @@ class Compiler:
             "num_params": len(kwargs["graph"].params),
             "num_descriptors": len(kwargs["descriptors"]),
             "num_layer_plans": len(kwargs["compile_plan"].layer_plans),
+            "architecture_signature": (
+                kwargs["compile_plan"].architecture_signature
+            ),
+            "architecture_capabilities": (
+                kwargs["capability_report"].to_dict()
+            ),
             "num_memory_placements": len(kwargs["memory_plan"].placements),
             "num_communication_edges": len(kwargs["communication_plan"].edges),
             "memory_totals": kwargs["memory_plan"].total_bytes_by_region,

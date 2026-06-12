@@ -34,7 +34,13 @@ template<
     typename OUT_T = act_t,
     typename WGT_T = wgt_t,
     typename BIAS_T = bias_t,
-    typename ACC_T = acc_t
+    typename ACC_T = acc_t,
+    int PIPELINE_II = FPGAI_PIPELINE_II,
+    int OC_UNROLL = FPGAI_CONV_OC_UNROLL,
+    int IC_UNROLL = FPGAI_CONV_IC_UNROLL,
+    int INPUT_PARTITION = 1,
+    int OUTPUT_PARTITION = 1,
+    int WEIGHT_PARTITION = 1
 >
 void conv2d(
     const IN_T x[IN_H * IN_W * IN_C],
@@ -43,11 +49,14 @@ void conv2d(
     const BIAS_T B[OUT_C]
 ) {
 #pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=x cyclic factor=INPUT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=y cyclic factor=OUTPUT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=W cyclic factor=WEIGHT_PARTITION dim=1
 
     for (
         int output_channel_base = 0;
         output_channel_base < OUT_C;
-        output_channel_base += FPGAI_CONV_OC_UNROLL
+        output_channel_base += OC_UNROLL
     ) {
         for (
             int output_row = 0;
@@ -59,17 +68,17 @@ void conv2d(
                 output_column < OUT_W;
                 ++output_column
             ) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+#pragma HLS PIPELINE II=PIPELINE_II
 
                 ACC_T accumulators[
-                    FPGAI_CONV_OC_UNROLL
+                    OC_UNROLL
                 ];
 
 #pragma HLS ARRAY_PARTITION variable=accumulators complete
 
                 for (
                     int output_lane = 0;
-                    output_lane < FPGAI_CONV_OC_UNROLL;
+                    output_lane < OC_UNROLL;
                     ++output_lane
                 ) {
 #pragma HLS UNROLL
@@ -93,7 +102,7 @@ void conv2d(
                 for (
                     int input_channel_base = 0;
                     input_channel_base < IN_C;
-                    input_channel_base += FPGAI_CONV_IC_UNROLL
+                    input_channel_base += IC_UNROLL
                 ) {
                     for (
                         int kernel_row = 0;
@@ -107,7 +116,7 @@ void conv2d(
                         ) {
                             for (
                                 int input_lane = 0;
-                                input_lane < FPGAI_CONV_IC_UNROLL;
+                                input_lane < IC_UNROLL;
                                 ++input_lane
                             ) {
 #pragma HLS UNROLL
@@ -156,7 +165,7 @@ void conv2d(
 
                                 for (
                                     int output_lane = 0;
-                                    output_lane < FPGAI_CONV_OC_UNROLL;
+                                    output_lane < OC_UNROLL;
                                     ++output_lane
                                 ) {
 #pragma HLS UNROLL
@@ -198,7 +207,7 @@ void conv2d(
 
                 for (
                     int output_lane = 0;
-                    output_lane < FPGAI_CONV_OC_UNROLL;
+                    output_lane < OC_UNROLL;
                     ++output_lane
                 ) {
 #pragma HLS UNROLL

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from types import SimpleNamespace
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from fpgai.config.access import get_path
 from fpgai.numerics.precision_policy import (
@@ -174,6 +174,10 @@ class LayerArchitecture:
     effective_lanes: int
     arithmetic: dict[str, Any]
     memory: dict[str, Any]
+    tiling: dict[str, int] = field(default_factory=dict)
+    partitioning: dict[str, Any] = field(default_factory=dict)
+    buffering: dict[str, Any] = field(default_factory=dict)
+    architecture_signature: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -185,6 +189,7 @@ class HLSArchitecture:
     execution_mode: str
     clock_mhz: float
     layers: list[LayerArchitecture]
+    architecture_signature: Optional[str] = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -388,12 +393,59 @@ def _precision_bits(
     }
 
 
+def _typed_architecture(
+    plan: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    architecture = plan.get("architecture", {})
+    if isinstance(architecture, Mapping):
+        return architecture
+    return {}
+
+
+def _typed_section(
+    plan: Mapping[str, Any],
+    name: str,
+) -> Mapping[str, Any]:
+    section = _typed_architecture(plan).get(name, {})
+    if isinstance(section, Mapping):
+        return section
+    return {}
+
+
+def _planned_precision_bits(
+    plan: Mapping[str, Any],
+    fallback: Mapping[str, int],
+) -> dict[str, int]:
+    precision = _typed_section(plan, "precision")
+    names = {
+        "activation": "activation_bits",
+        "weight": "weight_bits",
+        "bias": "bias_bits",
+        "accum": "accumulator_bits",
+    }
+    result: dict[str, int] = {}
+
+    for role, field_name in names.items():
+        value = precision.get(field_name)
+        result[role] = (
+            _positive_int(value)
+            if value is not None
+            else _positive_int(fallback[role])
+        )
+
+    return result
+
+
 def _plan_unroll(
     plan: Mapping[str, Any],
     key: str,
     fallback: Any,
 ) -> int:
-    unroll = plan.get("unroll", {})
+    parallelism = _typed_section(plan, "parallelism")
+    unroll = parallelism.get(
+        "unroll",
+        plan.get("unroll", {}),
+    )
 
     if isinstance(unroll, Mapping) and key in unroll:
         return _positive_int(
@@ -408,7 +460,11 @@ def _pipeline_ii(
     plan: Mapping[str, Any],
     default_ii: int,
 ) -> int:
-    value = plan.get("pipeline_ii")
+    pipeline = _typed_section(plan, "pipeline")
+    value = pipeline.get(
+        "ii",
+        plan.get("pipeline_ii"),
+    )
 
     if value is None:
         return default_ii
@@ -497,17 +553,46 @@ def build_hls_architecture(
             descriptor,
             op_type,
         )
-        bits = _precision_bits(
+        resolved_bits = _precision_bits(
             config,
             descriptor,
             index,
             name,
             op_type,
         )
+        bits = _planned_precision_bits(
+            plan,
+            resolved_bits,
+        )
         pipeline_ii = _pipeline_ii(
             plan,
             default_pipeline_ii,
         )
+        typed_partitioning = _typed_section(
+            plan,
+            "partitioning",
+        )
+        layer_partition_factor = _positive_int(
+            typed_partitioning.get(
+                "factor",
+                partition_factor,
+            )
+        )
+        partition_targets = typed_partitioning.get(
+            "targets",
+            {},
+        )
+        if not isinstance(partition_targets, Mapping):
+            partition_targets = {}
+        typed_tiling = _typed_section(plan, "tiling")
+        tile_sizes = typed_tiling.get(
+            "sizes",
+            plan.get("tile", {}),
+        )
+        if not isinstance(tile_sizes, Mapping):
+            tile_sizes = {}
+        typed_buffering = _typed_section(plan, "buffering")
+        typed_memory = _typed_section(plan, "memory")
 
         unroll: dict[str, int]
         pipeline_scope: str
@@ -564,15 +649,30 @@ def build_hls_architecture(
             )
 
             input_banks = max(
-                partition_factor,
+                _positive_int(
+                    partition_targets.get(
+                        "input",
+                        layer_partition_factor,
+                    )
+                ),
                 input_unroll,
             )
             output_banks = max(
-                partition_factor,
+                _positive_int(
+                    partition_targets.get(
+                        "output",
+                        layer_partition_factor,
+                    )
+                ),
                 output_unroll,
             )
             weight_banks = max(
-                partition_factor,
+                _positive_int(
+                    partition_targets.get(
+                        "weight",
+                        layer_partition_factor,
+                    )
+                ),
                 explicit_lanes,
             )
 
@@ -613,15 +713,30 @@ def build_hls_architecture(
             )
 
             input_banks = max(
-                partition_factor,
+                _positive_int(
+                    partition_targets.get(
+                        "input",
+                        layer_partition_factor,
+                    )
+                ),
                 input_unroll,
             )
             output_banks = max(
-                partition_factor,
+                _positive_int(
+                    partition_targets.get(
+                        "output",
+                        layer_partition_factor,
+                    )
+                ),
                 output_unroll,
             )
             weight_banks = max(
-                partition_factor,
+                _positive_int(
+                    partition_targets.get(
+                        "weight",
+                        layer_partition_factor,
+                    )
+                ),
                 explicit_lanes,
             )
 
@@ -642,17 +757,29 @@ def build_hls_architecture(
             )
             explicit_lanes = 1
 
-            input_banks = partition_factor
-            output_banks = partition_factor
+            input_banks = _positive_int(
+                partition_targets.get(
+                    "input",
+                    layer_partition_factor,
+                )
+            )
+            output_banks = _positive_int(
+                partition_targets.get(
+                    "output",
+                    layer_partition_factor,
+                )
+            )
             weight_banks = 1
 
         else:
-            element_unroll = _positive_int(
+            element_unroll = _plan_unroll(
+                plan,
+                "element",
                 _get(
                     config,
                     "hls.activation.unroll",
                     global_unroll,
-                )
+                ),
             )
             unroll = {
                 "element": element_unroll,
@@ -672,11 +799,21 @@ def build_hls_architecture(
             explicit_lanes = element_unroll
 
             input_banks = max(
-                partition_factor,
+                _positive_int(
+                    partition_targets.get(
+                        "input",
+                        layer_partition_factor,
+                    )
+                ),
                 element_unroll,
             )
             output_banks = max(
-                partition_factor,
+                _positive_int(
+                    partition_targets.get(
+                        "output",
+                        layer_partition_factor,
+                    )
+                ),
                 element_unroll,
             )
             weight_banks = 1
@@ -734,24 +871,75 @@ def build_hls_architecture(
                 },
                 memory={
                     "partition_factor": (
-                        partition_factor
+                        layer_partition_factor
                     ),
                     "input_banks": input_banks,
                     "output_banks": output_banks,
                     "weight_banks": weight_banks,
-                    "weight_mode": plan.get(
+                    "weight_mode": typed_memory.get(
                         "weight_mode",
-                        "embedded",
+                        plan.get(
+                            "weight_mode",
+                            "embedded",
+                        ),
                     ),
-                    "activation_mode": plan.get(
+                    "activation_mode": typed_memory.get(
                         "activation_mode",
-                        "buffer",
+                        plan.get(
+                            "activation_mode",
+                            "buffer",
+                        ),
                     ),
-                    "buffering": plan.get(
-                        "buffering",
-                        "single",
+                    "buffering": typed_buffering.get(
+                        "mode",
+                        plan.get(
+                            "buffering",
+                            "single",
+                        ),
+                    ),
+                    "weight_region": typed_memory.get(
+                        "weight_region"
+                    ),
+                    "activation_region": typed_memory.get(
+                        "activation_region"
                     ),
                 },
+                tiling={
+                    str(key): _positive_int(value)
+                    for key, value in tile_sizes.items()
+                },
+                partitioning={
+                    "factor": layer_partition_factor,
+                    "mode": typed_partitioning.get(
+                        "mode",
+                        plan_notes.get(
+                            "array_partition_mode",
+                            "none",
+                        ),
+                    ),
+                    "targets": {
+                        str(key): _positive_int(value)
+                        for key, value in partition_targets.items()
+                    },
+                },
+                buffering={
+                    "mode": typed_buffering.get(
+                        "mode",
+                        plan.get(
+                            "buffering",
+                            "single",
+                        ),
+                    ),
+                    "double_buffer": bool(
+                        typed_buffering.get(
+                            "double_buffer",
+                            plan.get("buffering") == "double",
+                        )
+                    ),
+                },
+                architecture_signature=plan.get(
+                    "architecture_signature"
+                ),
             )
         )
 
@@ -783,4 +971,13 @@ def build_hls_architecture(
             else _configured_clock(config)
         ),
         layers=layers,
+        architecture_signature=(
+            compile_plan.get("architecture_signature")
+            if isinstance(compile_plan, Mapping)
+            else getattr(
+                compile_plan,
+                "architecture_signature",
+                None,
+            )
+        ),
     )

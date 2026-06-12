@@ -4,7 +4,19 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from fpgai.config.access import get_path
-from fpgai.engine.models import CompilePlan, LayerDescriptor, LayerPlan
+from fpgai.engine.models import (
+    ArchitecturePlan,
+    BufferingPlan,
+    CompilePlan,
+    LayerDescriptor,
+    LayerMemoryPlan,
+    LayerPlan,
+    ParallelismPlan,
+    PartitionPlan,
+    PipelinePlan,
+    PrecisionPlan,
+    TilingPlan,
+)
 
 
 _cfg_get = get_path
@@ -273,6 +285,7 @@ def _layer_notes(desc: LayerDescriptor, precision: Dict[str, Any], policy: Polic
         "precision_tag": (desc.attrs or {}).get("precision_tag"),
         "partition_factor": policy.partition_factor,
         "partition_mode": policy.array_partition_mode,
+        "pipeline_style": policy.pipeline_style,
         "mac_style": policy.mac_style,
         "accum_strategy": policy.accum_strategy,
         "activation_impl": policy.activation_impl,
@@ -289,21 +302,111 @@ def _layer_notes(desc: LayerDescriptor, precision: Dict[str, Any], policy: Polic
     }
 
 
+def _architecture_plan(
+    *,
+    precision: Dict[str, Any],
+    policy: Policy,
+    tile: Dict[str, int],
+    unroll: Dict[str, int],
+    pipeline_ii: int,
+    weight_mode: str,
+    activation_mode: str,
+    buffering: str,
+) -> ArchitecturePlan:
+    pe = unroll.get(
+        "out",
+        unroll.get(
+            "oc",
+            unroll.get("element", 1),
+        ),
+    )
+    simd = unroll.get("in", unroll.get("ic", 1))
+
+    partition_targets = {
+        "input": max(policy.partition_factor, simd),
+        "output": max(policy.partition_factor, pe),
+        "weight": max(
+            policy.partition_factor,
+            pe * simd,
+        ),
+        "gradient": max(policy.partition_factor, pe),
+    }
+
+    return ArchitecturePlan(
+        precision=PrecisionPlan(
+            mode=precision["precision_mode"],
+            activation_bits=precision["act_bits"],
+            weight_bits=precision["weight_bits"],
+            bias_bits=precision["bias_bits"],
+            accumulator_bits=precision["accum_bits"],
+            activation_int_bits=precision["act_int_bits"],
+            weight_int_bits=precision["weight_int_bits"],
+            bias_int_bits=precision["bias_int_bits"],
+            accumulator_int_bits=precision["accum_int_bits"],
+        ),
+        pipeline=PipelinePlan(
+            ii=pipeline_ii,
+            style=policy.pipeline_style,
+        ),
+        parallelism=ParallelismPlan(
+            pe=pe,
+            simd=simd,
+            unroll=unroll,
+        ),
+        partitioning=PartitionPlan(
+            factor=policy.partition_factor,
+            mode=policy.array_partition_mode,
+            targets=partition_targets,
+        ),
+        tiling=TilingPlan(sizes=tile),
+        buffering=BufferingPlan(mode=buffering),
+        memory=LayerMemoryPlan(
+            weight_mode=weight_mode,
+            activation_mode=activation_mode,
+            weight_region=policy.weight_region_preference[0],
+            activation_region=policy.activation_region_preference[0],
+        ),
+    )
+
+
 def _plan_conv(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: str, policy: Policy) -> LayerPlan:
+    tile = {
+        "oh": policy.conv_oh,
+        "ow": policy.conv_ow,
+        "oc": policy.conv_oc,
+    }
+    unroll = {"ic": policy.simd, "oc": policy.pe}
+    pipeline_ii = _pipeline_ii_for(policy, desc.compute_hint)
+    activation_mode = (
+        "stream"
+        if policy.name in ("Latency-First", "Throughput-First")
+        else "buffer"
+    )
+    buffering = _buffering_for(weights_mode, policy)
     return LayerPlan(
         node_name=desc.node_name,
         op_type=desc.op_type,
         precision_mode=precision["precision_mode"],
         act_bits=precision["act_bits"],
         weight_bits=precision["weight_bits"],
-        tile={"oh": policy.conv_oh, "ow": policy.conv_ow, "oc": policy.conv_oc},
-        unroll={"ic": policy.simd, "oc": policy.pe},
-        pipeline_ii=_pipeline_ii_for(policy, desc.compute_hint),
+        tile=tile,
+        unroll=unroll,
+        pipeline_ii=pipeline_ii,
         weight_mode=weights_mode,
-        activation_mode="stream" if policy.name in ("Latency-First", "Throughput-First") else "buffer",
-        buffering=_buffering_for(weights_mode, policy),
+        activation_mode=activation_mode,
+        buffering=buffering,
         backend_kernel=desc.backend_kernel or "conv",
         notes=_layer_notes(desc, precision, policy),
+        architecture=_architecture_plan(
+            precision=precision,
+            policy=policy,
+            tile=tile,
+            unroll=unroll,
+            pipeline_ii=pipeline_ii,
+            weight_mode=weights_mode,
+            activation_mode=activation_mode,
+            buffering=buffering,
+        ),
     )
 
 
@@ -311,43 +414,80 @@ def _plan_dense(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: 
     out_features = int(desc.attrs.get("out_features", 1) or 1)
     in_features = int(desc.attrs.get("in_features", 1) or 1)
 
+    tile = {
+        "in": min(in_features, policy.dense_in),
+        "out": min(out_features, policy.dense_out),
+    }
+    unroll = {"in": policy.simd, "out": policy.pe}
+    pipeline_ii = _pipeline_ii_for(policy, desc.compute_hint)
+    activation_mode = (
+        "stream"
+        if policy.name in ("Latency-First", "Throughput-First")
+        else "buffer"
+    )
+    buffering = _buffering_for(weights_mode, policy)
+
     return LayerPlan(
         node_name=desc.node_name,
         op_type=desc.op_type,
         precision_mode=precision["precision_mode"],
         act_bits=precision["act_bits"],
         weight_bits=precision["weight_bits"],
-        tile={"in": min(in_features, policy.dense_in), "out": min(out_features, policy.dense_out)},
-        unroll={"in": policy.simd, "out": policy.pe},
-        pipeline_ii=_pipeline_ii_for(policy, desc.compute_hint),
+        tile=tile,
+        unroll=unroll,
+        pipeline_ii=pipeline_ii,
         weight_mode=weights_mode,
-        activation_mode="stream" if policy.name in ("Latency-First", "Throughput-First") else "buffer",
-        buffering=_buffering_for(weights_mode, policy),
+        activation_mode=activation_mode,
+        buffering=buffering,
         backend_kernel=desc.backend_kernel or "dense",
         notes=_layer_notes(desc, precision, policy),
+        architecture=_architecture_plan(
+            precision=precision,
+            policy=policy,
+            tile=tile,
+            unroll=unroll,
+            pipeline_ii=pipeline_ii,
+            weight_mode=weights_mode,
+            activation_mode=activation_mode,
+            buffering=buffering,
+        ),
     )
 
 
 def _plan_pool(desc: LayerDescriptor, precision: Dict[str, Any], policy: Policy) -> LayerPlan:
     spatial = max(4, min(policy.conv_oh, policy.conv_ow))
+    tile = {"oh": spatial, "ow": spatial}
+    pipeline_ii = _pipeline_ii_for(policy, desc.compute_hint)
     return LayerPlan(
         node_name=desc.node_name,
         op_type=desc.op_type,
         precision_mode=precision["precision_mode"],
         act_bits=precision["act_bits"],
         weight_bits=precision["weight_bits"],
-        tile={"oh": spatial, "ow": spatial},
+        tile=tile,
         unroll={},
-        pipeline_ii=_pipeline_ii_for(policy, desc.compute_hint),
+        pipeline_ii=pipeline_ii,
         weight_mode="embedded",
         activation_mode="stream",
         buffering="single",
         backend_kernel=desc.backend_kernel or desc.op_type.lower(),
         notes=_layer_notes(desc, precision, policy),
+        architecture=_architecture_plan(
+            precision=precision,
+            policy=policy,
+            tile=tile,
+            unroll={},
+            pipeline_ii=pipeline_ii,
+            weight_mode="embedded",
+            activation_mode="stream",
+            buffering="single",
+        ),
     )
 
 
 def _plan_elementwise(desc: LayerDescriptor, precision: Dict[str, Any], policy: Policy) -> LayerPlan:
+    unroll = {"element": policy.unroll_factor}
+    pipeline_ii = _pipeline_ii_for(policy, desc.compute_hint)
     return LayerPlan(
         node_name=desc.node_name,
         op_type=desc.op_type,
@@ -355,17 +495,29 @@ def _plan_elementwise(desc: LayerDescriptor, precision: Dict[str, Any], policy: 
         act_bits=precision["act_bits"],
         weight_bits=precision["weight_bits"],
         tile={},
-        unroll={},
-        pipeline_ii=_pipeline_ii_for(policy, desc.compute_hint),
+        unroll=unroll,
+        pipeline_ii=pipeline_ii,
         weight_mode="embedded",
         activation_mode="stream",
         buffering="single",
         backend_kernel=desc.backend_kernel or desc.op_type.lower(),
         notes=_layer_notes(desc, precision, policy),
+        architecture=_architecture_plan(
+            precision=precision,
+            policy=policy,
+            tile={},
+            unroll=unroll,
+            pipeline_ii=pipeline_ii,
+            weight_mode="embedded",
+            activation_mode="stream",
+            buffering="single",
+        ),
     )
 
 
 def _plan_generic(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: str, policy: Policy) -> LayerPlan:
+    pipeline_ii = _pipeline_ii_for(policy, desc.compute_hint)
+    buffering = _buffering_for(weights_mode, policy)
     return LayerPlan(
         node_name=desc.node_name,
         op_type=desc.op_type,
@@ -374,12 +526,22 @@ def _plan_generic(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode
         weight_bits=precision["weight_bits"],
         tile={},
         unroll={},
-        pipeline_ii=_pipeline_ii_for(policy, desc.compute_hint),
+        pipeline_ii=pipeline_ii,
         weight_mode=weights_mode,
         activation_mode="buffer",
-        buffering=_buffering_for(weights_mode, policy),
+        buffering=buffering,
         backend_kernel=desc.backend_kernel or desc.op_type.lower(),
         notes=_layer_notes(desc, precision, policy),
+        architecture=_architecture_plan(
+            precision=precision,
+            policy=policy,
+            tile={},
+            unroll={},
+            pipeline_ii=pipeline_ii,
+            weight_mode=weights_mode,
+            activation_mode="buffer",
+            buffering=buffering,
+        ),
     )
 
 
