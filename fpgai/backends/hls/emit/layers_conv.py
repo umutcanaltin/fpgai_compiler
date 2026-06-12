@@ -253,7 +253,13 @@ template<
     typename GRAD_OUT_T = grad_act_t,
     typename WGT_T = wgt_t,
     typename GRAD_IN_T = grad_act_t,
-    typename ACC_T = acc_t
+    typename ACC_T = acc_t,
+    int PIPELINE_II = FPGAI_PIPELINE_II,
+    int IC_UNROLL = FPGAI_CONV_IC_UNROLL,
+    int OC_UNROLL = FPGAI_CONV_OC_UNROLL,
+    int INPUT_PARTITION = 1,
+    int OUTPUT_PARTITION = 1,
+    int WEIGHT_PARTITION = 1
 >
 void conv2d_backward_input_typed(
     const GRAD_OUT_T dY[
@@ -267,13 +273,16 @@ void conv2d_backward_input_typed(
     ]
 ) {
 #pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=dY cyclic factor=OUTPUT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=W cyclic factor=WEIGHT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=dX cyclic factor=INPUT_PARTITION dim=1
 
     for (
         int index = 0;
         index < IN_H * IN_W * IN_C;
         ++index
     ) {
-#pragma HLS PIPELINE II=1
+#pragma HLS PIPELINE II=PIPELINE_II
 
         dX[index] = (GRAD_IN_T)0;
     }
@@ -293,6 +302,7 @@ void conv2d_backward_input_typed(
                 output_channel < OUT_C;
                 ++output_channel
             ) {
+#pragma HLS UNROLL factor=OC_UNROLL
                 const int output_index = (
                     (
                         output_row * OUT_W
@@ -311,6 +321,7 @@ void conv2d_backward_input_typed(
                     input_channel < IN_C;
                     ++input_channel
                 ) {
+#pragma HLS UNROLL factor=IC_UNROLL
                     for (
                         int kernel_row = 0;
                         kernel_row < K;
@@ -419,7 +430,13 @@ void conv2d_backward_input(
         grad_act_t,
         wgt_t,
         grad_act_t,
-        acc_t
+        acc_t,
+        FPGAI_PIPELINE_II,
+        FPGAI_CONV_IC_UNROLL,
+        FPGAI_CONV_OC_UNROLL,
+        1,
+        1,
+        1
     >(
         dY,
         W,
@@ -441,7 +458,13 @@ template<
     typename ACT_T = act_t,
     typename GRAD_OUT_T = grad_act_t,
     typename GRAD_WGT_T = grad_wgt_t,
-    typename ACC_T = acc_t
+    typename ACC_T = acc_t,
+    int PIPELINE_II = FPGAI_PIPELINE_II,
+    int IC_UNROLL = FPGAI_CONV_IC_UNROLL,
+    int OC_UNROLL = FPGAI_CONV_OC_UNROLL,
+    int INPUT_PARTITION = 1,
+    int OUTPUT_PARTITION = 1,
+    int WEIGHT_PARTITION = 1
 >
 void conv2d_weight_grad_typed(
     const ACT_T x[
@@ -455,17 +478,22 @@ void conv2d_weight_grad_typed(
     ]
 ) {
 #pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=x cyclic factor=INPUT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=dY cyclic factor=OUTPUT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=dW cyclic factor=WEIGHT_PARTITION dim=1
 
     for (
         int output_channel = 0;
         output_channel < OUT_C;
         ++output_channel
     ) {
+#pragma HLS UNROLL factor=OC_UNROLL
         for (
             int input_channel = 0;
             input_channel < IN_C;
             ++input_channel
         ) {
+#pragma HLS UNROLL factor=IC_UNROLL
             for (
                 int kernel_row = 0;
                 kernel_row < K;
@@ -592,7 +620,13 @@ void conv2d_weight_grad(
         act_t,
         grad_act_t,
         grad_wgt_t,
-        acc_t
+        acc_t,
+        FPGAI_PIPELINE_II,
+        FPGAI_CONV_IC_UNROLL,
+        FPGAI_CONV_OC_UNROLL,
+        1,
+        1,
+        1
     >(
         x,
         dY,
@@ -607,7 +641,9 @@ template<
     int OUT_W,
     typename GRAD_OUT_T = grad_act_t,
     typename GRAD_BIAS_T = grad_bias_t,
-    typename ACC_T = acc_t
+    typename ACC_T = acc_t,
+    int PIPELINE_II = FPGAI_PIPELINE_II,
+    int OUTPUT_PARTITION = 1
 >
 void conv2d_bias_grad_typed(
     const GRAD_OUT_T dY[
@@ -616,6 +652,8 @@ void conv2d_bias_grad_typed(
     GRAD_BIAS_T dB[OUT_C]
 ) {
 #pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=dY cyclic factor=OUTPUT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=dB cyclic factor=OUTPUT_PARTITION dim=1
 
     for (
         int output_channel = 0;
@@ -634,7 +672,7 @@ void conv2d_bias_grad_typed(
                 output_column < OUT_W;
                 ++output_column
             ) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+#pragma HLS PIPELINE II=PIPELINE_II
 
                 const int output_index = (
                     (
@@ -675,7 +713,9 @@ void conv2d_bias_grad(
         OUT_W,
         grad_act_t,
         grad_bias_t,
-        acc_t
+        acc_t,
+        FPGAI_PIPELINE_II,
+        1
     >(
         dY,
         dB

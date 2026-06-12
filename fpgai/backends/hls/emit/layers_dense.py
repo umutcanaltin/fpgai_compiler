@@ -158,7 +158,13 @@ template<
     typename ACT_T = act_t,
     typename GRAD_ACT_T = grad_act_t,
     typename GRAD_WGT_T = grad_wgt_t,
-    typename ACC_T = acc_t
+    typename ACC_T = acc_t,
+    int PIPELINE_II = FPGAI_PIPELINE_II,
+    int IN_UNROLL = FPGAI_DENSE_IN_UNROLL,
+    int OUT_UNROLL = FPGAI_DENSE_OUT_UNROLL,
+    int INPUT_PARTITION = 1,
+    int OUTPUT_PARTITION = 1,
+    int WEIGHT_PARTITION = 1
 >
 void dense_weight_grad_typed(
     const ACT_T x[IN_F],
@@ -166,28 +172,64 @@ void dense_weight_grad_typed(
     GRAD_WGT_T dW[OUT_F * IN_F]
 ) {
 #pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=x cyclic factor=INPUT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=dY cyclic factor=OUTPUT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=dW cyclic factor=WEIGHT_PARTITION dim=1
 
     for (
-        int output_index = 0;
-        output_index < OUT_F;
-        ++output_index
+        int output_base = 0;
+        output_base < OUT_F;
+        output_base += OUT_UNROLL
     ) {
         for (
-            int input_index = 0;
-            input_index < IN_F;
-            ++input_index
+            int input_base = 0;
+            input_base < IN_F;
+            input_base += IN_UNROLL
         ) {
+#pragma HLS PIPELINE II=PIPELINE_II
+
+            for (
+                int output_lane = 0;
+                output_lane < OUT_UNROLL;
+                ++output_lane
+            ) {
+#pragma HLS UNROLL
+
+                const int output_index = (
+                    output_base + output_lane
+                );
+
+                if (output_index >= OUT_F) {
+                    continue;
+                }
+
+                for (
+                    int input_lane = 0;
+                    input_lane < IN_UNROLL;
+                    ++input_lane
+                ) {
+#pragma HLS UNROLL
+
+                    const int input_index = (
+                        input_base + input_lane
+                    );
+
+                    if (input_index >= IN_F) {
+                        continue;
+                    }
             const int weight_index = (
                 output_index * IN_F
                 + input_index
             );
 
-            dW[weight_index] = (
-                (GRAD_WGT_T)(
-                    (ACC_T)dY[output_index]
-                    * (ACC_T)x[input_index]
-                )
-            );
+                    dW[weight_index] = (
+                        (GRAD_WGT_T)(
+                            (ACC_T)dY[output_index]
+                            * (ACC_T)x[input_index]
+                        )
+                    );
+                }
+            }
         }
     }
 }
@@ -205,7 +247,13 @@ void dense_weight_grad(
         act_t,
         grad_act_t,
         grad_wgt_t,
-        acc_t
+        acc_t,
+        FPGAI_PIPELINE_II,
+        FPGAI_DENSE_IN_UNROLL,
+        FPGAI_DENSE_OUT_UNROLL,
+        1,
+        1,
+        1
     >(
         x,
         dY,
@@ -217,20 +265,24 @@ void dense_weight_grad(
 template<
     int OUT_F,
     typename GRAD_ACT_T = grad_act_t,
-    typename GRAD_BIAS_T = grad_bias_t
+    typename GRAD_BIAS_T = grad_bias_t,
+    int PIPELINE_II = FPGAI_PIPELINE_II,
+    int OUTPUT_PARTITION = 1
 >
 void dense_bias_grad_typed(
     const GRAD_ACT_T dY[OUT_F],
     GRAD_BIAS_T dB[OUT_F]
 ) {
 #pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=dY cyclic factor=OUTPUT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=dB cyclic factor=OUTPUT_PARTITION dim=1
 
     for (
         int output_index = 0;
         output_index < OUT_F;
         ++output_index
     ) {
-#pragma HLS PIPELINE II=1
+#pragma HLS PIPELINE II=PIPELINE_II
 
         dB[output_index] = (
             (GRAD_BIAS_T)dY[output_index]
@@ -247,7 +299,9 @@ void dense_bias_grad(
     dense_bias_grad_typed<
         OUT_F,
         grad_act_t,
-        grad_bias_t
+        grad_bias_t,
+        FPGAI_PIPELINE_II,
+        1
     >(
         dY,
         dB
@@ -261,7 +315,13 @@ template<
     typename GRAD_OUT_T = grad_act_t,
     typename WGT_T = wgt_t,
     typename GRAD_IN_T = grad_act_t,
-    typename ACC_T = acc_t
+    typename ACC_T = acc_t,
+    int PIPELINE_II = FPGAI_PIPELINE_II,
+    int IN_UNROLL = FPGAI_DENSE_IN_UNROLL,
+    int OUT_UNROLL = FPGAI_DENSE_OUT_UNROLL,
+    int INPUT_PARTITION = 1,
+    int OUTPUT_PARTITION = 1,
+    int WEIGHT_PARTITION = 1
 >
 void dense_backward_input_typed(
     const GRAD_OUT_T dY[OUT_F],
@@ -269,33 +329,97 @@ void dense_backward_input_typed(
     GRAD_IN_T dX[IN_F]
 ) {
 #pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=dY cyclic factor=OUTPUT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=W cyclic factor=WEIGHT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=dX cyclic factor=INPUT_PARTITION dim=1
 
     for (
-        int input_index = 0;
-        input_index < IN_F;
-        ++input_index
+        int input_base = 0;
+        input_base < IN_F;
+        input_base += IN_UNROLL
     ) {
-        ACC_T accumulator = (ACC_T)0;
+        ACC_T accumulators[IN_UNROLL];
+#pragma HLS ARRAY_PARTITION variable=accumulators complete
 
         for (
-            int output_index = 0;
-            output_index < OUT_F;
-            ++output_index
+            int input_lane = 0;
+            input_lane < IN_UNROLL;
+            ++input_lane
         ) {
+#pragma HLS UNROLL
+            accumulators[input_lane] = (ACC_T)0;
+        }
+
+        for (
+            int output_base = 0;
+            output_base < OUT_F;
+            output_base += OUT_UNROLL
+        ) {
+#pragma HLS PIPELINE II=PIPELINE_II
+
+            for (
+                int output_lane = 0;
+                output_lane < OUT_UNROLL;
+                ++output_lane
+            ) {
+#pragma HLS UNROLL
+
+                const int output_index = (
+                    output_base + output_lane
+                );
+
+                if (output_index >= OUT_F) {
+                    continue;
+                }
+
+                const ACC_T output_gradient = (
+                    (ACC_T)dY[output_index]
+                );
+
+                for (
+                    int input_lane = 0;
+                    input_lane < IN_UNROLL;
+                    ++input_lane
+                ) {
+#pragma HLS UNROLL
+
+                    const int input_index = (
+                        input_base + input_lane
+                    );
+
+                    if (input_index >= IN_F) {
+                        continue;
+                    }
             const int weight_index = (
                 output_index * IN_F
                 + input_index
             );
 
-            accumulator += (
-                (ACC_T)dY[output_index]
-                * (ACC_T)W[weight_index]
-            );
+                    accumulators[input_lane] += (
+                        output_gradient
+                        * (ACC_T)W[weight_index]
+                    );
+                }
+            }
         }
 
-        dX[input_index] = (
-            (GRAD_IN_T)accumulator
-        );
+        for (
+            int input_lane = 0;
+            input_lane < IN_UNROLL;
+            ++input_lane
+        ) {
+#pragma HLS UNROLL
+
+            const int input_index = (
+                input_base + input_lane
+            );
+
+            if (input_index < IN_F) {
+                dX[input_index] = (
+                    (GRAD_IN_T)accumulators[input_lane]
+                );
+            }
+        }
     }
 }
 
@@ -312,7 +436,13 @@ void dense_backward_input(
         grad_act_t,
         wgt_t,
         grad_act_t,
-        acc_t
+        acc_t,
+        FPGAI_PIPELINE_II,
+        FPGAI_DENSE_IN_UNROLL,
+        FPGAI_DENSE_OUT_UNROLL,
+        1,
+        1,
+        1
     >(
         dY,
         W,
@@ -326,7 +456,9 @@ template<
     typename WGT_T = wgt_t,
     typename GRAD_WGT_T = grad_wgt_t,
     typename UPDATE_T = upd_t,
-    typename ACC_T = acc_t
+    typename ACC_T = acc_t,
+    int PIPELINE_II = FPGAI_PIPELINE_II,
+    int PARTITION = 1
 >
 void sgd_update_wgt_typed(
     WGT_T W[N],
@@ -334,13 +466,15 @@ void sgd_update_wgt_typed(
     const UPDATE_T learning_rate
 ) {
 #pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=W cyclic factor=PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=dW cyclic factor=PARTITION dim=1
 
     for (
         int index = 0;
         index < N;
         ++index
     ) {
-#pragma HLS PIPELINE II=1
+#pragma HLS PIPELINE II=PIPELINE_II
 
         const ACC_T updated = (
             (ACC_T)W[index]
@@ -366,7 +500,9 @@ void sgd_update_wgt(
         wgt_t,
         grad_wgt_t,
         upd_t,
-        acc_t
+        acc_t,
+        FPGAI_PIPELINE_II,
+        1
     >(
         W,
         dW,
@@ -380,7 +516,9 @@ template<
     typename BIAS_T = bias_t,
     typename GRAD_BIAS_T = grad_bias_t,
     typename UPDATE_T = upd_t,
-    typename ACC_T = acc_t
+    typename ACC_T = acc_t,
+    int PIPELINE_II = FPGAI_PIPELINE_II,
+    int PARTITION = 1
 >
 void sgd_update_bias_typed(
     BIAS_T B[N],
@@ -388,13 +526,15 @@ void sgd_update_bias_typed(
     const UPDATE_T learning_rate
 ) {
 #pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=B cyclic factor=PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=dB cyclic factor=PARTITION dim=1
 
     for (
         int index = 0;
         index < N;
         ++index
     ) {
-#pragma HLS PIPELINE II=1
+#pragma HLS PIPELINE II=PIPELINE_II
 
         const ACC_T updated = (
             (ACC_T)B[index]
@@ -420,7 +560,9 @@ void sgd_update_bias(
         bias_t,
         grad_bias_t,
         upd_t,
-        acc_t
+        acc_t,
+        FPGAI_PIPELINE_II,
+        1
     >(
         B,
         dB,

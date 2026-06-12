@@ -1,4 +1,5 @@
 from __future__ import annotations
+from fpgai.backends.hls.emit.architecture_comments import emit_layer_architecture_comments
 
 from typing import Any, Dict, Tuple
 
@@ -1350,3 +1351,29 @@ def emit_top_cpp(
     )
 
     return "\n".join(lines)
+
+# FPGAI architecture-comment wrapper.
+# This keeps the original emitter implementation intact while making
+# generated HLS sources self-describing for experiment artifacts.
+_fpgai_original_emit_top_cpp = emit_top_cpp
+
+
+def emit_top_cpp(*args, **kwargs):
+    source = _fpgai_original_emit_top_cpp(*args, **kwargs)
+
+    compile_plan = kwargs.get("compile_plan")
+    if compile_plan is None:
+        try:
+            import inspect
+
+            bound = inspect.signature(_fpgai_original_emit_top_cpp).bind_partial(
+                *args,
+                **kwargs,
+            )
+            compile_plan = bound.arguments.get("compile_plan")
+        except Exception:
+            compile_plan = None
+
+    comments = emit_layer_architecture_comments(compile_plan)
+    return comments + source
+

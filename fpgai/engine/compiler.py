@@ -28,6 +28,9 @@ from fpgai.analysis.training_resource_estimate import run_training_resource_esti
 from fpgai.benchmark.training_reference import run_training_reference_step
 from fpgai.benchmark.training_compare import compare_training_artifacts
 from fpgai.util.fs import ensure_clean_dir, write_text
+from fpgai.analysis.hls_schedule_report import write_hls_schedule_summary
+from fpgai.analysis.hls_ii_comparison import write_requested_achieved_ii_summary
+from fpgai.analysis.hls_artifact_metadata import emit_hls_artifact_metadata
 from fpgai.util.binio import write_f32_bin
 
 from fpgai.backends.hls.emit.types_h import emit_types_h
@@ -151,8 +154,22 @@ class Compiler:
                 estimate_vs_hls_result = post_synthesis_result.estimate_comparison
                 hls_module_breakdown_result = post_synthesis_result.module_breakdown
 
+        hls_schedule_summary = self._emit_hls_schedule_summary(out_dir)
+        hls_artifact_metadata = emit_hls_artifact_metadata(
+            out_dir,
+            compile_plan,
+            schedule_summary=hls_schedule_summary,
+        )
+        hls_ii_comparison = write_requested_achieved_ii_summary(
+            out_dir,
+            compile_plan,
+        )
+
         if emit_manifest:
             self._emit_manifest(
+                hls_schedule_summary=hls_schedule_summary,
+                hls_artifact_metadata=hls_artifact_metadata,
+                hls_ii_comparison=hls_ii_comparison,
                 out_dir=out_dir,
                 top_name=top_name,
                 weights_mode=weights_mode,
@@ -343,8 +360,22 @@ class Compiler:
                 )
                 print("\n" + training_compare_result.summary_txt.read_text(encoding="utf-8") + "\n")
 
+        hls_schedule_summary = self._emit_hls_schedule_summary(out_dir)
+        hls_artifact_metadata = emit_hls_artifact_metadata(
+            out_dir,
+            compile_plan,
+            schedule_summary=hls_schedule_summary,
+        )
+        hls_ii_comparison = write_requested_achieved_ii_summary(
+            out_dir,
+            compile_plan,
+        )
+
         if emit_manifest:
             self._emit_manifest(
+                hls_schedule_summary=hls_schedule_summary,
+                hls_artifact_metadata=hls_artifact_metadata,
+                hls_ii_comparison=hls_ii_comparison,
                 out_dir=out_dir,
                 top_name=top_name,
                 weights_mode=weights_mode,
@@ -836,6 +867,99 @@ class Compiler:
 
         return report
 
+    def _emit_hls_schedule_summary(self, out_dir: Path) -> dict[str, Any] | None:
+        """Discover HLS schedule reports and write one normalized summary.
+
+        This is intentionally best-effort: normal compilation should not fail
+        just because no HLS report exists yet, or because a vendor report has
+        an unexpected format.
+        """
+        summary_path = out_dir / "hls_schedule_summary.json"
+
+        try:
+            write_hls_schedule_summary(
+                out_dir,
+                summary_path,
+            )
+        except Exception as exc:
+            write_text(
+                out_dir / "hls_schedule_summary_error.txt",
+                f"{type(exc).__name__}: {exc}\n",
+            )
+            return None
+
+        if not summary_path.exists():
+            return None
+
+        try:
+            data = json.loads(
+                summary_path.read_text(encoding="utf-8")
+            )
+        except Exception as exc:
+            write_text(
+                out_dir / "hls_schedule_summary_error.txt",
+                f"Failed to read generated schedule summary: "
+                f"{type(exc).__name__}: {exc}\n",
+            )
+            return None
+
+        if not isinstance(data, dict):
+            return None
+
+        summary = data.get("summary", {})
+        if not isinstance(summary, dict):
+            summary = {}
+
+        reports = data.get("reports", [])
+        if not isinstance(reports, list):
+            reports = []
+
+        if not summary:
+            loop_count = 0
+            for report in reports:
+                if not isinstance(report, dict):
+                    continue
+
+                report_summary = report.get("summary", {})
+                if isinstance(report_summary, dict):
+                    try:
+                        loop_count += int(report_summary.get("loop_count", 0))
+                        continue
+                    except Exception:
+                        pass
+
+                loops = report.get("loops", [])
+                if isinstance(loops, list):
+                    loop_count += len(loops)
+
+            summary = {
+                "report_count": len(reports),
+                "loop_count": loop_count,
+            }
+            data["summary"] = summary
+            summary_path.write_text(
+                json.dumps(data, indent=2),
+                encoding="utf-8",
+            )
+
+        report_count_raw = summary.get("report_count", len(reports))
+        try:
+            report_count = int(report_count_raw)
+        except Exception:
+            report_count = len(reports)
+
+        if report_count <= 0:
+            try:
+                summary_path.unlink()
+            except FileNotFoundError:
+                pass
+            return None
+
+        return {
+            "path": str(summary_path.relative_to(out_dir)),
+            "summary": summary,
+        }
+
     def _emit_manifest(self, **kwargs) -> None:
         out_dir = kwargs["out_dir"]
         manifest = {
@@ -1004,4 +1128,16 @@ class Compiler:
             ),
             "seconds": round(float(kwargs["seconds"]), 6),
         }
+        hls_schedule_summary = kwargs.get("hls_schedule_summary")
+        if hls_schedule_summary is not None:
+            manifest["hls_schedule_summary"] = hls_schedule_summary
+
+        hls_artifact_metadata = kwargs.get("hls_artifact_metadata")
+        if hls_artifact_metadata is not None:
+            manifest["hls_artifact_metadata"] = hls_artifact_metadata
+
+        hls_ii_comparison = kwargs.get("hls_ii_comparison")
+        if hls_ii_comparison is not None:
+            manifest["hls_ii_comparison"] = hls_ii_comparison
+
         write_text(out_dir / "manifest.json", json.dumps(manifest, indent=2))

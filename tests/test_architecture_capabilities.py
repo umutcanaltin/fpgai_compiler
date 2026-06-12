@@ -156,7 +156,7 @@ def test_per_layer_ii_difference_is_implemented_for_inference() -> None:
     )
 
 
-def test_training_forward_specialization_is_limited() -> None:
+def test_training_specialization_is_implemented() -> None:
     report = validate_architecture_capabilities(
         CompilePlan(
             layer_plans=[
@@ -170,9 +170,9 @@ def test_training_forward_specialization_is_limited() -> None:
     )
     statuses = _status_map(report)
 
-    assert statuses["pipeline"] == LIMITED
-    assert statuses["parallelism"] == LIMITED
-    assert statuses["partitioning"] == LIMITED
+    assert statuses["pipeline"] == IMPLEMENTED
+    assert statuses["parallelism"] == IMPLEMENTED
+    assert statuses["partitioning"] == IMPLEMENTED
 
 
 def test_strict_mode_rejects_planning_only_options() -> None:

@@ -196,17 +196,12 @@ def _validate_layer_features(
             "Dense",
             "Conv",
         }
-        training_mode = (
-            pipeline_mode == "training_on_device"
-        )
         _add(
             issues,
             layer_name=layer.node_name,
             feature="pipeline",
             status=(
                 IMPLEMENTED
-                if forward_specialized and not training_mode
-                else LIMITED
                 if forward_specialized
                 else PLANNING_ONLY
             ),
@@ -217,10 +212,10 @@ def _validate_layer_features(
                 else "global_macro"
             },
             detail=(
-                "Forward Dense/Conv kernels receive a layer-specific "
-                "pipeline II; backward and update phases still use "
-                "shared settings."
-                if forward_specialized and training_mode
+                "Dense/Conv forward, backward, gradient, and update "
+                "kernels receive the layer-specific pipeline II."
+                if forward_specialized
+                and pipeline_mode == "training_on_device"
                 else "The generated forward kernel receives the "
                 "layer-specific pipeline II."
                 if forward_specialized
@@ -234,8 +229,6 @@ def _validate_layer_features(
             feature="parallelism",
             status=(
                 IMPLEMENTED
-                if forward_specialized and not training_mode
-                else LIMITED
                 if forward_specialized
                 else PLANNING_ONLY
             ),
@@ -246,10 +239,10 @@ def _validate_layer_features(
                 else {"scope": "operator_global"}
             ),
             detail=(
-                "Forward Dense/Conv kernels receive layer-specific "
-                "unroll values; backward and update phases are not "
-                "fully specialized yet."
-                if forward_specialized and training_mode
+                "Dense/Conv forward, backward-input, and weight-gradient "
+                "kernels receive layer-specific PE/SIMD unroll values."
+                if forward_specialized
+                and pipeline_mode == "training_on_device"
                 else "The generated forward kernel receives "
                 "layer-specific PE/SIMD unroll values."
                 if forward_specialized
@@ -273,10 +266,6 @@ def _validate_layer_features(
                 IMPLEMENTED
                 if partition_requested
                 and forward_specialized
-                and not training_mode
-                else LIMITED
-                if partition_requested
-                and forward_specialized
                 else PLANNING_ONLY
                 if partition_requested
                 else IMPLEMENTED
@@ -286,10 +275,11 @@ def _validate_layer_features(
                 partition.to_dict()
             ),
             detail=(
-                "Forward input, output, and weight arrays receive "
-                "layer-specific partition pragmas; gradient arrays "
-                "are not fully specialized yet."
-                if partition_requested and training_mode
+                "Forward, backward, gradient, and update arrays receive "
+                "layer-specific partition pragmas."
+                if partition_requested
+                and forward_specialized
+                and pipeline_mode == "training_on_device"
                 else "Forward input, output, and weight arrays receive "
                 "layer-specific partition pragmas."
                 if partition_requested and forward_specialized

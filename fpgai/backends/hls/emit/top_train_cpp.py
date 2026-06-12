@@ -1,4 +1,5 @@
 from __future__ import annotations
+from fpgai.backends.hls.emit.architecture_comments import emit_layer_architecture_comments
 
 import re
 from typing import Any, Dict, List, Optional, Tuple
@@ -1469,6 +1470,10 @@ def emit_top_train_cpp(
 
         if op.op_type == "Dense":
             tag = _sanitize(op.name)
+            codegen = _layer_codegen_values(
+                plan_by_name.get(op.name, {}),
+                op_type="Dense",
+            )
 
             (
                 _,
@@ -1481,25 +1486,45 @@ def emit_top_train_cpp(
             )
 
             lines.append(
-                f"  fpgai::dense_weight_grad"
-                f"<{input_features}, {output_features}>"
+                f"  fpgai::dense_weight_grad_typed"
+                f"<{input_features}, {output_features}, "
+                f"act_t, grad_act_t, grad_wgt_t, acc_t, "
+                f"{codegen['pipeline_ii']}, "
+                f"{codegen['input_unroll']}, "
+                f"{codegen['output_unroll']}, "
+                f"{codegen['input_partition']}, "
+                f"{codegen['output_partition']}, "
+                f"{codegen['weight_partition']}>"
                 f"({input_buffer}, {output_gradient}, "
                 f"dW_{tag});"
             )
             lines.append(
-                f"  fpgai::dense_bias_grad"
-                f"<{output_features}>"
+                f"  fpgai::dense_bias_grad_typed"
+                f"<{output_features}, grad_act_t, "
+                f"grad_bias_t, {codegen['pipeline_ii']}, "
+                f"{codegen['output_partition']}>"
                 f"({output_gradient}, dB_{tag});"
             )
             lines.append(
-                f"  fpgai::dense_backward_input"
-                f"<{input_features}, {output_features}>"
+                f"  fpgai::dense_backward_input_typed"
+                f"<{input_features}, {output_features}, "
+                f"grad_act_t, wgt_t, grad_act_t, acc_t, "
+                f"{codegen['pipeline_ii']}, "
+                f"{codegen['input_unroll']}, "
+                f"{codegen['output_unroll']}, "
+                f"{codegen['input_partition']}, "
+                f"{codegen['output_partition']}, "
+                f"{codegen['weight_partition']}>"
                 f"({output_gradient}, W_{tag}, "
                 f"{input_gradient});"
             )
 
         elif op.op_type == "Conv":
             tag = _sanitize(op.name)
+            codegen = _layer_codegen_values(
+                plan_by_name.get(op.name, {}),
+                op_type="Conv",
+            )
 
             weight_shape = _resolve_conv_arrays(
                 graph,
@@ -1547,16 +1572,26 @@ def emit_top_train_cpp(
             kernel_size = int(weight_shape[2])
 
             lines.append(
-                f"  fpgai::conv2d_weight_grad"
+                f"  fpgai::conv2d_weight_grad_typed"
                 f"<{height_in}, {width_in}, {channels_in}, "
                 f"{height_out}, {width_out}, {channels_out}, "
-                f"{kernel_size}, {stride}, {pad}>"
+                f"{kernel_size}, {stride}, {pad}, "
+                f"act_t, grad_act_t, grad_wgt_t, acc_t, "
+                f"{codegen['pipeline_ii']}, "
+                f"{codegen['input_unroll']}, "
+                f"{codegen['output_unroll']}, "
+                f"{codegen['input_partition']}, "
+                f"{codegen['output_partition']}, "
+                f"{codegen['weight_partition']}>"
                 f"({input_buffer}, {output_gradient}, "
                 f"dW_{tag});"
             )
             lines.append(
-                f"  fpgai::conv2d_bias_grad"
-                f"<{channels_out}, {height_out}, {width_out}>"
+                f"  fpgai::conv2d_bias_grad_typed"
+                f"<{channels_out}, {height_out}, {width_out}, "
+                f"grad_act_t, grad_bias_t, acc_t, "
+                f"{codegen['pipeline_ii']}, "
+                f"{codegen['output_partition']}>"
                 f"({output_gradient}, dB_{tag});"
             )
 
@@ -1565,10 +1600,17 @@ def emit_top_train_cpp(
                 op_index,
             ):
                 lines.append(
-                    f"  fpgai::conv2d_backward_input"
+                    f"  fpgai::conv2d_backward_input_typed"
                     f"<{height_in}, {width_in}, {channels_in}, "
                     f"{height_out}, {width_out}, {channels_out}, "
-                    f"{kernel_size}, {stride}, {pad}>"
+                    f"{kernel_size}, {stride}, {pad}, "
+                    f"grad_act_t, wgt_t, grad_act_t, acc_t, "
+                    f"{codegen['pipeline_ii']}, "
+                    f"{codegen['input_unroll']}, "
+                    f"{codegen['output_unroll']}, "
+                    f"{codegen['input_partition']}, "
+                    f"{codegen['output_partition']}, "
+                    f"{codegen['weight_partition']}>"
                     f"({output_gradient}, W_{tag}, "
                     f"{input_gradient});"
                 )
@@ -1768,7 +1810,7 @@ def emit_top_train_cpp(
 
     for (
         kind,
-        _op,
+        op,
         tag,
         weight_size,
         bias_size,
@@ -1777,13 +1819,23 @@ def emit_top_train_cpp(
             "dense",
             "conv",
         }:
+            codegen = _layer_codegen_values(
+                plan_by_name.get(op.name, {}),
+                op_type="Dense" if kind == "dense" else "Conv",
+            )
             lines.append(
-                f"  fpgai::sgd_update_wgt<{weight_size}>"
+                f"  fpgai::sgd_update_wgt_typed"
+                f"<{weight_size}, wgt_t, grad_wgt_t, upd_t, "
+                f"acc_t, {codegen['pipeline_ii']}, "
+                f"{codegen['weight_partition']}>"
                 f"(W_{tag}, dW_{tag}, "
                 f"(upd_t){learning_rate:.8f}f);"
             )
             lines.append(
-                f"  fpgai::sgd_update_bias<{bias_size}>"
+                f"  fpgai::sgd_update_bias_typed"
+                f"<{bias_size}, bias_t, grad_bias_t, upd_t, "
+                f"acc_t, {codegen['pipeline_ii']}, "
+                f"{codegen['output_partition']}>"
                 f"(B_{tag}, dB_{tag}, "
                 f"(upd_t){learning_rate:.8f}f);"
             )
@@ -1858,3 +1910,29 @@ def emit_top_train_cpp(
     )
 
     return "\n".join(lines)
+
+# FPGAI architecture-comment wrapper.
+# This keeps the original emitter implementation intact while making
+# generated HLS sources self-describing for experiment artifacts.
+_fpgai_original_emit_top_train_cpp = emit_top_train_cpp
+
+
+def emit_top_train_cpp(*args, **kwargs):
+    source = _fpgai_original_emit_top_train_cpp(*args, **kwargs)
+
+    compile_plan = kwargs.get("compile_plan")
+    if compile_plan is None:
+        try:
+            import inspect
+
+            bound = inspect.signature(_fpgai_original_emit_top_train_cpp).bind_partial(
+                *args,
+                **kwargs,
+            )
+            compile_plan = bound.arguments.get("compile_plan")
+        except Exception:
+            compile_plan = None
+
+    comments = emit_layer_architecture_comments(compile_plan)
+    return comments + source
+
