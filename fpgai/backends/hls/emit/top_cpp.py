@@ -1,5 +1,7 @@
 from __future__ import annotations
 from fpgai.backends.hls.emit.architecture_comments import emit_layer_architecture_comments
+from fpgai.backends.hls.emit.dense_tiling_codegen import apply_dense_tiling_to_top_source
+from fpgai.backends.hls.emit.conv_tiling_codegen import apply_conv_tiling_to_top_source
 
 from typing import Any, Dict, Tuple
 
@@ -1377,3 +1379,44 @@ def emit_top_cpp(*args, **kwargs):
     comments = emit_layer_architecture_comments(compile_plan)
     return comments + source
 
+# FPGAI dense-tiling wrapper.
+# This wraps the architecture-comment emitter and then rewrites Dense calls
+# whose compile plan contains tile sizes into tiled Dense kernels.
+_fpgai_dense_tiling_original_emit_top_cpp = emit_top_cpp
+
+
+def emit_top_cpp(*args, **kwargs):
+    source = _fpgai_dense_tiling_original_emit_top_cpp(*args, **kwargs)
+
+    graph = kwargs.get("graph")
+    if graph is None and args:
+        graph = args[0]
+
+    compile_plan = kwargs.get("compile_plan")
+
+    return apply_dense_tiling_to_top_source(
+        source,
+        graph,
+        compile_plan,
+    )
+
+# FPGAI convolution-tiling wrapper.
+# This runs after the dense-tiling wrapper and rewrites Conv calls whose
+# compile plan contains channel or spatial tile sizes.
+_fpgai_conv_tiling_original_emit_top_cpp = emit_top_cpp
+
+
+def emit_top_cpp(*args, **kwargs):
+    source = _fpgai_conv_tiling_original_emit_top_cpp(*args, **kwargs)
+
+    graph = kwargs.get("graph")
+    if graph is None and args:
+        graph = args[0]
+
+    compile_plan = kwargs.get("compile_plan")
+
+    return apply_conv_tiling_to_top_source(
+        source,
+        graph,
+        compile_plan,
+    )

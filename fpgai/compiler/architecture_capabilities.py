@@ -289,20 +289,32 @@ def _validate_layer_features(
 
         tiling = architecture.tiling
         has_tiling = bool(tiling.sizes)
+        tiling_implemented = (
+            has_tiling
+            and forward_specialized
+            and pipeline_mode == "inference"
+        )
         _add(
             issues,
             layer_name=layer.node_name,
             feature="tiling",
             status=(
-                PLANNING_ONLY
-                if has_tiling
-                else IMPLEMENTED
+                IMPLEMENTED
+                if tiling_implemented or not has_tiling
+                else PLANNING_ONLY
             ),
             requested=tiling.to_dict(),
-            effective={"sizes": {}},
+            effective=(
+                tiling.to_dict()
+                if tiling_implemented
+                else {"sizes": {}}
+            ),
             detail=(
-                "Tile sizes are recorded but generated compute loops "
-                "are not tiled yet."
+                "Dense/Conv inference code generation emits tiled "
+                "compute loops for the requested tile sizes."
+                if tiling_implemented
+                else "Tile sizes are recorded but generated compute loops "
+                "are not tiled for this pipeline/operator yet."
                 if has_tiling
                 else "No tiling was requested."
             ),
