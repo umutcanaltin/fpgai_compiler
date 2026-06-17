@@ -1,0 +1,9 @@
+name: model_suite
+command_template: "python main.py benchmark --config {config_path}"
+point_name_template: "model_{model_name}_{policy}"
+defaults:
+  config_path: fpgai.yml
+  board: kv260
+parameters:
+  model_name: [mlp_mnist, cnn_mnist, lenet5_mnist, fashion_mnist_cnn, tinyml_kws]
+  policy: [balanced, latency_first]

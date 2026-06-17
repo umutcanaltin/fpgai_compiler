@@ -1,0 +1,23 @@
+name: inference_policy
+command_template: python main.py benchmark --config {config_path}
+design_name_template: policy_{policy}_{precision_mode}
+defaults:
+  base_config_path: fpgai.yml
+  config_path: fpgai.yml
+  model_path: examples/mnist.onnx
+  board: kv260
+  metrics_json: build/fpgai_example_dense/calibration/estimate_vs_hls.json
+  precision_mode: fixed
+parameters:
+  policy:
+  - resource_first
+  - balanced
+  - latency_first
+  - throughput_first
+  - memory_first
+materialize_configs:
+  enabled: true
+  directory: configs
+  canonicalize_policy: true
+  strip_top_level_sections:
+  - notes

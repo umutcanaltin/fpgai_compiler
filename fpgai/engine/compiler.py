@@ -31,6 +31,7 @@ from fpgai.util.fs import ensure_clean_dir, write_text
 from fpgai.analysis.hls_schedule_report import write_hls_schedule_summary
 from fpgai.analysis.hls_ii_comparison import write_requested_achieved_ii_summary
 from fpgai.analysis.hls_artifact_metadata import emit_hls_artifact_metadata
+from fpgai.analysis.hls_calibration_runner import run_hls_calibration
 from fpgai.util.binio import write_f32_bin
 
 from fpgai.backends.hls.emit.types_h import emit_types_h
@@ -129,6 +130,14 @@ class Compiler:
         ) if enable_hls else None
         host_dir: Optional[Path] = self._emit_hostcpp(out_dir, g, top_name=top_name) if enable_host else None
         hls_run = self._maybe_run_vitis_hls(hls_dir) if enable_hls and hls_dir is not None else None
+        hls_calibration_result = run_hls_calibration(
+            out_dir=out_dir,
+            raw_cfg=raw,
+            compile_plan=compile_plan,
+            hls_report_dir=(hls_dir if hls_dir is not None else out_dir),
+            clock_mhz=float(_cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0)),
+            verbose=verbose,
+        )
 
         estimate_vs_hls_result = None
         hls_module_breakdown_result = None
@@ -342,6 +351,14 @@ class Compiler:
         ) if enable_hls else None
         host_dir: Optional[Path] = self._emit_hostcpp(out_dir, g, top_name=top_name) if enable_host else None
         hls_run = self._maybe_run_vitis_hls(hls_dir) if enable_hls and hls_dir is not None else None
+        hls_calibration_result = run_hls_calibration(
+            out_dir=out_dir,
+            raw_cfg=raw,
+            compile_plan=compile_plan,
+            hls_report_dir=(hls_dir if hls_dir is not None else out_dir),
+            clock_mhz=float(_cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0)),
+            verbose=verbose,
+        )
 
         training_compare_result = None
         if hls_run is not None and hls_dir is not None:

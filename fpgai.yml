@@ -163,6 +163,11 @@ analysis:
   quantization_report:
     enabled: true
     seed: 0
+  hls_calibration:
+    enabled: true
+    output_dir: calibration
+    fail_on_empty: false
+    fail_on_error: false
 
   precision_sweep:
     enabled: true

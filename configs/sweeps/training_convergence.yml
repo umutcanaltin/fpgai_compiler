@@ -1,0 +1,11 @@
+name: training_convergence
+command_template: "python main.py benchmark --config {config_path}"
+point_name_template: "train_{model_name}_{learning_rate}_{epochs}"
+defaults:
+  config_path: fpgai.yml
+  board: kv260
+  mode: training
+parameters:
+  model_name: [mlp_mnist, cnn_mnist]
+  learning_rate: [0.001, 0.0005]
+  epochs: [5, 10]
