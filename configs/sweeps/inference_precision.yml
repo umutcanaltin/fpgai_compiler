@@ -7,6 +7,7 @@ materialize_configs:
   canonicalize_policy: true
   strip_top_level_sections:
   - notes
+  compiler_policy_names: true
 defaults:
   base_config_path: fpgai.yml
   config_path: fpgai.yml
