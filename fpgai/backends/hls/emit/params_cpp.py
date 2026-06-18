@@ -219,10 +219,21 @@ def _format_array(
     name: str,
     ctype: str,
     array: np.ndarray,
+    *,
+    const: bool = True,
+    zero_init: bool = False,
 ) -> str:
     flattened = np.asarray(
         array
     ).reshape(-1)
+
+    qualifier = "const " if const else ""
+
+    if zero_init:
+        return (
+            f"{qualifier}{ctype} {name}"
+            f"[{flattened.size}] = {{ 0 }};"
+        )
 
     values = ", ".join(
         _format_scalar(value)
@@ -230,7 +241,7 @@ def _format_array(
     )
 
     return (
-        f"const {ctype} {name}"
+        f"{qualifier}{ctype} {name}"
         f"[{flattened.size}] = {{ "
         f"{values} }};"
     )
@@ -523,23 +534,14 @@ def emit_params_cpp(
         "",
     ]
 
-    if normalized_mode in {
+    runtime_mode = normalized_mode in {
         "stream",
         "streamed",
         "ddr",
         "dma_ddr",
-    }:
-        lines.extend(
-            [
-                "// Parameters are supplied at runtime.",
-                "",
-                "} // namespace fpgai",
-                "",
-            ]
-        )
-        return "\n".join(lines)
+    }
 
-    if normalized_mode != "embedded":
+    if normalized_mode != "embedded" and not runtime_mode:
         raise ValueError(
             f"Unsupported weights mode: "
             f"{weights_mode!r}"
@@ -605,6 +607,8 @@ def emit_params_cpp(
                 f"W{parameter_index}",
                 weight_type,
                 weight_array,
+                const=not runtime_mode,
+                zero_init=runtime_mode,
             )
         )
         lines.append(
@@ -612,6 +616,8 @@ def emit_params_cpp(
                 f"B{parameter_index}",
                 bias_type,
                 bias_array,
+                const=not runtime_mode,
+                zero_init=runtime_mode,
             )
         )
         lines.append("")
@@ -625,4 +631,53 @@ def emit_params_cpp(
         ]
     )
 
+    return "\n".join(lines)
+
+# Sprint 11D source fix: runtime modes require actual W*/B* definitions,
+# otherwise Vitis C-sim links deeplearn.cpp against fpgai::W0/B0/... and
+# fails with undefined references.  Embedded mode remains the original
+# const initialized arrays; runtime modes allocate mutable arrays initialized
+# to zero and populated by the generated stream/DDR loaders.
+_fpgai_runtime_defs_previous_emit_params_cpp = emit_params_cpp
+
+
+def emit_params_cpp(graph, *, weights_mode: str = "embedded") -> str:
+    normalized_mode = str(weights_mode).strip().lower()
+    if normalized_mode == "embedded":
+        return _fpgai_runtime_defs_previous_emit_params_cpp(graph, weights_mode=weights_mode)
+    if normalized_mode not in {"stream", "streamed", "ddr", "dma_ddr"}:
+        raise ValueError(f"Unsupported weights mode: {weights_mode!r}")
+
+    lines: List[str] = [
+        '#include "fpgai_params.h"',
+        "",
+        "namespace fpgai {",
+        "",
+        "// Runtime weight storage definitions.",
+        "// Populated by deeplearn.cpp from stream/DDR interfaces.",
+    ]
+
+    parameter_index = 0
+    for graph_index, op in enumerate(graph.ops):
+        if op.op_type not in {"Dense", "Conv"}:
+            continue
+        precision_tag = _precision_tag(op, graph_index)
+        weight_type = f"{precision_tag}_wgt_t"
+        bias_type = f"{precision_tag}_bias_t"
+        if op.op_type == "Dense":
+            weight_array, bias_array, weight_source, bias_source = _resolve_dense_parameters(graph, op)
+        else:
+            weight_array, bias_array, weight_source, bias_source = _resolve_conv_parameters(graph, op)
+        weight_count = int(np.asarray(weight_array).reshape(-1).size)
+        bias_count = int(np.asarray(bias_array).reshape(-1).size)
+        lines.append(f"// {op.op_type} layer {op.name!r}")
+        lines.append(f"// Runtime source mode: {normalized_mode}")
+        lines.append(f"// Original weight source: {weight_source}")
+        lines.append(f"// Original bias source: {bias_source}")
+        lines.append(f"{weight_type} W{parameter_index}[{weight_count}] = {{}};")
+        lines.append(f"{bias_type} B{parameter_index}[{bias_count}] = {{}};")
+        lines.append("")
+        parameter_index += 1
+
+    lines.extend(["} // namespace fpgai", ""])
     return "\n".join(lines)

@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import time
 
+import yaml
 from dataclasses import replace
 
 from .design_matrix import DesignPoint, expand_design_matrix, load_sweep_config, render_template
@@ -50,6 +51,53 @@ def _extract_metrics_from_paths(paths: Iterable[str | Path]) -> Dict[str, Any]:
             if isinstance(data, dict) and key in data:
                 metrics[key] = data[key]
     return metrics
+
+
+def _assign_design_artifact_out_dir(
+    config_path: str | Path,
+    *,
+    experiment_dir: str | Path,
+    design_name: str,
+) -> Dict[str, Any]:
+    """Make project.out_dir unique and inside the experiment directory.
+
+    Earlier sweeps reused the base config's project.out_dir, for example
+    build/fpgai_example_dense. That allowed later design points to overwrite
+    earlier generated C/C++ artifacts and left no generated code under the
+    experiment folder for Sprint 9 design-effect checks.
+    """
+
+    path = Path(config_path)
+    if not path.exists():
+        return {}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+
+    project = data.get("project")
+    if not isinstance(project, dict):
+        project = {}
+        data["project"] = project
+
+    safe = _safe_name(design_name)
+    artifact_dir = Path(experiment_dir) / "artifacts" / safe
+    build_dir = artifact_dir / "build"
+    previous = project.get("out_dir")
+
+    project["out_dir"] = str(build_dir)
+    project.setdefault("name", safe)
+
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    return {
+        "artifact_dir": str(artifact_dir),
+        "project_out_dir": str(build_dir),
+        "previous_project_out_dir": previous,
+    }
 
 
 class SweepRunner:
@@ -115,6 +163,26 @@ class SweepRunner:
         except TypeError:
             # Backwards compatibility for older materializer implementations.
             report = materialize_design_config(base_path, out_path, point.parameters, cfg)
+
+        artifact_info: Dict[str, Any] = {}
+        if bool(cfg.get("preserve_artifacts", True)):
+            artifact_info = _assign_design_artifact_out_dir(
+                out_path,
+                experiment_dir=self.store.experiment_dir,
+                design_name=point.name,
+            )
+            if artifact_info:
+                report.setdefault("applied", {})["project_out_dir"] = "project.out_dir"
+                report.update(artifact_info)
+                metadata_path = report.get("metadata_path")
+                if metadata_path:
+                    try:
+                        Path(str(metadata_path)).write_text(
+                            json.dumps(report, indent=2, sort_keys=True, default=str),
+                            encoding="utf-8",
+                        )
+                    except Exception:
+                        pass
         rel_out = out_path if out_path.is_absolute() else out_path
         try:
             rel_out = out_path.relative_to(self.repo_root)
@@ -139,7 +207,11 @@ class SweepRunner:
         )
 
     def _record_base(self, point: DesignPoint) -> Dict[str, Any]:
-        return {
+        metadata = dict(point.metadata)
+        materialized = metadata.get("materialized_config")
+        if not isinstance(materialized, Mapping):
+            materialized = {}
+        record = {
             "schema_version": 1,
             "design_index": point.index,
             "design_name": point.name,
@@ -150,8 +222,13 @@ class SweepRunner:
             "board": point.board,
             "tool_version": self.tool_version,
             "commit_hash": get_git_commit(self.repo_root),
-            "metadata": dict(point.metadata),
+            "metadata": metadata,
         }
+        if materialized.get("artifact_dir"):
+            record["artifact_dir"] = materialized.get("artifact_dir")
+        if materialized.get("project_out_dir"):
+            record["project_out_dir"] = materialized.get("project_out_dir")
+        return record
 
     def _record_for_skipped(self, point: DesignPoint, reason: str) -> Dict[str, Any]:
         r = self._record_base(point)

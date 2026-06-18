@@ -41,6 +41,13 @@ _DEFAULT_PATHS = {
         "model.path",
         "model_path",
     ],
+    "weight_storage": [
+        "memory.weight_storage",
+        "data_movement.ps_pl.weights.mode",
+    ],
+    "memory_strategy": [
+        "memory.strategy",
+    ],
 }
 
 _STRIP_DEFAULT = ["experiment", "design_parameters", "materialized_overrides"]
@@ -233,6 +240,169 @@ def _resolve_model_path(value: Any, repo_root: Optional[Path]) -> Tuple[bool, An
     return False, value, "requested model file does not exist"
 
 
+
+def _normalise_weight_storage(value: Any) -> Tuple[bool, str, str]:
+    raw = str(value).strip().lower().replace("-", "_")
+    table = {
+        "embedded": "embedded",
+        "on_chip": "embedded",
+        "onchip": "embedded",
+        "bram": "embedded",
+        "uram": "embedded",
+        "stream": "stream",
+        "streaming": "stream",
+        "streamed": "stream",
+        "ddr": "ddr",
+        "dma_ddr": "ddr",
+        "external": "ddr",
+        "external_ddr": "ddr",
+    }
+    if raw not in table:
+        return False, raw, "unknown weight storage mode"
+    return True, table[raw], ""
+
+
+def _memory_strategy_payload(value: Any) -> Tuple[bool, Dict[str, Any], str]:
+    raw = str(value).strip().lower().replace("-", "_")
+    table: Dict[str, Dict[str, Any]] = {
+        "on_chip": {
+            "memory.strategy": "on_chip",
+            "memory.weight_storage": "embedded",
+            "data_movement.ps_pl.weights.mode": "embedded",
+            "memory.weight_region_preference": ["BRAM", "URAM", "DDR"],
+            "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
+            "memory.allow_double_buffer": False,
+        },
+        "embedded": {
+            "memory.strategy": "on_chip",
+            "memory.weight_storage": "embedded",
+            "data_movement.ps_pl.weights.mode": "embedded",
+            "memory.weight_region_preference": ["BRAM", "URAM", "DDR"],
+            "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
+            "memory.allow_double_buffer": False,
+        },
+        "streaming": {
+            "memory.strategy": "streaming",
+            "memory.weight_storage": "stream",
+            "data_movement.ps_pl.weights.mode": "stream",
+            "memory.weight_region_preference": ["BRAM", "URAM", "DDR"],
+            "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
+            "memory.allow_double_buffer": True,
+        },
+        "stream": {
+            "memory.strategy": "streaming",
+            "memory.weight_storage": "stream",
+            "data_movement.ps_pl.weights.mode": "stream",
+            "memory.weight_region_preference": ["BRAM", "URAM", "DDR"],
+            "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
+            "memory.allow_double_buffer": True,
+        },
+        "external_ddr": {
+            "memory.strategy": "external_ddr",
+            "memory.weight_storage": "ddr",
+            "data_movement.ps_pl.weights.mode": "ddr",
+            "memory.weight_region_preference": ["DDR", "URAM", "BRAM"],
+            "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
+            "memory.allow_double_buffer": True,
+        },
+        "ddr": {
+            "memory.strategy": "external_ddr",
+            "memory.weight_storage": "ddr",
+            "data_movement.ps_pl.weights.mode": "ddr",
+            "memory.weight_region_preference": ["DDR", "URAM", "BRAM"],
+            "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
+            "memory.allow_double_buffer": True,
+        },
+        "bram_saver": {
+            "memory.strategy": "bram_saver",
+            "memory.weight_storage": "stream",
+            "data_movement.ps_pl.weights.mode": "stream",
+            "memory.weight_region_preference": ["DDR", "URAM", "BRAM"],
+            "memory.activation_region_preference": ["DDR", "URAM", "BRAM"],
+            "memory.allow_double_buffer": False,
+        },
+        "uram_first": {
+            "memory.strategy": "uram_first",
+            "memory.weight_storage": "embedded",
+            "data_movement.ps_pl.weights.mode": "embedded",
+            "memory.weight_region_preference": ["URAM", "BRAM", "DDR"],
+            "memory.activation_region_preference": ["URAM", "BRAM", "DDR"],
+            "memory.allow_double_buffer": False,
+        },
+    }
+    if raw not in table:
+        return False, {}, "unknown memory strategy"
+    return True, dict(table[raw]), ""
+
+
+def _apply_weight_storage(cfg: MutableMapping[str, Any], value: Any) -> Tuple[bool, str]:
+    ok, mode, reason = _normalise_weight_storage(value)
+    if not ok:
+        return False, reason
+    _set_path(cfg, "memory.weight_storage", mode, create=True)
+    _set_path(cfg, "data_movement.ps_pl.weights.mode", mode, create=True)
+    return True, "memory.weight_storage,data_movement.ps_pl.weights.mode"
+
+
+def _apply_memory_strategy(cfg: MutableMapping[str, Any], value: Any) -> Tuple[bool, str]:
+    ok, payload, reason = _memory_strategy_payload(value)
+    if not ok:
+        return False, reason
+    for key, val in payload.items():
+        _set_path(cfg, key, val, create=True)
+    return True, ",".join(payload.keys())
+
+
+def _materialize_precision_defaults_from_candidates(
+    cfg: MutableMapping[str, Any], precision_mode: Any
+) -> Tuple[bool, str]:
+    """Apply analysis.precision_sweep candidate defaults into numerics.defaults.
+
+    Precision sweep values such as ``fx8_3`` are not raw config fields in
+    fpgai.yml. They select one entry from
+    analysis.precision_sweep.candidates and materialize that candidate's
+    defaults into numerics.defaults so downstream compiler/codegen paths see
+    the selected numeric type widths.
+    """
+    if precision_mode in (None, ""):
+        return False, "empty precision mode"
+
+    candidates = _dig_for_materializer(
+        cfg, ("analysis", "precision_sweep", "candidates"), []
+    )
+    if not isinstance(candidates, list):
+        return False, "analysis.precision_sweep.candidates is not a list"
+
+    for candidate in candidates:
+        if not isinstance(candidate, Mapping):
+            continue
+        if candidate.get("name") != precision_mode:
+            continue
+        defaults = candidate.get("defaults")
+        if not isinstance(defaults, Mapping):
+            return False, f"precision mode {precision_mode} has no defaults"
+        numerics = cfg.setdefault("numerics", {})
+        if not isinstance(numerics, MutableMapping):
+            cfg["numerics"] = {}
+            numerics = cfg["numerics"]
+        numerics["defaults"] = copy.deepcopy(dict(defaults))
+        return True, "numerics.defaults"
+
+    return False, (
+        f"precision mode {precision_mode} not found in "
+        "analysis.precision_sweep.candidates"
+    )
+
+
+def _dig_for_materializer(data: Mapping[str, Any], keys: Iterable[str], default: Any = None) -> Any:
+    cur: Any = data
+    for key in keys:
+        if not isinstance(cur, Mapping) or key not in cur:
+            return default
+        cur = cur[key]
+    return cur
+
+
 def probe_parameter_paths(config: Mapping[str, Any]) -> Dict[str, list[str]]:
     """Return existing materializable paths for known experiment parameters."""
     out: Dict[str, list[str]] = {}
@@ -264,6 +434,53 @@ def apply_parameter_overrides(
         if param in {"config_path", "base_config_path", "metrics_json"}:
             continue
 
+        mapping = explicit_mappings.get(param) if isinstance(explicit_mappings, Mapping) else None
+
+        # Memory knobs are real design-space knobs.  They must be validated and
+        # must create canonical compiler paths even when the base config does
+        # not already contain a memory section.  Keep explicit parameter_mappings
+        # above this branch so advanced users can override the default path.
+        if mapping is None and param == "weight_storage":
+            ok_mem, target_or_reason = _apply_weight_storage(cfg, value)
+            if ok_mem:
+                applied[param] = target_or_reason
+            else:
+                skipped[param] = target_or_reason
+                unapplied[param] = value
+            continue
+
+        if mapping is None and param == "memory_strategy":
+            ok_mem, target_or_reason = _apply_memory_strategy(cfg, value)
+            if ok_mem:
+                applied[param] = target_or_reason
+            else:
+                skipped[param] = target_or_reason
+                unapplied[param] = value
+            continue
+
+        forced_candidate_paths: Optional[list[tuple[str, bool]]] = None
+
+        if param == "precision_mode" and mapping is None:
+            # Backwards-compatible behavior: if the base schema already has a
+            # scalar precision selector, update that raw field. Only real
+            # precision sweeps without such a scalar field should translate the
+            # selector into numerics.defaults.
+            existing_precision_paths = [
+                (p, False)
+                for p in _DEFAULT_PATHS.get(param, [])
+                if _has_path(cfg, p)
+            ]
+            if existing_precision_paths:
+                forced_candidate_paths = existing_precision_paths
+            else:
+                ok_precision, reason_or_path = _materialize_precision_defaults_from_candidates(cfg, value)
+                if ok_precision:
+                    applied[param] = reason_or_path
+                else:
+                    skipped[param] = reason_or_path
+                    unapplied[param] = value
+                continue
+
         if param == "model_path":
             ok_model, resolved_value, reason = _resolve_model_path(value, repo_root)
             if not ok_model:
@@ -274,7 +491,6 @@ def apply_parameter_overrides(
         else:
             value_to_apply = value
 
-        mapping = explicit_mappings.get(param) if isinstance(explicit_mappings, Mapping) else None
         candidate_paths: list[tuple[str, bool]] = []
         if isinstance(mapping, Mapping):
             path = mapping.get("path")
@@ -283,7 +499,9 @@ def apply_parameter_overrides(
         elif isinstance(mapping, str):
             candidate_paths.append((mapping, False))
 
-        if not candidate_paths:
+        if forced_candidate_paths is not None:
+            candidate_paths = forced_candidate_paths
+        elif not candidate_paths:
             candidate_paths = [(p, False) for p in _DEFAULT_PATHS.get(param, [])]
 
         chosen = False

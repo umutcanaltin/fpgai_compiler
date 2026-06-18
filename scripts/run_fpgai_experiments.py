@@ -74,8 +74,11 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = parser.parse_args(argv)
     payload = run_sweep(args)
 
+    results = payload.get("results", []) if isinstance(payload.get("results", []), list) else []
     failed = int(payload.get("failed_count", 0) or 0)
-    total = int(payload.get("result_count", len(payload.get("results", []))) or 0)
+    if failed == 0 and results:
+        failed = sum(1 for row in results if row.get("status") == "failed")
+    total = int(payload.get("result_count", len(results)) or 0)
     results_path = Path(payload.get("experiment_dir", args.out)) / "results.json"
     if failed:
         print(f"[WARN] Sweep completed: {total} records, {failed} failed")

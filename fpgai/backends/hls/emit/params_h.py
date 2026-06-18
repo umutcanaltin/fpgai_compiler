@@ -361,8 +361,28 @@ def emit_params_h(
         weights_mode
     ).strip().lower()
 
-    if normalized_mode == "embedded":
+    if normalized_mode in {
+        "embedded",
+        "stream",
+        "streamed",
+        "ddr",
+        "dma_ddr",
+    }:
         parameter_index = 0
+        const_qualifier = "const " if normalized_mode == "embedded" else ""
+
+        if normalized_mode in {"stream", "streamed"}:
+            lines.append(
+                "// Runtime parameters are loaded through the AXI weight stream "
+                "into mutable W*/B* storage."
+            )
+            lines.append("")
+        elif normalized_mode in {"ddr", "dma_ddr"}:
+            lines.append(
+                "// Runtime parameters are loaded through an m_axi DDR pointer "
+                "into mutable W*/B* storage."
+            )
+            lines.append("")
 
         for graph_index, op in enumerate(
             graph.ops
@@ -406,13 +426,13 @@ def emit_params_h(
                 )
 
             lines.append(
-                f"extern const "
+                f"extern {const_qualifier}"
                 f"{precision_tag}_wgt_t "
                 f"W{parameter_index}"
                 f"[{weight_count}];"
             )
             lines.append(
-                f"extern const "
+                f"extern {const_qualifier}"
                 f"{precision_tag}_bias_t "
                 f"B{parameter_index}"
                 f"[{bias_count}];"
@@ -420,26 +440,6 @@ def emit_params_h(
             lines.append("")
 
             parameter_index += 1
-
-    elif normalized_mode in {
-        "stream",
-        "streamed",
-    }:
-        lines.append(
-            "// Parameters are loaded through "
-            "the runtime weight stream."
-        )
-        lines.append("")
-
-    elif normalized_mode in {
-        "ddr",
-        "dma_ddr",
-    }:
-        lines.append(
-            "// DDR parameter declarations are "
-            "provided by the runtime backend."
-        )
-        lines.append("")
 
     else:
         raise ValueError(
@@ -466,3 +466,51 @@ def emit_params_h_stub(
         graph,
         weights_mode=weights_mode,
     )
+
+# Sprint 11D source fix: non-embedded runtime modes still need visible
+# W*/B* declarations because generated deeplearn.cpp loads runtime values
+# into these arrays and then passes them to the existing layer kernels.
+_fpgai_runtime_defs_previous_emit_params_h = emit_params_h
+
+
+def emit_params_h(graph, *, weights_mode: str = "embedded") -> str:
+    normalized_mode = str(weights_mode).strip().lower()
+    if normalized_mode == "embedded":
+        return _fpgai_runtime_defs_previous_emit_params_h(graph, weights_mode=weights_mode)
+    if normalized_mode not in {"stream", "streamed", "ddr", "dma_ddr"}:
+        raise ValueError(f"Unsupported weights mode: {weights_mode!r}")
+
+    lines: List[str] = [
+        "#pragma once",
+        '#include "fpgai_types.h"',
+        "",
+        "namespace fpgai {",
+        "",
+        "// Runtime weight storage declarations.",
+        "// Values are loaded from stream/DDR interfaces by deeplearn.cpp.",
+    ]
+
+    parameter_index = 0
+    for graph_index, op in enumerate(graph.ops):
+        if op.op_type not in {"Conv", "Dense"}:
+            continue
+        precision_tag = _precision_tag(op, graph_index)
+        if op.op_type == "Conv":
+            weight_count, bias_count = _conv_sizes(graph, op)
+        else:
+            weight_count, bias_count = _dense_sizes(graph, op)
+        if weight_count <= 0:
+            raise ValueError(f"{op.op_type} weights could not be resolved for op {op.name!r}")
+        if bias_count <= 0:
+            raise ValueError(f"{op.op_type} bias size could not be resolved for op {op.name!r}")
+        lines.append(f"extern {precision_tag}_wgt_t W{parameter_index}[{weight_count}];")
+        lines.append(f"extern {precision_tag}_bias_t B{parameter_index}[{bias_count}];")
+        lines.append("")
+        parameter_index += 1
+
+    lines.extend(["} // namespace fpgai", ""])
+    return "\n".join(lines)
+
+
+def emit_params_h_stub(graph, *, weights_mode: str = "embedded") -> str:
+    return emit_params_h(graph, weights_mode=weights_mode)

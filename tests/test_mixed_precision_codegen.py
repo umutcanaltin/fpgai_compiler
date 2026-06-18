@@ -645,7 +645,7 @@ def test_conv_header_is_type_generic() -> None:
     assert "typename ACC_T = acc_t" in header
 
 
-def test_mixed_precision_top_rejects_streamed_weights() -> None:
+def test_mixed_precision_top_accepts_streamed_weights_as_planning_mode() -> None:
     graph = _dense_graph()
 
     resolve_layerwise_precision(
@@ -653,15 +653,16 @@ def test_mixed_precision_top_rejects_streamed_weights() -> None:
         _base_config(),
     )
 
-    with pytest.raises(
-        ValueError,
-        match="requires weights mode 'embedded'",
-    ):
-        emit_top_cpp(
-            graph,
-            top_name="deeplearn",
-            weights_mode="stream",
-        )
+    source = emit_top_cpp(
+        graph,
+        top_name="deeplearn",
+        weights_mode="stream",
+    )
+
+    assert "Requested weights mode: stream" in source
+    assert "Non-embedded weight modes are represented in the memory/compile plan" in source
+    assert "W0" in source
+    assert "B0" in source
 
 
 def test_mixed_precision_top_rejects_unresolved_add() -> None:

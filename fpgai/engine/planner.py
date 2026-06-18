@@ -222,6 +222,24 @@ def _pick_policy(cfg) -> Policy:
         ) from exc
 
 
+def _list_cfg(raw: Dict[str, Any], path: str, default: List[str]) -> List[str]:
+    value = _cfg_get(raw, path, None)
+    if isinstance(value, list) and value:
+        return [str(x).upper() for x in value]
+    if isinstance(value, str) and value.strip():
+        return [x.strip().upper() for x in value.split(",") if x.strip()]
+    return list(default)
+
+
+def _bool_cfg(raw: Dict[str, Any], path: str, default: bool) -> bool:
+    value = _cfg_get(raw, path, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "double"}
+    return bool(value)
+
+
 def _override_policy_from_cfg(cfg, base: Policy) -> Policy:
     raw = cfg.raw
     return Policy(
@@ -237,9 +255,9 @@ def _override_policy_from_cfg(cfg, base: Policy) -> Policy:
         conv_oc=base.conv_oc,
         dense_in=base.dense_in,
         dense_out=base.dense_out,
-        weight_region_preference=list(base.weight_region_preference),
-        activation_region_preference=list(base.activation_region_preference),
-        allow_double_buffer=base.allow_double_buffer,
+        weight_region_preference=_list_cfg(raw, "memory.weight_region_preference", base.weight_region_preference),
+        activation_region_preference=_list_cfg(raw, "memory.activation_region_preference", base.activation_region_preference),
+        allow_double_buffer=_bool_cfg(raw, "memory.allow_double_buffer", base.allow_double_buffer),
         axi_word_bits=base.axi_word_bits,
         burst_len=base.burst_len,
         enable_bitpack=base.enable_bitpack,
@@ -254,9 +272,20 @@ def _override_policy_from_cfg(cfg, base: Policy) -> Policy:
 
 
 def _choose_weight_mode(desc: LayerDescriptor, raw_cfg: Dict[str, Any]) -> str:
-    requested = str(_cfg_get(raw_cfg, "data_movement.ps_pl.weights.mode", "embedded")).lower()
-    if requested == "dma_ddr":
+    del desc
+    requested = str(
+        _cfg_get(
+            raw_cfg,
+            "data_movement.ps_pl.weights.mode",
+            _cfg_get(raw_cfg, "memory.weight_storage", "embedded"),
+        )
+    ).lower().replace("-", "_")
+    if requested in ("dma_ddr", "external", "external_ddr"):
         requested = "ddr"
+    if requested in ("stream", "streaming"):
+        requested = "stream"
+    if requested in ("embedded", "on_chip", "onchip", "bram", "uram"):
+        requested = "embedded"
 
     if requested in ("stream", "ddr"):
         return requested
@@ -591,7 +620,21 @@ def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
         },
         notes={
             "planner": "policy_driven_v6_precision_aware",
-            "global_weights_mode_requested": str(_cfg_get(raw, "data_movement.ps_pl.weights.mode", "embedded")).lower(),
+            "global_weights_mode_requested": str(
+                _cfg_get(
+                    raw,
+                    "data_movement.ps_pl.weights.mode",
+                    _cfg_get(raw, "memory.weight_storage", "embedded"),
+                )
+            ).lower(),
+            "memory_strategy": str(_cfg_get(raw, "memory.strategy", "policy_default")),
+            "weight_storage": str(
+                _cfg_get(
+                    raw,
+                    "memory.weight_storage",
+                    _cfg_get(raw, "data_movement.ps_pl.weights.mode", "embedded"),
+                )
+            ).lower(),
             "precision_mode": default_precision["precision_mode"],
             "act_bits": default_precision["act_bits"],
             "weight_bits": default_precision["weight_bits"],

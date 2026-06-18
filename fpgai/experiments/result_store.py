@@ -89,10 +89,16 @@ class ResultStore:
 
     def materialize(self) -> None:
         records = self.load_records()
+        passed_count = sum(1 for row in records if row.get("status") == "passed")
+        failed_count = sum(1 for row in records if row.get("status") == "failed")
+        skipped_count = sum(1 for row in records if row.get("status") == "skipped")
         payload = {
             "schema_version": 1,
             "experiment_dir": str(self.experiment_dir),
             "result_count": len(records),
+            "passed_count": passed_count,
+            "failed_count": failed_count,
+            "skipped_count": skipped_count,
             "results": records,
         }
         self.results_path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=_json_default), encoding="utf-8")

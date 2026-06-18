@@ -687,10 +687,10 @@ def emit_top_cpp(
         weights_mode
     ).strip().lower()
 
-    if normalized_weights_mode != "embedded":
+    if normalized_weights_mode not in {"embedded", "stream", "ddr", "dma_ddr"}:
         raise ValueError(
-            "Mixed-precision inference currently "
-            "requires weights mode 'embedded'"
+            "Unsupported weights mode for mixed-precision inference: "
+            f"{weights_mode!r}"
         )
 
     plan_by_name = _plan_map(
@@ -780,6 +780,15 @@ def emit_top_cpp(
         "#pragma HLS INTERFACE axis port=out_stream",
         "#pragma HLS INTERFACE s_axilite "
         "port=return bundle=control",
+        "",
+        f"    // Requested weights mode: {normalized_weights_mode}",
+        (
+            "    // Non-embedded weight modes are represented in the memory/compile plan; "
+            "current generated HLS keeps the existing parameter arrays unless a backend "
+            "emits explicit runtime weight ports."
+            if normalized_weights_mode != "embedded"
+            else "    // Embedded weights mode: parameters are compiled into fpgai_params."
+        ),
         "",
     ]
 
@@ -1420,3 +1429,244 @@ def emit_top_cpp(*args, **kwargs):
         graph,
         compile_plan,
     )
+
+
+# FPGAI Sprint 11D runtime stream/DDR wrapper v2
+# ------------------------------------------------
+# The base mixed-precision top emitter already generates layer calls that use
+# W*/B* arrays.  For non-embedded weight-storage modes we keep those arrays as
+# runtime-loaded static storage, and rewrite the top-level HLS interface so the
+# arrays are populated from an AXI weight stream or an m_axi DDR pointer.
+_fpgai_sprint11d_previous_emit_top_cpp = emit_top_cpp
+
+
+def _fpgai_s11d_tensor_numel(graph, tensor_name):
+    if not tensor_name:
+        return 0
+    constants = getattr(graph, "constants", {}) or {}
+    if tensor_name in constants:
+        return int(np.asarray(constants[tensor_name]).size)
+    params = getattr(graph, "params", {}) or {}
+    if tensor_name in params:
+        return int(np.asarray(params[tensor_name]).size)
+    try:
+        tensor = graph.get_tensor(tensor_name)
+    except Exception:
+        tensor = None
+    if tensor is not None:
+        shape = getattr(tensor, "shape", None)
+        if shape:
+            count = 1
+            for dim in shape:
+                count *= int(dim)
+            return int(count)
+        data = getattr(tensor, "data", None)
+        if data is not None:
+            return int(np.asarray(data).size)
+    return 0
+
+
+def _fpgai_s11d_tensor_shape(graph, tensor_name):
+    if not tensor_name:
+        return None
+    constants = getattr(graph, "constants", {}) or {}
+    if tensor_name in constants:
+        return tuple(int(x) for x in np.asarray(constants[tensor_name]).shape)
+    params = getattr(graph, "params", {}) or {}
+    if tensor_name in params:
+        return tuple(int(x) for x in np.asarray(params[tensor_name]).shape)
+    try:
+        tensor = graph.get_tensor(tensor_name)
+    except Exception:
+        tensor = None
+    if tensor is not None and getattr(tensor, "shape", None):
+        return tuple(int(x) for x in tensor.shape)
+    return None
+
+
+def _fpgai_s11d_runtime_weight_specs(graph):
+    specs = []
+    parameter_index = 0
+    for graph_index, op in enumerate(getattr(graph, "ops", []) or []):
+        if op.op_type not in {"Conv", "Dense"}:
+            continue
+        precision_tag = _precision_tag(op, graph_index)
+        weight_count = 0
+        bias_count = 0
+        if len(op.inputs) > 1:
+            weight_count = _fpgai_s11d_tensor_numel(graph, op.inputs[1])
+        if len(op.inputs) > 2:
+            bias_count = _fpgai_s11d_tensor_numel(graph, op.inputs[2])
+        if weight_count <= 0 and op.op_type == "Dense":
+            in_features = int((getattr(op, "attrs", {}) or {}).get("in_features", 0) or 0)
+            out_features = int((getattr(op, "attrs", {}) or {}).get("out_features", 0) or 0)
+            if in_features > 0 and out_features > 0:
+                weight_count = in_features * out_features
+                if bias_count <= 0:
+                    bias_count = out_features
+        if bias_count <= 0 and op.op_type == "Conv" and len(op.inputs) > 1:
+            shape = _fpgai_s11d_tensor_shape(graph, op.inputs[1])
+            if shape:
+                bias_count = int(shape[0])
+        if weight_count <= 0:
+            raise ValueError(f"Runtime weight count could not be resolved for {op.op_type} op {op.name!r}")
+        if bias_count <= 0:
+            raise ValueError(f"Runtime bias count could not be resolved for {op.op_type} op {op.name!r}")
+        specs.append({
+            "index": parameter_index,
+            "tag": precision_tag,
+            "weight_count": int(weight_count),
+            "bias_count": int(bias_count),
+            "op_name": str(getattr(op, "name", f"param{parameter_index}")),
+            "op_type": str(getattr(op, "op_type", "Unknown")),
+        })
+        parameter_index += 1
+    return specs
+
+
+def _fpgai_s11d_helper_source() -> str:
+    return """
+template<typename T, int N>
+static void fpgai_load_stream_vector(hls::stream<axis_t>& weight_stream, T out[N]) {
+#pragma HLS INLINE off
+    for (int i = 0; i < N; ++i) {
+#pragma HLS PIPELINE II=1
+        axis_t packet = weight_stream.read();
+        out[i] = bits_to_value<T>(packet.data.to_uint());
+    }
+}
+
+template<typename T, int N>
+static void fpgai_load_ddr_vector(const ap_uint<32>* weights_mem, int base, T out[N]) {
+#pragma HLS INLINE off
+    for (int i = 0; i < N; ++i) {
+#pragma HLS PIPELINE II=1
+        out[i] = bits_to_value<T>(weights_mem[base + i].to_uint());
+    }
+}
+"""
+
+
+def _fpgai_s11d_runtime_body(specs, mode: str) -> str:
+    lines = []
+    lines.append("    // Runtime weight storage generated by FPGAI Sprint 11D.")
+    lines.append("    // Mutable W*/B* arrays are declared in fpgai_params.h and defined in fpgai_params.cpp.")
+    for spec in specs:
+        i = spec["index"]
+        wc = spec["weight_count"]
+        bc = spec["bias_count"]
+        lines.append(f"    // {spec['op_type']} {spec['op_name']}: W{i}[{wc}], B{i}[{bc}]")
+    if mode in {"stream", "streamed"}:
+        lines.append("    if (mode == 0) {")
+        for spec in specs:
+            i = spec["index"]
+            tag = spec["tag"]
+            lines.append(f"        fpgai_load_stream_vector<{tag}_wgt_t, {spec['weight_count']}>(weight_stream, W{i});")
+            lines.append(f"        fpgai_load_stream_vector<{tag}_bias_t, {spec['bias_count']}>(weight_stream, B{i});")
+        lines.append("        return;")
+        lines.append("    }")
+        lines.append("    // mode != 0: use previously loaded runtime weights for inference.")
+    else:
+        lines.append("    int fpgai_weight_offset = 0;")
+        for spec in specs:
+            i = spec["index"]
+            tag = spec["tag"]
+            wc = spec["weight_count"]
+            bc = spec["bias_count"]
+            lines.append(f"    fpgai_load_ddr_vector<{tag}_wgt_t, {wc}>(weights_mem, fpgai_weight_offset, W{i});")
+            lines.append(f"    fpgai_weight_offset += {wc};")
+            lines.append(f"    fpgai_load_ddr_vector<{tag}_bias_t, {bc}>(weights_mem, fpgai_weight_offset, B{i});")
+            lines.append(f"    fpgai_weight_offset += {bc};")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _fpgai_s11d_rewrite_signature(source: str, *, top_name: str, mode: str) -> str:
+    if "#include <ap_int.h>" not in source:
+        source = source.replace("#include <ap_axi_sdata.h>", "#include <ap_axi_sdata.h>\n#include <ap_int.h>")
+    helper = _fpgai_s11d_helper_source()
+    marker = f'extern "C" void {top_name}('
+    if helper not in source:
+        source = source.replace(marker, helper + "\n" + marker, 1)
+    old_sig = (
+        f'extern "C" void {top_name}(\n'
+        "    hls::stream<axis_t>& in_stream,\n"
+        "    hls::stream<axis_t>& out_stream\n"
+        ") {\n"
+        "#pragma HLS INTERFACE axis port=in_stream\n"
+        "#pragma HLS INTERFACE axis port=out_stream\n"
+        "#pragma HLS INTERFACE s_axilite port=return bundle=control\n"
+    )
+    if mode in {"stream", "streamed"}:
+        new_sig = (
+            f'extern "C" void {top_name}(\n'
+            "    hls::stream<axis_t>& in_stream,\n"
+            "    hls::stream<axis_t>& out_stream,\n"
+            "    hls::stream<axis_t>& weight_stream,\n"
+            "    int mode\n"
+            ") {\n"
+            "#pragma HLS INTERFACE axis port=in_stream\n"
+            "#pragma HLS INTERFACE axis port=out_stream\n"
+            "#pragma HLS INTERFACE axis port=weight_stream\n"
+            "#pragma HLS INTERFACE s_axilite port=mode bundle=control\n"
+            "#pragma HLS INTERFACE s_axilite port=return bundle=control\n"
+        )
+    else:
+        new_sig = (
+            f'extern "C" void {top_name}(\n'
+            "    hls::stream<axis_t>& in_stream,\n"
+            "    hls::stream<axis_t>& out_stream,\n"
+            "    const ap_uint<32>* weights_mem\n"
+            ") {\n"
+            "#pragma HLS INTERFACE axis port=in_stream\n"
+            "#pragma HLS INTERFACE axis port=out_stream\n"
+            "#pragma HLS INTERFACE m_axi port=weights_mem offset=slave bundle=gmem_weights\n"
+            "#pragma HLS INTERFACE s_axilite port=weights_mem bundle=control\n"
+            "#pragma HLS INTERFACE s_axilite port=return bundle=control\n"
+        )
+    if old_sig not in source:
+        raise ValueError("Could not rewrite generated top signature for runtime weights")
+    return source.replace(old_sig, new_sig, 1)
+
+
+def _fpgai_s11d_insert_runtime_body(source: str, specs, mode: str) -> str:
+    body = _fpgai_s11d_runtime_body(specs, mode)
+    anchor = "#pragma HLS INTERFACE s_axilite port=return bundle=control\n\n"
+    if anchor not in source:
+        raise ValueError("Could not find top pragma anchor for runtime weight body")
+    return source.replace(anchor, anchor + body, 1)
+
+
+def emit_top_cpp(*args, **kwargs):
+    weights_mode = str(kwargs.get("weights_mode", "embedded")).strip().lower()
+    source = _fpgai_sprint11d_previous_emit_top_cpp(*args, **kwargs)
+    if weights_mode not in {"stream", "streamed", "ddr", "dma_ddr"}:
+        return source
+
+    # The original emitter may itself already be a *args/**kwargs wrapper from
+    # earlier compatibility patches.  In that case inspect.signature() binds the
+    # first positional argument under the synthetic name "args", not "graph".
+    # Recover the graph directly from the positional call used throughout the
+    # tests and CLI code: emit_top_cpp(graph, top_name=..., weights_mode=...).
+    graph = kwargs.get("graph")
+    if graph is None and args:
+        graph = args[0]
+
+    top_name = kwargs.get("top_name")
+    if top_name is None:
+        try:
+            import inspect
+            bound = inspect.signature(_fpgai_sprint11d_previous_emit_top_cpp).bind_partial(*args, **kwargs)
+            graph = graph or bound.arguments.get("graph")
+            top_name = bound.arguments.get("top_name")
+        except Exception:
+            pass
+    if top_name is None:
+        top_name = "deeplearn"
+    if graph is None:
+        raise ValueError("Runtime weight top emission requires graph")
+
+    specs = _fpgai_s11d_runtime_weight_specs(graph)
+    source = _fpgai_s11d_rewrite_signature(source, top_name=top_name, mode=weights_mode)
+    source = _fpgai_s11d_insert_runtime_body(source, specs, weights_mode)
+    return source
