@@ -42,7 +42,7 @@ from fpgai.backends.hls.emit.layers_conv import emit_conv_h, emit_conv_cpp
 from fpgai.backends.hls.emit.layers_pool import emit_pool_h, emit_pool_cpp
 from fpgai.backends.hls.emit.layers_activations import emit_activations_h, emit_activations_cpp
 from fpgai.backends.hls.emit.layers_batchnorm import emit_batchnorm_h, emit_batchnorm_cpp
-from fpgai.backends.hls.emit.params_h import emit_params_h
+from fpgai.backends.hls.emit.params_h import emit_params_h, _conv_sizes, _dense_sizes
 from fpgai.backends.hls.emit.params_cpp import emit_params_cpp
 from fpgai.backends.hls.emit.weights_runtime_h import emit_weights_runtime_h
 from fpgai.backends.hls.emit.weights_runtime_cpp import emit_weights_runtime_cpp
@@ -53,6 +53,34 @@ from fpgai.backends.hls.testbench_train import emit_tb_train_cpp
 
 
 _cfg_get = get_path
+
+
+def _runtime_weight_word_count(graph) -> int:
+    """Return the number of 32-bit runtime words required by stream/DDR weight modes.
+
+    This must match the generated W*/B* arrays in params_h/params_cpp/top_cpp.
+    Conv and Dense inference kernels always consume both weight and bias arrays;
+    bias-free layers use generated zero-bias arrays, so bias words are counted too.
+    """
+    total = 0
+    for op in getattr(graph, "ops", []):
+        if op.op_type == "Conv":
+            weight_count, bias_count = _conv_sizes(graph, op)
+        elif op.op_type == "Dense":
+            weight_count, bias_count = _dense_sizes(graph, op)
+        else:
+            continue
+
+        if weight_count <= 0:
+            raise ValueError(
+                f"Runtime weight preload could not resolve weights for {op.op_type} op {getattr(op, 'name', '<unnamed>')!r}"
+            )
+        if bias_count <= 0:
+            raise ValueError(
+                f"Runtime weight preload could not resolve bias size for {op.op_type} op {getattr(op, 'name', '<unnamed>')!r}"
+            )
+        total += int(weight_count) + int(bias_count)
+    return int(total)
 
 
 @dataclass
@@ -614,74 +642,16 @@ class Compiler:
         write_text(layers_inc_dir / "batchnorm.h", emit_batchnorm_h())
         write_text(layers_src_dir / "batchnorm.cpp", emit_batchnorm_cpp())
 
-        normalized_weights_mode = str(weights_mode).strip().lower()
-        runtime_weight_mode = normalized_weights_mode in {
-            "stream",
-            "streamed",
-            "ddr",
-            "dma_ddr",
-        }
-
-        if runtime_weight_mode:
+        if weights_mode in ("stream", "streamed", "ddr", "dma_ddr"):
             write_text(inc_dir / "weights_runtime.h", emit_weights_runtime_h(g))
             write_text(src_dir / "weights_runtime.cpp", emit_weights_runtime_cpp(g))
-            write_text(inc_dir / "fpgai_params.h", emit_params_h(g, weights_mode=normalized_weights_mode))
-            write_text(src_dir / "fpgai_params.cpp", emit_params_cpp(g, weights_mode=normalized_weights_mode))
+            write_text(inc_dir / "fpgai_params.h", emit_params_h(g, weights_mode=weights_mode))
+            write_text(src_dir / "fpgai_params.cpp", emit_params_cpp(g, weights_mode=weights_mode))
         else:
             write_text(inc_dir / "fpgai_params.h", emit_params_h(g, weights_mode="embedded"))
             write_text(src_dir / "fpgai_params.cpp", emit_params_cpp(g, weights_mode="embedded"))
 
         input_bin = str((out_dir / "input.bin").resolve())
-
-        def _inference_param_numel(name: str) -> int:
-            if not name:
-                return 0
-            if hasattr(g, "constants") and name in getattr(g, "constants", {}):
-                return int(np.asarray(g.constants[name]).size)
-            if hasattr(g, "params") and name in getattr(g, "params", {}):
-                return int(np.asarray(g.params[name]).size)
-            try:
-                tensor = g.get_tensor(name)
-            except Exception:
-                tensor = None
-            if tensor is not None:
-                shape = getattr(tensor, "shape", None)
-                if shape:
-                    return int(np.prod(tuple(int(v) for v in shape)))
-                for attr_name in ("data", "initializer", "value", "values"):
-                    if hasattr(tensor, attr_name):
-                        value = getattr(tensor, attr_name)
-                        if value is not None:
-                            try:
-                                return int(np.asarray(value).size)
-                            except Exception:
-                                pass
-            return 0
-
-        def _runtime_inference_weight_words() -> int:
-            total = 0
-            for op in getattr(g, "ops", []) or []:
-                if op.op_type not in {"Conv", "Dense"}:
-                    continue
-                weight_count = _inference_param_numel(op.inputs[1]) if len(op.inputs) > 1 else 0
-                bias_count = _inference_param_numel(op.inputs[2]) if len(op.inputs) > 2 else 0
-                if weight_count <= 0 and op.op_type == "Dense":
-                    in_f = int((getattr(op, "attrs", {}) or {}).get("in_features") or 0)
-                    out_f = int((getattr(op, "attrs", {}) or {}).get("out_features") or 0)
-                    if in_f > 0 and out_f > 0:
-                        weight_count = in_f * out_f
-                        if bias_count <= 0:
-                            bias_count = out_f
-                if bias_count <= 0 and op.op_type == "Conv" and len(op.inputs) > 1:
-                    try:
-                        tensor = g.get_tensor(op.inputs[1])
-                    except Exception:
-                        tensor = None
-                    shape = getattr(tensor, "shape", None) if tensor is not None else None
-                    if shape:
-                        bias_count = int(shape[0])
-                total += max(0, int(weight_count)) + max(0, int(bias_count))
-            return int(total)
 
         if pipeline_mode == "training_on_device":
             write_text(
@@ -861,13 +831,19 @@ class Compiler:
                 out_shape = out_shape[1:]
             out_words = int(np.prod(out_shape)) if out_shape else 1
 
+            runtime_weight_words = (
+                _runtime_weight_word_count(g)
+                if str(weights_mode).strip().lower() in {"stream", "streamed", "ddr", "dma_ddr"}
+                else 0
+            )
+
             emit_tb_cpp(
                 src_dir,
                 top_name=top_name,
                 in_words=in_words,
                 out_words=out_words,
                 weights_mode=weights_mode,
-                weight_words=_runtime_inference_weight_words() if runtime_weight_mode else 0,
+                weight_words=runtime_weight_words,
             )
 
             write_text(

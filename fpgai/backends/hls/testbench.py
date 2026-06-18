@@ -12,12 +12,10 @@ def emit_tb_cpp(
     weight_words: int = 0,
 ) -> None:
     tb_path = tb_dir / "tb.cpp"
-    normalized_mode = str(weights_mode).strip().lower()
-    runtime_stream = normalized_mode in {"stream", "streamed"}
-    runtime_ddr = normalized_mode in {"ddr", "dma_ddr"}
+    mode = str(weights_mode).strip().lower()
 
-    if runtime_stream:
-        tb_text = f'''
+    if mode in {"stream", "streamed"}:
+        tb_text = f"""
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -25,7 +23,6 @@ def emit_tb_cpp(
 #include <hls_stream.h>
 #include <ap_axi_sdata.h>
 
-// FPGAI runtime-weight stream testbench.
 typedef ap_axis<32,0,0,0> axis_t;
 
 extern "C" void {top_name}(
@@ -78,6 +75,7 @@ int main(int argc, char** argv) {{
         float v = 0.001f * (float)(i + 1);
         push_f32(weight_stream, v, i == weight_words - 1);
     }}
+
     {top_name}(in_stream, out_stream, weight_stream, 0);
 
     for (int i = 0; i < n_floats; i++) {{
@@ -104,9 +102,9 @@ int main(int argc, char** argv) {{
     printf("[TB] Wrote output.bin\\n");
     return 0;
 }}
-'''
-    elif runtime_ddr:
-        tb_text = f'''
+"""
+    elif mode in {"ddr", "dma_ddr"}:
+        tb_text = f"""
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -115,7 +113,6 @@ int main(int argc, char** argv) {{
 #include <ap_axi_sdata.h>
 #include <ap_int.h>
 
-// FPGAI runtime-weight DDR testbench.
 typedef ap_axis<32,0,0,0> axis_t;
 
 extern "C" void {top_name}(
@@ -124,7 +121,7 @@ extern "C" void {top_name}(
     const ap_uint<32>* weights_mem
 );
 
-static void push_f32(hls::stream<axis_t>& s, float v, bool last=false) {{
+static axis_t make_axis_f32(float v, bool last=false) {{
     union {{ float f; unsigned int i; }} u;
     u.f = v;
 
@@ -133,10 +130,10 @@ static void push_f32(hls::stream<axis_t>& s, float v, bool last=false) {{
     pkt.keep = -1;
     pkt.strb = -1;
     pkt.last = last ? 1 : 0;
-    s.write(pkt);
+    return pkt;
 }}
 
-static ap_uint<32> f32_to_bits(float v) {{
+static ap_uint<32> make_word_f32(float v) {{
     union {{ float f; unsigned int i; }} u;
     u.f = v;
     return ap_uint<32>(u.i);
@@ -163,19 +160,19 @@ int main(int argc, char** argv) {{
 
     printf("[TB] Loaded %d inputs from %s\\n", n_floats, in_path);
 
-    const int weight_words = {int(weight_words)};
-    std::vector<ap_uint<32> > weights_mem(weight_words > 0 ? weight_words : 1);
-    printf("[TB] Preparing %d runtime weight words in DDR buffer...\\n", weight_words);
-    for (int i = 0; i < weight_words; i++) {{
-        float v = 0.001f * (float)(i + 1);
-        weights_mem[i] = f32_to_bits(v);
-    }}
-
     hls::stream<axis_t> in_stream;
     hls::stream<axis_t> out_stream;
 
+    const int weight_words = {int(weight_words)};
+    printf("[TB] Preparing %d runtime weight words in DDR buffer...\\n", weight_words);
+    std::vector<ap_uint<32> > weights_mem(weight_words);
+    for (int i = 0; i < weight_words; i++) {{
+        float v = 0.001f * (float)(i + 1);
+        weights_mem[i] = make_word_f32(v);
+    }}
+
     for (int i = 0; i < n_floats; i++) {{
-        push_f32(in_stream, input_data[i], i == n_floats - 1);
+        in_stream.write(make_axis_f32(input_data[i], i == n_floats - 1));
     }}
 
     printf("[TB] Running inference...\\n");
@@ -198,9 +195,9 @@ int main(int argc, char** argv) {{
     printf("[TB] Wrote output.bin\\n");
     return 0;
 }}
-'''
+"""
     else:
-        tb_text = f'''
+        tb_text = f"""
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
@@ -268,6 +265,6 @@ int main(int argc, char** argv) {{
     printf("[TB] Wrote output.bin\\n");
     return 0;
 }}
-'''
+"""
 
     tb_path.write_text(tb_text, encoding="utf-8")

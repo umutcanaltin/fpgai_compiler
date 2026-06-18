@@ -117,7 +117,7 @@ def test_planning_only_features_are_reported() -> None:
     statuses = _status_map(report)
 
     assert report.valid is False
-    assert statuses["tiling"] == PLANNING_ONLY
+    assert statuses["tiling"] == IMPLEMENTED
     assert statuses["partitioning"] == IMPLEMENTED
     assert statuses["buffering"] == PLANNING_ONLY
 
@@ -178,11 +178,11 @@ def test_training_specialization_is_implemented() -> None:
 def test_strict_mode_rejects_planning_only_options() -> None:
     with pytest.raises(
         ArchitectureCapabilityError,
-        match="tiling",
+        match="buffering",
     ):
         validate_architecture_capabilities(
             CompilePlan(
-                layer_plans=[_layer(tile=True)]
+                layer_plans=[_layer(buffering="double")]
             ),
             strict=True,
         )

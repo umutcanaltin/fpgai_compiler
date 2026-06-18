@@ -1,0 +1,27 @@
+name: sprint11b_memory_strategy
+command_template: python main.py benchmark --config {config_path}
+materialize_configs:
+  enabled: true
+  directory: configs
+  strip_unknown_top_level_sections: true
+  canonicalize_policy: true
+  strip_top_level_sections:
+    - notes
+  compiler_policy_names: true
+defaults:
+  base_config_path: fpgai.yml
+  config_path: fpgai.yml
+  model_path: models/cnn_mnist.onnx
+  board: kv260
+  policy: balanced
+  precision_mode: fx8_3
+design_name_template: memory_{memory_strategy}_{policy}
+parameters:
+  memory_strategy:
+    - on_chip
+    - streaming
+    - external_ddr
+    - bram_saver
+  policy:
+    - balanced
+    - latency_first
