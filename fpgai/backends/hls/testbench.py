@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 from pathlib import Path
 
 
@@ -22,7 +23,9 @@ def emit_tb_cpp(
 #include <fstream>
 #include <hls_stream.h>
 #include <ap_axi_sdata.h>
+#include "fpgai_params.h"
 
+using std::size_t;
 typedef ap_axis<32,0,0,0> axis_t;
 
 extern "C" void {top_name}(
@@ -69,13 +72,14 @@ int main(int argc, char** argv) {{
     hls::stream<axis_t> out_stream;
     hls::stream<axis_t> weight_stream;
 
-    const int weight_words = {int(weight_words)};
-    printf("[TB] Preloading %d runtime weight words through AXI stream...\\n", weight_words);
-    for (int i = 0; i < weight_words; i++) {{
-        float v = 0.001f * (float)(i + 1);
-        push_f32(weight_stream, v, i == weight_words - 1);
+    const int expected_weight_words = {int(weight_words)};
+    const int actual_weight_words = fpgai::fpgai_runtime_weight_word_count();
+    printf("[TB] Preloading %d runtime weight words through AXI stream...\\n", actual_weight_words);
+    if (expected_weight_words != 0 && expected_weight_words != actual_weight_words) {{
+        fprintf(stderr, "[TB] Error: expected %d runtime weight words, generated %d\\n", expected_weight_words, actual_weight_words);
+        return 2;
     }}
-
+    fpgai::fpgai_preload_runtime_weights(weight_stream);
     {top_name}(in_stream, out_stream, weight_stream, 0);
 
     for (int i = 0; i < n_floats; i++) {{
@@ -96,6 +100,10 @@ int main(int argc, char** argv) {{
     printf("[TB] Received %zu outputs.\\n", output_data.size());
 
     std::ofstream of("output.bin", std::ios::binary);
+    if (!of) {{
+        fprintf(stderr, "[TB] Error: Could not open output.bin for writing\\n");
+        return 3;
+    }}
     of.write(reinterpret_cast<const char*>(output_data.data()), output_data.size() * sizeof(float));
     of.close();
 
@@ -112,7 +120,9 @@ int main(int argc, char** argv) {{
 #include <hls_stream.h>
 #include <ap_axi_sdata.h>
 #include <ap_int.h>
+#include "fpgai_params.h"
 
+using std::size_t;
 typedef ap_axis<32,0,0,0> axis_t;
 
 extern "C" void {top_name}(
@@ -131,12 +141,6 @@ static axis_t make_axis_f32(float v, bool last=false) {{
     pkt.strb = -1;
     pkt.last = last ? 1 : 0;
     return pkt;
-}}
-
-static ap_uint<32> make_word_f32(float v) {{
-    union {{ float f; unsigned int i; }} u;
-    u.f = v;
-    return ap_uint<32>(u.i);
 }}
 
 int main(int argc, char** argv) {{
@@ -163,13 +167,15 @@ int main(int argc, char** argv) {{
     hls::stream<axis_t> in_stream;
     hls::stream<axis_t> out_stream;
 
-    const int weight_words = {int(weight_words)};
-    printf("[TB] Preparing %d runtime weight words in DDR buffer...\\n", weight_words);
-    std::vector<ap_uint<32> > weights_mem(weight_words);
-    for (int i = 0; i < weight_words; i++) {{
-        float v = 0.001f * (float)(i + 1);
-        weights_mem[i] = make_word_f32(v);
+    const int expected_weight_words = {int(weight_words)};
+    const int actual_weight_words = fpgai::fpgai_runtime_weight_word_count();
+    printf("[TB] Preparing %d runtime weight words in DDR buffer...\\n", actual_weight_words);
+    if (expected_weight_words != 0 && expected_weight_words != actual_weight_words) {{
+        fprintf(stderr, "[TB] Error: expected %d runtime weight words, generated %d\\n", expected_weight_words, actual_weight_words);
+        return 2;
     }}
+    std::vector<ap_uint<32> > weights_mem(actual_weight_words);
+    fpgai::fpgai_fill_runtime_weight_words(weights_mem.data(), actual_weight_words);
 
     for (int i = 0; i < n_floats; i++) {{
         in_stream.write(make_axis_f32(input_data[i], i == n_floats - 1));
@@ -189,6 +195,10 @@ int main(int argc, char** argv) {{
     printf("[TB] Received %zu outputs.\\n", output_data.size());
 
     std::ofstream of("output.bin", std::ios::binary);
+    if (!of) {{
+        fprintf(stderr, "[TB] Error: Could not open output.bin for writing\\n");
+        return 3;
+    }}
     of.write(reinterpret_cast<const char*>(output_data.data()), output_data.size() * sizeof(float));
     of.close();
 
@@ -205,6 +215,7 @@ int main(int argc, char** argv) {{
 #include <hls_stream.h>
 #include <ap_axi_sdata.h>
 
+using std::size_t;
 typedef ap_axis<32,0,0,0> axis_t;
 
 extern "C" void {top_name}(hls::stream<axis_t>& in, hls::stream<axis_t>& out);
@@ -259,6 +270,10 @@ int main(int argc, char** argv) {{
     printf("[TB] Received %zu outputs.\\n", output_data.size());
 
     std::ofstream of("output.bin", std::ios::binary);
+    if (!of) {{
+        fprintf(stderr, "[TB] Error: Could not open output.bin for writing\\n");
+        return 3;
+    }}
     of.write(reinterpret_cast<const char*>(output_data.data()), output_data.size() * sizeof(float));
     of.close();
 

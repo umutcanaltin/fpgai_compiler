@@ -4,7 +4,7 @@ from typing import List, Optional
 
 import numpy as np
 
-from .params_h import _conv_sizes, _dense_sizes
+from fpgai.backends.hls.emit.params_h import _conv_sizes, _dense_sizes
 
 
 WEIGHT_ATTR_KEYS = (
@@ -514,17 +514,25 @@ def emit_params_cpp(
     *,
     weights_mode: str = "embedded",
 ) -> str:
-    """Emit definitions for generated parameter arrays.
-
-    Embedded mode emits const initialized arrays from ONNX parameters. Runtime
-    modes emit mutable zero-initialized arrays. The generated top fills those
-    arrays from a stream or DDR pointer before invoking the existing kernels.
-    """
     normalized_mode = str(weights_mode).strip().lower()
-    if normalized_mode not in {"embedded", "stream", "streamed", "ddr", "dma_ddr"}:
-        raise ValueError(f"Unsupported weights mode: {weights_mode!r}")
 
-    is_runtime = normalized_mode in {"stream", "streamed", "ddr", "dma_ddr"}
+    if normalized_mode not in {
+        "embedded",
+        "stream",
+        "streamed",
+        "ddr",
+        "dma_ddr",
+    }:
+        raise ValueError(
+            f"Unsupported weights mode: {weights_mode!r}"
+        )
+
+    runtime_parameters = normalized_mode in {
+        "stream",
+        "streamed",
+        "ddr",
+        "dma_ddr",
+    }
 
     lines: List[str] = [
         '#include "fpgai_params.h"',
@@ -533,16 +541,135 @@ def emit_params_cpp(
         "",
     ]
 
-    if is_runtime:
+    if runtime_parameters:
         lines.append(
-            "// Mutable runtime parameter storage. Values are loaded by deeplearn()"
-        )
-        lines.append(
-            "// from the generated weight stream or DDR interface."
+            "// Mutable runtime parameter storage. Arrays are initialized from the "
+            "ONNX parameters so C-simulation and correctness benchmarking use "
+            "the same weights as the Python reference. The top function can "
+            "still overwrite them through AXI stream or DDR preload modes."
         )
         lines.append("")
 
+        preload_entries: list[tuple[str, str, int]] = []
+        parameter_index = 0
+        total_runtime_words = 0
+
+        for graph_index, op in enumerate(graph.ops):
+            if op.op_type not in {"Dense", "Conv"}:
+                continue
+
+            precision_tag = _precision_tag(op, graph_index)
+            weight_type = f"{precision_tag}_wgt_t"
+            bias_type = f"{precision_tag}_bias_t"
+
+            if op.op_type == "Dense":
+                (
+                    weight_array,
+                    bias_array,
+                    weight_source,
+                    bias_source,
+                ) = _resolve_dense_parameters(graph, op)
+            else:
+                (
+                    weight_array,
+                    bias_array,
+                    weight_source,
+                    bias_source,
+                ) = _resolve_conv_parameters(graph, op)
+
+            weight_array = np.asarray(weight_array).reshape(-1)
+            bias_array = np.asarray(bias_array).reshape(-1)
+
+            lines.append(f"// {op.op_type} layer {op.name!r}")
+            lines.append(f"// Weight source: {weight_source}")
+            lines.append(f"// Bias source: {bias_source}")
+            # Runtime arrays must be mutable, so do not emit const.
+            lines.append(
+                _format_array(f"W{parameter_index}", weight_type, weight_array).replace(
+                    f"const {weight_type}",
+                    weight_type,
+                    1,
+                )
+            )
+            lines.append(
+                _format_array(f"B{parameter_index}", bias_type, bias_array).replace(
+                    f"const {bias_type}",
+                    bias_type,
+                    1,
+                )
+            )
+            lines.append("")
+
+            preload_entries.append((f"W{parameter_index}", weight_type, int(weight_array.size)))
+            preload_entries.append((f"B{parameter_index}", bias_type, int(bias_array.size)))
+            total_runtime_words += int(weight_array.size) + int(bias_array.size)
+            parameter_index += 1
+
+        lines.extend(
+            [
+                "static unsigned int fpgai_value_to_bits_float(float value) {",
+                "    union { float f; unsigned int i; } u;",
+                "    u.f = value;",
+                "    return u.i;",
+                "}",
+                "",
+                "template <typename T>",
+                "static void fpgai_push_value(hls::stream<fpgai_axis_t>& weight_stream, T value, bool last) {",
+                "    fpgai_axis_t packet;",
+                "    packet.data = fpgai_value_to_bits_float((float)value);",
+                "    packet.keep = -1;",
+                "    packet.strb = -1;",
+                "    packet.last = last ? 1 : 0;",
+                "    weight_stream.write(packet);",
+                "}",
+                "",
+                "template <typename T>",
+                "static ap_uint<32> fpgai_pack_value(T value) {",
+                "    return ap_uint<32>(fpgai_value_to_bits_float((float)value));",
+                "}",
+                "",
+                "int fpgai_runtime_weight_word_count() {",
+                f"    return {total_runtime_words};",
+                "}",
+                "",
+                "void fpgai_preload_runtime_weights(hls::stream<fpgai_axis_t>& weight_stream) {",
+                "    int emitted = 0;",
+            ]
+        )
+
+        for symbol, _ctype, count in preload_entries:
+            lines.append(f"    for (int i = 0; i < {count}; ++i) {{")
+            lines.append(f"        const bool last = (emitted == {total_runtime_words - 1});")
+            lines.append(f"        fpgai_push_value(weight_stream, {symbol}[i], last);")
+            lines.append("        ++emitted;")
+            lines.append("    }")
+
+        lines.extend(
+            [
+                "}",
+                "",
+                "void fpgai_fill_runtime_weight_words(ap_uint<32>* weights_mem, int max_words) {",
+                "    int emitted = 0;",
+            ]
+        )
+
+        for symbol, _ctype, count in preload_entries:
+            lines.append(f"    for (int i = 0; i < {count} && emitted < max_words; ++i) {{")
+            lines.append(f"        weights_mem[emitted++] = fpgai_pack_value({symbol}[i]);")
+            lines.append("    }")
+
+        lines.extend(
+            [
+                "}",
+                "",
+                "} // namespace fpgai",
+                "",
+            ]
+        )
+        return "\n".join(lines)
+
     parameter_index = 0
+
     for graph_index, op in enumerate(graph.ops):
         if op.op_type not in {"Dense", "Conv"}:
             continue
@@ -551,32 +678,20 @@ def emit_params_cpp(
         weight_type = f"{precision_tag}_wgt_t"
         bias_type = f"{precision_tag}_bias_t"
 
-        if is_runtime:
-            if op.op_type == "Dense":
-                weight_count, bias_count = _dense_sizes(graph, op)
-            else:
-                weight_count, bias_count = _conv_sizes(graph, op)
-
-            if weight_count <= 0:
-                raise ValueError(
-                    f"{op.op_type} weights could not be resolved for op {op.name!r}"
-                )
-            if bias_count <= 0:
-                raise ValueError(
-                    f"{op.op_type} bias size could not be resolved for op {op.name!r}"
-                )
-
-            lines.append(f"// Runtime storage for {op.op_type} layer {op.name!r}")
-            lines.append(f"{weight_type} W{parameter_index}[{weight_count}] = {{}};")
-            lines.append(f"{bias_type} B{parameter_index}[{bias_count}] = {{}};")
-            lines.append("")
-            parameter_index += 1
-            continue
-
         if op.op_type == "Dense":
-            weight_array, bias_array, weight_source, bias_source = _resolve_dense_parameters(graph, op)
+            (
+                weight_array,
+                bias_array,
+                weight_source,
+                bias_source,
+            ) = _resolve_dense_parameters(graph, op)
         else:
-            weight_array, bias_array, weight_source, bias_source = _resolve_conv_parameters(graph, op)
+            (
+                weight_array,
+                bias_array,
+                weight_source,
+                bias_source,
+            ) = _resolve_conv_parameters(graph, op)
 
         lines.append(f"// {op.op_type} layer {op.name!r}")
         lines.append(f"// Weight source: {weight_source}")
@@ -584,6 +699,7 @@ def emit_params_cpp(
         lines.append(_format_array(f"W{parameter_index}", weight_type, weight_array))
         lines.append(_format_array(f"B{parameter_index}", bias_type, bias_array))
         lines.append("")
+
         parameter_index += 1
 
     lines.extend(["} // namespace fpgai", ""])

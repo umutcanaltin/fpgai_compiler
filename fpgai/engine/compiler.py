@@ -55,31 +55,24 @@ from fpgai.backends.hls.testbench_train import emit_tb_train_cpp
 _cfg_get = get_path
 
 
-def _runtime_weight_word_count(graph) -> int:
-    """Return the number of 32-bit runtime words required by stream/DDR weight modes.
+def _is_runtime_weight_mode(weights_mode: str) -> bool:
+    return str(weights_mode).strip().lower() in {
+        "stream",
+        "streamed",
+        "ddr",
+        "dma_ddr",
+    }
 
-    This must match the generated W*/B* arrays in params_h/params_cpp/top_cpp.
-    Conv and Dense inference kernels always consume both weight and bias arrays;
-    bias-free layers use generated zero-bias arrays, so bias words are counted too.
-    """
+
+def _runtime_weight_word_count(graph) -> int:
     total = 0
-    for op in getattr(graph, "ops", []):
+    for op in graph.ops:
         if op.op_type == "Conv":
             weight_count, bias_count = _conv_sizes(graph, op)
+            total += int(weight_count) + int(bias_count)
         elif op.op_type == "Dense":
             weight_count, bias_count = _dense_sizes(graph, op)
-        else:
-            continue
-
-        if weight_count <= 0:
-            raise ValueError(
-                f"Runtime weight preload could not resolve weights for {op.op_type} op {getattr(op, 'name', '<unnamed>')!r}"
-            )
-        if bias_count <= 0:
-            raise ValueError(
-                f"Runtime weight preload could not resolve bias size for {op.op_type} op {getattr(op, 'name', '<unnamed>')!r}"
-            )
-        total += int(weight_count) + int(bias_count)
+            total += int(weight_count) + int(bias_count)
     return int(total)
 
 
@@ -642,11 +635,20 @@ class Compiler:
         write_text(layers_inc_dir / "batchnorm.h", emit_batchnorm_h())
         write_text(layers_src_dir / "batchnorm.cpp", emit_batchnorm_cpp())
 
-        if weights_mode in ("stream", "streamed", "ddr", "dma_ddr"):
+        normalized_weights_mode = str(weights_mode).strip().lower()
+        runtime_weight_mode = _is_runtime_weight_mode(normalized_weights_mode)
+
+        if runtime_weight_mode:
             write_text(inc_dir / "weights_runtime.h", emit_weights_runtime_h(g))
             write_text(src_dir / "weights_runtime.cpp", emit_weights_runtime_cpp(g))
-            write_text(inc_dir / "fpgai_params.h", emit_params_h(g, weights_mode=weights_mode))
-            write_text(src_dir / "fpgai_params.cpp", emit_params_cpp(g, weights_mode=weights_mode))
+            write_text(
+                inc_dir / "fpgai_params.h",
+                emit_params_h(g, weights_mode=normalized_weights_mode),
+            )
+            write_text(
+                src_dir / "fpgai_params.cpp",
+                emit_params_cpp(g, weights_mode=normalized_weights_mode),
+            )
         else:
             write_text(inc_dir / "fpgai_params.h", emit_params_h(g, weights_mode="embedded"))
             write_text(src_dir / "fpgai_params.cpp", emit_params_cpp(g, weights_mode="embedded"))
@@ -833,7 +835,7 @@ class Compiler:
 
             runtime_weight_words = (
                 _runtime_weight_word_count(g)
-                if str(weights_mode).strip().lower() in {"stream", "streamed", "ddr", "dma_ddr"}
+                if runtime_weight_mode
                 else 0
             )
 
@@ -853,6 +855,7 @@ class Compiler:
                     part=part,
                     clk_period_ns=(1000.0 / clk_mhz),
                     input_bin_path=input_bin,
+                    output_bin_path=str((out_dir / "build" / "output.bin").resolve()),
                     weights_mode=weights_mode,
                     intermediate_dump=intermediate_dump,
                 ),

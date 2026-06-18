@@ -349,42 +349,55 @@ def emit_params_h(
     *,
     weights_mode: str = "embedded",
 ) -> str:
-    """Emit declarations for generated parameter arrays.
-
-    Embedded mode keeps the arrays const because they are compile-time
-    parameters. Runtime modes (stream/ddr/dma_ddr) still need mutable
-    backing arrays because the generated top loads runtime values into W*/B*
-    and existing layer kernels consume W*/B* symbols.
-    """
-    normalized_mode = str(weights_mode).strip().lower()
-    if normalized_mode not in {"embedded", "stream", "streamed", "ddr", "dma_ddr"}:
-        raise ValueError(f"Unsupported weights mode: {weights_mode!r}")
-
-    is_runtime = normalized_mode in {"stream", "streamed", "ddr", "dma_ddr"}
-
     lines: List[str] = [
         "#pragma once",
         '#include "fpgai_types.h"',
+        "#include <hls_stream.h>",
+        "#include <ap_axi_sdata.h>",
         "",
         "namespace fpgai {",
         "",
     ]
 
-    if is_runtime:
-        lines.append(
-            "// Runtime weight mode: mutable backing arrays loaded by the generated top."
+    normalized_mode = str(weights_mode).strip().lower()
+
+    if normalized_mode not in {
+        "embedded",
+        "stream",
+        "streamed",
+        "ddr",
+        "dma_ddr",
+    }:
+        raise ValueError(
+            f"Unsupported weights mode: {weights_mode!r}"
         )
-        lines.append(
-            "// The symbols remain W*/B* so existing generated layer calls can be reused."
-        )
+
+    mutable_runtime_parameters = normalized_mode in {
+        "stream",
+        "streamed",
+        "ddr",
+        "dma_ddr",
+    }
+
+    if mutable_runtime_parameters:
+        if normalized_mode in {"stream", "streamed"}:
+            lines.append(
+                "// Runtime parameters are preloaded through the AXI weight stream."
+            )
+        else:
+            lines.append(
+                "// Runtime parameters are loaded from the external DDR/m_axi weight buffer."
+            )
         lines.append("")
 
     parameter_index = 0
+
     for graph_index, op in enumerate(graph.ops):
         if op.op_type not in {"Conv", "Dense"}:
             continue
 
         precision_tag = _precision_tag(op, graph_index)
+
         if op.op_type == "Conv":
             weight_count, bias_count = _conv_sizes(graph, op)
         else:
@@ -394,23 +407,44 @@ def emit_params_h(
             raise ValueError(
                 f"{op.op_type} weights could not be resolved for op {op.name!r}"
             )
+
         if bias_count <= 0:
             raise ValueError(
                 f"{op.op_type} bias size could not be resolved for op {op.name!r}"
             )
 
-        qualifier = "" if is_runtime else "const "
+        qualifier = "extern" if mutable_runtime_parameters else "extern const"
+
         lines.append(
-            f"extern {qualifier}{precision_tag}_wgt_t W{parameter_index}[{weight_count}];"
+            f"{qualifier} {precision_tag}_wgt_t W{parameter_index}[{weight_count}];"
         )
         lines.append(
-            f"extern {qualifier}{precision_tag}_bias_t B{parameter_index}[{bias_count}];"
+            f"{qualifier} {precision_tag}_bias_t B{parameter_index}[{bias_count}];"
         )
         lines.append("")
+
         parameter_index += 1
 
-    lines.extend(["} // namespace fpgai", ""])
+    if mutable_runtime_parameters:
+        lines.extend(
+            [
+                "typedef ap_axis<32,0,0,0> fpgai_axis_t;",
+                "int fpgai_runtime_weight_word_count();",
+                "void fpgai_preload_runtime_weights(hls::stream<fpgai_axis_t>& weight_stream);",
+                "void fpgai_fill_runtime_weight_words(ap_uint<32>* weights_mem, int max_words);",
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            "} // namespace fpgai",
+            "",
+        ]
+    )
+
     return "\n".join(lines)
+
 
 def emit_params_h_stub(
     graph,
