@@ -51,14 +51,16 @@ def emit_tb_train_cpp(
 ) -> None:
     """Emit the Vitis HLS C-simulation testbench for training.
 
-    Sprint 13C:
-    - Keeps the Sprint 13B one-step path unchanged when epochs/train_steps=1 and batch_size=1.
-    - Supports runtime preload for stream/ddr modes from argv[3].
-    - Supports small multi-step smoke tests by repeating mode=2 training calls.
-    - Supports batch/microbatch replay by cycling through records in input.bin/target.bin.
+    Sprint 13D:
+    - Keeps Sprint 13C replay mode by default.
+    - Adds an accumulated-gradient CSim smoke mode for runtime-weight designs.
+    - In accumulated mode, gradients for each microbatch sample are computed from the same
+      base weights, averaged in the HLS testbench, and a reference SGD update is emitted.
 
-    This is a smoke-test path, not full accumulated mini-batch SGD. Each replayed sample
-    calls the training kernel once and therefore validates repeated stateful update execution.
+    Note: accumulated mode validates the generated HLS gradient path under mini-batch
+    semantics and emits averaged-gradient artifacts. The optimizer update is applied in
+    the CSim testbench artifact path; a later kernel-ABI sprint can move mode=4 optimizer
+    application into the HLS top itself.
     """
     del graph
 
@@ -92,6 +94,25 @@ def emit_tb_train_cpp(
             default=1,
         ),
         default=1,
+    )
+
+    batch_mode = str(
+        _cfg_lookup(
+            training_cfg,
+            "execution.batch_mode",
+            "batch_mode",
+            "optimizer.batch_mode",
+            default="replay",
+        )
+    ).strip().lower()
+    accumulated_batch = batch_mode in {"accumulate", "accumulated", "true_minibatch", "mini_batch", "minibatch"}
+    learning_rate = float(
+        _cfg_lookup(
+            training_cfg,
+            "optimizer.learning_rate",
+            "learning_rate",
+            default=0.01,
+        )
     )
 
     runtime_mode_expr = (
