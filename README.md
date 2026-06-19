@@ -1,129 +1,161 @@
 # FPGAI
 
-FPGAI is an open-source compiler framework that converts ONNX neural network models into deployable FPGA/SoC accelerator projects, with automatic HLS generation, runtime packaging, correctness benchmarking, and experiment automation for compiler-policy exploration.
+**FPGAI** is a resource-aware FPGA-SoC compilation framework for neural-network inference and training experiments. It imports ONNX models, builds an internal graph representation, generates Vitis HLS accelerator projects, materializes compiler policies into generated HLS code, and produces reproducible correctness and evidence tables for FPGA/compiler research.
 
-The project is designed for:
-
-- researchers building custom FPGA AI pipelines,
-- engineers deploying models on Xilinx SoCs,
-- contributors adding new operators, dataflows, benchmarking features, and compiler optimization policies,
-- authors preparing reproducible FPGA/compiler papers with automated result generation.
+> **License note:** FPGAI is released for **academic and non-commercial research use only**. Commercial use, product integration, paid services, redistribution for commercial purposes, and use in proprietary products require prior written permission from the author. See [`LICENSE.md`](LICENSE.md).
 
 ---
 
-## Features
+## What FPGAI is for
 
-### Core compiler flow
+FPGAI is designed for researchers and engineers who want to study how neural-network accelerator design choices affect correctness, latency, resource usage, and training behavior on FPGA-SoC targets.
 
-- ONNX model import
-- layer-wise graph analysis
-- resource-aware compile planning
-- memory placement planning
-- communication planning
-- automatic Vitis HLS project generation
-- embedded or streamed weight support
-- auto-generated HLS testbench
-- host/runtime artifact generation
+The project currently focuses on:
 
-### Correctness and debugging
+- ONNX-to-Vitis-HLS project generation.
+- Fixed-point neural-network inference experiments.
+- Runtime weight-loading strategies.
+- Memory binding strategies such as BRAM and URAM.
+- Parallelization-policy materialization.
+- HLS CSim correctness validation.
+- One-step and small multi-step training accelerator smoke tests.
+- Reproducible paper-style experiment automation.
 
-- end-to-end correctness benchmarking against ONNX ground truth
-- intermediate layer-by-layer error tracing
-- first bad layer detection
-- numeric error metrics
-- benchmark summaries and JSON outputs for automation
-
-### Precision and compiler optimization workflow
-
-- configurable fixed-point numerics
-- per-type control for activation, weight, bias, and accumulator precision
-- automated experiment scripting for multiple models
-- support for precision-policy sweeps
-- support for parallelization-policy sweeps
-- CSV aggregation of experiment results
-- automatic plot generation for paper figures
-- summary scripts for selecting best policies
-
-### Extensibility
-
-- extensible operator flow for contributor-added layers
-- modular frontend / engine / backend layout
-- reusable benchmarking pipeline
-- clear generated artifact structure
+FPGAI should be treated as a research compiler, not a general production deployment SDK.
 
 ---
 
-## Project Structure
+## Current verified capabilities
+
+The following capabilities have automated evidence in the current development flow.
+
+### Inference and HLS generation
+
+- ONNX model import for the evaluated CNN/MLP-style workloads.
+- Internal graph/IR construction and compile planning.
+- Vitis HLS project generation.
+- Auto-generated HLS top functions and testbenches.
+- HLS CSim execution through generated TCL scripts.
+- Correctness benchmarking against Python/ONNX reference outputs.
+- Intermediate layer debugging and first-bad-layer style analysis.
+
+### Weight and memory strategies
+
+FPGAI supports evaluated weight-placement modes:
+
+- `embedded`: weights compiled into generated C++ artifacts.
+- `stream`: weights provided at runtime through a preload path/stream.
+- `ddr`: external-memory style runtime weight access for supported experiments.
+
+FPGAI also supports HLS storage binding evidence for:
+
+- BRAM binding.
+- URAM binding.
+
+### Parallelization policies
+
+The compiler can materialize policy-driven HLS parameters for evaluated designs, including:
+
+- resource-first policy,
+- balanced policy,
+- throughput-first policy,
+- latency-first policy,
+- layer-specific unroll and partition factors,
+- PE/SIMD-style generated evidence comments.
+
+### Training accelerator experiments
+
+FPGAI currently supports validated HLS CSim smoke tests for CNN training accelerators:
+
+- one-step training validation,
+- embedded-weight training CSim,
+- streamed runtime-weight training CSim,
+- HLS-side artifact emission:
+  - `weights_before.bin`,
+  - `grads.bin`,
+  - `weights_after.bin`,
+- comparison against Python reference training artifacts,
+- small multi-step and batch-replay smoke tests.
+
+The current training evidence supports **small HLS training smoke tests**, not full autonomous multi-epoch training convergence on arbitrary datasets.
+
+---
+
+## What FPGAI does not yet claim
+
+To avoid overclaiming, the current version does **not** claim:
+
+- full arbitrary ONNX support,
+- arbitrary model training,
+- full multi-epoch FPGA training convergence,
+- globally optimal hardware search,
+- full production deployment on physical boards,
+- complete equivalence with FINN or hls4ml baselines,
+- vendor-independent FPGA support.
+
+These are roadmap items and should only be claimed after generated-code evidence and passing experiment evidence exist.
+
+---
+
+## Repository structure
 
 ```text
 fpgai/
-  benchmark/        # benchmark and comparison pipeline
-  backends/         # HLS / host code generation
-  config/           # yaml config loading and validation
-  engine/           # analysis, planning, memory, communication, compile flow
-  frontend/         # ONNX import
-  ir/               # graph IR and passes
-  util/             # helper utilities
+  benchmark/        Benchmarking, reference comparison, metrics
+  backends/         HLS and host-code generation
+  config/           YAML config loading and validation
+  engine/           Compiler pipeline, planning, memory, training flow
+  frontend/         ONNX import
+  ir/               Graph IR and compiler passes
+  util/             Helper utilities
 
 configs/
-  suite/            # example configs and experiment setups
+  sweeps/           Reproducible experiment sweep definitions
+  suite/            Example configs and experiment setups
 
 scripts/
-  ...               # utility scripts, sweeps, plotting, summaries
-
-build/
-  ...               # generated artifacts
+  run_fpgai_experiments.py
+  extract_*_evidence.py
+  collect_paper_evidence.py
+  diagnostic and utility scripts
 
 models/
-  ...               # ONNX models
+  Example ONNX models
 
-main.py             # main compiler entrypoint
-fpgai.yml           # user configuration
-README.md           # project documentation
+tests/
+  Unit and integration tests
+
+README.md
+LICENSE.md
+requirements.txt
+pyproject.toml
+setup.py
 ```
 
 ---
 
 ## Requirements
 
-Typical environment:
+Typical development environment:
 
 - Python 3.10+
 - `numpy`
 - `onnx`
 - `onnxruntime`
 - `pyyaml`
-- `matplotlib` for plotting scripts
-- Xilinx Vitis HLS 2023.2
-- Vivado 2023.2
+- `matplotlib` for plotting and paper figures
+- Xilinx Vitis HLS, tested around 2023.2-style flows
+- Vivado/Vitis installation when generating or running HLS projects
 
-If you use benchmark and HLS generation, make sure Vitis HLS is installed and accessible.
-
----
-
-## Installation
-
-Clone the repository:
-
-```bash
-git clone https://github.com/umutcanaltin/fpgai_compiler.git
-cd fpgai_compiler
-```
-
-Create and activate a virtual environment:
+Install Python dependencies:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-```
-
-Install dependencies:
-
-```bash
 pip install -r requirements.txt
 ```
 
-If you do not yet have a complete `requirements.txt`, install at least:
+If the requirements file is incomplete for a fresh environment, install the core dependencies manually:
 
 ```bash
 pip install numpy onnx onnxruntime pyyaml matplotlib
@@ -131,122 +163,45 @@ pip install numpy onnx onnxruntime pyyaml matplotlib
 
 ---
 
-## Basic Usage
+## Basic usage
 
-Run the compiler with a YAML configuration:
+Run the compiler with a YAML config:
 
 ```bash
 python3 main.py --config fpgai.yml
 ```
 
-This will:
+Typical pipeline:
 
-1. load the ONNX model,
-2. analyze and plan the graph,
-3. generate HLS and host artifacts,
-4. optionally run Vitis HLS,
-5. optionally run correctness benchmark.
+1. Load the ONNX model.
+2. Build the internal graph/IR.
+3. Generate compile, memory, and communication plans.
+4. Generate Vitis HLS source and TCL artifacts.
+5. Optionally run Vitis HLS CSim.
+6. Optionally benchmark generated outputs against reference outputs.
 
 ---
 
-## Main Execution Modes
+## Example configuration fields
 
-FPGAI can be used in several different ways.
-
-### 1. Compile-only mode
-
-Disable benchmark in YAML:
-
-```yaml
-benchmark:
-  enabled: false
-```
-
-Then run:
-
-```bash
-python3 main.py --config fpgai.yml
-```
-
-This will generate HLS and host artifacts and optionally run Vitis HLS.
-
-### 2. Compile + benchmark mode
-
-Enable benchmark in YAML:
-
-```yaml
-benchmark:
-  enabled: true
-```
-
-Then run:
-
-```bash
-python3 main.py --config fpgai.yml
-```
-
-This will:
-
-1. generate ONNX reference input/output,
-2. compile and run HLS on the same input,
-3. compare final outputs,
-4. optionally compare intermediate layer outputs.
-
-### 3. Precision exploration workflow
-
-Use this when comparing fixed-point settings.
-
-Typical use:
-
-- change `numerics.defaults`,
-- compile and benchmark,
-- compare errors and hardware metrics across runs.
-
-### 4. Compiler-policy sweep workflow
-
-Use this when exploring compiler strategies such as:
-
-- precision policies,
-- parallelization policies,
-- resource-first vs latency-first tradeoffs.
-
-This mode is useful for:
-
-- ASAP / FPGA / compiler papers,
-- compiler optimization studies,
-- reproducible design-space exploration.
-
-### 5. Contributor / operator development mode
-
-Use this when adding or debugging new operators.
-
-Recommended process:
-
-- compile-only first,
-- final benchmark next,
-- intermediate benchmark last,
-- fix the first bad layer before changing thresholds.
-
----
-
-## Configuration
-
-The compiler is controlled by `fpgai.yml`.
-
-Example:
+A typical configuration contains:
 
 ```yaml
 version: 1
 
 project:
-  name: fpgai_example_dense
-  out_dir: build/fpgai_example_dense
+  name: fpgai_example
+  out_dir: build/fpgai_example
   clean: true
 
 pipeline:
   mode: inference
   outputs:
     top_kernel_name: deeplearn
+
+model:
+  format: onnx
+  path: models/cnn_mnist.onnx
 
 targets:
   platform:
@@ -255,31 +210,6 @@ targets:
     clocks:
       - name: pl_clk0
         target_mhz: 200
-
-operators:
-  supported:
-    - Dense
-    - Conv
-    - MaxPool
-    - AvgPool
-    - Add
-    - Relu
-    - LeakyRelu
-    - Sigmoid
-    - Softmax
-    - BatchNormalization
-    - Flatten
-    - Reshape
-
-  defaults:
-    activation_insert:
-      kind: none
-      alpha: 0.1
-      except_last: true
-
-model:
-  format: onnx
-  path: models/cnn_mnist.onnx
 
 numerics:
   defaults:
@@ -290,8 +220,6 @@ numerics:
 
 data_movement:
   ps_pl:
-    compression:
-      enabled: true
     weights:
       mode: embedded   # embedded | stream | ddr
 
@@ -303,46 +231,24 @@ backends:
       mode: csim
       exe: vitis_hls
 
-toolchain:
-  vitis_hls:
-    enabled: true
-    settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
-
 benchmark:
   enabled: true
   fail_on_mismatch: true
-  seed: 0
-
-  compare:
-    atol: 0.08
-    rtol: 0.08
-    max_abs_error: 0.08
-    mean_abs_error: 0.03
-    rmse: 0.04
-    require_argmax_match: false
-    min_cosine_similarity: 0.95
-
-  intermediate:
-    enabled: true
-    fail_on_layer_mismatch: false
-    stop_on_first_bad_layer: false
-
-debug:
-  verbose: false
 ```
 
 ---
 
-## Output Artifacts
+## Output artifacts
 
-Generated files are written under `project.out_dir`.
+Generated outputs are written under `project.out_dir`.
 
-Important outputs include:
+Important artifacts include:
 
 ```text
 build/.../
   manifest.json
   input.bin
+  target.bin
   ir/
     descriptors.json
     compile_plan.json
@@ -350,669 +256,209 @@ build/.../
     comm_plan.json
   hls/
     src/
+      deeplearn.cpp
+      tb.cpp
     include/
     run_hls.tcl
     logs/
     metadata/
-  hostcpp/
   bench/
     metrics.json
     summary.txt
     reference_input.npy
     reference_output.npy
     hls_output.npy
-    intermediate/
-      intermediate_metrics.json
-      intermediate_summary.txt
+  training_reference/
+    weights_before_ref.bin
+    grads_ref.bin
+    weights_after_ref.bin
+    summary.json
+    summary.txt
+  training_compare/
+    results.json
+    summary.txt
 ```
-
-Additional experiment outputs may include:
-
-- sweep CSV files,
-- generated plots,
-- report summaries,
-- HLS synthesis metric extracts.
 
 ---
 
-## Benchmarking
+## Reproducible experiment workflow
 
-FPGAI can automatically compare generated HLS results against ONNX reference outputs.
+FPGAI uses sweep configs and extraction scripts to keep claims evidence-based.
 
-### Final-output benchmark
-
-This compares:
-
-- ONNX output
-- HLS CSIM output
-
-Metrics include:
-
-- max absolute error
-- mean absolute error
-- RMSE
-- cosine similarity
-- optional argmax agreement
-
-### Intermediate benchmark
-
-This compares intermediate outputs layer by layer and reports:
-
-- first bad layer
-- worst layers by error
-- skipped layout-sensitive layers if needed
-
-This is useful for debugging where divergence starts.
-
-Run benchmark by enabling it in YAML:
-
-```yaml
-benchmark:
-  enabled: true
-```
-
-Then run:
+General workflow:
 
 ```bash
-python3 main.py --config fpgai.yml
+rm -rf experiments/<experiment_name>
+
+PYTHONPATH="$PWD" python -B scripts/run_fpgai_experiments.py \
+  --sweep configs/sweeps/<sweep>.yml \
+  --out experiments/<experiment_name> \
+  --max-design-points <N> \
+  --timeout-sec 1800
 ```
 
----
-
-## Interpreting Benchmark Results
-
-### Final benchmark passes
-
-This means end-to-end generated inference is numerically close enough to ONNX based on your thresholds.
-
-### Final benchmark fails
-
-Check:
-
-```text
-build/.../bench/summary.txt
-build/.../bench/metrics.json
-```
-
-Common causes:
-
-- overly strict thresholds,
-- wrong weight source in stream mode,
-- final softmax sensitivity,
-- data layout mismatch before Dense.
-
-### Intermediate benchmark shows first bad layer
-
-This usually means:
-
-- layout mismatch before that layer,
-- arithmetic precision issue at that layer,
-- or operator implementation bug.
-
-Example:
-
-```text
-first_bad_layer : dense0
-```
-
-This suggests early feature extraction is correct, and divergence begins when features are flattened or consumed by Dense.
-
----
-
-## Intermediate Benchmark Notes
-
-Current intermediate comparison is layout-aware for common CNN inference paths.
-
-### Compared directly
-
-- Dense
-- Softmax
-
-### Compared after ONNX layout normalization
-
-- Conv
-- Relu
-- MaxPool
-- AvgPool
-
-### Currently skipped or treated specially
-
-- Flatten
-- Reshape
-
-These can be layout-sensitive because ONNX tensors are usually NCHW, while internal HLS buffers may use HWC-flat ordering.
-
-This is expected and not necessarily a bug.
-
----
-
-## Weight Modes
-
-FPGAI currently supports multiple weight modes:
-
-### `embedded`
-
-Weights are emitted directly into generated C++ parameter files.
-
-Use this first when validating correctness.
-
-### `stream`
-
-Weights are provided at runtime through a preload stream.
-
-Useful for runtime-loaded models, but benchmarking requires the real weights to be loaded in correct order.
-
-### `ddr`
-
-Reserved or evolving mode for external memory-backed parameter movement.
-
----
-
-## Recommended Validation Workflow
-
-### Step 1: start with embedded weights
-
-Set:
-
-```yaml
-data_movement:
-  ps_pl:
-    weights:
-      mode: embedded
-```
-
-This is the easiest mode for correctness validation.
-
-### Step 2: run benchmark
+Inspect results:
 
 ```bash
-python3 main.py --config fpgai.yml
-```
-
-### Step 3: inspect final benchmark
-
-```text
-build/.../bench/summary.txt
-build/.../bench/metrics.json
-```
-
-### Step 4: inspect intermediate benchmark
-
-```text
-build/.../bench/intermediate/intermediate_summary.txt
-build/.../bench/intermediate/intermediate_metrics.json
-```
-
-### Step 5: fix the first bad layer
-
-Do not start from the final output only. Use the first bad intermediate layer to identify where divergence begins.
-
----
-
-## Policy Sweep and Plotting Workflow
-
-FPGAI can also be used as a compiler experimentation platform for paper-ready evaluation.
-
-This is especially useful for:
-
-- precision studies,
-- latency / resource tradeoff analysis,
-- policy-driven compiler optimization,
-- ASAP 2026 paper figures and tables.
-
-### Typical experiment dimensions
-
-The sweep scripts can explore:
-
-- model choice,
-- precision policy,
-- parallelization policy.
-
-Typical precision policies:
-
-- `Uniform-8`
-- `Uniform-12`
-- `Uniform-16`
-- `Mixed-Conservative`
-- `Mixed-Aggressive`
-
-Typical parallelization policies:
-
-- `Resource-First`
-- `Balanced`
-- `Latency-First`
-
-### Run policy sweep
-
-If you add the policy sweep script:
-
-```text
-scripts/run_policy_sweep.py
-```
-
-run experiments like this:
-
-```bash
-python3 scripts/run_policy_sweep.py \
-  --config fpgai.yml \
-  --models models/suite/mlp_mnist.onnx models/cnn_mnist.onnx \
-  --precision-policies Uniform-8 Uniform-12 Uniform-16 Mixed-Conservative Mixed-Aggressive \
-  --parallel-policies Resource-First Balanced Latency-First
-```
-
-This script will:
-
-- generate temporary configs,
-- run the compiler for each experiment point,
-- collect benchmark and HLS data,
-- write an aggregated CSV.
-
-Typical output:
-
-```text
-build/policy_sweeps/policy_sweep_results.csv
-```
-
-### Generate plots
-
-If you add:
-
-```text
-scripts/plot_policy_results.py
-```
-
-run:
-
-```bash
-python3 scripts/plot_policy_results.py \
-  --csv build/policy_sweeps/policy_sweep_results.csv
-```
-
-Typical output directory:
-
-```text
-build/policy_sweeps/plots/
-```
-
-Typical plots include:
-
-- RMSE vs precision policy,
-- latency vs parallel policy,
-- LUT vs precision policy,
-- DSP vs precision policy,
-- BRAM vs precision policy,
-- Pareto plot: latency vs RMSE,
-- heatmaps for latency / RMSE / DSP.
-
-### Summarize best policies
-
-If you add:
-
-```text
-scripts/summarize_policy_results.py
-```
-
-run:
-
-```bash
-python3 scripts/summarize_policy_results.py \
-  --csv build/policy_sweeps/policy_sweep_results.csv
-```
-
-This is useful for selecting:
-
-- the best-accuracy policy,
-- the lowest-latency policy,
-- a balanced tradeoff point.
-
----
-
-## Example Debugging Interpretation
-
-Suppose you get:
-
-```text
-conv0   passed
-act0    passed
-pool0   passed
-dense0  failed
-act1    slightly off
-```
-
-This usually means:
-
-- Conv, activation, and pooling are correct,
-- the issue starts at flatten/reshape or dense input ordering,
-- softmax drift is a consequence of earlier dense mismatch.
-
-This is much more useful than only seeing the final output mismatch.
-
----
-
-## How to Contribute
-
-Contributions are welcome.
-
-Typical contribution areas:
-
-- new layer types,
-- improved planners,
-- quantization strategies,
-- memory and communication optimization,
-- benchmark enhancements,
-- plotting and experiment automation,
-- documentation.
-
-### General contribution flow
-
-1. fork the repository,
-2. create a feature branch,
-3. implement your change,
-4. add tests,
-5. run benchmark,
-6. open a pull request.
-
----
-
-## Contributor Guide for Adding a New Layer
-
-Adding a new operator usually touches these areas:
-
-### 1. Frontend / import
-
-Make sure the ONNX importer maps the ONNX op into FPGAI IR.
-
-### 2. Analysis
-
-Update graph analysis so the new op gets:
-
-- input/output shape info,
-- parameter bytes,
-- backend kernel hint,
-- compute and memory characterization.
-
-### 3. Planner
-
-Update compile planning if the operator needs custom tiling, unrolling, or memory behavior.
-
-### 4. HLS emitters
-
-Add the HLS layer implementation under the HLS backend.
-
-Typical additions include:
-
-- operator emitter,
-- header emission,
-- C++ emission,
-- integration hooks.
-
-### 5. Top integration
-
-Update top generation so the new layer is instantiated and connected correctly.
-
-### 6. Benchmark compatibility
-
-Make sure:
-
-- final output still works,
-- intermediate dumps can identify the layer,
-- comparison layout is handled correctly if needed.
-
----
-
-## Testing Strategy
-
-FPGAI uses two levels of testing.
-
-### 1. Compiler correctness tests
-
-These validate full-model compilation against ONNX reference.
-
-Goal:
-
-- prove generated code is correct end to end.
-
-### 2. Layer contributor tests
-
-These validate individual operators in isolation.
-
-Goal:
-
-- help contributors test a new layer before full integration.
-
----
-
-## Recommended Testing Workflow for Contributors
-
-### A. Basic compile test
-
-```bash
-python3 main.py --config fpgai.yml
-```
-
-Check:
-
-- compile result,
-- HLS logs,
-- generated artifacts.
-
-### B. Final correctness benchmark
-
-Enable benchmark in YAML and inspect:
-
-```text
-build/.../bench/summary.txt
-build/.../bench/metrics.json
-```
-
-### C. Intermediate debugging
-
-Inspect:
-
-```text
-build/.../bench/intermediate/intermediate_summary.txt
-build/.../bench/intermediate/intermediate_metrics.json
-```
-
-This shows where errors first appear.
-
-### D. New-layer debugging
-
-For a newly added operator:
-
-- first check compile path,
-- then final output,
-- then intermediate mismatch position,
-- then operator-specific layout and precision assumptions.
-
----
-
-## HLS Debugging Guide
-
-### HLS run failed
-
-Check:
-
-```text
-build/.../hls/logs/vitis_hls_stdout.log
-build/.../hls/logs/vitis_hls_stderr.log
-```
-
-Typical causes:
-
-- unsupported C++ in synthesizable region,
-- missing include,
-- unsupported standard library usage in csynth,
-- type mismatch between generated headers and source,
-- mismatch between top signature and testbench signature.
-
-### CSIM passed but CSYNTH failed
-
-This often means:
-
-- code is valid C++ but not synthesizable,
-- debug-only code leaked into synthesis,
-- unsupported file I/O or system calls are present.
-
-Use guards like:
-
-```cpp
-#if defined(FPGAI_DEBUG_DUMP) && !defined(__SYNTHESIS__)
-...
-#endif
-```
-
----
-
-## Final Benchmark Debugging Guide
-
-### Benchmark failed but final errors are small
-
-Possible reasons:
-
-- thresholds are too strict,
-- softmax is sensitive to small numeric changes,
-- argmax flips because top classes are very close.
-
-In that case:
-
-- inspect dense output and pre-softmax behavior,
-- do not rely only on final softmax probabilities.
-
-### Benchmark failed badly in stream mode
-
-Possible reasons:
-
-- runtime weights are dummy or ordered incorrectly,
-- streamed weight packing does not match ONNX parameter layout.
-
-Start with `embedded` mode first.
-
----
-
-## Intermediate Benchmark Debugging Guide
-
-### First bad layer is a spatial op like `conv0`
-
-This may indicate a layout mismatch in the intermediate comparator.
-
-Check whether ONNX is NCHW and HLS internal storage is HWC-flat.
-
-### First bad layer is `dense0`
-
-This often means:
-
-- flatten or reshape ordering mismatch,
-- Dense is consuming feature maps in the wrong flattened order.
-
-This is a very common CNN-to-Dense bug source.
-
-### Reshape or Flatten skipped
-
-This is acceptable in the current version if layout semantics differ between ONNX and internal HLS representation.
-
----
-
-## Common Development Advice
-
-- Start with `weights.mode: embedded` when validating correctness.
-- Enable intermediate benchmark when debugging a new operator.
-- Do not judge correctness only from final softmax if logits or dense outputs already match well.
-- Be careful with layout conversions between ONNX tensors and internal HLS buffer order.
-- Benchmark thresholds should reflect numeric precision mode.
-- Keep debug dump code out of synthesis using `!defined(__SYNTHESIS__)`.
-- Fix the first bad layer before trying to tune final output thresholds.
-
----
-
-## Example Commands
-
-### Compile only
-
-```bash
-python3 main.py --config fpgai.yml
-```
-
-### View final benchmark summary
-
-```bash
-cat build/fpgai_example_dense/bench/summary.txt
-cat build/fpgai_example_dense/bench/metrics.json
-```
-
-### View intermediate benchmark summary
-
-```bash
-cat build/fpgai_example_dense/bench/intermediate/intermediate_summary.txt
-```
-
-### Print first bad layer and worst layers
-
-```bash
-python3 - <<'PY'
+python - <<'PY'
 import json
-p="build/fpgai_example_dense/bench/intermediate/intermediate_metrics.json"
-data=json.load(open(p))
-print("first_bad_layer =", data["first_bad_layer"])
-for x in data["worst_layers"][:10]:
-    print(x["layer_name"], x["op_type"], x["max_abs_error"], x["mean_abs_error"], x["cosine_similarity"], x["passed"])
-print("skipped =", data["skipped_layers"])
+from pathlib import Path
+p = Path("experiments/<experiment_name>/results.json")
+data = json.loads(p.read_text())
+print("passed:", data.get("passed_count"))
+print("failed:", data.get("failed_count"))
+for r in data.get("results", []):
+    print(r.get("design_name"), r.get("status"), r.get("returncode"), r.get("error"))
 PY
 ```
 
-### Inspect HLS logs
+Extract evidence:
 
 ```bash
-sed -n '1,220p' build/fpgai_example_dense/hls/logs/vitis_hls_stdout.log
-sed -n '1,120p' build/fpgai_example_dense/hls/logs/vitis_hls_stderr.log
+python scripts/extract_training_accelerator_evidence.py experiments/<experiment_name>
+python scripts/extract_training_batch_multistep_evidence.py experiments/<experiment_name>
+python scripts/collect_paper_evidence.py
 ```
 
 ---
 
-## Current Status
+## Verified sprint evidence summary
 
-FPGAI currently supports an automated flow for:
+The recent evidence-driven development flow validated:
 
-- ONNX import,
-- HLS generation,
-- Vitis HLS execution,
-- final correctness benchmarking,
-- intermediate layer-wise debugging,
-- experiment scripting for policy exploration.
+### Sprint 12A — external DDR runtime memory mode
 
-The system is actively evolving, especially around:
+Validated embedded, streamed, and external-DDR runtime weight strategies end-to-end for the evaluated CNN configurations.
 
-- layout handling,
-- streamed weights,
-- training flow,
-- richer operator coverage,
-- contributor testing infrastructure,
-- deeper policy-driven planner support.
+### Sprint 12B — BRAM/URAM storage binding
 
----
+Validated HLS-level BRAM and URAM storage binding using generated `BIND_STORAGE` directives and Vitis HLS runs.
 
-## Roadmap
+### Sprint 12C — parallel policy materialization
 
-Planned or ongoing directions include:
+Validated resource-first, balanced, throughput-first, and latency-first parallelization policies with distinct generated HLS parameters.
 
-- better streamed-weight benchmarking,
-- full layer contributor test suite,
-- training benchmark support,
-- richer custom operator plugin flow,
-- pre-softmax/logit benchmark mode,
-- broader board support,
-- automatic real-weight export for runtime preload mode,
-- improved reshape and flatten semantic handling,
-- per-layer contributor reference harnesses,
-- stronger policy-driven parallelization support,
-- automated paper table generation.
+### Sprint 12D — paper evidence collector
+
+Generated paper-ready evidence tables for correctness, memory modes, memory binding, parallel policies, HLS metrics, and claim support.
+
+### Sprint 13A — one-step training accelerator validation
+
+Validated one-step training accelerator generation for embedded and streamed runtime-weight CNN configurations.
+
+### Sprint 13B — streamed training CSim preload and comparison
+
+Fixed streamed training CSim so runtime weights are loaded from `training_reference/weights_before_ref.bin`, enabling training comparison artifacts for stream mode.
+
+### Sprint 13C — batch/multi-step training smoke tests
+
+Validated small multi-step and batch-replay HLS training smoke tests for embedded and streamed runtime-weight modes.
 
 ---
 
-## Contact
+## Training experiment commands
 
-Repository:
+One-step training accelerator evidence:
 
-- [https://github.com/umutcanaltin/fpgai_compiler](https://github.com/umutcanaltin/fpgai_compiler)
+```bash
+rm -rf experiments/sprint13b_training_stream_compare_v7
 
-For issues and contributions, use GitHub Issues and Pull Requests.
+PYTHONPATH="$PWD" python -B scripts/run_fpgai_experiments.py \
+  --sweep configs/sweeps/sprint13a_training_accelerator.yml \
+  --out experiments/sprint13b_training_stream_compare_v7 \
+  --max-design-points 4 \
+  --timeout-sec 1800
+
+python scripts/extract_training_accelerator_evidence.py \
+  experiments/sprint13b_training_stream_compare_v7
+```
+
+Batch/multi-step smoke evidence:
+
+```bash
+rm -rf experiments/sprint13c_training_batch_multistep_v3
+
+PYTHONPATH="$PWD" python -B scripts/run_fpgai_experiments.py \
+  --sweep configs/sweeps/sprint13c_training_batch_multistep.yml \
+  --out experiments/sprint13c_training_batch_multistep_v3 \
+  --max-design-points 6 \
+  --timeout-sec 1800
+
+python scripts/extract_training_batch_multistep_evidence.py \
+  experiments/sprint13c_training_batch_multistep_v3
+```
+
+Expected Sprint 13C evidence:
+
+```text
+hls_ok=True
+training_compare=True
+has_multistep_summary=True
+hls_weights_before_bin=True
+hls_grads_bin=True
+hls_weights_after_bin=True
+```
+
+---
+
+## Current roadmap
+
+Near-term roadmap:
+
+1. True accumulated mini-batch SGD.
+2. Tiny multi-epoch convergence smoke tests.
+3. Operator coverage audit for the evaluated ONNX subset.
+4. HLS resource/latency report normalization.
+5. Combined precision/memory/parallel design-space sweeps.
+6. FINN/hls4ml baseline comparison setup.
+7. Physical KV260 deployment evidence.
+
+Longer-term roadmap:
+
+- Broader ONNX operator support.
+- More complete training support.
+- Physical board runtime integration.
+- Vendor abstraction beyond Xilinx/Vitis.
+- Resource-aware hardware search with stronger optimization guarantees.
+
+---
+
+## Development principle
+
+FPGAI development follows this rule:
+
+> Do not claim a feature unless there is generated-code evidence and passing experiment evidence.
+
+For each new feature:
+
+1. Add one claim.
+2. Generate HLS artifacts.
+3. Run a small sweep first.
+4. Inspect `results.json`, HLS logs, and generated `tb.cpp`/`deeplearn.cpp`.
+5. Extract `.json`, `.csv`, and `.md` evidence.
+6. Only then update README/paper claims.
+
+---
+
+## Citation / attribution
+
+If you use FPGAI in academic work, please cite the related FPGAI paper/preprint when available and acknowledge this repository.
+
+Suggested placeholder citation:
+
+```bibtex
+@misc{altin_fpgai,
+  title        = {FPGAI: A Resource-Aware Compilation and Execution Framework for Neural Network Inference and Training on FPGA-SoCs},
+  author       = {Altin, Umut Can},
+  year         = {2026},
+  note         = {Research software, academic use only}
+}
+```
+
+---
+
+## License
+
+This project is licensed for **academic and non-commercial research use only**. See [`LICENSE.md`](LICENSE.md).
+
+For commercial licensing, industrial evaluation, paid services, product integration, or redistribution outside academic research, contact the author for written permission.
