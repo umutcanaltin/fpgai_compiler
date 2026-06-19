@@ -57,10 +57,15 @@ def emit_tb_train_cpp(
     - In accumulated mode, gradients for each microbatch sample are computed from the same
       base weights, averaged in the HLS testbench, and a reference SGD update is emitted.
 
-    Note: accumulated mode validates the generated HLS gradient path under mini-batch
-    semantics and emits averaged-gradient artifacts. The optimizer update is applied in
-    the CSim testbench artifact path; a later kernel-ABI sprint can move mode=4 optimizer
-    application into the HLS top itself.
+    Sprint 13E:
+    - In accumulated mode, the testbench drives native HLS top modes:
+      mode 3 = accumulate gradients, mode 4 = average/apply update, mode 5 = reset.
+    - This validates that the generated HLS top owns the mini-batch optimizer update.
+
+    Sprint 13F:
+    - Adds multi-epoch convergence-smoke instrumentation.
+    - The testbench calls generated HLS top mode 6 to emit evaluation loss without updating weights.
+    - It records initial/final/epoch losses in training_multistep_summary.json.
     """
     del graph
 
@@ -115,6 +120,26 @@ def emit_tb_train_cpp(
         )
     )
 
+    convergence_smoke = bool(
+        _cfg_lookup(
+            training_cfg,
+            "execution.convergence_smoke",
+            "convergence_smoke",
+            "validation.convergence_smoke",
+            default=False,
+        )
+    )
+    loss_eval_records = _as_int(
+        _cfg_lookup(
+            training_cfg,
+            "execution.loss_eval_records",
+            "loss_eval_records",
+            "validation.loss_eval_records",
+            default=batch_size,
+        ),
+        default=batch_size,
+    )
+
     runtime_mode_expr = (
         f'(std::string("{_cpp_string_literal(normalized_mode)}") == "stream" || '
         f'std::string("{_cpp_string_literal(normalized_mode)}") == "streamed" || '
@@ -129,6 +154,7 @@ def emit_tb_train_cpp(
 
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -326,16 +352,75 @@ int main(int argc, char** argv) {{
     std::vector<float> weights_before = drain_exact(out_stream, {int(weight_words)}, "weights_before");
     write_bin_both(out_dir, "weights_before.bin", weights_before);
 
+    const bool convergence_smoke = {str(convergence_smoke).lower()};
+    const int loss_eval_records = {int(loss_eval_records)};
+    std::vector<float> epoch_losses;
+    float initial_loss = -1.0f;
+    float final_loss = -1.0f;
+
+    auto evaluate_loss = [&]() -> float {{
+        int input_records = input_words_per_record > 0 ? ((int)input_data.size() / input_words_per_record) : 0;
+        int target_records = target_words_per_record > 0 ? ((int)target_data.size() / target_words_per_record) : 0;
+        int n_records = loss_eval_records;
+        if (input_records > 0 && n_records > input_records) n_records = input_records;
+        if (target_records > 0 && n_records > target_records) n_records = target_records;
+        if (n_records <= 0) {{
+            fprintf(stderr, "[TB-TRAIN] Loss evaluation record count is zero.\\n");
+            std::exit(7);
+        }}
+        float total_loss = 0.0f;
+        for (int r = 0; r < n_records; ++r) {{
+            push_record(in_stream, input_data, input_words_per_record, r);
+            push_record(aux_stream, target_data, target_words_per_record, r);
+            {top_name}(in_stream, out_stream, aux_stream, 6);
+            std::vector<float> loss_words = drain_exact(out_stream, 1, "loss_eval");
+            total_loss += loss_words[0];
+        }}
+        return total_loss / (float)n_records;
+    }};
+
+    if (convergence_smoke) {{
+        initial_loss = evaluate_loss();
+        epoch_losses.push_back(initial_loss);
+        printf("[TB-TRAIN] convergence_initial_loss=%f loss_eval_records=%d\\n", initial_loss, loss_eval_records);
+    }}
+
     std::vector<float> last_grads;
     int total_train_calls = 0;
-    for (int step = 0; step < {int(train_steps)}; ++step) {{
-        for (int b = 0; b < {int(batch_size)}; ++b) {{
-            int rec = step * {int(batch_size)} + b;
-            push_record(in_stream, input_data, input_words_per_record, rec);
-            push_record(aux_stream, target_data, target_words_per_record, rec);
-            {top_name}(in_stream, out_stream, aux_stream, 2);
-            last_grads = drain_exact(out_stream, {int(weight_words)}, "grads");
-            total_train_calls += 1;
+    int optimizer_update_calls = 0;
+
+    if ({str(accumulated_batch).lower()}) {{
+        printf("[TB-TRAIN] native_accumulated_batch=true optimizer_location=hls_top_accumulated_optimizer\\n");
+        for (int step = 0; step < {int(train_steps)}; ++step) {{
+            {top_name}(in_stream, out_stream, aux_stream, 5);
+            for (int b = 0; b < {int(batch_size)}; ++b) {{
+                int rec = step * {int(batch_size)} + b;
+                push_record(in_stream, input_data, input_words_per_record, rec);
+                push_record(aux_stream, target_data, target_words_per_record, rec);
+                {top_name}(in_stream, out_stream, aux_stream, 3);
+                last_grads = drain_exact(out_stream, {int(weight_words)}, "accum_grads");
+                total_train_calls += 1;
+            }}
+            {top_name}(in_stream, out_stream, aux_stream, 4);
+            last_grads = drain_exact(out_stream, {int(weight_words)}, "avg_grads");
+            optimizer_update_calls += 1;
+            if (convergence_smoke) {{
+                float epoch_loss = evaluate_loss();
+                epoch_losses.push_back(epoch_loss);
+                printf("[TB-TRAIN] convergence_epoch=%d loss=%f\\n", step + 1, epoch_loss);
+            }}
+        }}
+    }} else {{
+        for (int step = 0; step < {int(train_steps)}; ++step) {{
+            for (int b = 0; b < {int(batch_size)}; ++b) {{
+                int rec = step * {int(batch_size)} + b;
+                push_record(in_stream, input_data, input_words_per_record, rec);
+                push_record(aux_stream, target_data, target_words_per_record, rec);
+                {top_name}(in_stream, out_stream, aux_stream, 2);
+                last_grads = drain_exact(out_stream, {int(weight_words)}, "grads");
+                total_train_calls += 1;
+                optimizer_update_calls += 1;
+            }}
         }}
     }}
     if (last_grads.empty()) {{
@@ -353,6 +438,14 @@ int main(int argc, char** argv) {{
     summary += "  \\\"train_steps\\\": " + std::to_string({int(train_steps)}) + ",\\n";
     summary += "  \\\"batch_size\\\": " + std::to_string({int(batch_size)}) + ",\\n";
     summary += "  \\\"total_train_calls\\\": " + std::to_string(total_train_calls) + ",\\n";
+    summary += "  \\\"total_forward_backward_calls\\\": " + std::to_string(total_train_calls) + ",\\n";
+    summary += "  \\\"optimizer_update_calls\\\": " + std::to_string(optimizer_update_calls) + ",\\n";
+    summary += "  \\\"accumulated_batch\\\": " + std::string({str(accumulated_batch).lower()} ? "true" : "false") + ",\\n";
+    summary += "  \\\"averaged_gradients\\\": " + std::string({str(accumulated_batch).lower()} ? "true" : "false") + ",\\n";
+    summary += "  \\\"gradient_accumulation_mode\\\": " + std::string({str(accumulated_batch).lower()} ? "true" : "false") + ",\\n";
+    summary += "  \\\"optimizer_apply_mode\\\": " + std::string({str(accumulated_batch).lower()} ? "true" : "false") + ",\\n";
+    summary += "  \\\"reset_accumulator_mode\\\": " + std::string({str(accumulated_batch).lower()} ? "true" : "false") + ",\\n";
+    summary += "  \\\"optimizer_location\\\": \\\"" + std::string({str(accumulated_batch).lower()} ? "hls_top_accumulated_optimizer" : "hls_top_step_optimizer") + "\\\",\\n";
     summary += "  \\\"weight_words\\\": " + std::to_string({int(weight_words)}) + ",\\n";
     summary += "  \\\"in_words\\\": " + std::to_string({int(in_words)}) + ",\\n";
     summary += "  \\\"out_words\\\": " + std::to_string({int(out_words)}) + "\\n";

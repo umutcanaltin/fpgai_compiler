@@ -577,6 +577,138 @@ def _needs_input_gradient(
     }
 
 
+
+
+def _inject_native_accumulated_modes_from_cpp(
+    cpp: str,
+    input_size: int,
+    learning_rate: float,
+) -> str:
+    """Post-process generated training C++ with native mini-batch modes.
+
+    Added top modes:
+      mode 3: run forward/backward, accumulate parameter gradients, no update
+      mode 4: average accumulated gradients and apply one SGD update in the HLS top
+      mode 5: reset accumulated gradients and counter
+
+    This helper discovers trainable parameters from the generated C++ itself, so it is
+    robust to changes in the Python generator's local variable names.
+    """
+    if "FPGAI_NATIVE_ACC_BATCH_COUNT" in cpp and "if (mode == 3)" in cpp:
+        return cpp
+
+    params = []
+    # Weight/bias gradients already emitted by the training generator.
+    grad_w = {m.group(1): int(m.group(2)) for m in re.finditer(r"static\s+grad_wgt_t\s+dW_([A-Za-z0-9_]+)\[(\d+)\];", cpp)}
+    grad_b = {m.group(1): int(m.group(2)) for m in re.finditer(r"static\s+grad_bias_t\s+dB_([A-Za-z0-9_]+)\[(\d+)\];", cpp)}
+
+    for tag in sorted(grad_w.keys()):
+        if tag not in grad_b:
+            continue
+        w_arr = f"W_{tag}"
+        b_arr = f"B_{tag}"
+        if f"static wgt_t {w_arr}[" not in cpp or f"static bias_t {b_arr}[" not in cpp:
+            # BatchNorm or other trainable parameter forms can be added later.
+            continue
+        if f"OUT_grad_{tag}" not in cpp:
+            continue
+        params.append({
+            "tag": tag,
+            "w": grad_w[tag],
+            "b": grad_b[tag],
+            "w_arr": w_arr,
+            "b_arr": b_arr,
+            "dw": f"dW_{tag}",
+            "db": f"dB_{tag}",
+            "out": f"OUT_grad_{tag}",
+        })
+
+    if not params:
+        raise RuntimeError("Native accumulation injection found no dense/conv trainable parameters in generated C++")
+
+    decl = ["", "// FPGAI native accumulated mini-batch optimizer state."]
+    for p in params:
+        decl.append(f"static acc_t ACC_{p['dw']}[{p['w']}];")
+        decl.append(f"static acc_t ACC_{p['db']}[{p['b']}];")
+    decl.append("static int FPGAI_NATIVE_ACC_BATCH_COUNT = 0;")
+    decl_text = "\n".join(decl) + "\n"
+
+    extern_marker = '\nextern "C" void '
+    if extern_marker not in cpp:
+        raise RuntimeError("Could not find extern C top marker for native accumulation injection")
+    cpp = cpp.replace(extern_marker, decl_text + extern_marker, 1)
+
+    def reset_lines(indent: str) -> list[str]:
+        out = []
+        for p in params:
+            out.append(f"{indent}for (int i = 0; i < {p['w']}; ++i) ACC_{p['dw']}[i] = (acc_t)0;")
+            out.append(f"{indent}for (int i = 0; i < {p['b']}; ++i) ACC_{p['db']}[i] = (acc_t)0;")
+        out.append(f"{indent}FPGAI_NATIVE_ACC_BATCH_COUNT = 0;")
+        return out
+
+    def emit_grad_lines(indent: str) -> list[str]:
+        out = []
+        for idx, p in enumerate(params):
+            last = "true" if idx == len(params) - 1 else "false"
+            total = p['w'] + p['b']
+            out.append(f"{indent}for (int i = 0; i < {p['w']}; ++i) {p['out']}[i] = (float){p['dw']}[i];")
+            out.append(f"{indent}for (int i = 0; i < {p['b']}; ++i) {p['out']}[{p['w']} + i] = (float){p['db']}[i];")
+            out.append(f"{indent}emit_stream_block<{total}>(out, {p['out']}, {last});")
+        return out
+
+    pre_input = [
+        "",
+        "  if (mode == 5) {",
+        *reset_lines("    "),
+        "    return;",
+        "  }",
+        "",
+        "  if (mode == 4) {",
+        "    const int denom = (FPGAI_NATIVE_ACC_BATCH_COUNT > 0) ? FPGAI_NATIVE_ACC_BATCH_COUNT : 1;",
+    ]
+    for p in params:
+        pre_input.append(f"    for (int i = 0; i < {p['w']}; ++i) {p['dw']}[i] = (grad_wgt_t)(((float)ACC_{p['dw']}[i]) / (float)denom);")
+        pre_input.append(f"    for (int i = 0; i < {p['b']}; ++i) {p['db']}[i] = (grad_bias_t)(((float)ACC_{p['db']}[i]) / (float)denom);")
+        pre_input.append(f"    fpgai::sgd_update_wgt_typed<{p['w']}, wgt_t, grad_wgt_t, upd_t, acc_t, 1, 4>({p['w_arr']}, {p['dw']}, (upd_t){learning_rate:.8f}f);")
+        pre_input.append(f"    fpgai::sgd_update_bias_typed<{p['b']}, bias_t, grad_bias_t, upd_t, acc_t, 1, 2>({p['b_arr']}, {p['db']}, (upd_t){learning_rate:.8f}f);")
+    pre_input.extend(reset_lines("    "))
+    pre_input.extend(emit_grad_lines("    "))
+    pre_input.extend(["    return;", "  }", ""])
+
+    input_marker = f"\n  for (int i = 0; i < {int(input_size)}; ++i)"
+    pos = cpp.find(input_marker)
+    if pos < 0:
+        raise RuntimeError(f"Could not find training input read marker: {input_marker!r}")
+    cpp = cpp[:pos] + "\n".join(pre_input) + cpp[pos:]
+
+    accum = ["", "  if (mode == 3) {"]
+    for p in params:
+        accum.append(f"    for (int i = 0; i < {p['w']}; ++i) ACC_{p['dw']}[i] += (acc_t){p['dw']}[i];")
+        accum.append(f"    for (int i = 0; i < {p['b']}; ++i) ACC_{p['db']}[i] += (acc_t){p['db']}[i];")
+    accum.append("    FPGAI_NATIVE_ACC_BATCH_COUNT += 1;")
+    accum.extend(emit_grad_lines("    "))
+    accum.extend(["    return;", "  }", ""])
+
+    update_marker = "\n  fpgai::sgd_update_"
+    pos = cpp.find(update_marker)
+    if pos < 0:
+        raise RuntimeError("Could not find SGD update marker for mode 3 insertion")
+    cpp = cpp[:pos] + "\n".join(accum) + cpp[pos:]
+
+    # Sprint 13F: add evaluation-only loss mode to the generated HLS top.
+    # mode 6 reads one input/target record, computes loss_value, emits one loss float,
+    # and returns before gradient computation or optimizer update.
+    if "if (mode == 6)" not in cpp:
+        loss_pos = cpp.find("loss_value +=")
+        if loss_pos < 0:
+            raise RuntimeError("Could not find loss_value accumulation for mode 6 injection")
+        insert_pos = cpp.find("\n\n  for (int i = 0; i <", loss_pos)
+        if insert_pos < 0:
+            raise RuntimeError("Could not find gradient loop marker after loss_value for mode 6 injection")
+        loss_eval_block = "\n\n  // FPGAI loss_eval mode.\n  if (mode == 6) {\n    write_f32(out, (float)loss_value, true);\n    return;\n  }"
+        cpp = cpp[:insert_pos] + loss_eval_block + cpp[insert_pos:]
+    return cpp
+
 def emit_top_train_cpp(
     *,
     graph: Graph,
@@ -1930,4 +2062,4 @@ def emit_top_train_cpp(
         ]
     )
 
-    return "\n".join(lines)
+    return _inject_native_accumulated_modes_from_cpp("\n".join(lines), input_size, learning_rate)

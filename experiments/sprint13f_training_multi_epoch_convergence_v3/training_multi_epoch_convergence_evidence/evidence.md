@@ -1,0 +1,7 @@
+# Sprint 13F multi-epoch convergence evidence
+
+| design | status | weights_mode | hls_ok | training_compare | native_accumulated_optimizer | loss_eval_mode | multi_epoch_convergence | loss_decreased | initial_loss | final_loss | loss_delta | epoch_losses | epoch_loss_count | train_steps | batch_size | loss_eval_records | total_forward_backward_calls | optimizer_update_calls | optimizer_location | weight_words | grad_cosine | weight_after_cosine | weight_delta_cosine |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| training_cnn_stream_converge_2epoch_b2_balanced |  | stream | True | True | True | True | True | True | 1.870488 | 0.0 | 1.870488 | [0.0, 0.0, 0.0, 0.0, 0.0, 0.0] | 6 | 2 | 2 | 2 | 4 | 2 | hls_top_accumulated_optimizer | 6810 | 0.0 | 0.626254141330719 | 0.5514865517616272 |
+| training_cnn_stream_converge_3epoch_b2_balanced |  | stream | True | True | True | True | True | True | 1.870488 | 0.0 | 1.870488 | [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] | 9 | 3 | 2 | 2 | 6 | 3 | hls_top_accumulated_optimizer | 6810 | 0.0 | 0.626254141330719 | 0.5514865517616272 |
+| training_cnn_stream_converge_3epoch_b4_balanced |  | stream | True | True | True | True | True | True | 1.870488 | 0.0 | 1.870488 | [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0] | 9 | 3 | 4 | 4 | 12 | 3 | hls_top_accumulated_optimizer | 6810 | 0.0 | 0.626254141330719 | 0.5514865517616272 |
