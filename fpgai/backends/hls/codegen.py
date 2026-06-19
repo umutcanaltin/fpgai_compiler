@@ -10,6 +10,7 @@ import re
 from fpgai.config.access import get_path
 from fpgai.analysis.tiling_reports import write_tiling_report_artifacts
 from fpgai.backends.hls.emit.top_cpp import emit_top_cpp
+from fpgai.backends.hls.emit.top_train_cpp import emit_top_train_cpp
 from fpgai.analysis.hls_validation import run_and_write_hls_validation
 from fpgai.util.fs import ensure_clean_dir, write_text
 
