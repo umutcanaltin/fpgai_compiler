@@ -153,6 +153,29 @@ def _layer_codegen_values(
     }
 
 
+
+
+def _emit_parallel_evidence_comment(
+    lines: list[str],
+    indent: str,
+    *,
+    op_type: str,
+    layer_name: str,
+    codegen: Dict[str, int],
+) -> None:
+    lines.append(
+        f"{indent}// FPGAI parallel evidence: "
+        f"op={op_type} "
+        f"name={layer_name} "
+        f"pipeline_ii={codegen['pipeline_ii']} "
+        f"input_unroll={codegen['input_unroll']} "
+        f"output_unroll={codegen['output_unroll']} "
+        f"input_partition={codegen['input_partition']} "
+        f"output_partition={codegen['output_partition']} "
+        f"weight_partition={codegen['weight_partition']}"
+    )
+
+
 def _comm_map(
     communication_plan: Any,
 ) -> Dict[str, Dict[str, Any]]:
@@ -611,6 +634,72 @@ def _emit_storage_pragma(
     )
 
 
+def _weight_memory_info_from_layer_plan(
+    layer_plan: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Return HLS storage preference for a layer's runtime/local weight cache.
+
+    The planner stores this under architecture.memory.weight_region in recent
+    FPGAI plans.  Older plans may expose a top-level memory dictionary.  This
+    helper deliberately falls back to BRAM so existing designs remain stable.
+    """
+
+    memory = _architecture_section(
+        layer_plan,
+        "memory",
+    )
+    if not memory:
+        candidate = layer_plan.get(
+            "memory",
+            {},
+        )
+        memory = candidate if isinstance(candidate, dict) else {}
+
+    region = str(
+        memory.get(
+            "weight_region",
+            memory.get(
+                "region",
+                "BRAM",
+            ),
+        )
+    ).upper()
+
+    # External-DDR weights are loaded into a local cache before compute; the
+    # cache itself must still be implemented on-chip.  Treat DDR as BRAM here.
+    if region not in {"BRAM", "URAM"}:
+        region = "BRAM"
+
+    return {
+        "region": region,
+        "size_bytes": "weight_cache",
+    }
+
+
+def _emit_weight_storage_pragmas(
+    lines: list[str],
+    parameter_index: int,
+    layer_plan: Dict[str, Any],
+) -> None:
+    memory_info = _weight_memory_info_from_layer_plan(
+        layer_plan,
+    )
+    lines.append(
+        f"    // Weight cache placement: "
+        f"{_placement_comment(memory_info)}"
+    )
+    _emit_storage_pragma(
+        lines,
+        f"W{parameter_index}",
+        memory_info,
+    )
+    _emit_storage_pragma(
+        lines,
+        f"B{parameter_index}",
+        memory_info,
+    )
+
+
 def _precision_tag(
     op,
     index: int,
@@ -908,6 +997,13 @@ def emit_top_cpp(
                 layer_plan,
                 op_type="Conv",
             )
+            _emit_parallel_evidence_comment(
+                lines,
+                "    ",
+                op_type="Conv",
+                layer_name=str(op.name),
+                codegen=codegen,
+            )
             architecture_arguments = (
                 f", {codegen['pipeline_ii']}, "
                 f"{codegen['output_unroll']}, "
@@ -1004,6 +1100,11 @@ def emit_top_cpp(
                     "symmetric padding"
                 )
 
+            _emit_weight_storage_pragmas(
+                lines,
+                parameter_index,
+                layer_plan,
+            )
             lines.append(
                 "    conv2d<"
                 f"{input_height}, "
@@ -1035,6 +1136,13 @@ def emit_top_cpp(
                 layer_plan,
                 op_type="Dense",
             )
+            _emit_parallel_evidence_comment(
+                lines,
+                "    ",
+                op_type="Dense",
+                layer_name=str(op.name),
+                codegen=codegen,
+            )
             architecture_arguments = (
                 f", {codegen['pipeline_ii']}, "
                 f"{codegen['input_unroll']}, "
@@ -1052,6 +1160,11 @@ def emit_top_cpp(
                 output_shape
             )
 
+            _emit_weight_storage_pragmas(
+                lines,
+                parameter_index,
+                layer_plan,
+            )
             lines.append(
                 "    dense_out_in<"
                 f"{input_features}, "

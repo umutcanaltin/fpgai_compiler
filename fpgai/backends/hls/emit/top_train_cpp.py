@@ -1054,6 +1054,27 @@ def emit_top_train_cpp(
             ]
         )
 
+    # Mode 1: emit the current trainable parameters as a flat stream.
+    # The training testbench uses this before and after mode 2 so the
+    # HLS step can be compared against the Python/ONNX reference for
+    # both gradients and SGD-updated weights.
+    if parameter_specs:
+        lines.append("  if (mode == 1) {")
+        for index, (kind, _op, tag, weight_size, bias_size) in enumerate(parameter_specs):
+            total_size = weight_size + bias_size
+            is_last_block = "true" if index == len(parameter_specs) - 1 else "false"
+            if kind in {"dense", "conv"}:
+                lines.append(f"    for (int i = 0; i < {weight_size}; ++i) OUT_grad_{tag}[i] = (float)W_{tag}[i];")
+                lines.append(f"    for (int i = 0; i < {bias_size}; ++i) OUT_grad_{tag}[{weight_size} + i] = (float)B_{tag}[i];")
+                lines.append(f"    emit_stream_block<{total_size}>(out, OUT_grad_{tag}, {is_last_block});")
+            elif kind == "bn":
+                lines.append(f"    for (int i = 0; i < {weight_size}; ++i) OUT_grad_{tag}[i] = (float)BN_G_{tag}[i];")
+                lines.append(f"    for (int i = 0; i < {bias_size}; ++i) OUT_grad_{tag}[{weight_size} + i] = (float)BN_B_{tag}[i];")
+                lines.append(f"    emit_stream_block<{total_size}>(out, OUT_grad_{tag}, {is_last_block});")
+        lines.append("    return;")
+        lines.append("  }")
+        lines.append("")
+
     input_buffer = tensor_name_to_buffer[input_name]
 
     lines.append(
@@ -1910,29 +1931,3 @@ def emit_top_train_cpp(
     )
 
     return "\n".join(lines)
-
-# FPGAI architecture-comment wrapper.
-# This keeps the original emitter implementation intact while making
-# generated HLS sources self-describing for experiment artifacts.
-_fpgai_original_emit_top_train_cpp = emit_top_train_cpp
-
-
-def emit_top_train_cpp(*args, **kwargs):
-    source = _fpgai_original_emit_top_train_cpp(*args, **kwargs)
-
-    compile_plan = kwargs.get("compile_plan")
-    if compile_plan is None:
-        try:
-            import inspect
-
-            bound = inspect.signature(_fpgai_original_emit_top_train_cpp).bind_partial(
-                *args,
-                **kwargs,
-            )
-            compile_plan = bound.arguments.get("compile_plan")
-        except Exception:
-            compile_plan = None
-
-    comments = emit_layer_architecture_comments(compile_plan)
-    return comments + source
-

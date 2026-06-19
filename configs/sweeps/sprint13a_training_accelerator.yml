@@ -1,0 +1,83 @@
+name: sprint13a_training_accelerator
+command_template: PYTHONPATH=. python -B main.py benchmark --config {config_path}
+
+materialize_configs:
+  enabled: true
+  directory: configs
+  strip_unknown_top_level_sections: true
+  canonicalize_policy: true
+  strip_top_level_sections:
+    - notes
+  compiler_policy_names: true
+  parameter_mappings:
+    model_path:
+      path: model.path
+      create: true
+    weight_mode:
+      path: data_movement.ps_pl.weights.mode
+      create: true
+    learning_rate:
+      path: training.optimizer.learning_rate
+      create: true
+    epochs:
+      path: training.execution.epochs
+      create: true
+    batch_size:
+      path: training.execution.batch_size
+      create: true
+    dump_intermediates:
+      path: training.debug.dump_intermediates
+      create: true
+    policy:
+      path: optimization.parallel_policy
+      create: true
+    pe:
+      path: optimization.parallel.pe
+      create: true
+    simd:
+      path: optimization.parallel.simd
+      create: true
+    unroll_factor:
+      path: optimization.parallel.unroll_factor
+      create: true
+    partition_factor:
+      path: optimization.parallel.partition_factor
+      create: true
+
+defaults:
+  base_config_path: fpgai_train.yml
+  config_path: fpgai_train.yml
+  board: kv260
+  model_path: models/cnn_mnist.onnx
+  policy: balanced
+  pe: 2
+  simd: 2
+  unroll_factor: 2
+  partition_factor: 2
+  learning_rate: 0.005
+  epochs: 1
+  batch_size: 1
+  dump_intermediates: true
+
+design_points:
+  - name: training_cnn_embedded_balanced
+    weight_mode: embedded
+
+  - name: training_cnn_stream_balanced
+    weight_mode: stream
+
+  - name: training_cnn_embedded_latency_first
+    policy: latency_first
+    pe: 4
+    simd: 4
+    unroll_factor: 4
+    partition_factor: 4
+    weight_mode: embedded
+
+  - name: training_cnn_stream_latency_first
+    policy: latency_first
+    pe: 4
+    simd: 4
+    unroll_factor: 4
+    partition_factor: 4
+    weight_mode: stream

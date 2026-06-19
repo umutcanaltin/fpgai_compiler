@@ -583,25 +583,36 @@ def emit_params_cpp(
             lines.append(f"// {op.op_type} layer {op.name!r}")
             lines.append(f"// Weight source: {weight_source}")
             lines.append(f"// Bias source: {bias_source}")
-            # Runtime arrays must be mutable, so do not emit const.
+            # Runtime arrays must be mutable and intentionally uninitialized.
+            # Vitis HLS rejects initialized global/static arrays when they are
+            # bound to URAM (HLS 214-221).  Keep the reference ONNX values in
+            # separate const *_init arrays used only by the testbench/preload
+            # helpers; the top function writes runtime data into W*/B* through
+            # AXI stream or DDR before inference.
             lines.append(
-                _format_array(f"W{parameter_index}", weight_type, weight_array).replace(
-                    f"const {weight_type}",
+                f"{weight_type} W{parameter_index}[{int(weight_array.size)}];"
+            )
+            lines.append(
+                f"{bias_type} B{parameter_index}[{int(bias_array.size)}];"
+            )
+            lines.append(
+                _format_array(
+                    f"W{parameter_index}_init",
                     weight_type,
-                    1,
+                    weight_array,
                 )
             )
             lines.append(
-                _format_array(f"B{parameter_index}", bias_type, bias_array).replace(
-                    f"const {bias_type}",
+                _format_array(
+                    f"B{parameter_index}_init",
                     bias_type,
-                    1,
+                    bias_array,
                 )
             )
             lines.append("")
 
-            preload_entries.append((f"W{parameter_index}", weight_type, int(weight_array.size)))
-            preload_entries.append((f"B{parameter_index}", bias_type, int(bias_array.size)))
+            preload_entries.append((f"W{parameter_index}_init", weight_type, int(weight_array.size)))
+            preload_entries.append((f"B{parameter_index}_init", bias_type, int(bias_array.size)))
             total_runtime_words += int(weight_array.size) + int(bias_array.size)
             parameter_index += 1
 

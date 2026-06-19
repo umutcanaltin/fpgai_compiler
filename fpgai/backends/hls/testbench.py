@@ -49,7 +49,9 @@ static void push_f32(hls::stream<axis_t>& s, float v, bool last=false) {{
 
 int main(int argc, char** argv) {{
     const char* in_path = "input.bin";
+    const char* out_path = "output.bin";
     if (argc >= 2) in_path = argv[1];
+    if (argc >= 3) out_path = argv[2];
 
     std::ifstream f(in_path, std::ios::binary);
     if (!f) {{
@@ -145,7 +147,9 @@ static axis_t make_axis_f32(float v, bool last=false) {{
 
 int main(int argc, char** argv) {{
     const char* in_path = "input.bin";
+    const char* out_path = "output.bin";
     if (argc >= 2) in_path = argv[1];
+    if (argc >= 3) out_path = argv[2];
 
     std::ifstream f(in_path, std::ios::binary);
     if (!f) {{
@@ -222,7 +226,9 @@ extern "C" void {top_name}(hls::stream<axis_t>& in, hls::stream<axis_t>& out);
 
 int main(int argc, char** argv) {{
     const char* in_path = "input.bin";
+    const char* out_path = "output.bin";
     if (argc >= 2) in_path = argv[1];
+    if (argc >= 3) out_path = argv[2];
 
     std::ifstream f(in_path, std::ios::binary);
     if (!f) {{

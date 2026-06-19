@@ -50,6 +50,13 @@ static void push_f32(hls::stream<axis_t>& s, float v, bool last=false) {{
     s.write(pkt);
 }}
 
+static float pop_f32(hls::stream<axis_t>& s) {{
+    axis_t pkt = s.read();
+    union {{ unsigned int i; float f; }} u;
+    u.i = pkt.data.to_uint();
+    return u.f;
+}}
+
 static std::vector<float> read_bin(const char* path) {{
     std::ifstream f(path, std::ios::binary);
     if (!f) {{
@@ -67,6 +74,29 @@ static std::vector<float> read_bin(const char* path) {{
 static void write_bin(const char* path, const std::vector<float>& data) {{
     std::ofstream f(path, std::ios::binary);
     f.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(float));
+}}
+
+static std::vector<float> drain_exact(
+    hls::stream<axis_t>& out_stream,
+    int expected_words,
+    const char* label
+) {{
+    std::vector<float> values;
+    while (!out_stream.empty()) {{
+        values.push_back(pop_f32(out_stream));
+    }}
+    if ((int)values.size() != expected_words) {{
+        fprintf(
+            stderr,
+            "[TB-TRAIN] Unexpected %s words. got=%zu expected=%d delta=%lld\\n",
+            label,
+            values.size(),
+            expected_words,
+            (long long)values.size() - (long long)expected_words
+        );
+        std::exit(2);
+    }}
+    return values;
 }}
 
 int main(int argc, char** argv) {{
@@ -91,6 +121,10 @@ int main(int argc, char** argv) {{
         {top_name}(in_stream, out_stream, aux_stream, 0);
     }}
 
+    {top_name}(in_stream, out_stream, aux_stream, 1);
+    std::vector<float> weights_before = drain_exact(out_stream, {int(weight_words)}, "weights_before");
+    write_bin("weights_before.bin", weights_before);
+
     for (size_t i = 0; i < input_data.size(); ++i) {{
         push_f32(in_stream, input_data[i], i + 1 == input_data.size());
     }}
@@ -100,31 +134,16 @@ int main(int argc, char** argv) {{
     }}
 
     {top_name}(in_stream, out_stream, aux_stream, 2);
-
-    std::vector<float> grads;
-    while (!out_stream.empty()) {{
-        axis_t pkt = out_stream.read();
-        union {{ unsigned int i; float f; }} u;
-        u.i = pkt.data.to_uint();
-        grads.push_back(u.f);
-    }}
-
-    const int expected_words = {int(weight_words)};
-
-    if ((int)grads.size() != expected_words) {{
-        fprintf(
-            stderr,
-            "[TB-TRAIN] Unexpected output words. got=%zu expected=%d delta=%lld\\n",
-            grads.size(),
-            expected_words,
-            (long long)grads.size() - (long long)expected_words
-        );
-        return 2;
-    }}
-
+    std::vector<float> grads = drain_exact(out_stream, {int(weight_words)}, "grads");
     write_bin("grads.bin", grads);
 
+    {top_name}(in_stream, out_stream, aux_stream, 1);
+    std::vector<float> weights_after = drain_exact(out_stream, {int(weight_words)}, "weights_after");
+    write_bin("weights_after.bin", weights_after);
+
+    printf("[TB-TRAIN] Wrote weights_before.bin (%zu floats)\\n", weights_before.size());
     printf("[TB-TRAIN] Wrote grads.bin (%zu floats)\\n", grads.size());
+    printf("[TB-TRAIN] Wrote weights_after.bin (%zu floats)\\n", weights_after.size());
     return 0;
 }}
 """

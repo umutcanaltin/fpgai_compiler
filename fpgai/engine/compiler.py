@@ -37,6 +37,7 @@ from fpgai.util.binio import write_f32_bin
 from fpgai.backends.hls.emit.types_h import emit_types_h
 from fpgai.backends.hls.emit.top_cpp import emit_top_cpp
 from fpgai.backends.hls.emit.top_train_cpp import emit_top_train_cpp
+_emit_top_train_cpp = emit_top_train_cpp
 from fpgai.backends.hls.emit.layers_dense import emit_dense_h, emit_dense_cpp
 from fpgai.backends.hls.emit.layers_conv import emit_conv_h, emit_conv_cpp
 from fpgai.backends.hls.emit.layers_pool import emit_pool_h, emit_pool_cpp
@@ -658,7 +659,7 @@ class Compiler:
         if pipeline_mode == "training_on_device":
             write_text(
                 src_dir / f"{top_name}.cpp",
-                emit_top_train_cpp(
+                _emit_top_train_cpp(
                     graph=g,
                     top_name=top_name,
                     weights_mode=weights_mode,
@@ -855,7 +856,7 @@ class Compiler:
                     part=part,
                     clk_period_ns=(1000.0 / clk_mhz),
                     input_bin_path=input_bin,
-                    output_bin_path=str((out_dir / "build" / "output.bin").resolve()),
+                    output_bin_path=str((out_dir / "output.bin").resolve()),
                     weights_mode=weights_mode,
                     intermediate_dump=intermediate_dump,
                 ),
