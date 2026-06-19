@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
+from typing import List, Optional
+
 from fpgai.ir.graph import Graph
+
+
+def _cpp_string_literal(value: str) -> str:
+    return str(value).replace('\\', '\\\\').replace('"', '\\"')
 
 
 def emit_tb_train_cpp(
@@ -16,19 +21,45 @@ def emit_tb_train_cpp(
     weight_words: int,
     preload_weights: List[float],
     training_cfg: dict,
+    output_dir: Optional[str] = None,
 ) -> None:
-    tb_path = tb_dir / "tb.cpp"
+    """Emit the Vitis HLS C-simulation testbench for one training step.
 
+    Sprint 13B v2:
+    - Supports embedded and runtime-weight training modes.
+    - Accepts an explicit output directory through argv[3].
+    - Also writes compatibility copies in the CSim working directory.
+    - Fails CSim loudly if runtime preload size or file writes are wrong.
+    """
+
+    del graph, in_words, out_words, training_cfg
+
+    tb_path = tb_dir / "tb.cpp"
+    normalized_mode = str(weights_mode).strip().lower()
     preload_vals = ", ".join(f"{float(v):.8f}f" for v in preload_weights)
+    default_out_dir = _cpp_string_literal(str(output_dir or "."))
+
+    runtime_mode_expr = (
+        f'(std::string("{_cpp_string_literal(normalized_mode)}") == "stream" || '
+        f'std::string("{_cpp_string_literal(normalized_mode)}") == "streamed" || '
+        f'std::string("{_cpp_string_literal(normalized_mode)}") == "ddr" || '
+        f'std::string("{_cpp_string_literal(normalized_mode)}") == "dma_ddr")'
+    )
 
     tb_text = f"""\
-#include <vector>
-#include <fstream>
+#include <ap_axi_sdata.h>
+#include <hls_stream.h>
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <string>
-#include <hls_stream.h>
-#include <ap_axi_sdata.h>
+#include <vector>
+
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
 
 typedef ap_axis<32,0,0,0> axis_t;
 
@@ -38,6 +69,14 @@ extern "C" void {top_name}(
     hls::stream<axis_t>& aux,
     int mode
 );
+
+static std::string join_path(const std::string& dir, const char* name) {{
+    if (dir.empty() || dir == ".") return std::string(name);
+    const char last = dir[dir.size() - 1];
+    // Avoid a generated C++ backslash character literal. ASCII 92 is backslash.
+    if (last == '/' || ((int)last) == 92) return dir + name;
+    return dir + "/" + name;
+}}
 
 static void push_f32(hls::stream<axis_t>& s, float v, bool last=false) {{
     union {{ float f; unsigned int i; }} u;
@@ -71,9 +110,24 @@ static std::vector<float> read_bin(const char* path) {{
     return data;
 }}
 
-static void write_bin(const char* path, const std::vector<float>& data) {{
-    std::ofstream f(path, std::ios::binary);
+static void write_one_bin(const std::string& path, const std::vector<float>& data) {{
+    std::ofstream f(path.c_str(), std::ios::binary);
+    if (!f) {{
+        fprintf(stderr, "[TB-TRAIN] Error: cannot write %s\\n", path.c_str());
+        std::exit(3);
+    }}
     f.write(reinterpret_cast<const char*>(data.data()), data.size() * sizeof(float));
+    if (!f) {{
+        fprintf(stderr, "[TB-TRAIN] Error: failed while writing %s\\n", path.c_str());
+        std::exit(3);
+    }}
+}}
+
+static void write_bin_both(const std::string& out_dir, const char* name, const std::vector<float>& data) {{
+    write_one_bin(join_path(out_dir, name), data);
+    if (!(out_dir.empty() || out_dir == ".")) {{
+        write_one_bin(std::string(name), data);
+    }}
 }}
 
 static std::vector<float> drain_exact(
@@ -102,9 +156,16 @@ static std::vector<float> drain_exact(
 int main(int argc, char** argv) {{
     const char* in_path = "input.bin";
     const char* target_path = "target.bin";
-
     if (argc >= 2) in_path = argv[1];
     if (argc >= 3) target_path = argv[2];
+
+    std::string out_dir = "{default_out_dir}";
+    if (argc >= 4) out_dir = argv[3];
+
+    printf("[TB-TRAIN] input=%s\\n", in_path);
+    printf("[TB-TRAIN] target=%s\\n", target_path);
+    printf("[TB-TRAIN] output_dir=%s\\n", out_dir.c_str());
+    printf("[TB-TRAIN] mode={_cpp_string_literal(normalized_mode)} expected_weight_words={int(weight_words)}\\n");
 
     std::vector<float> input_data = read_bin(in_path);
     std::vector<float> target_data = read_bin(target_path);
@@ -113,37 +174,46 @@ int main(int argc, char** argv) {{
     hls::stream<axis_t> out_stream;
     hls::stream<axis_t> aux_stream;
 
-    if ("{weights_mode}" == std::string("stream") || "{weights_mode}" == std::string("ddr")) {{
+    if ({runtime_mode_expr}) {{
         std::vector<float> preload = {{ {preload_vals} }};
+        if ((int)preload.size() != {int(weight_words)}) {{
+            fprintf(
+                stderr,
+                "[TB-TRAIN] Runtime preload size mismatch. got=%zu expected=%d mode={_cpp_string_literal(normalized_mode)}\\n",
+                preload.size(),
+                {int(weight_words)}
+            );
+            std::exit(4);
+        }}
         for (size_t i = 0; i < preload.size(); ++i) {{
             push_f32(aux_stream, preload[i], i + 1 == preload.size());
         }}
         {top_name}(in_stream, out_stream, aux_stream, 0);
+        printf("[TB-TRAIN] Preloaded runtime weights (%zu floats)\\n", preload.size());
     }}
 
     {top_name}(in_stream, out_stream, aux_stream, 1);
     std::vector<float> weights_before = drain_exact(out_stream, {int(weight_words)}, "weights_before");
-    write_bin("weights_before.bin", weights_before);
+    write_bin_both(out_dir, "weights_before.bin", weights_before);
 
     for (size_t i = 0; i < input_data.size(); ++i) {{
         push_f32(in_stream, input_data[i], i + 1 == input_data.size());
     }}
-
     for (size_t i = 0; i < target_data.size(); ++i) {{
         push_f32(aux_stream, target_data[i], i + 1 == target_data.size());
     }}
 
     {top_name}(in_stream, out_stream, aux_stream, 2);
     std::vector<float> grads = drain_exact(out_stream, {int(weight_words)}, "grads");
-    write_bin("grads.bin", grads);
+    write_bin_both(out_dir, "grads.bin", grads);
 
     {top_name}(in_stream, out_stream, aux_stream, 1);
     std::vector<float> weights_after = drain_exact(out_stream, {int(weight_words)}, "weights_after");
-    write_bin("weights_after.bin", weights_after);
+    write_bin_both(out_dir, "weights_after.bin", weights_after);
 
-    printf("[TB-TRAIN] Wrote weights_before.bin (%zu floats)\\n", weights_before.size());
-    printf("[TB-TRAIN] Wrote grads.bin (%zu floats)\\n", grads.size());
-    printf("[TB-TRAIN] Wrote weights_after.bin (%zu floats)\\n", weights_after.size());
+    printf("[TB-TRAIN] Wrote %s (%zu floats)\\n", join_path(out_dir, "weights_before.bin").c_str(), weights_before.size());
+    printf("[TB-TRAIN] Wrote %s (%zu floats)\\n", join_path(out_dir, "grads.bin").c_str(), grads.size());
+    printf("[TB-TRAIN] Wrote %s (%zu floats)\\n", join_path(out_dir, "weights_after.bin").c_str(), weights_after.size());
     return 0;
 }}
 """
