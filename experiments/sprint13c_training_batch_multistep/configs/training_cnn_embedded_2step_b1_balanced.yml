@@ -1,0 +1,170 @@
+version: 1
+project:
+  name: fpgai_train
+  out_dir: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/experiments/sprint13c_training_batch_multistep/artifacts/training_cnn_embedded_2step_b1_balanced/build
+  clean: true
+pipeline:
+  mode: training_on_device
+  outputs:
+    top_kernel_name: deeplearn
+training:
+  debug:
+    dump_intermediates: true
+  optimizer:
+    type: sgd
+    learning_rate: 0.005
+  loss:
+    type: mse
+  execution:
+    batch_size: 1
+    epochs: 2
+    train_steps: 2
+  storage:
+    weights: bram
+    activations: bram
+    gradients: bram
+    optimizer_state: bram
+  cache:
+    store_forward_activations: true
+    store_pre_activations: true
+    store_pool_indices: true
+    gradient_checkpointing: false
+    store_step_snapshots: true
+  estimator:
+    enabled: true
+    include_forward: true
+    include_backward_input: true
+    include_backward_params: true
+    include_update: true
+    include_buffers: true
+  phase_overrides: {}
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+operators:
+  supported:
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true
+model:
+  format: onnx
+  path: models/cnn_mnist.onnx
+numerics:
+  defaults:
+    activation:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 12
+    weight:
+      type: ap_fixed
+      total_bits: 20
+      int_bits: 8
+    bias:
+      type: ap_fixed
+      total_bits: 32
+      int_bits: 16
+    accum:
+      type: ap_fixed
+      total_bits: 40
+      int_bits: 20
+  training:
+    grad:
+      type: ap_fixed
+      total_bits: 32
+      int_bits: 16
+    grad_accum:
+      type: ap_fixed
+      total_bits: 40
+      int_bits: 20
+    master_weight:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+    optimizer_state:
+      type: ap_fixed
+      total_bits: 32
+      int_bits: 16
+analysis:
+  quantization_report:
+    enabled: true
+    seed: 0
+  design_space:
+    enabled: true
+    print_terminal_summary: true
+    recommendation:
+      require_prediction_match: false
+      min_cosine: 0.95
+    performance:
+      baseline_cpu_latency_ms: 1.0
+  precision_sweep:
+    enabled: false
+data_movement:
+  ps_pl:
+    compression:
+      enabled: true
+    weights:
+      mode: embedded
+backends:
+  hls:
+    enabled: true
+    vitis:
+      enabled: true
+      mode: csim
+      exe: vitis_hls
+  host_cpp:
+    enabled: true
+debug:
+  verbose: false
+toolchain:
+  vitis_hls:
+    enabled: true
+    root: /tools/Xilinx/Vitis_HLS/2023.2
+    settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
+    install_dir: /tools/Xilinx/Vitis_HLS/2023.2
+benchmark:
+  enabled: true
+  fail_on_mismatch: true
+  seed: 0
+  compare:
+    atol: 0.25
+    rtol: 0.25
+    max_abs_error: 0.25
+    mean_abs_error: 0.1
+    rmse: 0.12
+    require_argmax_match: false
+    min_cosine_similarity: 0.9
+  intermediate:
+    enabled: true
+    fail_on_layer_mismatch: false
+    stop_on_first_bad_layer: false
+memory:
+  storage:
+    weights: bram
+    activations: bram
+    gradients: bram
+    optimizer_state: bram
+optimization:
+  parallel_policy: Balanced
+  parallel:
+    pe: 2
+    simd: 2
+    unroll_factor: 2
+    partition_factor: 2
