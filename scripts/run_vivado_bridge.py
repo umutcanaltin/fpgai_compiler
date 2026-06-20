@@ -55,6 +55,19 @@ def _hls_impl_ip_dir(bridge: Path) -> Path:
     return bridge.parent / "hls" / "fpgai_hls_proj" / "sol1" / "impl" / "ip"
 
 
+def _clear_exported_ip(bridge: Path) -> None:
+    """Remove stale exported IP locations before a forced re-export.
+
+    This prevents stale component.xml files from making a failed HLS export look
+    successful and from allowing Vivado to continue with incompatible old IP.
+    """
+    for path in [bridge / "hls_ip", _hls_impl_ip_dir(bridge)]:
+        if path.exists():
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+
 def _mirror_hls_ip_to_bridge(bridge: Path) -> None:
     """Copy canonical Vitis HLS impl/ip contents into vivado_bridge/hls_ip.
 
@@ -225,7 +238,10 @@ def _run_for_artifact(
     }
 
     if export_hls_ip:
-        _mirror_hls_ip_to_bridge(bridge)
+        if force_hls_export:
+            _clear_exported_ip(bridge)
+        else:
+            _mirror_hls_ip_to_bridge(bridge)
         existing_components = _component_xml_paths(bridge)
         if existing_components and not force_hls_export:
             res = {
@@ -259,22 +275,33 @@ def _run_for_artifact(
         })
 
     if run_vivado_synth or run_vivado_impl:
-        _mirror_hls_ip_to_bridge(bridge)
-        if not _component_xml_exists(bridge):
+        if export_hls_ip and not row.get("hls_ip_export_ok", False):
             res = {
                 "requested": True,
                 "ran": False,
                 "ok": False,
                 "returncode": None,
-                "error": "Cannot run Vivado: no exported HLS IP component.xml found under vivado_bridge/hls_ip",
-                "stdout_log": "",
-                "stderr_log": "",
+                "error": "Cannot run Vivado: HLS IP export failed; inspect vitis_hls_export_ip logs",
+                "stdout_log": row.get("hls_ip_export_stdout_log", ""),
+                "stderr_log": row.get("hls_ip_export_stderr_log", ""),
             }
         else:
-            env = os.environ.copy()
-            if run_vivado_impl:
-                env["FPGAI_VIVADO_RUN_IMPL"] = "1"
-            res = _run_cmd(["vivado", "-mode", "batch", "-source", "scripts/run_vivado.tcl"], bridge, "vivado_build", timeout_sec, env=env)
+            _mirror_hls_ip_to_bridge(bridge)
+            if not _component_xml_exists(bridge):
+                res = {
+                    "requested": True,
+                    "ran": False,
+                    "ok": False,
+                    "returncode": None,
+                    "error": "Cannot run Vivado: no exported HLS IP component.xml found under vivado_bridge/hls_ip",
+                    "stdout_log": "",
+                    "stderr_log": "",
+                }
+            else:
+                env = os.environ.copy()
+                if run_vivado_impl:
+                    env["FPGAI_VIVADO_RUN_IMPL"] = "1"
+                res = _run_cmd(["vivado", "-mode", "batch", "-source", "scripts/run_vivado.tcl"], bridge, "vivado_build", timeout_sec, env=env)
         row.update({
             "vivado_run": res,
             "vivado_ran": bool(res.get("ran")),
