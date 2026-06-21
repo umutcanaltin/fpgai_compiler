@@ -300,27 +300,12 @@ def _buffering_for(weights_mode: str, policy: Policy) -> str:
 
 
 def _pipeline_ii_for(policy: Policy, compute_hint: str = "") -> int:
-    """Lower pipeline_style into distinct HLS initiation intervals.
-
-    Sprint 15C goal: conservative, balanced, and aggressive must produce
-    different generated HLS directives even when PE/SIMD/unroll/partition
-    are held constant by the sweep.
-
-    These values are intentionally simple and evidence-driven:
-    - conservative prioritizes timing/resource safety, so it relaxes II.
-    - balanced uses moderate pipelining.
-    - aggressive targets II=1.
-    """
-    style = str(getattr(policy, "pipeline_style", "balanced") or "balanced").lower()
-    hint = str(compute_hint or "").lower()
-
-    if style == "aggressive":
+    if policy.pipeline_style == "aggressive":
         return 1
-    if style == "balanced":
-        return 2
-    if style == "conservative":
-        return 4 if hint == "memory_bound" else 3
-    return 2
+    if policy.pipeline_style == "conservative":
+        return 2 if compute_hint == "memory_bound" else 1
+    return 1
+
 
 def _layer_notes(desc: LayerDescriptor, precision: Dict[str, Any], policy: Policy) -> Dict[str, Any]:
     return {
