@@ -695,7 +695,7 @@ def _inject_native_accumulated_modes_from_cpp(
         raise RuntimeError("Could not find SGD update marker for mode 3 insertion")
     cpp = cpp[:pos] + "\n".join(accum) + cpp[pos:]
 
-    # Sprint 13F: add evaluation-only loss mode to the generated HLS top.
+    # Training convergence mode: add evaluation-only loss mode to the generated HLS top.
     # mode 6 reads one input/target record, computes loss_value, emits one loss float,
     # and returns before gradient computation or optimizer update.
     if "if (mode == 6)" not in cpp:

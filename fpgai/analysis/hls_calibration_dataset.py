@@ -1,9 +1,9 @@
 """Build calibration datasets by matching FPGAI estimates with Vitis HLS reports.
 
-Sprint 5.1 notes
+HLS calibration notes
 ----------------
 This version is intentionally tolerant of the real FPGAI compiler artifacts.
-The first Sprint 5 patch worked for synthetic compile-plan JSON, but real
+The first HLS calibration update worked for synthetic compile-plan JSON, but real
 benchmark runs can store estimates under nested/reporting-specific structures.
 This module therefore:
 
@@ -191,7 +191,7 @@ def build_calibration_dataset(
 
     project_root = _infer_project_root_from_compile_plan(compile_plan_path)
 
-    # Sprint 5.4 direct bridge: the Sprint 4 estimate-vs-HLS reports already
+    # Direct calibration bridge: the estimate-vs-HLS reports already
     # print correct layer<->module matches and module resources. Prefer those
     # text summaries when the generic compile-plan path has no samples or only
     # zero resource predictions. This avoids fragile parsing of helper csynth
@@ -202,7 +202,7 @@ def build_calibration_dataset(
         # extractor. The generic path can produce stale missing_or_zero_estimate
         # warnings because compile_plan_for_calibration.json stores scheduling
         # choices, not numeric LUT/FF/DSP/BRAM predictions. Suppress those old
-        # warnings so the final Sprint 5 artifact is clean and paper-ready.
+        # warnings so the final HLS calibration artifact is clean and paper-ready.
         suppressed_warning_count = len(warnings)
         samples = text_bridge_samples
         warnings = [{"warning": "used_text_summary_bridge", "sample_count": str(len(text_bridge_samples))}]

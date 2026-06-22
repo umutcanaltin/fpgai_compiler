@@ -149,7 +149,7 @@ def write_tiling_report_artifacts(
     candidates_by_layer: Mapping[str, Iterable[Mapping[str, int]]] | None = None,
     sweep_top_k: int | None = 5,
 ) -> tuple[dict[str, Any], MutableMapping[str, Any]]:
-    """Write all Sprint-4 tiling artifacts and update the compile manifest.
+    """Write all tiling artifacts and update the compile manifest.
 
     Artifacts written:
       - tiling_analysis.json

@@ -2,7 +2,7 @@
 
 This module evaluates whether the HLS calibration model improves estimates on
 samples that were not used to fit the calibration factors.  It intentionally
-keeps the data format close to the Sprint 5 calibration artifacts:
+keeps the data format close to the HLS calibration artifacts:
 
     {"samples": [{"estimated": {...}, "hls_actual": {...}, ...}]}
 

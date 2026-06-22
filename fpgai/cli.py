@@ -462,7 +462,7 @@ def inspect_sweep_config(
     return 0 if not errors else 1
 
 
-def inspect_evidence_config(
+def inspect_experiment_config(
     config_path: str,
     *,
     json_output: str | None = None,
@@ -492,7 +492,7 @@ def inspect_evidence_config(
         errors.append("limitations: expected list or mapping")
 
     report = {
-        "kind": "paper_evidence",
+        "kind": "paper_experiment",
         "config": config_path,
         "valid": not errors,
         "paper_title": paper.get("title") if isinstance(paper, dict) else None,
@@ -503,7 +503,7 @@ def inspect_evidence_config(
         "errors": errors,
     }
 
-    print("=============== FPGAI Evidence Config Inspection ===============")
+    print("============== FPGAI Experiment Config Inspection ==============")
     print(f"Config                : {config_path}")
     print(f"Paper title           : {report['paper_title']}")
     print(f"Valid                 : {report['valid']}")
@@ -514,11 +514,11 @@ def inspect_evidence_config(
         print("-----------------------------------------------------------------")
         for error in errors:
             print(f" - {error}")
-    print("=================================================================")
+    print("================================================================")
 
     output_path = _write_json_report(report, json_output)
     if output_path is not None:
-        print(f"[OK] Wrote evidence inspection JSON to: {output_path}")
+        print(f"[OK] Wrote experiment inspection JSON to: {output_path}")
 
     return 0 if not errors else 1
 
@@ -731,25 +731,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Repository root for resolving relative sweep paths",
     )
 
-    evidence_parser = subparsers.add_parser(
-        "evidence",
-        help="Inspect or collect paper evidence configs",
+    experiment_parser = subparsers.add_parser(
+        "experiment",
+        help="Inspect or run paper experiment configs",
     )
-    evidence_subparsers = evidence_parser.add_subparsers(
-        dest="evidence_command"
+    experiment_subparsers = experiment_parser.add_subparsers(
+        dest="experiment_command"
     )
-    evidence_inspect_parser = evidence_subparsers.add_parser(
+    experiment_inspect_parser = experiment_subparsers.add_parser(
         "inspect",
-        help="Inspect a paper/evidence YAML without collecting artifacts",
+        help="Inspect a paper experiment YAML without running experiments",
     )
-    evidence_inspect_parser.add_argument(
+    experiment_inspect_parser.add_argument(
         "--config",
         required=True,
-        help="Path to configs/paper/*.yml",
+        help="Path to configs/experiments/*.yml",
     )
-    evidence_inspect_parser.add_argument(
+    experiment_inspect_parser.add_argument(
         "--json-output",
-        help="Optional path for evidence inspection JSON",
+        help="Optional path for experiment inspection JSON",
     )
 
     parser.add_argument(
@@ -826,15 +826,15 @@ def main() -> None:
             )
         parser.error("sweep requires a subcommand, e.g. 'inspect' or 'run'")
 
-    if args.command == "evidence":
-        if args.evidence_command == "inspect":
+    if args.command == "experiment":
+        if args.experiment_command == "inspect":
             raise SystemExit(
-                inspect_evidence_config(
+                inspect_experiment_config(
                     args.config,
                     json_output=args.json_output,
                 )
             )
-        parser.error("evidence requires a subcommand, e.g. 'inspect'")
+        parser.error("experiment requires a subcommand, e.g. 'inspect'")
 
     if args.config:
         raise SystemExit(

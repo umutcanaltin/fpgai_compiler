@@ -2,7 +2,7 @@
 
 The first implementation targets PYNQ-Z2 because the bit/.hwh overlay flow is
 simpler than Kria. KV260/KR260 entries are included as metadata only; their
-block-design and deployment flows should be validated in later sprints.
+block-design and deployment flows should be validated in later development stages.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ _BOARDS: Dict[str, BoardInfo] = {
         default_clock_mhz=100.0,
         ps_type="processing_system7",
         overlay_style="pynq_bit_hwh",
-        notes="Primary Sprint 14 target: simple PYNQ overlay path.",
+        notes="Primary Vivado bridge target: simple PYNQ overlay path.",
     ),
     "kv260": BoardInfo(
         name="kv260",
@@ -48,7 +48,7 @@ _BOARDS: Dict[str, BoardInfo] = {
         default_clock_mhz=100.0,
         ps_type="zynq_ultra_ps_e",
         overlay_style="kria_xsa_dtbo_later",
-        notes="Metadata only in Sprint 14A/B; Kria deployment comes later.",
+        notes="Metadata only at this stage; Kria deployment comes later.",
     ),
     "kr260": BoardInfo(
         name="kr260",
@@ -59,7 +59,7 @@ _BOARDS: Dict[str, BoardInfo] = {
         default_clock_mhz=100.0,
         ps_type="zynq_ultra_ps_e",
         overlay_style="kria_xsa_dtbo_later",
-        notes="Metadata only in Sprint 14A/B; Kria deployment comes later.",
+        notes="Metadata only at this stage; Kria deployment comes later.",
     ),
 }
 

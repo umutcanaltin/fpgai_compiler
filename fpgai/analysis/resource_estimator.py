@@ -356,12 +356,12 @@ def _top_level_resources(
         + 64 * stream_edges
     )
 
-    dispatch_lut = (
+    disupdate_lut = (
         45 * layer_count
         if dataflow_enabled
         else 70 * layer_count
     )
-    dispatch_ff = (
+    disupdate_ff = (
         60 * layer_count
         if dataflow_enabled
         else 90 * layer_count
@@ -456,13 +456,13 @@ def _top_level_resources(
     return {
         "predicted_lut": (
             interface_lut
-            + dispatch_lut
+            + disupdate_lut
             + conversion_lut
             + fifo_lut
         ),
         "predicted_ff": (
             interface_ff
-            + dispatch_ff
+            + disupdate_ff
             + conversion_ff
             + fifo_ff
         ),
@@ -473,8 +473,8 @@ def _top_level_resources(
         ),
         "interface_lut": interface_lut,
         "interface_ff": interface_ff,
-        "dispatch_lut": dispatch_lut,
-        "dispatch_ff": dispatch_ff,
+        "disupdate_lut": disupdate_lut,
+        "disupdate_ff": disupdate_ff,
         "conversion_lut": conversion_lut,
         "conversion_ff": conversion_ff,
         "fifo_lut": fifo_lut,

@@ -171,7 +171,7 @@ def run_compile_correctness_benchmark(
                 f"See {intermediate_out_dir / 'intermediate_summary.txt'}"
             )
 
-    manifest_patch = {
+    manifest_update = {
         "benchmark": {
             "passed": metrics.passed,
             "metrics_json": str((bench_dir / "metrics.json").resolve()),
@@ -200,7 +200,7 @@ def run_compile_correctness_benchmark(
         }
     }
     (bench_dir / "benchmark_manifest.json").write_text(
-        json.dumps(manifest_patch, indent=2),
+        json.dumps(manifest_update, indent=2),
         encoding="utf-8",
     )
 

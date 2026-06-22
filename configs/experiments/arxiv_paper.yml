@@ -1,0 +1,31 @@
+version: 1
+
+paper:
+  title: "FPGAI: A Resource-Aware Compilation and Execution Framework for Neural Network Inference and Training on FPGA-SoCs"
+  stage: arxiv
+  claim_policy: artifact_first
+
+inputs:
+  experiments:
+    training_convergence: experiments/training_multi_epoch_convergence
+    hardware_knobs: experiments/hardware_knob_validation
+    pipeline_policy: experiments/pipeline_policy_strength
+    parallel_envelope: experiments/parallelism_feasible_envelope
+  artifacts:
+    summary: paper_experiments/reproducibility/summary.csv
+    training_convergence: paper_experiments/arxiv/training_convergence/training_convergence.csv
+    vivado_impl: paper_experiments/arxiv/vivado_impl_summary/vivado_impl_summary.csv
+    hardware_knobs: paper_experiments/arxiv/hardware_knobs
+    estimator_accuracy: paper_experiments/arxiv/estimator_accuracy/estimator_accuracy.csv
+    communication_ablation: paper_experiments/arxiv/communication_ablation/comm_ablation.csv
+
+claim_levels:
+  ready: claim is supported by generated artifacts and can be used with stated limitations
+  partial: claim is supported only for a subset or modeled/static artifact and must be limited
+  missing: claim must not be used yet
+
+limitations:
+  - "Physical-board training convergence is not claimed until board-runtime artifacts exist."
+  - "Estimator accuracy is partial unless valid LUT/FF/BRAM/DSP predictions are exported."
+  - "Communication ablation is based on transfer-volume artifacts unless board DMA measurements are added."
+  - "Vivado implementation artifacts are the source of truth for final feasibility."

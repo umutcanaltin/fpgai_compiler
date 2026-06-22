@@ -302,11 +302,11 @@ def _buffering_for(weights_mode: str, policy: Policy) -> str:
 def _pipeline_ii_for(policy: Policy, compute_hint: str = "") -> int:
     """Lower pipeline_style into distinct HLS initiation intervals.
 
-    Sprint 15C goal: conservative, balanced, and aggressive must produce
+    Pipeline policy goal: conservative, balanced, and aggressive must produce
     different generated HLS directives even when PE/SIMD/unroll/partition
     are held constant by the sweep.
 
-    These values are intentionally simple and evidence-driven:
+    These values are intentionally simple and artifact-driven:
     - conservative prioritizes timing/resource safety, so it relaxes II.
     - balanced uses moderate pipelining.
     - aggressive targets II=1.

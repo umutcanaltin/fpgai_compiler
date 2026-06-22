@@ -14,7 +14,7 @@ Future stable workflow target:
 ```bash
 fpgai compile --config configs/examples/inference_compile.yml
 fpgai sweep --config configs/sweeps/example.yml
-fpgai paper collect --config configs/paper/arxiv_evidence.yml
+fpgai paper collect --config configs/experiments/arxiv_paper.yml
 ```
 
 ## Repository policy
@@ -26,10 +26,10 @@ Allowed script categories:
 | Category | Purpose |
 |---|---|
 | public | Stable user-facing wrappers while CLI commands mature |
-| paper | Artifact/evidence collection for manuscripts |
+| paper | Artifact/experiment collection for manuscripts |
 | dev | Maintainer diagnostics and migration tools |
-| legacy_sprint | Historical sprint utilities; not recommended for new users |
+| legacy_workflow | Historical development utilities; not recommended for new users |
 
 ## Current transition
 
-The repository still contains many historical sprint scripts. They should not be deleted immediately. Instead, each script should be classified, documented, and either promoted to a stable CLI command or moved under a legacy/development namespace.
+The repository still contains many historical development scripts. They should not be deleted immediately. Instead, each script should be classified, documented, and either promoted to a stable CLI command or moved under a legacy/development namespace.

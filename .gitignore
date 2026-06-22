@@ -34,3 +34,13 @@ experiments/*
 
 # Local audit files
 repo_audit/
+# Generated experiment outputs
+experiments/
+paper_experiments/
+reports/
+build/
+
+# Keep directory documentation tracked
+!experiments/README.md
+!paper_experiments/README.md
+!reports/README.md

@@ -1,11 +1,11 @@
-"""Compiler/benchmark integration glue for Sprint 5 HLS calibration.
+"""Compiler/benchmark integration glue for HLS calibration.
 
 This module is intentionally best-effort. It should never break normal FPGAI
 compilation unless the user explicitly sets:
 
     analysis.hls_calibration.fail_on_empty: true
 
-It writes the Sprint 5 artifacts under:
+It writes the HLS calibration artifacts under:
 
     <out_dir>/<output_dir>/hls_operator_dataset.json
     <out_dir>/<output_dir>/calibrated_model.json
@@ -52,7 +52,7 @@ def run_hls_calibration(
     clock_mhz: float | None = None,
     verbose: bool = False,
 ) -> HLSCalibrationResult:
-    """Run Sprint 5 calibration from inside the compiler flow.
+    """Run HLS calibration from inside the compiler flow.
 
     Parameters are deliberately broad so this can be called from both the
     inference compiler path and the benchmark path without changing their data
@@ -107,7 +107,7 @@ def run_hls_calibration(
             clock_target_mhz=clock_mhz,
         )
 
-        # Sprint 5.1: real FPGAI benchmark runs may already produce JSON
+        # HLS calibration: real FPGAI benchmark runs may already produce JSON
         # validation artifacts with predicted-vs-actual layer data, while the
         # compile_plan object passed here can be too high-level to contain layer
         # estimates. If the direct compile-plan path produced zero samples, scan

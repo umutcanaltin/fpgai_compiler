@@ -35,7 +35,7 @@ def _extract_metrics_from_paths(paths: Iterable[str | Path]) -> Dict[str, Any]:
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             continue
-        # Common Sprint 5 calibration metrics
+        # Common HLS calibration metrics
         summary = data.get("summary") if isinstance(data, dict) else None
         if isinstance(summary, dict):
             for prefix_key in ["raw_mean_absolute_percentage_error", "calibrated_mean_absolute_percentage_error"]:
@@ -64,7 +64,7 @@ def _assign_design_artifact_out_dir(
     Earlier sweeps reused the base config's project.out_dir, for example
     build/fpgai_example_dense. That allowed later design points to overwrite
     earlier generated C/C++ artifacts and left no generated code under the
-    experiment folder for Sprint 9 design-effect checks.
+    experiment folder for precision design-effect checks.
     """
 
     path = Path(config_path)

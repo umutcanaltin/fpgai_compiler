@@ -1,0 +1,75 @@
+name: parallelism_policy
+command_template: python main.py benchmark --config {config_path}
+
+materialize_configs:
+  enabled: true
+  directory: configs
+  strip_unknown_top_level_sections: true
+  canonicalize_policy: true
+  strip_top_level_sections:
+    - notes
+  compiler_policy_names: true
+  parameter_mappings:
+    pe:
+      path: optimization.parallel.pe
+      create: true
+    simd:
+      path: optimization.parallel.simd
+      create: true
+    unroll_factor:
+      path: optimization.parallel.unroll_factor
+      create: true
+    partition_factor:
+      path: optimization.parallel.partition_factor
+      create: true
+    pipeline_style:
+      path: optimization.parallel.pipeline_style
+      create: true
+
+# Keep memory/precision fixed so any generated-HLS differences come from
+# parallel policy and explicit PE/SIMD/partition knobs.
+defaults:
+  base_config_path: fpgai.yml
+  config_path: fpgai.yml
+  model_path: models/cnn_mnist.onnx
+  board: kv260
+  precision_mode: fx8_3
+  memory_strategy: on_chip
+  weight_storage: embedded
+  policy: balanced
+
+# The aliases below are experiment names. The actual compiler policy is
+# materialized through optimization.parallel_policy plus explicit parallel
+# knobs under optimization.parallel.*.
+design_points:
+  - name: parallel_resource_first
+    policy: resource_first
+    pe: 1
+    simd: 1
+    unroll_factor: 1
+    partition_factor: 1
+    pipeline_style: conservative
+
+  - name: parallel_balanced
+    policy: balanced
+    pe: 2
+    simd: 2
+    unroll_factor: 2
+    partition_factor: 2
+    pipeline_style: balanced
+
+  - name: parallel_throughput_first
+    policy: throughput_first
+    pe: 2
+    simd: 4
+    unroll_factor: 2
+    partition_factor: 4
+    pipeline_style: aggressive
+
+  - name: parallel_latency_first_max
+    policy: latency_first
+    pe: 4
+    simd: 4
+    unroll_factor: 4
+    partition_factor: 4
+    pipeline_style: aggressive

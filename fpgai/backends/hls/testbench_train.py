@@ -51,18 +51,18 @@ def emit_tb_train_cpp(
 ) -> None:
     """Emit the Vitis HLS C-simulation testbench for training.
 
-    Sprint 13D:
-    - Keeps Sprint 13C replay mode by default.
+    Training accumulation mode:
+    - Keeps batch replay mode by default.
     - Adds an accumulated-gradient CSim smoke mode for runtime-weight designs.
     - In accumulated mode, gradients for each microbatch sample are computed from the same
       base weights, averaged in the HLS testbench, and a reference SGD update is emitted.
 
-    Sprint 13E:
+    Native accumulation mode:
     - In accumulated mode, the testbench drives native HLS top modes:
       mode 3 = accumulate gradients, mode 4 = average/apply update, mode 5 = reset.
     - This validates that the generated HLS top owns the mini-batch optimizer update.
 
-    Sprint 13F:
+    Training convergence mode:
     - Adds multi-epoch convergence-smoke instrumentation.
     - The testbench calls generated HLS top mode 6 to emit evaluation loss without updating weights.
     - It records initial/final/epoch losses in training_multistep_summary.json.

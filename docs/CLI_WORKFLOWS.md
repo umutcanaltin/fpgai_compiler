@@ -29,18 +29,18 @@ fpgai sweep run \
 
 Sweep output goes under `experiments/`. Generated experiment artifacts should not normally be committed.
 
-## Paper evidence config
+## Paper experiments config
 
 Use this for reproducibility and paper-result generation.
 
 ```bash
-fpgai evidence inspect --config configs/paper/arxiv_evidence.yml
+fpgai experiment inspect --config configs/experiments/arxiv_paper.yml
 ```
 
-Future evidence commands should follow this pattern:
+Future experiment artifact commands should follow this pattern:
 
 ```bash
-fpgai evidence collect --config configs/paper/arxiv_evidence.yml --out evidence/arxiv
+fpgai experiment run --config configs/experiments/arxiv_paper.yml --out paper_experiments/arxiv
 ```
 
 ## Logging policy

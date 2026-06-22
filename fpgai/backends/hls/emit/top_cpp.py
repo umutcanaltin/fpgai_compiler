@@ -155,7 +155,7 @@ def _layer_codegen_values(
 
 
 
-def _emit_parallel_evidence_comment(
+def _emit_parallel_artifact_comment(
     lines: list[str],
     indent: str,
     *,
@@ -164,7 +164,7 @@ def _emit_parallel_evidence_comment(
     codegen: Dict[str, int],
 ) -> None:
     lines.append(
-        f"{indent}// FPGAI parallel evidence: "
+        f"{indent}// FPGAI parallel artifact: "
         f"op={op_type} "
         f"name={layer_name} "
         f"pipeline_ii={codegen['pipeline_ii']} "
@@ -997,7 +997,7 @@ def emit_top_cpp(
                 layer_plan,
                 op_type="Conv",
             )
-            _emit_parallel_evidence_comment(
+            _emit_parallel_artifact_comment(
                 lines,
                 "    ",
                 op_type="Conv",
@@ -1136,7 +1136,7 @@ def emit_top_cpp(
                 layer_plan,
                 op_type="Dense",
             )
-            _emit_parallel_evidence_comment(
+            _emit_parallel_artifact_comment(
                 lines,
                 "    ",
                 op_type="Dense",
@@ -1767,9 +1767,9 @@ def emit_top_cpp(*args, **kwargs):
     if graph is None or top_name is None:
         raise ValueError("Runtime weight top emission requires graph and top_name")
 
-    patched_kwargs = dict(kwargs)
-    patched_kwargs["weights_mode"] = "embedded"
-    source = _fpgai_runtime_weight_previous_emit_top_cpp(*args, **patched_kwargs)
+    updateed_kwargs = dict(kwargs)
+    updateed_kwargs["weights_mode"] = "embedded"
+    source = _fpgai_runtime_weight_previous_emit_top_cpp(*args, **updateed_kwargs)
     source = _fpgai_insert_runtime_helpers(source)
     source = _fpgai_rewrite_runtime_signature(source, top_name=top_name, mode=requested_mode)
     source = _fpgai_insert_runtime_load_block(source, graph, mode=requested_mode)

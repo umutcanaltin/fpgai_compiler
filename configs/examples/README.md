@@ -1,7 +1,7 @@
 # FPGAI Example Configurations
 
 These examples are intended to match the current public `fpgai inspect --config ...` schema.
-They are examples for users and contributors, not sprint-only artifacts.
+They are examples for users and contributors, not development-only artifacts.
 
 ## Validate an example
 
@@ -22,4 +22,4 @@ PYTHONPATH="$PWD" python -m fpgai.cli inspect \
 
 - Keep example configs small and stable.
 - Prefer YAML configs for normal compilation workflows.
-- Use scripts only for paper evidence collection, development utilities, or compatibility wrappers.
+- Use scripts only for paper experiments collection, development utilities, or compatibility wrappers.

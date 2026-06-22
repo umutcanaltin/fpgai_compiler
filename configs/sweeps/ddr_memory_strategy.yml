@@ -1,0 +1,42 @@
+name: ddr_memory_strategy
+command_template: python main.py benchmark --config {config_path}
+
+materialize_configs:
+  enabled: true
+  directory: configs
+  strip_unknown_top_level_sections: true
+  canonicalize_policy: true
+  strip_top_level_sections:
+    - notes
+  compiler_policy_names: true
+
+# Defaults are intentionally kept compatible with the existing sweep runner.
+defaults:
+  base_config_path: fpgai.yml
+  config_path: fpgai.yml
+  model_path: models/cnn_mnist.onnx
+  board: kv260
+  precision_mode: fx8_3
+  policy: balanced
+
+# Explicit points are used so --max-design-points 4 includes DDR designs.
+design_points:
+  - name: memory_on_chip_balanced
+    memory_strategy: on_chip
+    weight_storage: embedded
+    policy: balanced
+
+  - name: memory_streaming_balanced
+    memory_strategy: streaming
+    weight_storage: stream
+    policy: balanced
+
+  - name: memory_external_ddr_balanced
+    memory_strategy: external_ddr
+    weight_storage: ddr
+    policy: balanced
+
+  - name: memory_external_ddr_latency_first
+    memory_strategy: external_ddr
+    weight_storage: ddr
+    policy: latency_first

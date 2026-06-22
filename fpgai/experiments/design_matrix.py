@@ -1,7 +1,7 @@
 """Experiment design-matrix expansion utilities for FPGAI.
 
 This module is intentionally dependency-light and backwards compatible with the
-first Sprint 6 automation patches.  The public API used by tests and the sweep
+first early automation updates.  The public API used by tests and the sweep
 runner is:
 
 - DesignPoint
@@ -28,7 +28,7 @@ class DesignPoint:
     """One concrete experiment point.
 
     `command` is kept as a first-class field for compatibility with the original
-    Sprint 6 runner and tests.  The dataclass is frozen so points can be safely
+    early sweep runner and tests.  The dataclass is frozen so points can be safely
     reused/resumed without accidental mutation; tests that need edits should use
     `dataclasses.replace`.
     """

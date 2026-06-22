@@ -19,7 +19,7 @@ def emit_csim_train_tcl(
 ) -> str:
     """Emit the Vitis HLS TCL script for training CSim/Csynth.
 
-    Sprint 13B v7 fix:
+    Training stream compatibility:
     Runtime-weight training modes (stream/DDR) need initial weights for the
     preload phase before mode=2 training. The generated tb.cpp already accepts
     argv[3] as a runtime preload file and argv[4] as an output directory. Older

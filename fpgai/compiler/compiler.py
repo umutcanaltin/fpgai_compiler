@@ -8,7 +8,7 @@ from typing import Any, Callable, Optional
 
 # Keep this module import-safe in test environments where the legacy engine's
 # historical top-level imports are not on PYTHONPATH. The actual import happens
-# lazily inside compile(), and tests can monkeypatch this symbol directly.
+# lazily inside compile(), and tests can monkeyupdate this symbol directly.
 fpgai_engine: Optional[Callable[..., Any]] = None
 
 

@@ -1,18 +1,18 @@
 # FPGAI Repository Cleanup Plan
 
-This document defines the professional repository structure for FPGAI after the sprint-heavy development phase.
+This document defines the professional repository structure for FPGAI after the iteration-heavy development phase.
 
 ## Goal
 
 FPGAI should be usable by three groups:
 
 1. **Users** who want to compile an ONNX model using YAML.
-2. **Researchers** who want to reproduce paper evidence.
-3. **Contributors** who want to extend the compiler without understanding old sprint history.
+2. **Researchers** who want to reproduce paper experiments.
+3. **Contributors** who want to extend the compiler without understanding old development history.
 
 ## Rule: YAML first, scripts second
 
-Compilation and experiment configuration should be driven by YAML files. Python scripts should be thin entrypoints or paper/evidence utilities, not one-off sprint logic.
+Compilation and experiment configuration should be driven by YAML files. Python scripts should be thin entrypoints or paper/experiment artifact utilities, not one-off development logic.
 
 Allowed public entrypoints:
 
@@ -21,19 +21,19 @@ fpgai compile --config <config.yml>
 fpgai inspect --config <config.yml>
 fpgai benchmark --config <config.yml>
 PYTHONPATH="$PWD" python -B scripts/run_fpgai_experiments.py --sweep <sweep.yml> --out <out>
-python scripts/generate_paper_artifacts.py --config configs/paper/<paper>.yml
+python main.py report build --config configs/experiments/<paper>.yml
 ```
 
 Everything else should eventually move to one of these categories:
 
 ```text
-scripts/legacy/       Old sprint-only scripts kept for reproducibility, not public API.
+scripts/legacy/       Old development-only scripts kept for reproducibility, not public API.
 scripts/paper/        Paper table/figure generation only.
 scripts/dev/          Developer diagnostics and migration helpers only.
 scripts/examples/     Small demonstration helpers only.
 ```
 
-Do not delete sprint scripts immediately. First classify them, then migrate stable behavior into package code or YAML workflows.
+Do not delete historical development scripts immediately. First classify them, then migrate stable behavior into package code or YAML workflows.
 
 ## Cleanup phases
 
@@ -55,7 +55,7 @@ public_entrypoint
 paper_artifact
 experiment_runner
 dev_diagnostic
-legacy_sprint
+legacy_workflow
 model_generation
 runtime_helper
 ```
@@ -71,14 +71,14 @@ fpgai compile --config configs/examples/inference_compile.yml
 fpgai inspect --config configs/examples/inference_compile.yml
 fpgai benchmark --config configs/examples/inference_compile.yml
 fpgai sweep --config configs/sweeps/<sweep>.yml --out experiments/<name>
-fpgai paper --config configs/paper/arxiv_evidence.yml
+fpgai experiment run --config configs/experiments/arxiv_paper.yml
 ```
 
 Until these subcommands exist, the documented stable commands remain the current `fpgai compile/inspect/benchmark` plus `scripts/run_fpgai_experiments.py`.
 
 ### Phase P3 — Estimator hardening
 
-The current estimator evidence is not strong enough for a broad paper claim. The repo needs a real estimator export format:
+The current estimator experiment artifact is not strong enough for a broad paper claim. The repo needs a real estimator export format:
 
 ```text
 build/estimator/resource_prediction.json
@@ -103,26 +103,26 @@ Predicted values must not be placeholders such as 0 or 1. If no reliable estimat
 
 ### Phase P4 — Paper artifact separation
 
-Paper scripts should read evidence CSV/JSON and write only paper-ready tables/figures. They should not run compilation.
+Paper scripts should read experiment artifact CSV/JSON and write only paper-ready tables/figures. They should not run compilation.
 
 Suggested output:
 
 ```text
-evidence/arxiv_tables/
-evidence/arxiv_figures/
-evidence/arxiv_summary.md
+paper_experiments/arxiv_tables/
+paper_experiments/arxiv_figures/
+paper_experiments/arxiv_summary.md
 ```
 
 ### Phase P5 — Real board validation
 
-Physical FPGA runtime, board loss curves, and simulation-vs-board comparisons should be kept separate from HLS/Vivado evidence.
+Physical FPGA runtime, board loss curves, and simulation-vs-board comparisons should be kept separate from HLS/Vivado experiment artifact.
 
 Suggested output:
 
 ```text
-evidence/board_runtime/
-evidence/board_training_loss/
-evidence/board_vs_sim/
+paper_experiments/board_runtime/
+paper_experiments/board_training_loss/
+paper_experiments/board_vs_sim/
 ```
 
 ## Claims policy
@@ -135,10 +135,10 @@ FPGAI improves physical DMA runtime
 FPGAI demonstrates board-level training convergence
 ```
 
-unless the corresponding evidence folders exist and pass.
+unless the corresponding experiment folders exist and pass.
 
 Safe current direction:
 
 ```text
-FPGAI supports YAML-driven compilation and experiment sweeps, and paper claims are tied to reproducible evidence artifacts.
+FPGAI supports YAML-driven compilation and experiment sweeps, and paper claims are tied to reproducible experiment artifacts.
 ```
