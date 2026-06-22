@@ -1,135 +1,126 @@
-# FPGAI Compiler
+# FPGAI
 
-FPGAI is an academic research compiler framework for generating FPGA-oriented neural network accelerators from high-level model descriptions. The project focuses on resource-aware compilation for FPGA-SoC targets, with an emphasis on Vitis HLS code generation, configurable arithmetic precision, memory-placement strategies, parallelization policies, and experimental training-accelerator flows.
+FPGAI is an open-source compiler framework for turning ONNX neural-network models into FPGA/SoC accelerator projects. It focuses on YAML-driven compilation, Vitis HLS project generation, correctness benchmarking, design-space sweeps, and reproducible paper evidence.
 
-The framework is intended for research in embedded AI acceleration, FPGA compilation, design-space exploration, and hardware/software co-design.
+## Who is this for?
 
-## Overview
+- Researchers building FPGA AI compiler flows.
+- Engineers experimenting with Xilinx FPGA/SoC deployment.
+- Contributors adding operators, optimization policies, backends, and evidence tools.
+- Authors preparing reproducible FPGA/compiler papers.
 
-FPGAI provides a Python-based compilation and experiment workflow for transforming neural network models into HLS projects. The compiler is designed to make hardware-related choices explicit and reproducible, including numeric precision, weight storage strategy, storage binding, and layer-level parallelization.
+## Current public workflow
 
-The current implementation is centered on AMD/Xilinx FPGA-SoC workflows using Vitis HLS. Generated projects can be used for C simulation, synthesis-oriented inspection, and automated experiment collection.
-
-## Key Features
-
-- ONNX model import and intermediate representation construction
-- Vitis HLS C++ accelerator generation
-- Fixed-point precision configuration
-- Embedded, streamed, and external-memory weight handling paths
-- BRAM and URAM storage binding support
-- Configurable parallelization and pipelining parameters
-- HLS testbench generation for inference and training-oriented experiments
-- Automated experiment sweeps through YAML configuration files
-- Evidence and result extraction scripts for reproducible evaluation
-
-## Repository Structure
-
-```text
-fpgai/                  Core compiler package
-  backends/hls/          HLS code generation, testbenches, and TCL emitters
-  engine/                Compilation orchestration
-  frontend/              Model import and frontend utilities
-  ir/                    Intermediate representation utilities
-
-configs/                Example compiler and experiment configurations
-configs/sweeps/         Sweep definitions for automated experiments
-scripts/                Experiment runners and evidence extraction tools
-models/                 Example neural network models
-tests/                  Unit and regression tests
-```
-
-## Installation
-
-Create and activate a Python virtual environment:
+FPGAI is used through the `fpgai` command-line interface. Normal users should not call internal files under `scripts/` directly.
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -U pip
 pip install -e .
 ```
 
-Install development and test dependencies as needed:
+Inspect a single compile config:
 
 ```bash
-pip install pytest numpy onnx onnxruntime pyyaml
+fpgai inspect --config configs/examples/inference_compile.yml
 ```
 
-For HLS compilation and C simulation, install a compatible AMD/Xilinx Vitis HLS environment and make sure `vitis_hls` is available on your `PATH`.
-
-## Basic Usage
-
-Run the test suite:
+Compile a model:
 
 ```bash
-pytest
+fpgai compile --config configs/examples/inference_compile.yml
 ```
 
-Run an experiment sweep:
+Run a benchmark flow:
 
 ```bash
-PYTHONPATH="$PWD" python -B scripts/run_fpgai_experiments.py \
-  --sweep configs/sweeps/<sweep-file>.yml \
-  --out experiments/<experiment-name> \
-  --max-design-points 4 \
-  --timeout-sec 1800
+fpgai benchmark --config configs/examples/inference_compile.yml
 ```
 
-Inspect experiment results:
+Inspect a sweep config:
 
 ```bash
-python - <<'PY'
-import json
-from pathlib import Path
-
-p = Path("experiments/<experiment-name>/results.json")
-data = json.loads(p.read_text())
-print("passed:", data.get("passed_count"))
-print("failed:", data.get("failed_count"))
-for r in data.get("results", []):
-    print(r.get("design_name"), r.get("status"), r.get("returncode"), r.get("error"))
-PY
+fpgai sweep inspect --config configs/sweeps/inference_precision.yml
 ```
 
-## Experiment Workflow
-
-A typical FPGAI workflow is:
-
-1. Select an ONNX model and target configuration.
-2. Define the precision, memory, and parallelization policy in a YAML sweep.
-3. Generate HLS code and testbench artifacts.
-4. Run Vitis HLS C simulation or synthesis-oriented checks.
-5. Extract metrics and generated-code evidence from the experiment directory.
-
-Experiment outputs are written under `experiments/` and should normally not be committed to the repository.
-
-## Development Notes
-
-Before committing changes, run syntax checks and targeted tests:
+Run a sweep:
 
 ```bash
-python -B -m py_compile $(find fpgai scripts -name "*.py")
-pytest
+fpgai sweep run \
+  --config configs/sweeps/inference_precision.yml \
+  --out experiments/inference_precision \
+  --max-design-points 1 \
+  --timeout-sec 1200
 ```
 
-For large HLS experiments, start with a small number of design points before running a full sweep.
+Inspect a paper-evidence config:
 
-## Scope
+```bash
+fpgai evidence inspect --config configs/paper/arxiv_evidence.yml
+```
 
-FPGAI is research software. The project is intended to support reproducible compiler and accelerator-design experiments rather than serve as a general-purpose production deployment tool.
+## YAML config types
 
-The current codebase is primarily oriented toward Vitis HLS and AMD/Xilinx FPGA-SoC targets. Support for additional FPGA vendors, broader ONNX operator coverage, board-level deployment flows, and extended training studies may require additional implementation and validation.
+FPGAI uses separate YAML schemas for separate workflows.
 
-## Citation
+| Location | Purpose | Inspect command |
+|---|---|---|
+| `configs/examples/*.yml` | Single compile/benchmark configs | `fpgai inspect --config ...` |
+| `configs/sweeps/*.yml` | Design-space sweep configs | `fpgai sweep inspect --config ...` |
+| `configs/paper/*.yml` | Paper/reproducibility evidence configs | `fpgai evidence inspect --config ...` |
 
-If you use FPGAI in academic work, please cite the associated publication or repository when available. Citation metadata can be added in a future `CITATION.cff` file.
+## Repository structure
+
+```text
+fpgai/                  Python package and compiler implementation
+configs/examples/       Public single-run example configs
+configs/sweeps/         Sweep/matrix configs
+configs/paper/          Paper evidence configs
+docs/                   User and developer documentation
+models/                 Small ONNX models used by examples/tests
+tests/                  Unit and integration tests
+scripts/                Transitional compatibility/developer tools only
+```
+
+Generated build outputs are written under `build/` or the configured `project.out_dir`. Generated sweep outputs are written under `experiments/`. These generated outputs should normally not be committed.
+
+## Supported flow today
+
+FPGAI currently supports:
+
+- ONNX model import and graph inspection.
+- YAML-driven compile configuration.
+- Vitis HLS project generation.
+- HLS CSim / synthesis flow where enabled in the config.
+- Correctness benchmarking against ONNX Runtime for supported inference paths.
+- Precision, pipeline, and parallel-policy sweeps through `fpgai sweep run`.
+- Schema-specific inspection for compile, sweep, and paper-evidence YAML files.
+- Quiet CLI logging by default, with full tool output available through `--verbose`.
+
+## Important limitations
+
+FPGAI is an active research compiler. Some flows are still being strengthened. In particular:
+
+- Physical-board runtime benchmarking is not yet the default public workflow.
+- Training-code generation exists, but full numerical training correctness is still being hardened.
+- Resource estimation is being moved toward explicit exported predictions and calibrated evidence.
+- Communication optimization currently distinguishes modeled transfer planning from measured board-level DMA runtime.
+
+These are implementation targets, not abandoned features.
+
+## Development and contribution
+
+Start with the CLI workflows above. For development, run:
+
+```bash
+pytest -q
+```
+
+When adding a feature, include:
+
+- YAML config coverage when applicable.
+- Unit tests or integration smoke tests.
+- Documentation under `docs/`.
+- A clear statement of generated artifacts and limitations.
 
 ## License
 
-This repository is distributed under the **FPGAI Academic Research Use License v1.0**. The software is available for academic and non-commercial research use only. Commercial use, product integration, paid services, and redistribution for commercial advantage require prior written permission from the copyright holder.
-
-See [LICENSE.md](LICENSE.md) for the full license terms.
-
-## Contact
-
-For academic collaboration, research use, or commercial licensing inquiries, please contact the repository maintainer.
+See `LICENSE.md`.

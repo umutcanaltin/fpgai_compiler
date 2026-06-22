@@ -4,7 +4,7 @@ design_name_template: policy_{policy}_{precision_mode}
 defaults:
   base_config_path: fpgai.yml
   config_path: fpgai.yml
-  model_path: examples/mnist.onnx
+  model_path: models/cnn_mnist.onnx
   board: kv260
   metrics_json: build/fpgai_example_dense/calibration/estimate_vs_hls.json
   precision_mode: fixed

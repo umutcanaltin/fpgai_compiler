@@ -1,0 +1,31 @@
+version: 1
+
+paper:
+  title: "FPGAI: A Resource-Aware Compilation and Execution Framework for Neural Network Inference and Training on FPGA-SoCs"
+  stage: arxiv
+  claim_policy: evidence_first
+
+inputs:
+  experiments:
+    training_convergence: experiments/sprint13f_training_multi_epoch_convergence_v3
+    hardware_knobs: experiments/sprint15a_hardware_knob_validation_parallel
+    pipeline_policy: experiments/sprint15c_pipeline_policy_strengthened
+    parallel_envelope: experiments/sprint15e_parallel_feasible_envelope
+  evidence:
+    claim_support: evidence/reproducibility/claim_support.csv
+    training_convergence: evidence/sprint16b_training_convergence/training_convergence.csv
+    vivado_impl: evidence/sprint16c_vivado_impl_summary/vivado_impl_summary.csv
+    hardware_knobs: evidence/sprint16d_hardware_knobs
+    estimator_accuracy: evidence/sprint16e_estimator_accuracy/estimator_accuracy.csv
+    communication_ablation: evidence/sprint16f_comm_ablation/comm_ablation.csv
+
+claim_levels:
+  ready: claim is supported by generated artifacts and can be used with stated limitations
+  partial: claim is supported only for a subset or modeled/static evidence and must be limited
+  missing: claim must not be used yet
+
+limitations:
+  - "Physical-board training convergence is not claimed until board-runtime evidence exists."
+  - "Estimator accuracy is partial unless valid LUT/FF/BRAM/DSP predictions are exported."
+  - "Communication ablation is transfer-volume evidence unless board DMA measurements are added."
+  - "Vivado implementation evidence is the source of truth for final feasibility."

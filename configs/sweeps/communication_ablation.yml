@@ -3,7 +3,7 @@ command_template: "python main.py benchmark --config {config_path}"
 point_name_template: "comm_{communication_enabled}_{weight_delivery}_{activation_transfer}"
 defaults:
   config_path: fpgai.yml
-  model_path: examples/mnist.onnx
+  model_path: models/cnn_mnist.onnx
   board: kv260
 parameters:
   communication_enabled: [true, false]
