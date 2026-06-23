@@ -46,6 +46,8 @@ Model-suite utilities moved to `fpgai/experiments/`:
     scripts/create_model_suite.py
     scripts/generate_models.py
 
+Reporting utilities moved to `fpgai/reporting/`.
+
 Use public workflows instead:
 
     python main.py sweep inspect --config configs/sweeps/precision_selection.yml
@@ -63,64 +65,17 @@ Target package location:
 
     fpgai/backends/vivado/
 
-### Reporting utilities
-
-    scripts/analyze_fpgai_experiments.py
-    scripts/classify_hardware_feasibility.py
-    scripts/collect_claim_support_v2.py
-    scripts/collect_comm_ablation.py
-    scripts/collect_estimator_accuracy.py
-    scripts/collect_hardware_knob_tables.py
-    scripts/collect_hls_calibration_samples.py
-    scripts/collect_paper_evidence.py
-    scripts/collect_training_convergence_evidence.py
-    scripts/collect_vivado_impl_evidence.py
-    scripts/compare_fpgai_experiments.py
-    scripts/compare_hardware_knobs.py
-    scripts/extract_hls_calibration_dataset.py
-    scripts/extract_memory_binding_evidence.py
-    scripts/extract_parallel_policy_evidence.py
-    scripts/extract_training_accelerator_evidence.py
-    scripts/extract_training_accumulated_batch_evidence.py
-    scripts/extract_training_batch_multistep_evidence.py
-    scripts/extract_training_multi_epoch_convergence_evidence.py
-    scripts/extract_training_native_accumulated_batch_evidence.py
-    scripts/extract_vivado_bridge_evidence.py
-    scripts/generate_paper_artifacts.py
-    scripts/inspect_pipeline_policy_artifacts.py
-    scripts/make_estimator_tables.py
-    scripts/paper_frontier.py
-    scripts/paper_training_precision.py
-    scripts/paper_training_table.py
-    scripts/plot_policy_results.py
-    scripts/plot_training_loss_curves.py
-    scripts/report_safe_clock_recommendations.py
-    scripts/run_hls_calibration_validation.py
-    scripts/summarize_hls_calibration_claims.py
-    scripts/summarize_policy_results.py
-
-Target package location:
-
-    fpgai/reporting/
-
-Important naming rule for migration:
-
-Generated report text may use neutral terms such as `results`, `reports`,
-`artifacts`, and `traceability`. Avoid exposing old internal names in public
-README/docs.
-
 ### Developer-only diagnostics
 
     scripts/diagnose_training_csim.py
     scripts/probe_fpgai_config_schema.py
 
 These should not be public workflows. They can stay temporarily until there is a
-better developer workflow.
+better developer workflow or tests cover the same behavior.
 
 ## Migration order
 
-1. Move reporting utilities into `fpgai/reporting/`.
-2. Move Vivado bridge command logic into `fpgai/backends/vivado/`.
-3. Replace public documentation references to `scripts/`.
-4. Remove or archive remaining legacy scripts.
-5. Leave at most this README and manifest during transition.
+1. Move Vivado bridge command logic into `fpgai/backends/vivado/`.
+2. Replace public documentation references to `scripts/`.
+3. Remove or archive remaining legacy scripts.
+4. Leave at most this README and manifest during transition.
