@@ -1,25 +1,25 @@
-# Scripts Directory
+# Scripts
 
-This directory contains transitional compatibility utilities and developer/paper helpers.
+The public FPGAI workflow is exposed through the `fpgai` command-line interface
+and the root `main.py` wrapper.
 
-The public user interface is the `fpgai` CLI:
+Normal users should prefer commands such as:
 
-```bash
-fpgai inspect --config configs/examples/inference_compile.yml
-fpgai compile --config configs/examples/inference_compile.yml
-fpgai benchmark --config configs/examples/inference_compile.yml
-fpgai sweep inspect --config configs/sweeps/inference_precision.yml
-fpgai sweep run --config configs/sweeps/inference_precision.yml --out experiments/inference_precision
-fpgai evidence inspect --config configs/paper/arxiv_evidence.yml
-```
+    python main.py compile --config configs/examples/inference_compile.yml
+    python main.py sweep inspect --config configs/sweeps/precision_selection.yml
+    python main.py experiment inspect --config configs/experiments/arxiv_paper.yml
 
-New user-facing workflows should be added under the `fpgai` package and exposed through `fpgai.cli`, not added as standalone scripts.
+Files in this directory are transitional developer or reproducibility utilities.
+They are not the primary public API.
 
-Existing scripts should be migrated over time into:
+Long-term policy:
 
-```text
-fpgai/experiments/
-fpgai/evidence/
-fpgai/runtime/
-fpgai/backends/
-```
+- reusable runtime logic should live under `fpgai/runtime/`
+- reusable validation logic should live under `fpgai/validation/`
+- reusable reporting logic should live under `fpgai/reporting/`
+- experiment orchestration should be exposed through `fpgai experiment`
+- sweep orchestration should be exposed through `fpgai sweep`
+- obsolete one-off scripts should be removed
+
+Do not add new public workflows here. Add package modules and expose them through
+the CLI instead.
