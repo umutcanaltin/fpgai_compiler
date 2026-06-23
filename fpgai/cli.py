@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from fpgai.reporting.artifacts import build_report
+from fpgai.validation.results import validate_results
 import argparse
 import contextlib
 import io
@@ -602,6 +604,46 @@ def run_sweep_from_config(
         return 1
 
 
+
+def _handle_report_build(args) -> int:
+    try:
+        result = build_report(args.input, args.out)
+    except Exception as exc:
+        print(f"[ERROR] Failed to build report: {exc}")
+        return 2
+
+    print("=============== FPGAI Report Build ===============")
+    print(f"Input              : {result.input_dir}")
+    print(f"Out dir            : {result.out_dir}")
+    print(f"Result records     : {result.result_count}")
+    print(f"Passed records     : {result.passed_count}")
+    print(f"Failed records     : {result.failed_count}")
+    print(f"Skipped records    : {result.skipped_count}")
+    print(f"Summary            : {result.summary_md}")
+    print(f"Results table      : {result.results_table_csv}")
+    print(f"Claim traceability : {result.claim_traceability_md}")
+    print("===================================================")
+    return 0
+
+
+def _handle_validate_results(args) -> int:
+    result = validate_results(args.input)
+
+    print("============== FPGAI Results Validation ==============")
+    print(f"Input          : {result.input_dir}")
+    print(f"Passed         : {result.passed}")
+    print(f"Child items    : {result.child_count}")
+    print(f"Failed children: {result.failed_child_count}")
+    print(f"Errors         : {result.error_count}")
+    print(f"Warnings       : {result.warning_count}")
+
+    for issue in result.issues:
+        print(f"[{issue.level.upper()}] {issue.path}: {issue.message}")
+
+    print("=======================================================")
+    return 0 if result.passed else 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         "FPGAI compiler"
@@ -808,6 +850,45 @@ def build_parser() -> argparse.ArgumentParser:
         help="Quiet output for backward-compatible --config mode.",
     )
 
+
+    report_parser = subparsers.add_parser(
+        "report",
+        help="Generate reports from FPGAI experiment outputs",
+    )
+    report_subparsers = report_parser.add_subparsers(dest="report_command")
+
+    report_build_parser = report_subparsers.add_parser(
+        "build",
+        help="Build summary tables and claim traceability from experiment outputs",
+    )
+    report_build_parser.add_argument(
+        "--input",
+        required=True,
+        help="Input experiment output directory, for example paper_experiments/arxiv",
+    )
+    report_build_parser.add_argument(
+        "--out",
+        required=True,
+        help="Output report directory, for example reports/arxiv",
+    )
+
+    validate_parser = subparsers.add_parser(
+        "validate",
+        help="Validate FPGAI experiment outputs",
+    )
+    validate_subparsers = validate_parser.add_subparsers(dest="validate_command")
+
+    validate_results_parser = validate_subparsers.add_parser(
+        "results",
+        help="Validate experiment result files and detect false passes",
+    )
+    validate_results_parser.add_argument(
+        "--input",
+        required=True,
+        help="Input experiment output directory, for example paper_experiments/arxiv",
+    )
+
+
     return parser
 
 
@@ -824,6 +905,19 @@ def main() -> None:
                 quiet=args.quiet,
             )
         )
+
+
+    if args.command == "report":
+        if getattr(args, "report_command", None) == "build":
+            return _handle_report_build(args)
+        parser.error("report requires a subcommand")
+        return 2
+
+    if args.command == "validate":
+        if getattr(args, "validate_command", None) == "results":
+            return _handle_validate_results(args)
+        parser.error("validate requires a subcommand")
+        return 2
 
     if args.command == "benchmark":
         raise SystemExit(

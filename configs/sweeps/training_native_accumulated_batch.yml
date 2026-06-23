@@ -1,5 +1,5 @@
 name: training_native_accumulated_batch
-command_template: PYTHONPATH=. python -B main.py benchmark --config {config_path}
+command_template: PYTHONPATH=. python -B main.py compile --config {config_path}
 materialize_configs:
   enabled: true
   directory: configs

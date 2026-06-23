@@ -1,5 +1,5 @@
 name: parallelism_feasible_envelope
-command_template: PYTHONPATH=. python -B main.py benchmark --config {config_path}
+command_template: PYTHONPATH=. python -B main.py compile --config {config_path}
 
 materialize_configs:
   enabled: true
