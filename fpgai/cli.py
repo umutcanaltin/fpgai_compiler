@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fpgai.reporting.artifacts import build_report
 from fpgai.validation.results import validate_results
+from fpgai.validation.correctness import validate_correctness
 import argparse
 import contextlib
 import io
@@ -626,6 +627,36 @@ def _handle_report_build(args) -> int:
     return 0
 
 
+
+def _handle_validate_correctness(args) -> int:
+    try:
+        result = validate_correctness(args.config)
+    except Exception as exc:
+        print(f"[ERROR] Correctness validation failed: {exc}")
+        return 2
+
+    print("============== FPGAI Correctness Validation ==============")
+    print(f"Config         : {result.config_path}")
+    print(f"Pipeline mode  : {result.pipeline_mode}")
+    print(f"Requested      : {result.requested}")
+    print(f"Executed       : {result.executed}")
+    print(f"Passed         : {result.passed}")
+
+    if result.reason:
+        print(f"Reason         : {result.reason}")
+    if result.build_dir is not None:
+        print(f"Build dir      : {result.build_dir}")
+    if result.bench_dir is not None:
+        print(f"Bench dir      : {result.bench_dir}")
+    if result.metrics_json is not None:
+        print(f"Metrics JSON   : {result.metrics_json}")
+    if result.summary_txt is not None:
+        print(f"Summary TXT    : {result.summary_txt}")
+
+    print("===========================================================")
+    return 0 if result.passed else 1
+
+
 def _handle_validate_results(args) -> int:
     result = validate_results(args.input)
 
@@ -889,6 +920,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
 
+    validate_correctness_parser = validate_subparsers.add_parser(
+        "correctness",
+        help="Run inference correctness validation for a compile config",
+    )
+    validate_correctness_parser.add_argument(
+        "--config",
+        required=True,
+        help="Compile config to validate, for example configs/examples/inference_compile.yml",
+    )
+
+
     return parser
 
 
@@ -916,6 +958,8 @@ def main() -> None:
     if args.command == "validate":
         if getattr(args, "validate_command", None) == "results":
             return _handle_validate_results(args)
+        if getattr(args, "validate_command", None) == "correctness":
+            return _handle_validate_correctness(args)
         parser.error("validate requires a subcommand")
         return 2
 
