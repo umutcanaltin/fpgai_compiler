@@ -14,7 +14,7 @@ from typing import Any, Callable, TypeVar
 
 import yaml
 
-from fpgai.analysis.model_inspection import inspect_config
+from fpgai.analysis.model_inspection import inspect_config, write_model_inspection_report
 from fpgai.benchmark.pipeline import (
     run_compile_correctness_benchmark,
 )
@@ -319,12 +319,13 @@ def inspect_from_config(
     config_path: str,
     *,
     json_output: str | None = None,
+    out: str | None = None,
 ) -> int:
     try:
         cfg = load_config(config_path)
         report = inspect_config(cfg)
 
-        print(report.summary())
+        wrote_anything = False
 
         if json_output is not None:
             output_path = report.write_json(
@@ -333,6 +334,19 @@ def inspect_from_config(
             print(
                 f"[OK] Wrote inspection JSON to: {output_path}"
             )
+            wrote_anything = True
+
+        if out is not None:
+            paths = write_model_inspection_report(
+                report,
+                out,
+            )
+            print(f"[OK] Model profile JSON: {paths['model_profile_json']}")
+            print(f"[OK] Prediction summary: {paths['prediction_summary_md']}")
+            wrote_anything = True
+
+        if not wrote_anything:
+            print(report.summary())
 
         if report.compilation_ready:
             return 0
@@ -815,6 +829,11 @@ def build_parser() -> argparse.ArgumentParser:
             "inspection report"
         ),
     )
+    inspect_parser.add_argument(
+        "--out",
+        default=None,
+        help="Optional directory for model inspection/prediction artifacts.",
+    )
 
     sweep_parser = subparsers.add_parser(
         "sweep",
@@ -1113,6 +1132,7 @@ def main() -> None:
             inspect_from_config(
                 args.config,
                 json_output=args.json_output,
+                out=args.out,
             )
         )
 

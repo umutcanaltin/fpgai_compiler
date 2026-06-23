@@ -75,6 +75,22 @@ Sprint 4: model inspection and resource/timing prediction.
 
 ## Latest update
 
+- Wired `fpgai inspect --config ... --out <dir>` through the existing `inspect_from_config()` helper.
+- The command now writes `model_profile.json` and `prediction_summary.md` without replacing the main CLI dispatch branch.
+- Existing `--json-output` behavior is preserved.
+- No new files were added.
+
+## Latest update
+
+- Wired the existing `inspect` command to emit model-inspection artifacts.
+- `fpgai inspect --config ... --out <dir>` now writes:
+  - `model_profile.json`
+  - `prediction_summary.md`
+- Reused `fpgai.analysis.model_inspection`; no new prediction module was added.
+- Resource and timing prediction files remain for the next Sprint 4 step.
+
+## Latest update
+
 - Started Sprint 4: model inspection and prediction.
 - Sprint 4 rule: inspect and reuse existing analysis modules before adding any new prediction files.
 - Target public artifacts for this sprint:

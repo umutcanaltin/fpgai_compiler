@@ -85,3 +85,41 @@ def test_inspection_marks_limited_ops_without_rejecting_model() -> None:
     assert report.limited_operators == [
         "Add",
     ]
+
+def test_write_model_inspection_report_outputs_profile_and_summary(tmp_path):
+    from fpgai.analysis.model_inspection import (
+        ModelInspection,
+        write_model_inspection_report,
+    )
+
+    inspection = ModelInspection(
+        model_path="model.onnx",
+        pipeline_mode="inference",
+        graph_name="main",
+        inputs=[],
+        outputs=[],
+        operator_counts={"Dense": 1},
+        operators=[],
+        constants=[],
+        parameter_values=10,
+        parameter_bytes=40,
+        disallowed_operators=[],
+        unsupported_operators=[],
+        limited_operators=[],
+    )
+
+    paths = write_model_inspection_report(
+        inspection,
+        tmp_path,
+    )
+
+    profile = tmp_path / "model_profile.json"
+    summary = tmp_path / "prediction_summary.md"
+
+    assert paths["model_profile_json"] == str(profile)
+    assert paths["prediction_summary_md"] == str(summary)
+    assert profile.exists()
+    assert summary.exists()
+    assert "compilation_ready" in profile.read_text(encoding="utf-8")
+    assert "Resource and timing prediction artifacts" in summary.read_text(encoding="utf-8")
+

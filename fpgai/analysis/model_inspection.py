@@ -297,3 +297,60 @@ def inspect_config(
         pipeline_mode=cfg.pipeline.mode,
         allowed_operators=cfg.operators.supported,
     )
+
+def write_model_inspection_report(
+    inspection: ModelInspection,
+    out_dir: str | Path,
+) -> dict[str, str]:
+    """Write model-inspection artifacts for CLI/report workflows."""
+    output = Path(out_dir)
+    output.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    profile_json = output / "model_profile.json"
+    summary_md = output / "prediction_summary.md"
+
+    inspection.write_json(profile_json)
+
+    lines = [
+        "# FPGAI Model Inspection and Prediction Summary",
+        "",
+        "This report is generated before HLS/Vivado execution.",
+        "Resource and timing prediction artifacts are added in the next prediction step when estimator inputs are available.",
+        "",
+        "## Model profile",
+        "",
+        f"- Model: `{inspection.model_path}`",
+        f"- Pipeline mode: `{inspection.pipeline_mode}`",
+        f"- Compilation ready: `{inspection.compilation_ready}`",
+        f"- Operators: `{sum(inspection.operator_counts.values())}`",
+        f"- Operator counts: `{inspection.operator_counts}`",
+        f"- Parameter values: `{inspection.parameter_values}`",
+        f"- Parameter bytes: `{inspection.parameter_bytes}`",
+        "",
+        "## Operator support",
+        "",
+        f"- Disallowed operators: `{inspection.disallowed_operators}`",
+        f"- Unsupported operators: `{inspection.unsupported_operators}`",
+        f"- Limited operators: `{inspection.limited_operators}`",
+        "",
+        "## Prediction status",
+        "",
+        "- `model_profile.json`: generated",
+        "- `resource_prediction.json`: not generated in this step",
+        "- `timing_prediction.json`: not generated in this step",
+        "",
+    ]
+
+    summary_md.write_text(
+        "\n".join(lines),
+        encoding="utf-8",
+    )
+
+    return {
+        "model_profile_json": str(profile_json),
+        "prediction_summary_md": str(summary_md),
+    }
+

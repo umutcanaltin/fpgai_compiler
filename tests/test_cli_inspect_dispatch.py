@@ -9,6 +9,7 @@ class _Args:
     command = "inspect"
     config = "dummy.yml"
     json_output = "inspection.json"
+    out = None
 
 
 def test_inspect_subcommand_does_not_route_to_auto_compile(monkeypatch):
@@ -28,9 +29,10 @@ def test_inspect_subcommand_does_not_route_to_auto_compile(monkeypatch):
         calls.append((config_path, action))
         return 99
 
-    def fake_inspect_from_config(config_path: str, *, json_output: str | None = None) -> int:
+    def fake_inspect_from_config(config_path: str, *, json_output: str | None = None, out: str | None = None) -> int:
         assert config_path == "dummy.yml"
         assert json_output == "inspection.json"
+        assert out is None
         return 0
 
     monkeypatch.setattr(cli, "build_parser", fake_build_parser)
@@ -42,3 +44,14 @@ def test_inspect_subcommand_does_not_route_to_auto_compile(monkeypatch):
 
     assert exc.value.code == 0
     assert calls == []
+
+def test_inspect_command_exposes_out_argument_in_parser_source():
+    from pathlib import Path
+
+    source = Path("fpgai/cli.py").read_text(encoding="utf-8")
+
+    assert '"--out"' in source
+    assert "write_model_inspection_report" in source
+    assert "model_profile_json" in source
+    assert "prediction_summary_md" in source
+
