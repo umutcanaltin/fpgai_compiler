@@ -20,44 +20,41 @@ the `fpgai/` package, converted into tests, or removed.
 | `MIGRATE_REPORTING` | Move table, plot, and summary generation into `fpgai/reporting/`. |
 | `DEV_ONLY` | Keep temporarily for internal debugging, then move under a developer-only location or tests. |
 | `LEGACY_REMOVE` | Historical one-off utility. Remove after replacement and reference check. |
-| `DELETE_NOW` | Obsolete and safe to delete. |
+| `COMPLETED` | Already migrated or removed. |
 
-## Current classification
+## Completed migrations
 
-### Delete now
-
-These are obsolete after the public CLI and tests exist:
+The following obsolete or migrated scripts have been removed from `scripts/`:
 
     scripts/compile.py
     scripts/test_weights_pack.py
-
-### Migrate runtime/build utilities
-
+    scripts/compare_host_vs_onnx.py
+    scripts/compare_vitis_vs_host_vs_onnx.py
+    scripts/verify.py
     scripts/build_bitstream.py
     scripts/generate_kv260_runtime.py
     scripts/make_input_bin.py
     scripts/make_weights_bin.py
     scripts/run_hostcpp.py
     scripts/run_vitis_csim.py
+
+Replacement package locations:
+
+    fpgai/validation/
+    fpgai/runtime/
+
+## Remaining migration targets
+
+### Runtime / backend utilities
+
     scripts/run_vivado_bridge.py
 
 Target package locations:
 
-    fpgai/runtime/
-    fpgai/backends/hls/
     fpgai/backends/vivado/
+    fpgai/runtime/
 
-### Migrate validation utilities
-
-    scripts/compare_host_vs_onnx.py
-    scripts/compare_vitis_vs_host_vs_onnx.py
-    scripts/verify.py
-
-Target package location:
-
-    fpgai/validation/
-
-### Migrate experiment orchestration utilities
+### Experiment orchestration utilities
 
     scripts/create_model_suite.py
     scripts/generate_models.py
@@ -72,7 +69,7 @@ Target package location:
 
     fpgai/experiments/
 
-### Migrate reporting utilities
+### Reporting utilities
 
     scripts/analyze_fpgai_experiments.py
     scripts/classify_hardware_feasibility.py
@@ -128,10 +125,9 @@ better developer workflow.
 
 ## Migration order
 
-1. Delete `DELETE_NOW` scripts.
-2. Move validation utilities into `fpgai/validation/`.
-3. Move runtime/build utilities into package modules.
-4. Move reporting utilities into `fpgai/reporting/`.
-5. Replace public documentation references to `scripts/`.
-6. Remove or archive remaining legacy scripts.
-7. Leave at most this README and manifest during transition.
+1. Move experiment orchestration into `fpgai/experiments/`.
+2. Move reporting utilities into `fpgai/reporting/`.
+3. Move Vivado bridge command logic into `fpgai/backends/vivado/`.
+4. Replace public documentation references to `scripts/`.
+5. Remove or archive remaining legacy scripts.
+6. Leave at most this README and manifest during transition.
