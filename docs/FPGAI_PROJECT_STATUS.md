@@ -75,6 +75,24 @@ Sprint 3: canonical pipeline inspection and stage manifest mapping.
 
 ## Latest update
 
+- Added explicit `pipeline_stages` metadata to the existing compile `manifest.json`.
+- Reused `fpgai/engine/compiler.py`; no new pipeline orchestrator or pipeline file was added.
+- Stage metadata currently describes the existing compile flow:
+  - config load
+  - model import
+  - model/graph analysis
+  - architecture planning
+  - optional reports
+  - host C++ generation
+  - HLS generation
+  - optional Vitis HLS run
+  - training artifacts when applicable
+  - Vivado bridge as `not_requested`
+  - runtime package as `not_implemented`
+- Added a source-level regression test in existing `tests/test_compiler_artifact_meta.py`.
+
+## Latest update
+
 - Started Sprint 3 canonical pipeline inspection.
 - Confirmed current compile flow already has a central manifest path in `fpgai/engine/compiler.py`.
 - Current safest Sprint 3 improvement is to extend the existing `manifest.json` with explicit pipeline stage status instead of creating a new pipeline orchestrator or new pipeline file.

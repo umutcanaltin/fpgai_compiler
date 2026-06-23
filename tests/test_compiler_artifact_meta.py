@@ -4,6 +4,7 @@ import json
 from types import SimpleNamespace
 
 from fpgai.compiler.compiler import Compiler
+from pathlib import Path
 
 
 def _cfg(out_dir, *, training_enabled=False):
@@ -139,3 +140,11 @@ def test_training_learning_rate_is_read_from_dict_optimizer(tmp_path, monkeypatc
     )
 
     assert calls["learning_rate"] == 0.025
+
+def test_compiler_manifest_records_pipeline_stages_in_source() -> None:
+    source = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
+
+    assert "_build_pipeline_stages" in source
+    assert '"pipeline_stages": self._build_pipeline_stages(**kwargs)' in source
+    assert '"vivado_bridge"' in source
+    assert '"runtime_package"' in source

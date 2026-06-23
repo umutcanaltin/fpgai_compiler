@@ -1015,6 +1015,207 @@ class Compiler:
             "summary": summary,
         }
 
+    @staticmethod
+    def _pipeline_stage(
+        name: str,
+        status: str,
+        *,
+        detail: str = "",
+        artifacts: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        row: Dict[str, Any] = {
+            "name": name,
+            "status": status,
+        }
+        if detail:
+            row["detail"] = detail
+        if artifacts:
+            row["artifacts"] = artifacts
+        return row
+
+    def _build_pipeline_stages(
+        self,
+        **kwargs: Any,
+    ) -> List[Dict[str, Any]]:
+        """Describe the effective compile pipeline in the existing manifest.
+
+        This is traceability metadata only. It does not create a new pipeline
+        orchestrator and does not claim that Vivado/runtime stages ran through
+        the main compile command.
+        """
+        raw = self.cfg.raw
+        graph = kwargs.get("graph")
+        compile_plan = kwargs.get("compile_plan")
+        memory_plan = kwargs.get("memory_plan")
+        communication_plan = kwargs.get("communication_plan")
+        hls_run = kwargs.get("hls_run")
+        training_plan = kwargs.get("training_plan")
+
+        hls_enabled = bool(_cfg_get(raw, "backends.hls.enabled", True))
+        host_cpp_enabled = bool(_cfg_get(raw, "backends.host_cpp.enabled", True))
+
+        stages: List[Dict[str, Any]] = [
+            self._pipeline_stage(
+                "load_config",
+                "done",
+                detail="YAML configuration loaded and normalized.",
+            ),
+            self._pipeline_stage(
+                "import_model",
+                "done",
+                detail="Model imported into FPGAI IR.",
+                artifacts={
+                    "num_ops": len(getattr(graph, "ops", []) or []),
+                    "num_params": len(getattr(graph, "params", {}) or {}),
+                },
+            ),
+            self._pipeline_stage(
+                "analyze_model",
+                "done",
+                detail="Graph descriptors, capability report, memory plan, and communication plan generated.",
+                artifacts={
+                    "num_descriptors": len(kwargs.get("descriptors", []) or []),
+                    "num_memory_placements": len(getattr(memory_plan, "placements", []) or []),
+                    "num_communication_edges": len(getattr(communication_plan, "edges", []) or []),
+                },
+            ),
+            self._pipeline_stage(
+                "plan_architecture",
+                "done",
+                detail="Compile plan generated.",
+                artifacts={
+                    "num_layer_plans": len(getattr(compile_plan, "layer_plans", []) or []),
+                    "architecture_signature": getattr(compile_plan, "architecture_signature", None),
+                },
+            ),
+        ]
+
+        optional_results = [
+            ("quantization_report", kwargs.get("quant_result"), "Optional quantization report."),
+            ("precision_sweep", kwargs.get("sweep_result"), "Optional precision sweep."),
+            ("design_space", kwargs.get("design_result"), "Optional design-space report."),
+            ("estimate_vs_hls", kwargs.get("estimate_vs_hls_result"), "Optional estimate-vs-HLS report."),
+            ("hls_module_breakdown", kwargs.get("hls_module_breakdown_result"), "Optional HLS module breakdown report."),
+        ]
+
+        for name, result, detail in optional_results:
+            if result is None:
+                stages.append(
+                    self._pipeline_stage(
+                        name,
+                        "skipped",
+                        detail=f"{detail} Not requested or unavailable.",
+                    )
+                )
+                continue
+
+            artifacts = {
+                key: str(value)
+                for key, value in {
+                    "out_dir": getattr(result, "out_dir", None),
+                    "summary_txt": getattr(result, "summary_txt", None),
+                    "results_json": getattr(result, "results_json", None),
+                }.items()
+                if value is not None
+            }
+            stages.append(
+                self._pipeline_stage(
+                    name,
+                    "done",
+                    detail=detail,
+                    artifacts=artifacts,
+                )
+            )
+
+        stages.append(
+            self._pipeline_stage(
+                "generate_host_cpp",
+                "done" if host_cpp_enabled else "skipped",
+                detail=(
+                    "Host C++ reference artifacts requested."
+                    if host_cpp_enabled
+                    else "Host C++ backend disabled in config."
+                ),
+            )
+        )
+
+        stages.append(
+            self._pipeline_stage(
+                "generate_hls",
+                "done" if hls_enabled else "skipped",
+                detail=(
+                    "HLS source artifacts requested."
+                    if hls_enabled
+                    else "HLS backend disabled in config."
+                ),
+            )
+        )
+
+        if not hls_enabled:
+            hls_status = "skipped"
+            hls_detail = "HLS backend disabled in config."
+        elif hls_run is None:
+            hls_status = "skipped"
+            hls_detail = "Vitis HLS run was not requested or not reached."
+        elif hls_run.ok:
+            hls_status = "done"
+            hls_detail = "Vitis HLS run completed successfully."
+        else:
+            hls_status = "failed"
+            hls_detail = "Vitis HLS run failed; inspect HLS logs."
+
+        stages.append(
+            self._pipeline_stage(
+                "run_hls",
+                hls_status,
+                detail=hls_detail,
+                artifacts=(
+                    {
+                        key: str(value)
+                        for key, value in {
+                            "returncode": getattr(hls_run, "returncode", None),
+                            "stdout_log": getattr(hls_run, "stdout_log", None),
+                            "stderr_log": getattr(hls_run, "stderr_log", None),
+                            "csynth_report": getattr(hls_run, "csynth_report", None),
+                        }.items()
+                        if value is not None
+                    }
+                    if hls_run is not None
+                    else None
+                ),
+            )
+        )
+
+        stages.append(
+            self._pipeline_stage(
+                "training_artifacts",
+                "done" if training_plan is not None else "skipped",
+                detail=(
+                    "Training plan and reference artifacts generated."
+                    if training_plan is not None
+                    else "Pipeline mode is not training_on_device."
+                ),
+            )
+        )
+
+        stages.append(
+            self._pipeline_stage(
+                "vivado_bridge",
+                "not_requested",
+                detail="Vivado bridge is generated/run by the separate Vivado bridge flow, not by the main compile command.",
+            )
+        )
+
+        stages.append(
+            self._pipeline_stage(
+                "runtime_package",
+                "not_implemented",
+                detail="Runtime packaging is planned for a later sprint and is not claimed by this compile manifest.",
+            )
+        )
+
+        return stages
+
     def _emit_manifest(self, **kwargs) -> None:
         out_dir = kwargs["out_dir"]
         manifest = {
@@ -1181,6 +1382,7 @@ class Compiler:
                 if kwargs["hls_run"] is not None and kwargs["hls_run"].csynth_report is not None
                 else None
             ),
+            "pipeline_stages": self._build_pipeline_stages(**kwargs),
             "seconds": round(float(kwargs["seconds"]), 6),
         }
         hls_schedule_summary = kwargs.get("hls_schedule_summary")
