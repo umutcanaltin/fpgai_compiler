@@ -9,7 +9,7 @@ from fpgai.experiments.config_materializer import materialize_design_config
 def test_materializer_does_not_write_unknown_experiment_section(tmp_path: Path):
     model = tmp_path / "model.onnx"
     model.write_text("dummy")
-    base = tmp_path / "fpgai.yml"
+    base = tmp_path / "configs/examples/default_compile.yml"
     base.write_text(
         "project: demo\n"
         "model:\n"
@@ -42,7 +42,7 @@ def test_materializer_does_not_write_unknown_experiment_section(tmp_path: Path):
 def test_materializer_does_not_overwrite_model_path_when_requested_model_is_missing(tmp_path: Path):
     existing = tmp_path / "real.onnx"
     existing.write_text("dummy")
-    base = tmp_path / "fpgai.yml"
+    base = tmp_path / "configs/examples/default_compile.yml"
     base.write_text(
         "model:\n"
         f"  path: {existing.name}\n"

@@ -2,8 +2,8 @@ name: inference_policy
 command_template: python main.py benchmark --config {config_path}
 design_name_template: policy_{policy}_{precision_mode}
 defaults:
-  base_config_path: fpgai.yml
-  config_path: fpgai.yml
+  base_config_path: configs/examples/default_compile.yml
+  config_path: configs/examples/default_compile.yml
   model_path: models/cnn_mnist.onnx
   board: kv260
   metrics_json: build/fpgai_example_dense/calibration/estimate_vs_hls.json

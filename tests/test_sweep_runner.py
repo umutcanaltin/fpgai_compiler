@@ -8,7 +8,7 @@ def test_sweep_runner_dry_run_creates_outputs(tmp_path):
     cfg = {
         "name": "dry",
         "command_template": "echo {x}",
-        "defaults": {"config_path": "fpgai.yml", "model_path": "model.onnx", "board": "kv260"},
+        "defaults": {"config_path": "configs/examples/default_compile.yml", "model_path": "model.onnx", "board": "kv260"},
         "parameters": {"x": [1, 2, 3]},
     }
     points = expand_design_matrix(cfg)

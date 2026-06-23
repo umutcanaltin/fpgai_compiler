@@ -2,7 +2,7 @@ name: training_convergence
 command_template: "python main.py benchmark --config {config_path}"
 point_name_template: "train_{model_name}_{learning_rate}_{epochs}"
 defaults:
-  config_path: fpgai.yml
+  config_path: configs/examples/default_compile.yml
   board: kv260
   mode: training
 parameters:

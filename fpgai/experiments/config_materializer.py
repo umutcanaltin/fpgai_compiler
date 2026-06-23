@@ -359,7 +359,7 @@ def _materialize_precision_defaults_from_candidates(
     """Apply analysis.precision_sweep candidate defaults into numerics.defaults.
 
     Precision sweep values such as ``fx8_3`` are not raw config fields in
-    fpgai.yml. They select one entry from
+    configs/examples/default_compile.yml. They select one entry from
     analysis.precision_sweep.candidates and materialize that candidate's
     defaults into numerics.defaults so downstream compiler/codegen paths see
     the selected numeric type widths.

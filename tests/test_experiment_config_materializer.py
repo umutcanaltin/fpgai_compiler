@@ -26,7 +26,7 @@ def test_apply_parameter_overrides_updates_existing_paths_strictly():
 def test_materialize_design_config_writes_strict_yaml_and_sidecar(tmp_path: Path):
     model = tmp_path / "model.onnx"
     model.write_text("dummy", encoding="utf-8")
-    base = tmp_path / "fpgai.yml"
+    base = tmp_path / "configs/examples/default_compile.yml"
     base.write_text(
         "model:\n"
         "  path: old.onnx\n"
@@ -55,11 +55,11 @@ def test_materialize_design_config_writes_strict_yaml_and_sidecar(tmp_path: Path
 
 def test_sweep_runner_materializes_config_and_command_strictly(tmp_path: Path):
     repo = tmp_path
-    (repo / "fpgai.yml").write_text("notes:\n  parallel_policy: Balanced\n", encoding="utf-8")
+    (repo / "configs/examples/default_compile.yml").write_text("notes:\n  parallel_policy: Balanced\n", encoding="utf-8")
     config = {
         "name": "policy_test",
         "command_template": "python main.py benchmark --config {config_path}",
-        "defaults": {"base_config_path": "fpgai.yml", "config_path": "fpgai.yml", "model_path": "m.onnx", "board": "kv260"},
+        "defaults": {"base_config_path": "configs/examples/default_compile.yml", "config_path": "configs/examples/default_compile.yml", "model_path": "m.onnx", "board": "kv260"},
         "parameters": {"policy": ["resource_first"]},
     }
     points = expand_design_matrix(config)

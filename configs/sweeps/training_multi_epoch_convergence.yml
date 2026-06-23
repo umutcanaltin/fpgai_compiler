@@ -56,8 +56,8 @@ materialize_configs:
       create: true
 
 defaults:
-  base_config_path: fpgai_train.yml
-  config_path: fpgai_train.yml
+  base_config_path: configs/examples/training_compile_smoke.yml
+  config_path: configs/examples/training_compile_smoke.yml
   board: kv260
   model_path: models/cnn_mnist.onnx
   policy: balanced

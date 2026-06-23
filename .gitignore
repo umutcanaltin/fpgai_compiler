@@ -1,44 +1,35 @@
-# Python/cache
+# Python
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
 
-# OS/editor
-.DS_Store
-.vscode/
-.idea/
-
-# Environments/builds
+# Virtual environments
 .venv/
 venv/
+env/
+
+# Packaging
 build/
 dist/
 *.egg-info/
 
-# FPGA/tool outputs
-*.jou
-*.log
-*.str
-*.rpt
-*.rpx
-*.pb
-*.bit
-*.xsa
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
 
-# Generated experiment outputs
+# Generated outputs
 experiments/*
-!experiments/README.md
-!experiments/.gitkeep
-
-# Local audit files
+paper_experiments/*
+reports/*
 repo_audit/
-# Generated experiment outputs
-experiments/
-paper_experiments/
-reports/
-build/
+patches/
 
 # Keep directory documentation tracked
 !experiments/README.md

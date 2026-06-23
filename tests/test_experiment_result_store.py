@@ -13,7 +13,7 @@ def test_result_store_writes_json_csv_and_resume(tmp_path):
         "returncode": 0,
         "duration_sec": 0.1,
         "commit_hash": "abc",
-        "config_path": "fpgai.yml",
+        "config_path": "configs/examples/default_compile.yml",
         "model_path": "m.onnx",
         "tool_version": "test",
         "board": "kv260",

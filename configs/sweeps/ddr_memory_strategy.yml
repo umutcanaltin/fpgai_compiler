@@ -12,8 +12,8 @@ materialize_configs:
 
 # Defaults are intentionally kept compatible with the existing sweep runner.
 defaults:
-  base_config_path: fpgai.yml
-  config_path: fpgai.yml
+  base_config_path: configs/examples/default_compile.yml
+  config_path: configs/examples/default_compile.yml
   model_path: models/cnn_mnist.onnx
   board: kv260
   precision_mode: fx8_3

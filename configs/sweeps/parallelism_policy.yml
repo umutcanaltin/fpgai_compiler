@@ -29,8 +29,8 @@ materialize_configs:
 # Keep memory/precision fixed so any generated-HLS differences come from
 # parallel policy and explicit PE/SIMD/partition knobs.
 defaults:
-  base_config_path: fpgai.yml
-  config_path: fpgai.yml
+  base_config_path: configs/examples/default_compile.yml
+  config_path: configs/examples/default_compile.yml
   model_path: models/cnn_mnist.onnx
   board: kv260
   precision_mode: fx8_3

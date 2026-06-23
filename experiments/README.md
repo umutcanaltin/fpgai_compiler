@@ -1,0 +1,5 @@
+# Experiments
+
+This directory is used for generated local experiment outputs.
+
+Generated files under this directory are ignored by git. Only this README is tracked.

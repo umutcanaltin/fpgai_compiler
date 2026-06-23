@@ -5,7 +5,7 @@ def test_expand_design_matrix_cartesian_product():
     cfg = {
         "name": "demo",
         "command_template": "python main.py benchmark --config {config_path} --policy {policy}",
-        "defaults": {"config_path": "fpgai.yml", "board": "kv260"},
+        "defaults": {"config_path": "configs/examples/default_compile.yml", "board": "kv260"},
         "parameters": {"policy": ["balanced", "latency_first"], "bits": [8, 16]},
     }
     points = expand_design_matrix(cfg)
