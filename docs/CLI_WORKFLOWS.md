@@ -31,17 +31,49 @@ Sweep output goes under `experiments/`. Generated experiment artifacts should no
 
 ## Paper experiments config
 
-Use this for reproducibility and paper-result generation.
+Use this workflow for reproducibility and paper-result generation.
 
-```bash
-fpgai experiment inspect --config configs/experiments/arxiv_paper.yml
-```
+Inspect the paper experiment configuration before running it:
 
-Future experiment artifact commands should follow this pattern:
+    fpgai experiment inspect --config configs/experiments/arxiv_paper.yml
 
-```bash
-fpgai experiment run --config configs/experiments/arxiv_paper.yml --out paper_experiments/arxiv
-```
+Run the paper experiment configuration and write generated outputs under `paper_experiments/`:
+
+    fpgai experiment run \
+      --config configs/experiments/arxiv_paper.yml \
+      --out paper_experiments/arxiv
+
+Generated experiment outputs should go under `paper_experiments/` or `experiments/`, not into tracked source directories.
+
+## Report and paper artifact generation
+
+Use `fpgai report` to turn existing experiment outputs into reviewer-facing summaries, tables, plots, and traceability reports. These commands reuse the implementation under `fpgai/reporting/`; users do not need to call internal scripts directly.
+
+Build a summary report from an experiment output directory:
+
+    fpgai report build \
+      --input experiments/inference_precision \
+      --out reports/inference_precision
+
+Generate paper tables and figures from a sweep/result CSV:
+
+    fpgai report paper-artifacts \
+      --csv experiments/inference_precision/policy_sweep_results.csv \
+      --out reports/inference_precision/paper_artifacts
+
+Generate Pareto/frontier artifacts:
+
+    fpgai report frontier \
+      --csv experiments/inference_precision/policy_sweep_results.csv \
+      --out reports/inference_precision/frontier
+
+Generate estimator-vs-real resource and latency tables:
+
+    fpgai report estimator \
+      --csv experiments/inference_precision/policy_sweep_results.csv \
+      --out reports/inference_precision/estimator
+
+Report outputs should go under `reports/` and should not normally be committed.
 
 ## Logging policy
 

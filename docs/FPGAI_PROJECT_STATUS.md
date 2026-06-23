@@ -75,6 +75,17 @@ Sprint 2: reporting and experiment tooling cleanup/wiring.
 
 ## Latest update
 
+- Updated `docs/CLI_WORKFLOWS.md` with public report CLI documentation.
+- Used a safer section replacement that avoids embedded Markdown code fences inside the patch script.
+- Documented:
+  - `fpgai report build`
+  - `fpgai report paper-artifacts`
+  - `fpgai report frontier`
+  - `fpgai report estimator`
+- Clarified that report commands reuse `fpgai/reporting/` and generated outputs belong under `reports/`.
+
+## Latest update
+
 - Second report runtime smoke-test run reduced failures to one fixture-column mismatch.
 - `paper-artifacts` also expected `hls_ok`.
 - Patched the tiny `paper-artifacts` CSV fixture to include `hls_ok=True`.
