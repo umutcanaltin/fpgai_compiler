@@ -75,6 +75,16 @@ Sprint 2: reporting and experiment tooling cleanup/wiring.
 
 ## Latest update
 
+- Added tests for the new public `report` CLI subcommands.
+- Reused existing `tests/test_cli_report_validate.py` instead of creating a new test file.
+- Covered help paths for:
+  - `fpgai report`
+  - `fpgai report paper-artifacts`
+  - `fpgai report frontier`
+  - `fpgai report estimator`
+
+## Latest update
+
 - Inspected existing reporting modules and current `report` CLI wiring before adding anything.
 - Reused existing reporting modules instead of creating new files:
   - `fpgai.reporting.generate_paper_artifacts`

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 from fpgai.reporting.artifacts import build_report
@@ -96,3 +98,53 @@ def test_validate_results_rejects_false_pass(tmp_path: Path):
     assert not result.passed
     assert result.error_count == 1
     assert "false pass" in result.issues[0].message
+
+def _run_main_help(*args: str) -> subprocess.CompletedProcess[str]:
+    root = Path(__file__).resolve().parents[1]
+
+    return subprocess.run(
+        [sys.executable, str(root / "main.py"), *args, "--help"],
+        cwd=root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
+def test_report_cli_exposes_existing_reporting_subcommands():
+    result = _run_main_help("report")
+
+    assert result.returncode == 0
+    assert "paper-artifacts" in result.stdout
+    assert "frontier" in result.stdout
+    assert "estimator" in result.stdout
+
+
+def test_report_paper_artifacts_help_is_public():
+    result = _run_main_help("report", "paper-artifacts")
+
+    assert result.returncode == 0
+    assert "--csv" in result.stdout
+    assert "--out" in result.stdout
+    assert "generated paper artifacts" in result.stdout
+
+
+def test_report_frontier_help_is_public():
+    result = _run_main_help("report", "frontier")
+
+    assert result.returncode == 0
+    assert "--csv" in result.stdout
+    assert "--out" in result.stdout
+    assert "--require-pass" in result.stdout
+
+
+def test_report_estimator_help_is_public():
+    result = _run_main_help("report", "estimator")
+
+    assert result.returncode == 0
+    assert "--csv" in result.stdout
+    assert "--out" in result.stdout
+    assert "--inference-filter" in result.stdout
+    assert "--training-filter" in result.stdout
+
