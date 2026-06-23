@@ -31,4 +31,4 @@ fpgai compile --config configs/examples/inference_compile.yml --quiet
 
 ## Rationale
 
-Open-source users should see concise FPGAI status messages by default. Full Vitis/Vivado logs remain available in files for debugging and reproducibility.
+Users should see concise FPGAI status messages by default. Full Vitis/Vivado logs remain available in files for debugging and reproducibility.

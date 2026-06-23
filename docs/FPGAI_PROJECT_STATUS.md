@@ -75,6 +75,21 @@ Sprint 1: repository truth, tests, package metadata, and cleanup baseline.
 
 ## Latest update
 
+- Inspected public docs cleanup candidates before deleting anything.
+- Deleted stale internal planning/cleanup docs that made the repository look like an unfinished sprint workspace:
+  - `docs/REPO_CLEANUP_PLAN.md`
+  - `docs/development_roadmap.md`
+  - `docs/cli_workflows_legacy.md`
+- Kept current user-facing docs:
+  - `docs/CLI_WORKFLOWS.md`
+  - `docs/CONFIG_FIRST_WORKFLOW.md`
+  - `docs/PAPER_ARTIFACT_POLICY.md`
+  - `docs/inspect_command.md`
+  - `docs/logging.md`
+- Reworded `docs/logging.md` to avoid calling FPGAI open-source while the license is academic/non-commercial research only.
+
+## Latest update
+
 - Inspected package/license/README metadata.
 - Found mismatch:
   - `LICENSE.md` says academic, educational, and non-commercial research use only.
