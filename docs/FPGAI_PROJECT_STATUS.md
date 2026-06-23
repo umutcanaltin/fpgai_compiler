@@ -20,7 +20,7 @@ ONNX model → model analysis → resource/timing prediction → design selectio
 
 ## Current phase
 
-Sprint 2: reporting and experiment tooling cleanup/wiring.
+Sprint 3: canonical pipeline inspection and stage manifest mapping.
 
 ## Completed
 
@@ -72,6 +72,19 @@ Sprint 2: reporting and experiment tooling cleanup/wiring.
 5. Resolve package/license/README mismatch.
 6. Inspect stale docs before deleting or rewriting.
 7. Update this status file after every meaningful change.
+
+## Latest update
+
+- Started Sprint 3 canonical pipeline inspection.
+- Confirmed current compile flow already has a central manifest path in `fpgai/engine/compiler.py`.
+- Current safest Sprint 3 improvement is to extend the existing `manifest.json` with explicit pipeline stage status instead of creating a new pipeline orchestrator or new pipeline file.
+- Current owners:
+  - CLI compile entry: `fpgai/cli.py`
+  - compile orchestration: `fpgai/engine/compiler.py`
+  - result model: `fpgai/engine/result.py`
+  - HLS backend: `fpgai/backends/hls/`
+  - Vivado bridge/backend: `fpgai/backends/vivado/`
+- Next step: inspect `_emit_manifest` exactly and add `pipeline_stages` only inside the existing manifest output.
 
 ## Latest update
 
