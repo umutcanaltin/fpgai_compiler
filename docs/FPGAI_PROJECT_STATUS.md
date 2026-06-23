@@ -75,6 +75,16 @@ Sprint 1: repository truth, tests, package metadata, and cleanup baseline.
 
 ## Latest update
 
+- Inspected package/license/README metadata.
+- Found mismatch:
+  - `LICENSE.md` says academic, educational, and non-commercial research use only.
+  - `pyproject.toml` said MIT.
+  - README described FPGAI as open-source.
+- Patched README and `pyproject.toml` to align with `LICENSE.md`.
+- No source/compiler behavior changed.
+
+## Latest update
+
 - Full Sprint 1 baseline is green.
 - Final pytest result:
   - `258 passed, 1 skipped in 1.41s`

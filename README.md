@@ -1,6 +1,6 @@
 # FPGAI
 
-FPGAI is an open-source compiler framework for turning ONNX neural-network models into FPGA/SoC accelerator projects. It focuses on YAML-driven compilation, Vitis HLS project generation, correctness benchmarking, design-space sweeps, and reproducible paper experiments.
+FPGAI is a research compiler framework for turning ONNX neural-network models into FPGA/SoC accelerator projects. It focuses on YAML-driven compilation, Vitis HLS project generation, correctness benchmarking, design-space sweeps, and reproducible paper experiments.
 
 ## Who is this for?
 
@@ -123,4 +123,4 @@ When adding a feature, include:
 
 ## License
 
-See `LICENSE.md`.
+FPGAI is released for academic, educational, and non-commercial research use under the terms in `LICENSE.md`. Commercial use, redistribution for commercial purposes, and proprietary integration require separate written permission.
