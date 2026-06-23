@@ -20,7 +20,7 @@ ONNX model → model analysis → resource/timing prediction → design selectio
 
 ## Current phase
 
-Sprint 1: repository truth, tests, package metadata, and cleanup baseline.
+Sprint 2: reporting and experiment tooling cleanup/wiring.
 
 ## Completed
 
@@ -72,6 +72,29 @@ Sprint 1: repository truth, tests, package metadata, and cleanup baseline.
 5. Resolve package/license/README mismatch.
 6. Inspect stale docs before deleting or rewriting.
 7. Update this status file after every meaningful change.
+
+## Latest update
+
+- Inspected existing reporting modules and current `report` CLI wiring before adding anything.
+- Reused existing reporting modules instead of creating new files:
+  - `fpgai.reporting.generate_paper_artifacts`
+  - `fpgai.reporting.paper_frontier`
+  - `fpgai.reporting.estimator_tables`
+- Wired them into the public CLI as:
+  - `fpgai report paper-artifacts`
+  - `fpgai report frontier`
+  - `fpgai report estimator`
+- Existing report logic remains in `fpgai/reporting/`; `fpgai/cli.py` only dispatches to it.
+
+## Latest update
+
+- Sprint 1 closeout check passed.
+- Full pytest result after docs cleanup:
+  - `258 passed, 1 skipped in 1.43s`
+  - exit code `0`
+- Remaining skipped test is optional HLS/Vitis CSim integration correctness when no testable YAML config is present.
+- Remaining grep hits are acceptable generated-output/limitations/function-name references, not stale public sprint/cleanup workspace language.
+- Sprint 1 is complete.
 
 ## Latest update
 

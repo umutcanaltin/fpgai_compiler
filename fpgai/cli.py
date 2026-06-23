@@ -628,6 +628,75 @@ def _handle_report_build(args) -> int:
 
 
 
+def _run_existing_reporting_main(module_name: str, argv: list[str]) -> int:
+    """Run an existing fpgai.reporting module main() through the public CLI.
+
+    This keeps report logic in the existing reporting modules and only wires it
+    into `fpgai report ...`.
+    """
+    import importlib
+
+    old_argv = sys.argv[:]
+    sys.argv = [f"fpgai report {module_name.rsplit('.', 1)[-1]}", *argv]
+
+    try:
+        module = importlib.import_module(module_name)
+        result = module.main()
+    except SystemExit as exc:
+        code = exc.code
+        if code is None:
+            return 0
+        if isinstance(code, int):
+            return code
+        print(code, file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(f"[ERROR] Failed to run {module_name}: {exc}", file=sys.stderr)
+        return 2
+    finally:
+        sys.argv = old_argv
+
+    return int(result or 0)
+
+
+
+def _handle_report_paper_artifacts(args) -> int:
+    return _run_existing_reporting_main(
+        "fpgai.reporting.generate_paper_artifacts",
+        ["--csv", args.csv, "--outdir", args.out],
+    )
+
+
+
+def _handle_report_frontier(args) -> int:
+    argv = ["--csv", args.csv, "--outdir", args.out]
+    if getattr(args, "require_pass", False):
+        argv.append("--require-pass")
+    return _run_existing_reporting_main(
+        "fpgai.reporting.paper_frontier",
+        argv,
+    )
+
+
+
+def _handle_report_estimator(args) -> int:
+    argv = [
+        "--csv",
+        args.csv,
+        "--out-dir",
+        args.out,
+        "--inference-filter",
+        args.inference_filter,
+        "--training-filter",
+        args.training_filter,
+    ]
+    return _run_existing_reporting_main(
+        "fpgai.reporting.estimator_tables",
+        argv,
+    )
+
+
+
 def _handle_validate_correctness(args) -> int:
     try:
         result = validate_correctness(args.config)
@@ -903,6 +972,66 @@ def build_parser() -> argparse.ArgumentParser:
         help="Output report directory, for example reports/arxiv",
     )
 
+    report_paper_artifacts_parser = report_subparsers.add_parser(
+        "paper-artifacts",
+        help="Generate paper tables and figures from an existing sweep CSV",
+    )
+    report_paper_artifacts_parser.add_argument(
+        "--csv",
+        required=True,
+        help="Input policy_sweep_results.csv or compatible FPGAI result CSV",
+    )
+    report_paper_artifacts_parser.add_argument(
+        "--out",
+        required=True,
+        help="Output directory for generated paper artifacts",
+    )
+
+    report_frontier_parser = report_subparsers.add_parser(
+        "frontier",
+        help="Generate DSP-vs-latency Pareto frontier artifacts from an existing sweep CSV",
+    )
+    report_frontier_parser.add_argument(
+        "--csv",
+        required=True,
+        help="Input policy_sweep_results.csv or compatible FPGAI result CSV",
+    )
+    report_frontier_parser.add_argument(
+        "--out",
+        required=True,
+        help="Output directory for generated frontier artifacts",
+    )
+    report_frontier_parser.add_argument(
+        "--require-pass",
+        action="store_true",
+        help="Keep only rows with benchmark_passed=True when available",
+    )
+
+    report_estimator_parser = report_subparsers.add_parser(
+        "estimator",
+        help="Generate estimator-vs-real resource and latency tables from an existing CSV",
+    )
+    report_estimator_parser.add_argument(
+        "--csv",
+        required=True,
+        help="Input CSV containing predicted and actual resource/latency columns",
+    )
+    report_estimator_parser.add_argument(
+        "--out",
+        required=True,
+        help="Output directory for estimator comparison tables",
+    )
+    report_estimator_parser.add_argument(
+        "--inference-filter",
+        default="inference",
+        help="Substring used to identify inference rows in the CSV mode column",
+    )
+    report_estimator_parser.add_argument(
+        "--training-filter",
+        default="training",
+        help="Substring used to identify training rows in the CSV mode column",
+    )
+
     validate_parser = subparsers.add_parser(
         "validate",
         help="Validate FPGAI experiment outputs",
@@ -952,6 +1081,12 @@ def main() -> None:
     if args.command == "report":
         if getattr(args, "report_command", None) == "build":
             return _handle_report_build(args)
+        if getattr(args, "report_command", None) == "paper-artifacts":
+            raise SystemExit(_handle_report_paper_artifacts(args))
+        if getattr(args, "report_command", None) == "frontier":
+            raise SystemExit(_handle_report_frontier(args))
+        if getattr(args, "report_command", None) == "estimator":
+            raise SystemExit(_handle_report_estimator(args))
         parser.error("report requires a subcommand")
         return 2
 
