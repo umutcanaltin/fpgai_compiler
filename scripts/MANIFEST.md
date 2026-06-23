@@ -41,7 +41,12 @@ Experiment runner scripts replaced by public CLI commands:
     scripts/run_policy_sweep.py
     scripts/run_training_policy_sweep.py
 
-Use instead:
+Model-suite utilities moved to `fpgai/experiments/`:
+
+    scripts/create_model_suite.py
+    scripts/generate_models.py
+
+Use public workflows instead:
 
     python main.py sweep inspect --config configs/sweeps/precision_selection.yml
     python main.py sweep run --config configs/sweeps/precision_selection.yml --out experiments/precision_selection
@@ -57,15 +62,6 @@ Use instead:
 Target package location:
 
     fpgai/backends/vivado/
-
-### Experiment/model-suite utilities
-
-    scripts/create_model_suite.py
-    scripts/generate_models.py
-
-Target package location:
-
-    fpgai/experiments/
 
 ### Reporting utilities
 
@@ -123,9 +119,8 @@ better developer workflow.
 
 ## Migration order
 
-1. Move model-suite utilities into `fpgai/experiments/`.
-2. Move reporting utilities into `fpgai/reporting/`.
-3. Move Vivado bridge command logic into `fpgai/backends/vivado/`.
-4. Replace public documentation references to `scripts/`.
-5. Remove or archive remaining legacy scripts.
-6. Leave at most this README and manifest during transition.
+1. Move reporting utilities into `fpgai/reporting/`.
+2. Move Vivado bridge command logic into `fpgai/backends/vivado/`.
+3. Replace public documentation references to `scripts/`.
+4. Remove or archive remaining legacy scripts.
+5. Leave at most this README and manifest during transition.
