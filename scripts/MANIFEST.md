@@ -10,27 +10,21 @@ The professional public interface of FPGAI is:
 The `scripts/` directory is transitional. Scripts should either be migrated into
 the `fpgai/` package, converted into tests, or removed.
 
-## Classification rules
-
-| Category | Meaning |
-|---|---|
-| `MIGRATE_RUNTIME` | Move reusable runtime/build logic into `fpgai/runtime/` or backend modules. |
-| `MIGRATE_VALIDATION` | Move correctness or comparison logic into `fpgai/validation/`. |
-| `MIGRATE_EXPERIMENTS` | Move sweep/model-suite orchestration into `fpgai/experiments/`. |
-| `MIGRATE_REPORTING` | Move table, plot, and summary generation into `fpgai/reporting/`. |
-| `DEV_ONLY` | Keep temporarily for internal debugging, then move under a developer-only location or tests. |
-| `LEGACY_REMOVE` | Historical one-off utility. Remove after replacement and reference check. |
-| `COMPLETED` | Already migrated or removed. |
-
 ## Completed migrations
 
 The following obsolete or migrated scripts have been removed from `scripts/`:
 
     scripts/compile.py
     scripts/test_weights_pack.py
+
+Validation helpers moved to `fpgai/validation/`:
+
     scripts/compare_host_vs_onnx.py
     scripts/compare_vitis_vs_host_vs_onnx.py
     scripts/verify.py
+
+Runtime helpers moved to `fpgai/runtime/`:
+
     scripts/build_bitstream.py
     scripts/generate_kv260_runtime.py
     scripts/make_input_bin.py
@@ -38,10 +32,21 @@ The following obsolete or migrated scripts have been removed from `scripts/`:
     scripts/run_hostcpp.py
     scripts/run_vitis_csim.py
 
-Replacement package locations:
+Experiment runner scripts replaced by public CLI commands:
 
-    fpgai/validation/
-    fpgai/runtime/
+    scripts/run_all_training_experiments.py
+    scripts/run_fpgai_experiments.py
+    scripts/run_inference_policy_sweep.py
+    scripts/run_paper_experiments.py
+    scripts/run_policy_sweep.py
+    scripts/run_training_policy_sweep.py
+
+Use instead:
+
+    python main.py sweep inspect --config configs/sweeps/precision_selection.yml
+    python main.py sweep run --config configs/sweeps/precision_selection.yml --out experiments/precision_selection
+    python main.py experiment inspect --config configs/experiments/arxiv_paper.yml
+    python main.py experiment run --config configs/experiments/arxiv_paper.yml --out paper_experiments/arxiv
 
 ## Remaining migration targets
 
@@ -49,21 +54,14 @@ Replacement package locations:
 
     scripts/run_vivado_bridge.py
 
-Target package locations:
+Target package location:
 
     fpgai/backends/vivado/
-    fpgai/runtime/
 
-### Experiment orchestration utilities
+### Experiment/model-suite utilities
 
     scripts/create_model_suite.py
     scripts/generate_models.py
-    scripts/run_all_training_experiments.py
-    scripts/run_fpgai_experiments.py
-    scripts/run_inference_policy_sweep.py
-    scripts/run_paper_experiments.py
-    scripts/run_policy_sweep.py
-    scripts/run_training_policy_sweep.py
 
 Target package location:
 
@@ -125,7 +123,7 @@ better developer workflow.
 
 ## Migration order
 
-1. Move experiment orchestration into `fpgai/experiments/`.
+1. Move model-suite utilities into `fpgai/experiments/`.
 2. Move reporting utilities into `fpgai/reporting/`.
 3. Move Vivado bridge command logic into `fpgai/backends/vivado/`.
 4. Replace public documentation references to `scripts/`.
