@@ -75,6 +75,27 @@ Sprint 2: reporting and experiment tooling cleanup/wiring.
 
 ## Latest update
 
+- Cleaned two remaining stale names from the selected artifact modules:
+  - replaced the `sprint13b` default experiment path with `experiments/training_stream_compare`
+  - renamed a local `evidence` variable to `artifact_lines`
+- Focused artifact module cleanup remains source-compatible and does not add files.
+
+## Latest update
+
+- Cleaned stale `evidence`/`Sprint` wording in selected artifact-reporting modules.
+- Replaced old extractor usage strings with package-module usage.
+- Renamed selected generated output folders/files from `*_evidence` to `*_artifacts`.
+- Patched:
+  - `fpgai/reporting/training_native_accumulated_batch_artifacts.py`
+  - `fpgai/reporting/training_accumulated_batch_artifacts.py`
+  - `fpgai/reporting/training_multi_epoch_convergence_artifacts.py`
+  - `fpgai/reporting/training_accelerator_artifacts.py`
+  - `fpgai/reporting/memory_binding_artifacts.py`
+  - `fpgai/reporting/parallel_policy_artifacts.py`
+- No new files were added.
+
+## Latest update
+
 - Inspected `scripts/` reporting cleanup state.
 - Confirmed `scripts/` contains only documentation:
   - `scripts/README.md`

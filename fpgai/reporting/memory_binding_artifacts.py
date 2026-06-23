@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract Sprint 12B memory binding evidence from generated HLS artifacts."""
+"""Extract memory binding artifacts from generated HLS artifacts."""
 from __future__ import annotations
 
 import json
@@ -52,7 +52,7 @@ def _summary(path: Path) -> dict[str, object]:
 
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
-        print("usage: extract_memory_binding_evidence.py <experiment_dir>", file=sys.stderr)
+        print("usage: python -m fpgai.reporting.memory_binding_artifacts <experiment_dir>", file=sys.stderr)
         return 2
     root = Path(argv[1])
     artifacts = root / "artifacts"
@@ -76,9 +76,9 @@ def main(argv: list[str]) -> int:
             }
         )
 
-    out_dir = root / "memory_binding_evidence"
+    out_dir = root / "memory_binding_artifacts"
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "memory_binding_evidence.json").write_text(json.dumps(rows, indent=2))
+    (out_dir / "memory_binding_artifacts.json").write_text(json.dumps(rows, indent=2))
 
     lines = [
         "| design | passed | cosine | #W/B bindings | BRAM | URAM |",
@@ -89,7 +89,7 @@ def main(argv: list[str]) -> int:
             f"| {row['design']} | {row['passed']} | {row['cosine_similarity']} | "
             f"{row['num_weight_bindings']} | {row['has_bram_weight_binding']} | {row['has_uram_weight_binding']} |"
         )
-    (out_dir / "memory_binding_evidence.md").write_text("\n".join(lines) + "\n")
+    (out_dir / "memory_binding_artifacts.md").write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
     print(f"\n[OK] Wrote {out_dir}")
     return 0

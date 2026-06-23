@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract Sprint 13D accumulated mini-batch training evidence.
+"""Extract accumulated mini-batch training artifacts.
 
 This extractor is intentionally conservative:
 - It only marks accumulated_batch=True when the design name/config indicates
@@ -164,7 +164,7 @@ def _markdown(rows: List[Dict[str, Any]]) -> str:
         "total_forward_backward_calls", "optimizer_update_calls", "optimizer_location",
         "weight_words", "grad_cosine", "weight_after_cosine", "weight_delta_cosine",
     ]
-    out = ["# Sprint 13D accumulated mini-batch evidence", ""]
+    out = ["# Accumulated mini-batch training artifacts", ""]
     out.append("| " + " | ".join(cols) + " |")
     out.append("|" + "|".join(["---"] * len(cols)) + "|")
     for r in rows:
@@ -194,7 +194,7 @@ def _csv(rows: List[Dict[str, Any]]) -> str:
 
 def main() -> int:
     if len(sys.argv) != 2:
-        print("usage: extract_training_accumulated_batch_evidence.py <experiment_dir>", file=sys.stderr)
+        print("usage: python -m fpgai.reporting.training_accumulated_batch_artifacts <experiment_dir>", file=sys.stderr)
         return 2
     exp_dir = Path(sys.argv[1])
     results = _load_json(exp_dir / "results.json")
@@ -202,11 +202,11 @@ def main() -> int:
     rows = [_row_for(d, results_by_name) for d in _find_design_dirs(exp_dir)]
     rows.sort(key=lambda r: r["design"])
 
-    out_dir = exp_dir / "training_accumulated_batch_evidence"
+    out_dir = exp_dir / "training_accumulated_batch_artifacts"
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "training_accumulated_batch_evidence.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
-    (out_dir / "training_accumulated_batch_evidence.md").write_text(_markdown(rows), encoding="utf-8")
-    (out_dir / "training_accumulated_batch_evidence.csv").write_text(_csv(rows), encoding="utf-8")
+    (out_dir / "training_accumulated_batch_artifacts.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
+    (out_dir / "training_accumulated_batch_artifacts.md").write_text(_markdown(rows), encoding="utf-8")
+    (out_dir / "training_accumulated_batch_artifacts.csv").write_text(_csv(rows), encoding="utf-8")
 
     print(_markdown(rows))
     print(f"[OK] Wrote {out_dir}")

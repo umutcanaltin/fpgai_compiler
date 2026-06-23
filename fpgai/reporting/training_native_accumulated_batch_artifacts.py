@@ -33,7 +33,7 @@ def _read_text(p: Path) -> str:
 
 def main() -> None:
     if len(sys.argv) != 2:
-        raise SystemExit('usage: extract_training_native_accumulated_batch_evidence.py <experiment_dir>')
+        raise SystemExit('usage: python -m fpgai.reporting.training_native_accumulated_batch_artifacts <experiment_dir>')
     root = Path(sys.argv[1])
     rows = []
     for d in _find_designs(root):
@@ -91,14 +91,14 @@ def main() -> None:
         'optimizer_location','train_steps','batch_size','total_forward_backward_calls',
         'optimizer_update_calls','weight_words','grad_cosine','weight_after_cosine','weight_delta_cosine'
     ]
-    out_dir = root / 'training_native_accumulated_batch_evidence'
+    out_dir = root / 'training_native_accumulated_batch_artifacts'
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / 'evidence.json').write_text(json.dumps(rows, indent=2))
-    md = ['# Sprint 13E native accumulated mini-batch evidence', '', '| ' + ' | '.join(cols) + ' |', '|'+ '|'.join(['---']*len(cols))+'|']
+    (out_dir / 'artifacts.json').write_text(json.dumps(rows, indent=2))
+    md = ['# Native accumulated mini-batch training artifacts', '', '| ' + ' | '.join(cols) + ' |', '|'+ '|'.join(['---']*len(cols))+'|']
     for r in rows:
         md.append('| ' + ' | '.join(str(r.get(c, '')) for c in cols) + ' |')
     text = '\n'.join(md) + '\n'
-    (out_dir / 'evidence.md').write_text(text)
+    (out_dir / 'artifacts.md').write_text(text)
     print(text)
     print(f'[OK] Wrote {out_dir}')
 

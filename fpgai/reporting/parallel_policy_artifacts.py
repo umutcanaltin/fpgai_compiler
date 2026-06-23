@@ -71,11 +71,11 @@ def _find_config_for_design(root: Path, design: str) -> Optional[Path]:
     return None
 
 
-def _extract_evidence_lines(source_path: Path) -> List[Dict[str, Any]]:
+def _extract_artifact_lines(source_path: Path) -> List[Dict[str, Any]]:
     if not source_path.exists():
         return []
     pattern = re.compile(
-        r"FPGAI parallel evidence:\s+"
+        r"FPGAI parallel artifacts:\s+"
         r"op=(?P<op>\S+)\s+"
         r"name=(?P<name>\S+)\s+"
         r"pipeline_ii=(?P<pipeline_ii>\d+)\s+"
@@ -97,8 +97,8 @@ def _extract_evidence_lines(source_path: Path) -> List[Dict[str, Any]]:
     return out
 
 
-def _first_metric(evidence: List[Dict[str, Any]], op: str, key: str) -> Optional[int]:
-    for row in evidence:
+def _first_metric(artifacts: List[Dict[str, Any]], op: str, key: str) -> Optional[int]:
+    for row in artifacts:
         if row.get("op") == op and key in row:
             return int(row[key])
     return None
@@ -157,7 +157,7 @@ def _design_dirs(root: Path, results: Dict[str, Dict[str, Any]]) -> Iterable[str
 
 def main(argv: List[str]) -> int:
     if len(argv) != 2:
-        print("Usage: extract_parallel_policy_evidence.py <experiment_dir>", file=sys.stderr)
+        print("Usage: python -m fpgai.reporting.parallel_policy_artifacts <experiment_dir>", file=sys.stderr)
         return 2
     root = Path(argv[1]).resolve()
     if not root.exists():
@@ -172,7 +172,7 @@ def main(argv: List[str]) -> int:
         build = root / "artifacts" / design / "build"
         hls = build / "hls"
         source = hls / "src" / "deeplearn.cpp"
-        evidence = _extract_evidence_lines(source)
+        artifact_lines = _extract_artifact_lines(source)
         summary = _parse_summary(build / "bench" / "summary.txt")
         config_path = _find_config_for_design(root, design)
         params = _parse_materialized_metadata(config_path) if config_path else {}
@@ -191,15 +191,15 @@ def main(argv: List[str]) -> int:
             "unroll_factor": params.get("unroll_factor"),
             "partition_factor": params.get("partition_factor"),
             "pipeline_style": params.get("pipeline_style"),
-            "evidence_lines": len(evidence),
-            "conv_pipeline_ii": _first_metric(evidence, "Conv", "pipeline_ii"),
-            "conv_oc_unroll": _first_metric(evidence, "Conv", "output_unroll"),
-            "conv_ic_unroll": _first_metric(evidence, "Conv", "input_unroll"),
-            "conv_weight_partition": _first_metric(evidence, "Conv", "weight_partition"),
-            "dense_pipeline_ii": _first_metric(evidence, "Dense", "pipeline_ii"),
-            "dense_in_unroll": _first_metric(evidence, "Dense", "input_unroll"),
-            "dense_out_unroll": _first_metric(evidence, "Dense", "output_unroll"),
-            "dense_weight_partition": _first_metric(evidence, "Dense", "weight_partition"),
+            "artifact_lines": len(evidence),
+            "conv_pipeline_ii": _first_metric(artifacts, "Conv", "pipeline_ii"),
+            "conv_oc_unroll": _first_metric(artifacts, "Conv", "output_unroll"),
+            "conv_ic_unroll": _first_metric(artifacts, "Conv", "input_unroll"),
+            "conv_weight_partition": _first_metric(artifacts, "Conv", "weight_partition"),
+            "dense_pipeline_ii": _first_metric(artifacts, "Dense", "pipeline_ii"),
+            "dense_in_unroll": _first_metric(artifacts, "Dense", "input_unroll"),
+            "dense_out_unroll": _first_metric(artifacts, "Dense", "output_unroll"),
+            "dense_weight_partition": _first_metric(artifacts, "Dense", "weight_partition"),
             "has_array_partition_pragmas": bool(source.exists() and "ARRAY_PARTITION" in source.read_text(encoding="utf-8", errors="ignore")),
             "has_unroll_pragmas": bool(source.exists() and "UNROLL" in source.read_text(encoding="utf-8", errors="ignore")),
             "has_pipeline_pragmas": bool(source.exists() and "PIPELINE" in source.read_text(encoding="utf-8", errors="ignore")),
@@ -210,22 +210,22 @@ def main(argv: List[str]) -> int:
             "result": result,
             "summary": summary,
             "parameters": params,
-            "evidence": evidence,
+            "artifacts": artifacts,
             "reports": report_data,
         }
 
-    out_dir = root / "parallel_policy_evidence"
+    out_dir = root / "parallel_policy_artifacts"
     out_dir.mkdir(parents=True, exist_ok=True)
-    json_path = out_dir / "parallel_policy_evidence.json"
-    md_path = out_dir / "parallel_policy_evidence.md"
-    csv_path = out_dir / "parallel_policy_evidence.csv"
+    json_path = out_dir / "parallel_policy_artifacts.json"
+    md_path = out_dir / "parallel_policy_artifacts.md"
+    csv_path = out_dir / "parallel_policy_artifacts.csv"
 
     json_path.write_text(json.dumps({"rows": rows, "detailed": detailed}, indent=2), encoding="utf-8")
 
     headers = [
         "design", "status", "passed", "cosine", "policy", "pe", "simd",
         "unroll_factor", "partition_factor", "conv_oc_unroll", "conv_ic_unroll",
-        "dense_out_unroll", "dense_in_unroll", "dense_weight_partition", "evidence_lines",
+        "dense_out_unroll", "dense_in_unroll", "dense_weight_partition", "artifact_lines",
     ]
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=headers, extrasaction="ignore")
@@ -233,11 +233,11 @@ def main(argv: List[str]) -> int:
         writer.writerows(rows)
 
     lines = []
-    lines.append("| design | status | passed | cosine | policy | PE | SIMD | unroll | partition | Conv OC/IC | Dense OUT/IN | W part | evidence |")
+    lines.append("| design | status | passed | cosine | policy | PE | SIMD | unroll | partition | Conv OC/IC | Dense OUT/IN | W part | artifacts |")
     lines.append("|---|---|---:|---:|---|---:|---:|---:|---:|---|---|---:|---:|")
     for row in rows:
         lines.append(
-            "| {design} | {status} | {passed} | {cosine} | {policy} | {pe} | {simd} | {unroll_factor} | {partition_factor} | {conv_oc_unroll}/{conv_ic_unroll} | {dense_out_unroll}/{dense_in_unroll} | {dense_weight_partition} | {evidence_lines} |".format(**{k: row.get(k, "") for k in headers + ["conv_oc_unroll", "conv_ic_unroll", "dense_out_unroll", "dense_in_unroll", "dense_weight_partition"]})
+            "| {design} | {status} | {passed} | {cosine} | {policy} | {pe} | {simd} | {unroll_factor} | {partition_factor} | {conv_oc_unroll}/{conv_ic_unroll} | {dense_out_unroll}/{dense_in_unroll} | {dense_weight_partition} | {artifact_lines} |".format(**{k: row.get(k, "") for k in headers + ["conv_oc_unroll", "conv_ic_unroll", "dense_out_unroll", "dense_in_unroll", "dense_weight_partition"]})
         )
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 

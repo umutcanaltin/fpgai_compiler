@@ -130,7 +130,7 @@ def _merge_summary(json_summary: dict[str, Any], log_summary: dict[str, Any]) ->
 
 def main() -> None:
     if len(sys.argv) != 2:
-        raise SystemExit('usage: extract_training_multi_epoch_convergence_evidence.py <experiment_dir>')
+        raise SystemExit('usage: python -m fpgai.reporting.training_multi_epoch_convergence_artifacts <experiment_dir>')
     root = Path(sys.argv[1])
     rows = []
     for d in _find_designs(root):
@@ -229,14 +229,14 @@ def main() -> None:
         'optimizer_update_calls','optimizer_location','weight_words','grad_cosine',
         'weight_after_cosine','weight_delta_cosine'
     ]
-    out_dir = root / 'training_multi_epoch_convergence_evidence'
+    out_dir = root / 'training_multi_epoch_convergence_artifacts'
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / 'evidence.json').write_text(json.dumps(rows, indent=2))
-    md = ['# Sprint 13F multi-epoch convergence evidence', '', '| ' + ' | '.join(cols) + ' |', '|' + '|'.join(['---'] * len(cols)) + '|']
+    (out_dir / 'artifacts.json').write_text(json.dumps(rows, indent=2))
+    md = ['# Multi-epoch convergence artifacts', '', '| ' + ' | '.join(cols) + ' |', '|' + '|'.join(['---'] * len(cols)) + '|']
     for r in rows:
         md.append('| ' + ' | '.join(str(r.get(c, '')) for c in cols) + ' |')
     text = '\n'.join(md) + '\n'
-    (out_dir / 'evidence.md').write_text(text)
+    (out_dir / 'artifacts.md').write_text(text)
     print(text)
     print(f'[OK] Wrote {out_dir}')
 
