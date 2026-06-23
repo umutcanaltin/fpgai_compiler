@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Sprint 16F: collect communication-aware ablation evidence from FPGAI artifacts.
+Collect communication-aware ablation reports from FPGAI artifacts.
 
 This collector is conservative: it does not claim hardware runtime speedup. It scans
 existing build artifacts for communication/memory plans and estimates transfer-volume
 trade-offs for raw, precision-packed, and zero-run-length compressed sparse inputs.
 
 Outputs:
-  evidence/sprint16f_comm_ablation/comm_ablation.csv
-  evidence/sprint16f_comm_ablation/comm_ablation.json
-  evidence/sprint16f_comm_ablation/comm_ablation.md
+  reports/comm_ablation/comm_ablation.csv
+  reports/comm_ablation/comm_ablation.json
+  reports/comm_ablation/comm_ablation.md
 """
 
 from __future__ import annotations
@@ -130,7 +130,7 @@ def infer_input_elements(artifact: Path) -> tuple[int | None, str, str]:
         if val is not None:
             return val, str(p), 'found_explicit_input_element_count'
 
-    # Fallback for MNIST-like experiments used in the current FPGAI evidence.
+    # Fallback for MNIST-like experiments used in the current FPGAI reports.
     text = artifact.name.lower()
     if 'mnist' in text or 'cnn' in text or 'training' in text or 'hw_' in text:
         return 28 * 28, 'fallback:mnist_28x28', 'fallback_assumption_mnist_input_784'
@@ -241,7 +241,7 @@ def write_outputs(rows: list[Row], out: Path) -> None:
     reduced = [r for r in rows if r.mode != 'raw_fp32' and r.transfer_bytes is not None and r.raw_bytes is not None and r.transfer_bytes < r.raw_bytes]
 
     with md_path.open('w', encoding='utf-8') as f:
-        f.write('# Sprint 16F Communication-Aware Ablation Evidence\n\n')
+        f.write('# Communication-Aware Ablation Report\n\n')
         f.write('This table summarizes transfer-volume ablations derived from existing FPGAI communication/memory artifacts. It does not claim physical-board runtime improvement.\n\n')
         f.write('## Summary\n\n')
         f.write(f'- design count: {len(designs)}\n')
@@ -256,7 +256,7 @@ def write_outputs(rows: list[Row], out: Path) -> None:
         f.write('\n## Safe claim\n\n')
         f.write('FPGAI communication artifacts can be used to quantify transfer-volume trade-offs between raw, precision-packed, and sparse zero-run-length-style transfer formats for evaluated designs.\n\n')
         f.write('## Limitation\n\n')
-        f.write('This sprint reports transfer-volume evidence only. It does not measure physical-board DMA latency or runtime speedup. Physical runtime validation is reserved for later board-validation sprints.\n')
+        f.write('This report summarizes transfer-volume artifacts only. It does not measure physical-board DMA latency or runtime speedup. Physical runtime validation requires later board-validation runs.\n')
 
     print(f'Wrote {csv_path}')
     print(f'Wrote {json_path}')
@@ -268,7 +268,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument('experiments', nargs='+', help='Experiment directories to scan')
     ap.add_argument('--vivado-summary', default='', help='Optional Sprint 16C Vivado summary CSV')
-    ap.add_argument('--out', default='evidence/sprint16f_comm_ablation')
+    ap.add_argument('--out', default='reports/comm_ablation')
     ap.add_argument('--sparsity', type=float, default=0.90, help='Assumed sparsity for modeled zero-run-length sparse input')
     args = ap.parse_args()
 

@@ -335,7 +335,7 @@ def write_output_check(
     )
 
     md_lines = [
-        "# FPGAI Sprint 4 real-output check",
+        "# FPGAI real-output check",
         "",
         f"Overall status: {'PASS' if result.ok else 'FAIL'}",
         "",
@@ -376,7 +376,7 @@ def write_output_check(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Validate real Sprint 4 FPGAI generated output artifacts.",
+        description="Validate real FPGAI generated output artifacts.",
     )
     parser.add_argument(
         "out_dir",

@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-Sprint 16D: Build paper-facing hardware knob tables from Sprint 16C Vivado evidence.
+Build paper-facing hardware knob tables from Vivado implementation reports.
 
 Inputs:
-  evidence/sprint16c_vivado_impl_summary/vivado_impl_summary.csv
+  reports/vivado_impl_summary/vivado_impl_summary.csv
 
 Outputs:
-  evidence/sprint16d_hardware_knobs/precision_table.csv/.md
-  evidence/sprint16d_hardware_knobs/pipeline_table.csv/.md
-  evidence/sprint16d_hardware_knobs/parallel_envelope.csv/.md
-  evidence/sprint16d_hardware_knobs/hardware_knobs.md
-  evidence/sprint16d_hardware_knobs/hardware_knobs_summary.json
+  reports/hardware_knobs/precision_table.csv/.md
+  reports/hardware_knobs/pipeline_table.csv/.md
+  reports/hardware_knobs/parallel_envelope.csv/.md
+  reports/hardware_knobs/hardware_knobs.md
+  reports/hardware_knobs/hardware_knobs_summary.json
 
-The script is conservative: it only uses rows already present in the Sprint 16C
+The collector is conservative: it only uses rows already present in the
 CSV and does not infer missing Vivado metrics.
 """
 
@@ -168,13 +168,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--vivado-summary",
-        default="evidence/sprint16c_vivado_impl_summary/vivado_impl_summary.csv",
-        help="Sprint 16C Vivado implementation summary CSV",
+        default="reports/vivado_impl_summary/vivado_impl_summary.csv",
+        help="Vivado implementation summary CSV",
     )
     parser.add_argument(
         "--out",
-        default="evidence/sprint16d_hardware_knobs",
-        help="Output evidence directory",
+        default="reports/hardware_knobs",
+        help="Output report directory",
     )
     args = parser.parse_args()
 
@@ -224,24 +224,24 @@ def main() -> int:
 
     write_md_table(
         out / "precision_table.md",
-        "Sprint 16D Precision Hardware Table",
+        "Precision Hardware Table",
         precision_rows,
         precision_cols,
-        "Precision rows are selected from Sprint 16C Vivado implementation evidence.",
+        "Precision rows are selected from Vivado implementation reports.",
     )
     write_md_table(
         out / "pipeline_table.md",
-        "Sprint 16D Pipeline Policy Hardware Table",
+        "Pipeline Policy Hardware Table",
         pipeline_rows,
         pipeline_cols,
-        "Pipeline rows are selected from Sprint 16C Vivado implementation evidence.",
+        "Pipeline rows are selected from Vivado implementation reports.",
     )
     write_md_table(
         out / "parallel_envelope.md",
-        "Sprint 16D Parallel Feasibility Envelope",
+        "Parallel Feasibility Envelope",
         parallel_rows,
         parallel_cols,
-        "Parallel rows are selected from Sprint 16C Vivado implementation evidence.",
+        "Parallel rows are selected from Vivado implementation reports.",
     )
 
     summary = {
@@ -254,7 +254,7 @@ def main() -> int:
             "in resources, timing, and power for evaluated designs."
         ),
         "limitations": [
-            "Tables are generated from existing Vivado evidence and do not rerun Vivado.",
+            "Tables are generated from existing Vivado reports and do not rerun Vivado.",
             "Claims are limited to evaluated design points and target flow.",
             "FPGAI does not claim global design-space optimality.",
         ],
@@ -262,8 +262,8 @@ def main() -> int:
     (out / "hardware_knobs_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     with (out / "hardware_knobs.md").open("w", encoding="utf-8") as f:
-        f.write("# Sprint 16D Hardware Knob Evidence\n\n")
-        f.write("This file summarizes paper-facing hardware knob tables generated from Sprint 16C Vivado evidence.\n\n")
+        f.write("# Hardware Knob Report\n\n")
+        f.write("This file summarizes paper-facing hardware knob tables generated from Vivado implementation reports.\n\n")
         f.write("## Summary\n\n")
         for key in ["precision", "pipeline", "parallel"]:
             item = summary[key]

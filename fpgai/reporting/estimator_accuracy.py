@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Sprint 16E v3: Collect resource-estimator accuracy evidence safely.
+Collect resource-estimator accuracy reports safely.
 
 Key safety rule:
   Do NOT treat placeholder values such as 0 or 1 as valid resource predictions.
 
 This collector compares Vivado implementation resources against FPGAI estimator
 artifacts only when non-placeholder predictions are available. If no usable
-predictions exist, it produces an honest evidence file saying so instead of
+predictions exist, it produces an honest report saying so instead of
 creating an artificial 100% error table.
 """
 from __future__ import annotations
@@ -231,8 +231,8 @@ def fmt(x: Any) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("experiments", nargs="+", help="Experiment folders to scan")
-    ap.add_argument("--vivado-summary", required=True, help="Sprint 16C vivado_impl_summary.csv")
-    ap.add_argument("--out", default="evidence/sprint16e_estimator_accuracy")
+    ap.add_argument("--vivado-summary", required=True, help="Vivado implementation summary CSV")
+    ap.add_argument("--out", default="reports/estimator_accuracy")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -335,7 +335,7 @@ def main() -> int:
     (out / "estimator_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     md = []
-    md.append("# Sprint 16E Resource Estimator Accuracy\n")
+    md.append("# Resource Estimator Accuracy\n")
     md.append("This table compares FPGAI resource predictions against Vivado implementation resources only when usable non-placeholder prediction artifacts are found. Values `0` and `1` are treated as placeholders/missing.\n")
     md.append("## Summary\n")
     md.append(f"- comparison rows: {summary['comparison_rows']}")

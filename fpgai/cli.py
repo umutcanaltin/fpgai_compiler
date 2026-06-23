@@ -541,7 +541,7 @@ def run_sweep_from_config(
 
     This is the public CLI path for experiment matrices. It intentionally
     keeps the command surface inside ``fpgai`` instead of requiring users to
-    call ``scripts/run_fpgai_experiments.py`` directly.
+    call internal experiment runner scripts directly.
     """
 
     try:

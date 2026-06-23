@@ -14,7 +14,7 @@ def read(path: Path) -> str:
 
 
 def main() -> int:
-    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("experiments/sprint13b_training_stream_compare")
+    root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("experiments/training_stream_compare")
     results = json.loads((root / "results.json").read_text(encoding="utf-8"))
     for item in results.get("results", []):
         design = item.get("design_name") or item.get("name")

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Collect Vivado implementation evidence from FPGAI experiment artifacts.
+Collect Vivado implementation reports from FPGAI experiment artifacts.
 
-Sprint 16C v2 goals:
+Vivado implementation report goals:
   - Do not rerun Vivado.
   - Summarize only existing artifacts.
   - Prefer Vivado report files over broad JSON crawling.
   - Avoid parsing HLS internal JSON/register files as design metrics.
-  - Leave missing values blank/UNKNOWN rather than inventing evidence.
+  - Leave missing values blank/UNKNOWN rather than inventing results.
 
 Outputs:
   <out>/vivado_impl_summary.csv
@@ -392,7 +392,7 @@ def write_outputs(rows: list[ImplRow], out: Path) -> None:
     timing_rows = sum(1 for r in rows if r.wns_ns is not None)
 
     with md_path.open("w", encoding="utf-8") as f:
-        f.write("# Sprint 16C Vivado Implementation Evidence Summary\n\n")
+        f.write("# Vivado Implementation Report Summary\n\n")
         f.write("This table is generated from existing experiment artifacts. Missing values are left blank or UNKNOWN.\n\n")
         f.write(f"Total design rows: {len(rows)}\n\n")
         f.write(f"Bitstream rows: {bitstream_rows}\n\n")
@@ -410,9 +410,9 @@ def write_outputs(rows: list[ImplRow], out: Path) -> None:
                 f"{r.notes} | {r.artifact_dir} |\n"
             )
         f.write("\n## Safe claim\n\n")
-        f.write("FPGAI extracts implementation-level timing, resource, power, bitstream, and XSA evidence for evaluated designs when those artifacts are present.\n\n")
+        f.write("FPGAI extracts implementation-level timing, resource, power, bitstream, and XSA reports for evaluated designs when those artifacts are present.\n\n")
         f.write("## Limitation\n\n")
-        f.write("This collector summarizes existing artifacts only. It does not rerun Vivado and it does not infer missing values as passing evidence.\n")
+        f.write("This collector summarizes existing artifacts only. It does not rerun Vivado and it does not infer missing values as passing results.\n")
 
     print(f"Wrote {csv_path}")
     print(f"Wrote {json_path}")
@@ -426,7 +426,7 @@ def write_outputs(rows: list[ImplRow], out: Path) -> None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("experiments", nargs="+", help="Experiment directories to scan")
-    ap.add_argument("--out", default="evidence/sprint16c_vivado_impl_summary")
+    ap.add_argument("--out", default="reports/vivado_impl_summary")
     args = ap.parse_args()
 
     rows: list[ImplRow] = []

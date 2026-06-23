@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Plot Sprint 16B training loss curves/table summary.
+Plot training loss curves/table summary.
 
 Input:
-  evidence/sprint16b_training_convergence/training_convergence.csv
+  reports/training_convergence/training_convergence.csv
 
 Output:
-  evidence/sprint16b_training_convergence/loss_curve.png
+  reports/training_convergence/loss_curve.png
 
 If only initial/final loss are available, this plots a two-point loss line per design.
 """
@@ -28,7 +28,7 @@ def as_float(x: str):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("csv_path")
-    ap.add_argument("--out", default="evidence/sprint16b_training_convergence/loss_curve.png")
+    ap.add_argument("--out", default="reports/training_convergence/loss_curve.png")
     args = ap.parse_args()
 
     csv_path = Path(args.csv_path)
@@ -55,7 +55,7 @@ def main() -> int:
     for design, initial, final in usable:
         ax.plot([0, 1], [initial, final], marker="o", label=design)
 
-    ax.set_title("FPGAI Training Convergence Smoke Evidence")
+    ax.set_title("FPGAI Training Convergence Smoke Report")
     ax.set_xlabel("Evaluation point")
     ax.set_ylabel("Loss")
     ax.set_xticks([0, 1])

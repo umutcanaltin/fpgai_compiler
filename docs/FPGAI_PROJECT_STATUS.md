@@ -75,6 +75,14 @@ Sprint 2: reporting and experiment tooling cleanup/wiring.
 
 ## Latest update
 
+- Applied Sprint 2B public-wording cleanup without requiring uploaded logs.
+- Patched known stale public/help/reporting strings from the broad grep output.
+- Replaced old `python scripts/...`, `Sprint`, and public `evidence` wording with CLI/report/artifact terminology where behavior stays equivalent.
+- Kept deeper internal compatibility comments for later targeted cleanup.
+- No new files were added.
+
+## Latest update
+
 - Cleaned two remaining stale names from the selected artifact modules:
   - replaced the `sprint13b` default experiment path with `experiments/training_stream_compare`
   - renamed a local `evidence` variable to `artifact_lines`

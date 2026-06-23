@@ -366,10 +366,10 @@ def main() -> int:
             except Exception as exc:
                 run_rows.append({"design": art.name, "error": str(exc)})
 
-    out = exp / "vivado_bridge_run_evidence.json"
+    out = exp / "vivado_bridge_run_artifacts.json"
     _write_json(out, {"generated": gen_rows, "tool_runs": run_rows})
 
-    print("# Sprint 14A/B automated Vivado bridge")
+    print("# Automated Vivado bridge")
     print()
     print("| design | generated | hls_req | hls_ran | hls_reused | hls_tool_ok | hls_returncode | hls_ip_exported | component_xml_count | vivado_req | vivado_ran | vivado_ok | vivado_returncode | reports | bitstream | xsa | error | stdout_log | stderr_log |")
     print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")

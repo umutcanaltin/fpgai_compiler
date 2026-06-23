@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Collect Sprint 16B training convergence evidence from existing FPGAI experiment outputs.
+Collect training convergence reports from existing FPGAI experiment outputs.
 
 Outputs:
-  evidence/sprint16b_training_convergence/training_convergence.csv
-  evidence/sprint16b_training_convergence/training_convergence.md
-  evidence/sprint16b_training_convergence/training_convergence.json
+  reports/training_convergence/training_convergence.csv
+  reports/training_convergence/training_convergence.md
+  reports/training_convergence/training_convergence.json
 
 The collector is intentionally schema-tolerant because earlier sprint outputs may store
 metrics in results.json, summary.json, manifest files, per-design metadata, or logs.
-It never invents pass evidence: unknown fields are written as UNKNOWN/blank.
+It never invents pass results: unknown fields are written as UNKNOWN/blank.
 """
 
 from __future__ import annotations
@@ -273,8 +273,8 @@ def write_outputs(rows: list[Row], out: Path) -> None:
 
     md_path = out / "training_convergence.md"
     with md_path.open("w", encoding="utf-8") as f:
-        f.write("# Sprint 16B Training Convergence Evidence\n\n")
-        f.write("This table is generated from existing experiment artifacts. Unknown values are not inferred as passing evidence.\n\n")
+        f.write("# Training Convergence Report\n\n")
+        f.write("This table is generated from existing experiment artifacts. Unknown values are not inferred as passing results.\n\n")
         f.write("| design | initial_loss | final_loss | loss_delta | loss_decreased | training_compare | native_accumulated_optimizer | eval_only_loss_mode | software_reference_match | source | notes |\n")
         f.write("|---|---:|---:|---:|---|---|---|---|---|---|---|\n")
         for r in rows:
@@ -298,8 +298,8 @@ def write_outputs(rows: list[Row], out: Path) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("experiment", help="Experiment directory, e.g. experiments/sprint13f_training_multi_epoch_convergence_v3")
-    ap.add_argument("--out", default="evidence/sprint16b_training_convergence")
+    ap.add_argument("experiment", help="Experiment directory, e.g. experiments/training_multi_epoch_convergence")
+    ap.add_argument("--out", default="reports/training_convergence")
     args = ap.parse_args()
 
     exp = Path(args.experiment).resolve()
