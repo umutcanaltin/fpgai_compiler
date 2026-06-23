@@ -1,6 +1,6 @@
 # Vivado bridge marker config.
 # This update is driven by scripts/run_vivado_bridge.py on top of an existing
-# FPGAI experiment directory. Full integration into run_fpgai_experiments.py
+# FPGAI experiment directory. Full integration into the public experiment CLI
 # comes after the bridge artifacts are validated.
 vivado:
   enabled: true

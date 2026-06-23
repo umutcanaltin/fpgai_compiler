@@ -30,7 +30,7 @@ def count_tokens(path: Path) -> dict[str, int | str]:
 
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
-        print("Usage: python scripts/inspect_pipeline_policy_artifacts.py <experiment_dir>")
+        print("Usage: python -m fpgai.reporting.inspect_pipeline_policy_artifacts <experiment_dir>")
         return 2
     exp = Path(argv[1])
     root = exp / "artifacts"

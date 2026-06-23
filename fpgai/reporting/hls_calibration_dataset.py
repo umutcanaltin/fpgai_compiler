@@ -2,7 +2,7 @@
 """Extract an FPGAI HLS calibration dataset and reports from an existing build.
 
 Example:
-    python scripts/extract_hls_calibration_dataset.py \
+    python -m fpgai.reporting.hls_calibration_dataset \
       --build-dir build/my_project \
       --compile-plan build/my_project/compile_plan.json \
       --out build/my_project/calibration

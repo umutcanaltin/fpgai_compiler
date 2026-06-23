@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Classify FPGAI Vivado bridge evidence as feasible / resource_fail / timing_fail / tool_fail.
+"""Classify FPGAI Vivado bridge artifacts as feasible / resource_fail / timing_fail / tool_fail.
 
 Usage:
-  python scripts/classify_hardware_feasibility.py experiments/<run_dir>
+  python -m fpgai.reporting.hardware_feasibility experiments/<run_dir>
 
 Inputs:
   <run_dir>/vivado_bridge_evidence/evidence.json
@@ -69,7 +69,7 @@ def _records_from_evidence(data: Any) -> List[Dict[str, Any]]:
                 vv.setdefault("design", k)
                 out.append(vv)
             return out
-    raise SystemExit("Could not find evidence records in evidence.json")
+    raise SystemExit("Could not find artifact records in evidence.json")
 
 
 def _run_map(run_path: Path) -> Dict[str, Dict[str, Any]]:

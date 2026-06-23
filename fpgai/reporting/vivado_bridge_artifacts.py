@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract Vivado/Vitis HLS evidence from FPGAI experiment artifacts.
+"""Extract Vivado/Vitis HLS reports from FPGAI experiment artifacts.
 
 This extractor is intentionally defensive because different sprints may produce
 slightly different directory layouts:
@@ -17,9 +17,9 @@ It extracts:
   - estimated energy = power_w * latency_cycles * clock_period_ns * 1e-9
 
 Outputs:
-  <experiment>/vivado_bridge_evidence/evidence.json
-  <experiment>/vivado_bridge_evidence/evidence.csv
-  <experiment>/vivado_bridge_evidence/summary.md
+  <experiment>/vivado_bridge_artifacts/evidence.json
+  <experiment>/vivado_bridge_artifacts/evidence.csv
+  <experiment>/vivado_bridge_artifacts/summary.md
 """
 from __future__ import annotations
 
@@ -336,7 +336,7 @@ def extract(exp: Path) -> List[Dict[str, Any]]:
 
 
 def _write_outputs(exp: Path, records: List[Dict[str, Any]]) -> None:
-    out_dir = exp / "vivado_bridge_evidence"
+    out_dir = exp / "vivado_bridge_artifacts"
     out_dir.mkdir(parents=True, exist_ok=True)
     json_path = out_dir / "evidence.json"
     csv_path = out_dir / "evidence.csv"
@@ -359,7 +359,7 @@ def _write_outputs(exp: Path, records: List[Dict[str, Any]]) -> None:
         for r in records:
             w.writerow(r)
 
-    lines = ["# Sprint Vivado bridge evidence", ""]
+    lines = ["# Vivado bridge artifacts", ""]
     lines.append("| design | reports | bit | xsa | power_w | WNS_ns | LUT | FF | BRAM | DSP | HLS cycles | energy_j |")
     lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in records:
@@ -388,7 +388,7 @@ def _write_outputs(exp: Path, records: List[Dict[str, Any]]) -> None:
 
 def main(argv: List[str]) -> int:
     if len(argv) != 2:
-        print("Usage: python scripts/extract_vivado_bridge_evidence.py <experiment_dir>", file=sys.stderr)
+        print("Usage: python -m fpgai.reporting.vivado_bridge_artifacts <experiment_dir>", file=sys.stderr)
         return 2
     exp = Path(argv[1])
     records = extract(exp)

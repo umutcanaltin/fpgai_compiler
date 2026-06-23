@@ -3,8 +3,8 @@
 Collect reviewer-safe claim support for FPGAI.
 
 This script creates:
-  evidence/reproducibility/claim_support.csv
-  evidence/reproducibility/claim_support.md
+  reports/reproducibility/claim_support.csv
+  reports/reproducibility/claim_support.md
 
 Rule:
   Do not invent claims. A claim is marked READY only if at least one
@@ -44,13 +44,13 @@ CLAIMS: tuple[Claim, ...] = (
             "experiments/sprint13f_training_multi_epoch_convergence_smoke",
         ),
         reproduce_command=(
-            "python scripts/collect_training_convergence_evidence.py "
+            "fpgai report build "
             "experiments/sprint13f_training_multi_epoch_convergence_v3 "
-            "--out evidence/sprint16b_training_convergence"
+            "--out reports/training_convergence"
         ),
         paper_section="Training correctness and convergence",
         limitations=(
-            "Small convergence smoke test only; not evidence for arbitrary ONNX "
+            "Small convergence smoke test only; not validation for arbitrary ONNX "
             "training or large-model FPGA training."
         ),
     ),
@@ -67,7 +67,7 @@ CLAIMS: tuple[Claim, ...] = (
             "experiments/sprint13d_training_accumulated_batch",
         ),
         reproduce_command=(
-            "PYTHONPATH=$PWD python -B scripts/run_fpgai_experiments.py "
+            "fpgai experiment run "
             "--sweep configs/sweeps/sprint13e_training_native_accumulated_batch.yml "
             "--out experiments/sprint13e_training_native_accumulated_batch_v3"
         ),
@@ -89,13 +89,13 @@ CLAIMS: tuple[Claim, ...] = (
             "experiments/sprint15a_hardware_knob_validation_smoke",
         ),
         reproduce_command=(
-            "PYTHONPATH=$PWD python -B scripts/run_fpgai_experiments.py "
+            "fpgai experiment run "
             "--sweep configs/sweeps/sprint15a_hardware_knob_validation.yml "
             "--out experiments/sprint15a_hardware_knob_validation_parallel"
         ),
         paper_section="Hardware knob validation",
         limitations=(
-            "Evidence is limited to evaluated precision modes and target device flow."
+            "Validation is limited to evaluated precision modes and target device flow."
         ),
     ),
     Claim(
@@ -109,7 +109,7 @@ CLAIMS: tuple[Claim, ...] = (
             "experiments/sprint15b_pipeline_only",
         ),
         reproduce_command=(
-            "PYTHONPATH=$PWD python -B scripts/run_fpgai_experiments.py "
+            "fpgai experiment run "
             "--sweep configs/sweeps/sprint15c_pipeline_policy_strengthened.yml "
             "--out experiments/sprint15c_pipeline_policy_strengthened"
         ),
@@ -122,13 +122,13 @@ CLAIMS: tuple[Claim, ...] = (
         claim="Parallel feasibility envelope",
         safe_wording=(
             "FPGAI identifies evaluated parallel design points as pass, timing_fail, "
-            "or resource_fail using implementation-level timing and resource evidence."
+            "or resource_fail using implementation-level timing and resource reports."
         ),
         evidence_paths=(
             "experiments/sprint15e_parallel_feasible_envelope",
         ),
         reproduce_command=(
-            "PYTHONPATH=$PWD python -B scripts/run_fpgai_experiments.py "
+            "fpgai experiment run "
             "--sweep configs/sweeps/sprint15e_parallel_feasible_envelope.yml "
             "--out experiments/sprint15e_parallel_feasible_envelope"
         ),
@@ -151,8 +151,8 @@ CLAIMS: tuple[Claim, ...] = (
             "experiments/sprint15a_hardware_knob_validation_parallel",
         ),
         reproduce_command=(
-            "python scripts/collect_claim_support_v2.py "
-            "--out evidence/reproducibility"
+            "fpgai report build "
+            "--out reports/reproducibility"
         ),
         paper_section="Hardware feasibility and safe-clock reporting",
         limitations=(
@@ -178,7 +178,7 @@ def md_escape(s: str) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", default=".", help="Repository root")
-    parser.add_argument("--out", default="evidence/reproducibility", help="Output directory")
+    parser.add_argument("--out", default="reports/reproducibility", help="Output directory")
     args = parser.parse_args()
 
     repo = Path(args.repo).resolve()
@@ -196,8 +196,8 @@ def main() -> int:
             {
                 "claim": c.claim,
                 "safe_wording": c.safe_wording,
-                "evidence_folder": "; ".join(found) if found else "",
-                "candidate_evidence_paths": "; ".join(c.evidence_paths),
+                "artifact_folder": "; ".join(found) if found else "",
+                "candidate_artifact_paths": "; ".join(c.evidence_paths),
                 "reproduce_command": c.reproduce_command,
                 "paper_section": c.paper_section,
                 "status": status,
@@ -211,8 +211,8 @@ def main() -> int:
     fieldnames = [
         "claim",
         "safe_wording",
-        "evidence_folder",
-        "candidate_evidence_paths",
+        "artifact_folder",
+        "candidate_artifact_paths",
         "reproduce_command",
         "paper_section",
         "status",
@@ -231,7 +231,7 @@ def main() -> int:
             "artifacts. Claims marked `READY` have at least one existing supporting "
             "artifact path. Claims marked `MISSING` must not be used in the paper yet.\n\n"
         )
-        f.write("| Claim | Safe wording | Evidence folder | Reproduce command | Paper section | Status | Limitations |\n")
+        f.write("| Claim | Safe wording | Artifact folder | Reproduce command | Paper section | Status | Limitations |\n")
         f.write("|---|---|---|---|---|---|---|\n")
         for r in rows:
             f.write(
@@ -241,7 +241,7 @@ def main() -> int:
                     for k in [
                         "claim",
                         "safe_wording",
-                        "evidence_folder",
+                        "artifact_folder",
                         "reproduce_command",
                         "paper_section",
                         "status",

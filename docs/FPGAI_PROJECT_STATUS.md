@@ -75,6 +75,19 @@ Sprint 2: reporting and experiment tooling cleanup/wiring.
 
 ## Latest update
 
+- Inspected `scripts/` reporting cleanup state.
+- Confirmed `scripts/` contains only documentation:
+  - `scripts/README.md`
+  - `scripts/MANIFEST.md`
+- No script files were deleted.
+- Patched stale user-visible references in existing reporting/Vivado modules:
+  - replaced old `python scripts/...` usage strings with package-module usage
+  - replaced several public “evidence”/“sprint” labels with artifacts, reports, validation, or traceability wording
+  - updated `claim_traceability` default output from `evidence/reproducibility` to `reports/reproducibility`
+- This patch did not add new files.
+
+## Latest update
+
 - Updated `docs/CLI_WORKFLOWS.md` with public report CLI documentation.
 - Used a safer section replacement that avoids embedded Markdown code fences inside the patch script.
 - Documented:

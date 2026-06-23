@@ -71,7 +71,7 @@ def _summary_for_design(design_dir: Path) -> Dict[str, Any]:
 
 def main() -> int:
     if len(sys.argv) != 2:
-        print("usage: python scripts/extract_training_batch_multistep_evidence.py <experiment_dir>", file=sys.stderr)
+        print("usage: python -m fpgai.reporting.training_batch_multistep_artifacts <experiment_dir>", file=sys.stderr)
         return 2
 
     exp = Path(sys.argv[1])
@@ -91,11 +91,11 @@ def main() -> int:
         row["status"] = statuses.get(row["design"], row["status"])
         rows.append(row)
 
-    out_dir = exp / "training_batch_multistep_evidence"
+    out_dir = exp / "training_batch_multistep_artifacts"
     out_dir.mkdir(parents=True, exist_ok=True)
-    json_path = out_dir / "training_batch_multistep_evidence.json"
-    csv_path = out_dir / "training_batch_multistep_evidence.csv"
-    md_path = out_dir / "training_batch_multistep_evidence.md"
+    json_path = out_dir / "training_batch_multistep_artifacts.json"
+    csv_path = out_dir / "training_batch_multistep_artifacts.csv"
+    md_path = out_dir / "training_batch_multistep_artifacts.md"
 
     json_path.write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
@@ -125,7 +125,7 @@ def main() -> int:
         for row in rows:
             w.writerow({k: row.get(k, "") for k in fields})
 
-    lines = ["# Sprint 13C training batch/multi-step evidence", "", "| " + " | ".join(fields) + " |", "|" + "|".join(["---"] * len(fields)) + "|"]
+    lines = ["# Training batch/multi-step artifacts", "", "| " + " | ".join(fields) + " |", "|" + "|".join(["---"] * len(fields)) + "|"]
     for row in rows:
         lines.append("| " + " | ".join(str(row.get(k, "")) for k in fields) + " |")
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
