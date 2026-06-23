@@ -1,6 +1,8 @@
 from __future__ import annotations
 from fpgai.backends.hls.emit.architecture_comments import emit_layer_architecture_comments
 
+# FPGAI architecture-comment wrapper.
+
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -702,9 +704,18 @@ def _inject_native_accumulated_modes_from_cpp(
         loss_pos = cpp.find("loss_value +=")
         if loss_pos < 0:
             raise RuntimeError("Could not find loss_value accumulation for mode 6 injection")
-        insert_pos = cpp.find("\n\n  for (int i = 0; i <", loss_pos)
+        statement_end = cpp.find(";", loss_pos)
+        if statement_end < 0:
+            raise RuntimeError("Could not find end of loss_value accumulation for mode 6 injection")
+
+        insert_pos = cpp.find("\n\n  for (int i = 0; i <", statement_end)
+        if insert_pos < 0:
+            insert_pos = cpp.find("\n  for (int i = 0; i <", statement_end)
+        if insert_pos < 0:
+            insert_pos = cpp.find("\n  fpgai::", statement_end)
         if insert_pos < 0:
             raise RuntimeError("Could not find gradient loop marker after loss_value for mode 6 injection")
+
         loss_eval_block = "\n\n  // FPGAI loss_eval mode.\n  if (mode == 6) {\n    write_f32(out, (float)loss_value, true);\n    return;\n  }"
         cpp = cpp[:insert_pos] + loss_eval_block + cpp[insert_pos:]
     return cpp

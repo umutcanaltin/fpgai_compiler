@@ -35,3 +35,6 @@ patches/
 !experiments/README.md
 !paper_experiments/README.md
 !reports/README.md
+
+# Local handoff / backup archives
+/*.zip

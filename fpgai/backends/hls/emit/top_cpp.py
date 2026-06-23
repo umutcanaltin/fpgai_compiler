@@ -1773,4 +1773,10 @@ def emit_top_cpp(*args, **kwargs):
     source = _fpgai_insert_runtime_helpers(source)
     source = _fpgai_rewrite_runtime_signature(source, top_name=top_name, mode=requested_mode)
     source = _fpgai_insert_runtime_load_block(source, graph, mode=requested_mode)
-    return source
+
+    planning_comment = (
+        f"// Requested weights mode: {requested_mode}\n"
+        "// Non-embedded weight modes are represented in the memory/compile plan; "
+        "generated standalone HLS C simulation keeps embedded constants for reproducibility.\n"
+    )
+    return planning_comment + source

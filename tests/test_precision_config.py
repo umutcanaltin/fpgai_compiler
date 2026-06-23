@@ -62,6 +62,7 @@ def _write_config(
     model_path.touch()
 
     config_path = tmp_path / "configs/examples/default_compile.yml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         content.replace(
             "__MODEL__",
@@ -80,6 +81,7 @@ def test_valid_precision_config_loads(
     model_path.touch()
 
     config_path = tmp_path / "configs/examples/default_compile.yml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         _base_config(
             model_path,

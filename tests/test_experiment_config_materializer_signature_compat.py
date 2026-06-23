@@ -7,6 +7,7 @@ from fpgai.experiments.config_materializer import materialize_design_config
 
 def test_materialize_design_config_accepts_fourth_options_argument(tmp_path: Path):
     base = tmp_path / "configs/examples/default_compile.yml"
+    base.parent.mkdir(parents=True, exist_ok=True)
     out = tmp_path / "out.yml"
     base.write_text("notes:\n  parallel_policy: Balanced\n", encoding="utf-8")
 
