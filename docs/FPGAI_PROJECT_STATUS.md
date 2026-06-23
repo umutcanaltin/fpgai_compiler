@@ -20,7 +20,7 @@ ONNX model → model analysis → resource/timing prediction → design selectio
 
 ## Current phase
 
-Sprint 3: canonical pipeline inspection and stage manifest mapping.
+Sprint 4: model inspection and resource/timing prediction.
 
 ## Completed
 
@@ -72,6 +72,18 @@ Sprint 3: canonical pipeline inspection and stage manifest mapping.
 5. Resolve package/license/README mismatch.
 6. Inspect stale docs before deleting or rewriting.
 7. Update this status file after every meaningful change.
+
+## Latest update
+
+- Started Sprint 4: model inspection and prediction.
+- Sprint 4 rule: inspect and reuse existing analysis modules before adding any new prediction files.
+- Target public artifacts for this sprint:
+  - `model_profile.json`
+  - `resource_prediction.json`
+  - `timing_prediction.json`
+  - `prediction_summary.md`
+- Target behavior: FPGAI should expose model/profile/resource/timing predictions before HLS/Vivado compile, while clearly marking estimates as estimates.
+- Current first task: inventory existing `fpgai/analysis` modules and CLI inspect/estimate paths.
 
 ## Latest update
 
