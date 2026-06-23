@@ -75,6 +75,29 @@ Sprint 2: reporting and experiment tooling cleanup/wiring.
 
 ## Latest update
 
+- Second report runtime smoke-test run reduced failures to one fixture-column mismatch.
+- `paper-artifacts` also expected `hls_ok`.
+- Patched the tiny `paper-artifacts` CSV fixture to include `hls_ok=True`.
+
+## Latest update
+
+- First report runtime smoke-test run found fixture-column mismatches, not CLI failures:
+  - `paper-artifacts` expected `compile_ok`.
+  - `frontier` expected `latency_seconds_min` or `latency_seconds_max`.
+- Patched the tiny CSV test fixtures to match existing reporting module schemas.
+
+## Latest update
+
+- Added runtime smoke tests for public report subcommands using tiny CSV fixtures.
+- Reused `tests/test_cli_report_validate.py`; no new test file was added.
+- Covered:
+  - `fpgai report paper-artifacts`
+  - `fpgai report frontier`
+  - `fpgai report estimator`
+- Tests verify that each command exits successfully and writes expected output artifacts.
+
+## Latest update
+
 - Added tests for the new public `report` CLI subcommands.
 - Reused existing `tests/test_cli_report_validate.py` instead of creating a new test file.
 - Covered help paths for:

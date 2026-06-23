@@ -148,3 +148,103 @@ def test_report_estimator_help_is_public():
     assert "--inference-filter" in result.stdout
     assert "--training-filter" in result.stdout
 
+def _run_main(*args: str) -> subprocess.CompletedProcess[str]:
+    root = Path(__file__).resolve().parents[1]
+
+    return subprocess.run(
+        [sys.executable, str(root / "main.py"), *args],
+        cwd=root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
+def test_report_paper_artifacts_runs_on_tiny_csv(tmp_path: Path):
+    csv_path = tmp_path / "paper.csv"
+    out_dir = tmp_path / "paper_out"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "model_name,precision_policy,parallel_policy,status,compile_ok,hls_ok,benchmark_passed,quant_cosine,quant_mse,quant_mae,quant_rmse,bench_cosine,bench_mse,bench_mae,bench_rmse,lut,ff,dsp,bram_18k,uram,latency_cycles_min,latency_cycles_max,latency_ms,estimated_clock_ns,ii,bottleneck",
+                "toy,fx8_3,balanced,passed,True,True,True,0.99,0.01,0.01,0.1,0.98,0.02,0.02,0.14,100,200,4,2,0,1000,1200,0.01,5.0,1,compute",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = _run_main(
+        "report",
+        "paper-artifacts",
+        "--csv",
+        str(csv_path),
+        "--out",
+        str(out_dir),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (out_dir / "summary.txt").is_file()
+    assert (out_dir / "tables" / "table_accuracy.csv").is_file()
+    assert (out_dir / "tables" / "table_resource_latency.csv").is_file()
+
+
+def test_report_frontier_runs_on_tiny_csv(tmp_path: Path):
+    csv_path = tmp_path / "frontier.csv"
+    out_dir = tmp_path / "frontier_out"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "model_name,precision_policy,parallel_policy,benchmark_passed,dsp,lut,ff,bram_18k,uram,ii,estimated_clock_ns,latency_cycles_min,latency_cycles_max,latency_seconds_min,latency_seconds_max,latency_ms,quant_cosine,quant_mse,quant_mae,quant_rmse,bench_cosine,bench_mse,bench_mae,bench_rmse,out_dir",
+                "toy,fx8_3,balanced,True,4,100,200,2,0,1,5.0,1000,1200,0.010,0.012,0.01,0.99,0.01,0.01,0.1,0.98,0.02,0.02,0.14,run0",
+                "toy,fx16_6,latency_first,True,8,140,260,3,0,1,5.0,600,800,0.006,0.008,0.006,0.995,0.005,0.005,0.07,0.99,0.01,0.01,0.1,run1",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = _run_main(
+        "report",
+        "frontier",
+        "--csv",
+        str(csv_path),
+        "--out",
+        str(out_dir),
+        "--require-pass",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert (out_dir / "frontier_points.csv").is_file()
+    assert (out_dir / "frontier_knees.csv").is_file()
+    assert (out_dir / "paper_discussion.txt").is_file()
+
+
+def test_report_estimator_runs_on_tiny_csv(tmp_path: Path):
+    csv_path = tmp_path / "estimator.csv"
+    out_dir = tmp_path / "estimator_out"
+    csv_path.write_text(
+        "\n".join(
+            [
+                "model,mode,precision,policy,compile_ok,latency_cycles,pred_latency_cycles,lut,pred_lut,ff,pred_ff,dsp,pred_dsp,bram_18k,pred_bram_18k",
+                "toy,inference,fx8_3,balanced,True,1000,1100,100,120,200,180,4,5,2,2",
+                "toy,training,fx16_6,latency_first,True,2000,2100,180,170,260,250,8,9,3,4",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = _run_main(
+        "report",
+        "estimator",
+        "--csv",
+        str(csv_path),
+        "--out",
+        str(out_dir),
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert any(out_dir.iterdir())
+
