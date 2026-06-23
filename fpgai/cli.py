@@ -22,6 +22,7 @@ from fpgai.config.loader import (
 )
 from fpgai.engine.compiler import Compiler
 from fpgai.experiments.sweep_runner import run_sweep_config
+from fpgai.experiments.paper_runner import run_experiment_from_config
 
 T = TypeVar("T")
 
@@ -752,6 +753,43 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional path for experiment inspection JSON",
     )
 
+    experiment_run_parser = experiment_subparsers.add_parser(
+        "run",
+        help="Run a paper experiment YAML",
+    )
+    experiment_run_parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to configs/experiments/*.yml",
+    )
+    experiment_run_parser.add_argument(
+        "--out",
+        required=True,
+        help="Output directory for paper experiment results",
+    )
+    experiment_run_parser.add_argument(
+        "--max-design-points",
+        type=int,
+        default=None,
+        help="Optional cap per sweep for smoke runs",
+    )
+    experiment_run_parser.add_argument(
+        "--timeout-sec",
+        type=int,
+        default=None,
+        help="Optional timeout per design point",
+    )
+    experiment_run_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Resolve experiment items without running sweeps",
+    )
+    experiment_run_parser.add_argument(
+        "--repo-root",
+        default=".",
+        help="Optional repository root override",
+    )
+
     parser.add_argument(
         "--config",
         help=(
@@ -834,7 +872,19 @@ def main() -> None:
                     json_output=args.json_output,
                 )
             )
-        parser.error("experiment requires a subcommand, e.g. 'inspect'")
+        if args.experiment_command == "run":
+            raise SystemExit(
+                run_experiment_from_config(
+                    args.config,
+                    out_dir=args.out,
+                    run_sweep_callable=run_sweep_from_config,
+                    max_design_points=args.max_design_points,
+                    timeout_sec=args.timeout_sec,
+                    dry_run=args.dry_run,
+                    repo_root=args.repo_root,
+                )
+            )
+        parser.error("experiment requires a subcommand, e.g. 'inspect' or 'run'")
 
     if args.config:
         raise SystemExit(

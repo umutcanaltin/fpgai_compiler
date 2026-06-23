@@ -1,9 +1,0 @@
-parallel_factor,design,status,bitstream,xsa,wns_ns,fmax_mhz,safe_clock_mhz,power_w,lut,ff,bram,dsp,notes
-1,hw_parallel_1,pass,True,True,0.73,234.192,212.881,2.259,32768,43188,54,51,
-1,hw_parallel_1_feasible,pass,True,True,0.253,210.659,191.489,2.184,29199,20834,9,53,
-2,hw_parallel_2,pass,True,True,0.702,232.666,211.494,2.358,34024,43149,59,109,
-2,hw_parallel_2_feasible,timing_fail,True,True,-0.47,182.815,166.179,2.291,31808,22415,15,96,
-2,hw_parallel_2_relaxed_180mhz,timing_fail,True,True,-0.124,195.16,177.4,2.289,31701,22415,15,96,
-3,hw_parallel_3_candidate,timing_fail,False,False,-9.347,69.701,63.358,3.552,,40572,63,172,missing: lut
-4,hw_parallel_4,timing_fail,False,False,-4.729,102.785,93.432,2.678,,60668,73,220,missing: lut
-4,hw_parallel_4_expected_resource_fail,timing_fail,False,False,-9.123,70.806,64.363,2.397,,29912,71,220,missing: lut
