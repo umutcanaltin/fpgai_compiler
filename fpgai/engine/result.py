@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -50,6 +51,32 @@ class CompileResult:
 
     training_plan_json: Optional[Path] = None
     training_summary_txt: Optional[Path] = None
+
+    def _pipeline_stage_summary_lines(self) -> list[str]:
+        manifest_path = self.out_dir / "manifest.json"
+        if not manifest_path.exists():
+            return []
+
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+
+        stages = manifest.get("pipeline_stages")
+        if not isinstance(stages, list) or not stages:
+            return []
+
+        stage_lines = ["Pipeline stages     :"]
+        for stage in stages:
+            if not isinstance(stage, dict):
+                continue
+            name = stage.get("name")
+            status = stage.get("status")
+            if not name or not status:
+                continue
+            stage_lines.append(f"  - {name}: {status}")
+
+        return stage_lines if len(stage_lines) > 1 else []
 
     def summary(self) -> str:
         lines = [
@@ -106,5 +133,10 @@ class CompileResult:
             f"Training summary TXT : {self.training_summary_txt}",
             "===================================================",
         ]
+
+        pipeline_lines = self._pipeline_stage_summary_lines()
+        if pipeline_lines:
+            lines.insert(-1, "---------------------------------------------------")
+            lines[-1:-1] = pipeline_lines
 
         return "\n".join(lines)

@@ -67,3 +67,39 @@ def test_verbose_and_quiet_are_mutually_exclusive(capsys):
     captured = capsys.readouterr()
     assert rc == 2
     assert "cannot be used together" in captured.err
+
+def test_compile_result_summary_includes_pipeline_stages_when_manifest_exists(tmp_path):
+    import json
+
+    from types import SimpleNamespace
+
+    from fpgai.engine.result import CompileResult
+
+    manifest = {
+        "pipeline_stages": [
+            {"name": "load_config", "status": "done"},
+            {"name": "run_hls", "status": "skipped"},
+            {"name": "vivado_bridge", "status": "not_requested"},
+        ]
+    }
+    (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = CompileResult(
+        out_dir=tmp_path,
+        graph=SimpleNamespace(
+            ops=[],
+            params={},
+            inputs=[],
+            outputs=[],
+        ),
+        hls_project_dir=None,
+        host_project_dir=None,
+    )
+
+    summary = result.summary()
+
+    assert "Pipeline stages" in summary
+    assert "load_config: done" in summary
+    assert "run_hls: skipped" in summary
+    assert "vivado_bridge: not_requested" in summary
+

@@ -75,6 +75,13 @@ Sprint 3: canonical pipeline inspection and stage manifest mapping.
 
 ## Latest update
 
+- Added compile-summary visibility for `pipeline_stages`.
+- Reused `CompileResult.summary()` and the existing compile `manifest.json`.
+- Added a regression test in the existing CLI quiet logging test file.
+- No new files were added.
+
+## Latest update
+
 - Corrected Sprint 3 pipeline stage regression test placement.
 - Removed `pipeline_stages` assertions from paper experiment manifest tests because those manifests are not compile manifests.
 - Added a runtime helper test for compile pipeline stage metadata in the existing compiler artifact test file.
