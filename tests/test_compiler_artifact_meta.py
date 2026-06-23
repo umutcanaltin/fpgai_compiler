@@ -148,3 +148,58 @@ def test_compiler_manifest_records_pipeline_stages_in_source() -> None:
     assert '"pipeline_stages": self._build_pipeline_stages(**kwargs)' in source
     assert '"vivado_bridge"' in source
     assert '"runtime_package"' in source
+
+def test_compiler_pipeline_stage_helper_returns_expected_names(tmp_path):
+    from types import SimpleNamespace
+
+    from fpgai.engine.compiler import Compiler
+
+    compiler = object.__new__(Compiler)
+    compiler.cfg = SimpleNamespace(
+        raw={
+            "backends": {
+                "hls": {"enabled": False},
+                "host_cpp": {"enabled": False},
+            }
+        }
+    )
+
+    compile_plan = SimpleNamespace(
+        layer_plans=[],
+        architecture_signature="test-signature",
+    )
+    graph = SimpleNamespace(
+        ops=[],
+        params={},
+    )
+    memory_plan = SimpleNamespace(placements=[])
+    communication_plan = SimpleNamespace(edges=[])
+
+    stages = compiler._build_pipeline_stages(
+        graph=graph,
+        compile_plan=compile_plan,
+        memory_plan=memory_plan,
+        communication_plan=communication_plan,
+        descriptors=[],
+        hls_run=None,
+        training_plan=None,
+        quant_result=None,
+        sweep_result=None,
+        design_result=None,
+        estimate_vs_hls_result=None,
+        hls_module_breakdown_result=None,
+    )
+
+    by_name = {stage["name"]: stage for stage in stages}
+
+    assert by_name["load_config"]["status"] == "done"
+    assert by_name["import_model"]["status"] == "done"
+    assert by_name["analyze_model"]["status"] == "done"
+    assert by_name["plan_architecture"]["status"] == "done"
+    assert by_name["generate_host_cpp"]["status"] == "skipped"
+    assert by_name["generate_hls"]["status"] == "skipped"
+    assert by_name["run_hls"]["status"] == "skipped"
+    assert by_name["training_artifacts"]["status"] == "skipped"
+    assert by_name["vivado_bridge"]["status"] == "not_requested"
+    assert by_name["runtime_package"]["status"] == "not_implemented"
+

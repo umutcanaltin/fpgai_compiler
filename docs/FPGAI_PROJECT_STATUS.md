@@ -75,6 +75,25 @@ Sprint 3: canonical pipeline inspection and stage manifest mapping.
 
 ## Latest update
 
+- Corrected Sprint 3 pipeline stage regression test placement.
+- Removed `pipeline_stages` assertions from paper experiment manifest tests because those manifests are not compile manifests.
+- Added a runtime helper test for compile pipeline stage metadata in the existing compiler artifact test file.
+- No new files were added.
+
+## Latest update
+
+- Added a runtime regression check for Sprint 3 pipeline stage metadata.
+- The test verifies the emitted/constructed pipeline stage list includes the canonical stage names:
+  - `load_config`
+  - `import_model`
+  - `generate_hls`
+  - `run_hls`
+  - `vivado_bridge`
+  - `runtime_package`
+- No new test file was added; existing tests were reused.
+
+## Latest update
+
 - Added explicit `pipeline_stages` metadata to the existing compile `manifest.json`.
 - Reused `fpgai/engine/compiler.py`; no new pipeline orchestrator or pipeline file was added.
 - Stage metadata currently describes the existing compile flow:
