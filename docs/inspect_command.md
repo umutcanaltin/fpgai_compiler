@@ -1,4 +1,4 @@
-# P3A Pure Inspect Command
+# Pure Inspect Command
 
 `fpgai inspect --config ...` must be a pure metadata/config inspection command.
 It must not run compile, benchmark, Vitis HLS, Vivado, precision sweeps, or training comparison.

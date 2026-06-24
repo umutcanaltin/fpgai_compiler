@@ -1,462 +1,89 @@
-## Latest update
-
-- Improved compile result summaries so quiet and normal compile output surface manifest-backed artifact status.
-- Quiet compile output now shows:
-  - manifest path, pipeline mode, top kernel, compile seconds;
-  - prediction artifact paths;
-  - grouped HLS artifact status;
-  - Vivado bridge status;
-  - runtime package status;
-  - compact pipeline stage statuses.
-- Added test coverage for quiet compile manifest-section output.
-- Verified quick compile terminal output now shows runtime package and artifact truth directly to the user.
-
-## Latest update
-
-- Finished the previously partial runtime package stage.
-- Added `fpgai.runtime.package.emit_runtime_package`.
-- Main compile now emits `runtime_package/package_manifest.json`.
-- Main manifest now includes a `runtime_package` section.
-- Pipeline stage `runtime_package` now reports `done` when package metadata is emitted, and `skipped` only when absent.
-- Runtime package is truth-preserving: it copies existing runtime-facing artifacts and records missing bitstream/HWH/XSA files instead of claiming deployment.
-- Quick compile smoke confirmed `runtime_package.status=created` and `pipeline_stages.runtime_package.status=done`.
-
 # FPGAI Project Status
 
-This file is updated during cleanup and feature-completion work. It tracks what has been done, what remains, and what the next safe step is.
+This document records the current implementation state of the FPGAI repository. It is intentionally concise so the public repository does not look like an unfinished work log.
 
 ## Working rules
 
-- Do not add a new file before checking whether an existing file can be reused, rewired, merged, or rewritten.
-- No duplicate reporting, runtime, compiler, or experiment logic.
-- No public paper/README claim unless it is implemented, tested, documented, and produces reproducible artifacts.
-- Use tests during development as safety checks.
-- At the end, remove or reorganize temporary/debug/sprint tests and keep only professional public tests.
-- Public workflows should go through `main.py` / `fpgai` CLI.
-- Avoid public “evidence” wording; use experiments, reports, artifacts, traceability.
+- Prefer YAML-first workflows through the public CLI.
+- Inspect and reuse existing modules before adding new files.
+- Keep public claims tied to implemented behavior and generated artifacts.
+- Use tests during development; keep only useful public regression tests.
+- Use “experiments”, “reports”, “artifacts”, “validation”, and “traceability” wording in public docs.
 
 ## Current target
 
-Build FPGAI into a professional end-to-end FPGA/SoC compiler pipeline:
+FPGAI should provide a clear end-to-end compiler workflow:
 
-ONNX model → model analysis → resource/timing prediction → design selection → Vitis HLS generation → HLS reports → Vivado build/reports → bitstream → runtime package → real FPGA inference/training → paper plots/reports.
+```text
+inspect config/model
+→ estimate model/resource/timing before HLS
+→ optionally run design-space exploration
+→ generate host/HLS artifacts
+→ optionally run Vitis HLS
+→ optionally generate/run Vivado bridge artifacts
+→ emit runtime package metadata
+→ report truthful artifact status in CLI output and manifest
+```
 
-## Current phase
+## Current implementation state
 
-Sprint 4: model inspection and resource/timing prediction.
+Implemented and tested:
 
-## Completed
+- Config-first CLI workflows for compile, inspect, benchmark, sweep, experiment inspection, and report generation.
+- Quick compile flow that does not require Vitis HLS or Vivado.
+- Pre-HLS model profile, resource prediction, timing prediction, and prediction summary artifacts.
+- Manifest-backed pipeline stage reporting.
+- Design-space metadata in the compile manifest when DSE is enabled.
+- HLS artifact grouping in the compile manifest.
+- Board-aware Vivado bridge generation for:
+  - `pynq_z2` using `processing_system7`;
+  - `kv260` using `zynq_ultra_ps_e`;
+  - `kr260` using `zynq_ultra_ps_e`.
+- Runtime package emission from compile outputs:
+  - `runtime_package/package_manifest.json`;
+  - copied runtime-facing artifacts when present;
+  - truthful bitstream/HWH/XSA presence flags.
+- Quiet and normal compile summaries that surface manifest-backed artifact status.
 
-- Loaded next-chat handoff rules.
-- Inspected actual repository file layout.
-- Confirmed current tests exist under `tests/`.
-- Confirmed `docs/FPGAI_PROJECT_STATUS.md` was missing before this file was created.
+## Truth boundaries
 
-## Current state
+The repository should not imply more than the generated artifacts prove.
 
-- `tests/test_precision_config.py` exists in the current repo.
-- The repo contains many source, analysis, backend, experiment, reporting, benchmark, and frontend modules.
-- Existing reporting functionality is already present under `fpgai/reporting/`; do not add duplicate reporting files before inspecting and wiring existing modules.
-- Current docs include cleanup/legacy planning documents that must be inspected before deleting or rewriting:
-  - `docs/REPO_CLEANUP_PLAN.md`
-  - `docs/development_roadmap.md`
-  - `docs/cli_workflows_legacy.md`
-- Untracked root archives were observed:
-  - `configs.zip`
-  - `docs.zip`
-  - `fpgai.zip`
-  - `models.zip`
-  - `scripts.zip`
-  - `tests.zip`
-- `__pycache__` and `.pyc` files appear in the working tree listing and must be classified as tracked or untracked before cleanup.
+- Resource and timing predictions are pre-HLS estimates unless compared against HLS/Vivado reports.
+- Vivado bridge generation is separate from the main compile command.
+- Bitstream, HWH, and XSA files are only reported as present when actual files exist.
+- Physical-board runtime benchmarking is not the default public workflow.
+- Training-code generation exists, but full numerical training convergence remains a validation area.
 
-## Files changed
+## Important current artifacts
 
-- `docs/FPGAI_PROJECT_STATUS.md` created.
+A normal compile can emit:
 
-## Tests run
+```text
+<out_dir>/manifest.json
+<out_dir>/reports/model_profile.json
+<out_dir>/reports/resource_prediction.json
+<out_dir>/reports/timing_prediction.json
+<out_dir>/reports/prediction_summary.md
+<out_dir>/hls_artifact_metadata.json
+<out_dir>/runtime_package/package_manifest.json
+```
 
-- Not yet run in this cleanup pass.
-- Next step is to check CLI import/help and test collection only after confirming Git tracking of generated files.
+Vivado bridge generation can emit:
 
-## Decisions made
-
-- Start from real repository inventory, not old assumed test paths.
-- Create the status file before any feature or cleanup patch.
-- Do not add new modules until existing modules are inspected for reuse/merge/wiring.
-- Do not delete `__pycache__`, `.pyc`, zip backups, or stale docs until Git tracking and contents are checked.
-
-## Remaining Sprint 1 tasks
-
-1. Classify generated/cache/archive files as tracked or untracked.
-2. Check basic CLI import/help.
-3. Run test collection or focused pytest groups.
-4. Fix collection/import issues.
-5. Resolve package/license/README mismatch.
-6. Inspect stale docs before deleting or rewriting.
-7. Update this status file after every meaningful change.
-
-## Latest update
-
-- Extended Sprint 8 from a Vivado truth audit into board-aware Vivado bridge support.
-- Added explicit board capability metadata for `pynq_z2`, `kv260`, and `kr260`.
-- Added board-specific block-design Tcl generation:
-  - `pynq_z2`: `processing_system7` / Zynq-7000 path.
-  - `kv260`: `zynq_ultra_ps_e` / Zynq UltraScale+ MPSoC path.
-  - `kr260`: `zynq_ultra_ps_e` / Zynq UltraScale+ MPSoC path.
-- Added focused tests that generate Vivado bridge artifacts for all three boards and verify board-specific Tcl, parts, support flags, and manifest metadata.
-- Real bridge-generation smoke confirmed all three board keys generate the expected board-specific Tcl and part settings.
-- Bitstream/XSA success is still recorded only when Vivado actually produces those files.
+```text
+<out_dir>/vivado_bridge/scripts/export_hls_ip.tcl
+<out_dir>/vivado_bridge/scripts/create_bd.tcl
+<out_dir>/vivado_bridge/scripts/run_vivado.tcl
+<out_dir>/vivado_bridge/vivado_bridge_manifest.json
+```
 
 ## Latest update
 
-- Started Sprint 7: HLS/Vitis pipeline polish.
-- Reused existing HLS schedule summary, artifact metadata, and requested/achieved II comparison modules.
-- Compile manifest now includes a grouped `hls_artifacts` block with HLS run status, project path, logs, csynth report, schedule summary, artifact metadata, and II comparison.
-- Real HLS compile smoke confirmed the grouped HLS artifact metadata is present.
+- Public status document was condensed into a professional current-state summary.
+- Old work-log language was removed from this file.
+- Current feature boundaries are documented in terms of implemented artifacts and validation status.
 
-## Latest update
+## Next cleanup target
 
-- Started Sprint 6: DSE integration polish.
-- Reused the existing design-space report instead of redesigning DSE.
-- Compile manifest now records DSE `prediction_status: estimate`, analytical model metadata, recommendation policy, recommended candidates, and `layer_breakdown.csv`.
-- Real DSE compile smoke confirmed the manifest records `design_space` as done and surfaces the recommended candidate metadata.
-
-## Latest update
-
-- Started Sprint 5C: cleaned compile summary output using the existing `manifest.json`.
-- Added manifest summary lines to `CompileResult.summary()` for manifest path, pipeline mode, top kernel, and compile seconds.
-- Reused the existing manifest/pipeline-stage/prediction-artifact structure instead of adding a separate artifact-index file.
-
-## Latest update
-
-- Started Sprint 5B: added `configs/examples/quick_compile.yml` for a fast YAML-first compile path.
-- The quick compile example disables HLS, Vitis HLS, host C++, benchmark, precision sweep, and design-space exploration.
-- Smoke compile confirmed prediction artifacts and pipeline stage metadata are generated under `build/fpgai_quick_compile/`.
-
-## Latest update
-
-- Started Sprint 5A: YAML-first compile flow polish.
-- `CompileResult.summary()` now surfaces prediction artifact paths from `manifest.json`.
-- Documented inspect/compile prediction artifacts in `docs/CLI_WORKFLOWS.md`.
-- Updated README wording so resource/timing prediction is no longer described as future work.
-
-## Latest update
-
-- Added Sprint 4C compile-output prediction artifacts.
-- Normal compile now writes pre-HLS prediction artifacts under `<compile_out>/reports/`:
-  - `model_profile.json`
-  - `resource_prediction.json`
-  - `timing_prediction.json`
-  - `prediction_summary.md`
-- Reused the same model-inspection writer and existing resource/timing estimators used by `inspect --out`.
-- Manifest now records `prediction_artifacts` paths.
-
-## Latest update
-
-- Added Sprint 4B pre-HLS resource/timing prediction artifacts to the existing inspect output path.
-- Reused existing estimator modules:
-  - `estimate_resources_from_descriptors`
-  - `estimate_performance`
-  - `analyze_graph`
-  - `make_compile_plan`
-- `fpgai inspect --config ... --out <dir>` now writes:
-  - `model_profile.json`
-  - `resource_prediction.json`
-  - `timing_prediction.json`
-  - `prediction_summary.md`
-- Prediction JSONs are explicitly marked with `prediction_status: estimate`.
-
-## Latest update
-
-- Wired `fpgai inspect --config ... --out <dir>` through the existing `inspect_from_config()` helper.
-- The command now writes `model_profile.json` and `prediction_summary.md` without replacing the main CLI dispatch branch.
-- Existing `--json-output` behavior is preserved.
-- No new files were added.
-
-## Latest update
-
-- Wired the existing `inspect` command to emit model-inspection artifacts.
-- `fpgai inspect --config ... --out <dir>` now writes:
-  - `model_profile.json`
-  - `prediction_summary.md`
-- Reused `fpgai.analysis.model_inspection`; no new prediction module was added.
-- Resource and timing prediction files remain for the next Sprint 4 step.
-
-## Latest update
-
-- Started Sprint 4: model inspection and prediction.
-- Sprint 4 rule: inspect and reuse existing analysis modules before adding any new prediction files.
-- Target public artifacts for this sprint:
-  - `model_profile.json`
-  - `resource_prediction.json`
-  - `timing_prediction.json`
-  - `prediction_summary.md`
-- Target behavior: FPGAI should expose model/profile/resource/timing predictions before HLS/Vivado compile, while clearly marking estimates as estimates.
-- Current first task: inventory existing `fpgai/analysis` modules and CLI inspect/estimate paths.
-
-## Latest update
-
-- Added compile-summary visibility for `pipeline_stages`.
-- Reused `CompileResult.summary()` and the existing compile `manifest.json`.
-- Added a regression test in the existing CLI quiet logging test file.
-- No new files were added.
-
-## Latest update
-
-- Corrected Sprint 3 pipeline stage regression test placement.
-- Removed `pipeline_stages` assertions from paper experiment manifest tests because those manifests are not compile manifests.
-- Added a runtime helper test for compile pipeline stage metadata in the existing compiler artifact test file.
-- No new files were added.
-
-## Latest update
-
-- Added a runtime regression check for Sprint 3 pipeline stage metadata.
-- The test verifies the emitted/constructed pipeline stage list includes the canonical stage names:
-  - `load_config`
-  - `import_model`
-  - `generate_hls`
-  - `run_hls`
-  - `vivado_bridge`
-  - `runtime_package`
-- No new test file was added; existing tests were reused.
-
-## Latest update
-
-- Added explicit `pipeline_stages` metadata to the existing compile `manifest.json`.
-- Reused `fpgai/engine/compiler.py`; no new pipeline orchestrator or pipeline file was added.
-- Stage metadata currently describes the existing compile flow:
-  - config load
-  - model import
-  - model/graph analysis
-  - architecture planning
-  - optional reports
-  - host C++ generation
-  - HLS generation
-  - optional Vitis HLS run
-  - training artifacts when applicable
-  - Vivado bridge as `not_requested`
-  - runtime package as `not_implemented`
-- Added a source-level regression test in existing `tests/test_compiler_artifact_meta.py`.
-
-## Latest update
-
-- Started Sprint 3 canonical pipeline inspection.
-- Confirmed current compile flow already has a central manifest path in `fpgai/engine/compiler.py`.
-- Current safest Sprint 3 improvement is to extend the existing `manifest.json` with explicit pipeline stage status instead of creating a new pipeline orchestrator or new pipeline file.
-- Current owners:
-  - CLI compile entry: `fpgai/cli.py`
-  - compile orchestration: `fpgai/engine/compiler.py`
-  - result model: `fpgai/engine/result.py`
-  - HLS backend: `fpgai/backends/hls/`
-  - Vivado bridge/backend: `fpgai/backends/vivado/`
-- Next step: inspect `_emit_manifest` exactly and add `pipeline_stages` only inside the existing manifest output.
-
-## Latest update
-
-- Applied Sprint 2B public-wording cleanup without requiring uploaded logs.
-- Patched known stale public/help/reporting strings from the broad grep output.
-- Replaced old `python scripts/...`, `Sprint`, and public `evidence` wording with CLI/report/artifact terminology where behavior stays equivalent.
-- Kept deeper internal compatibility comments for later targeted cleanup.
-- No new files were added.
-
-## Latest update
-
-- Cleaned two remaining stale names from the selected artifact modules:
-  - replaced the `sprint13b` default experiment path with `experiments/training_stream_compare`
-  - renamed a local `evidence` variable to `artifact_lines`
-- Focused artifact module cleanup remains source-compatible and does not add files.
-
-## Latest update
-
-- Cleaned stale `evidence`/`Sprint` wording in selected artifact-reporting modules.
-- Replaced old extractor usage strings with package-module usage.
-- Renamed selected generated output folders/files from `*_evidence` to `*_artifacts`.
-- Patched:
-  - `fpgai/reporting/training_native_accumulated_batch_artifacts.py`
-  - `fpgai/reporting/training_accumulated_batch_artifacts.py`
-  - `fpgai/reporting/training_multi_epoch_convergence_artifacts.py`
-  - `fpgai/reporting/training_accelerator_artifacts.py`
-  - `fpgai/reporting/memory_binding_artifacts.py`
-  - `fpgai/reporting/parallel_policy_artifacts.py`
-- No new files were added.
-
-## Latest update
-
-- Inspected `scripts/` reporting cleanup state.
-- Confirmed `scripts/` contains only documentation:
-  - `scripts/README.md`
-  - `scripts/MANIFEST.md`
-- No script files were deleted.
-- Patched stale user-visible references in existing reporting/Vivado modules:
-  - replaced old `python scripts/...` usage strings with package-module usage
-  - replaced several public “evidence”/“sprint” labels with artifacts, reports, validation, or traceability wording
-  - updated `claim_traceability` default output from `evidence/reproducibility` to `reports/reproducibility`
-- This patch did not add new files.
-
-## Latest update
-
-- Updated `docs/CLI_WORKFLOWS.md` with public report CLI documentation.
-- Used a safer section replacement that avoids embedded Markdown code fences inside the patch script.
-- Documented:
-  - `fpgai report build`
-  - `fpgai report paper-artifacts`
-  - `fpgai report frontier`
-  - `fpgai report estimator`
-- Clarified that report commands reuse `fpgai/reporting/` and generated outputs belong under `reports/`.
-
-## Latest update
-
-- Second report runtime smoke-test run reduced failures to one fixture-column mismatch.
-- `paper-artifacts` also expected `hls_ok`.
-- Patched the tiny `paper-artifacts` CSV fixture to include `hls_ok=True`.
-
-## Latest update
-
-- First report runtime smoke-test run found fixture-column mismatches, not CLI failures:
-  - `paper-artifacts` expected `compile_ok`.
-  - `frontier` expected `latency_seconds_min` or `latency_seconds_max`.
-- Patched the tiny CSV test fixtures to match existing reporting module schemas.
-
-## Latest update
-
-- Added runtime smoke tests for public report subcommands using tiny CSV fixtures.
-- Reused `tests/test_cli_report_validate.py`; no new test file was added.
-- Covered:
-  - `fpgai report paper-artifacts`
-  - `fpgai report frontier`
-  - `fpgai report estimator`
-- Tests verify that each command exits successfully and writes expected output artifacts.
-
-## Latest update
-
-- Added tests for the new public `report` CLI subcommands.
-- Reused existing `tests/test_cli_report_validate.py` instead of creating a new test file.
-- Covered help paths for:
-  - `fpgai report`
-  - `fpgai report paper-artifacts`
-  - `fpgai report frontier`
-  - `fpgai report estimator`
-
-## Latest update
-
-- Inspected existing reporting modules and current `report` CLI wiring before adding anything.
-- Reused existing reporting modules instead of creating new files:
-  - `fpgai.reporting.generate_paper_artifacts`
-  - `fpgai.reporting.paper_frontier`
-  - `fpgai.reporting.estimator_tables`
-- Wired them into the public CLI as:
-  - `fpgai report paper-artifacts`
-  - `fpgai report frontier`
-  - `fpgai report estimator`
-- Existing report logic remains in `fpgai/reporting/`; `fpgai/cli.py` only dispatches to it.
-
-## Latest update
-
-- Sprint 1 closeout check passed.
-- Full pytest result after docs cleanup:
-  - `258 passed, 1 skipped in 1.43s`
-  - exit code `0`
-- Remaining skipped test is optional HLS/Vitis CSim integration correctness when no testable YAML config is present.
-- Remaining grep hits are acceptable generated-output/limitations/function-name references, not stale public sprint/cleanup workspace language.
-- Sprint 1 is complete.
-
-## Latest update
-
-- Inspected public docs cleanup candidates before deleting anything.
-- Deleted stale internal planning/cleanup docs that made the repository look like an unfinished sprint workspace:
-  - `docs/REPO_CLEANUP_PLAN.md`
-  - `docs/development_roadmap.md`
-  - `docs/cli_workflows_legacy.md`
-- Kept current user-facing docs:
-  - `docs/CLI_WORKFLOWS.md`
-  - `docs/CONFIG_FIRST_WORKFLOW.md`
-  - `docs/PAPER_ARTIFACT_POLICY.md`
-  - `docs/inspect_command.md`
-  - `docs/logging.md`
-- Reworded `docs/logging.md` to avoid calling FPGAI open-source while the license is academic/non-commercial research only.
-
-## Latest update
-
-- Inspected package/license/README metadata.
-- Found mismatch:
-  - `LICENSE.md` says academic, educational, and non-commercial research use only.
-  - `pyproject.toml` said MIT.
-  - README described FPGAI as open-source.
-- Patched README and `pyproject.toml` to align with `LICENSE.md`.
-- No source/compiler behavior changed.
-
-## Latest update
-
-- Full Sprint 1 baseline is green.
-- Final pytest result:
-  - `258 passed, 1 skipped in 1.41s`
-  - exit code `0`
-- Remaining skipped test is the optional HLS CSim integration correctness test when no testable HLS/Vitis CSim YAML config is present.
-- Sprint 1 test stabilization is complete enough to commit.
-
-## Latest update
-
-- Inspected exact active source blocks for the last 2 focused failures.
-- Found that `top_cpp.py` has multiple `emit_top_cpp` wrappers; the active runtime-weight wrapper is the final one.
-- Patched the active runtime-weight wrapper to prepend honest requested-mode planning comments while preserving existing stream/DDR helper insertion.
-- Patched the active training mode-6 insertion block using a robust post-loss marker search.
-
-## Latest update
-
-- The first fixture patch did not apply because the exact string replacement patterns were too brittle.
-- Applied a more robust line-based test repair that inserts `parent.mkdir(parents=True, exist_ok=True)` after temporary nested config path assignments.
-- This remains a test-only repair; compiler/source logic is unchanged.
-
-## Latest update
-
-- Repaired test fixtures that wrote nested temporary config paths without creating parent directories first.
-- Changed only tests, not compiler logic.
-- Patched:
-  - `tests/test_precision_config.py`
-  - `tests/test_experiment_config_materializer_signature_compat.py`
-  - `tests/test_experiment_config_materializer_strict.py`
-- Reason: baseline pytest showed many failures caused by missing `tmp_path/configs/examples/` parent directories.
-
-## Latest update
-
-- Adjusted workflow for long outputs: commands now write logs to `repo_audit/sprint1_baseline/` so the user can upload a ZIP instead of pasting terminal output.
-- Next baseline run will capture CLI checks, pytest collection, full pytest output, and Git status.
-
-## Latest update
-
-- Basic CLI sanity check passed:
-  - `python -B -m py_compile main.py fpgai/cli.py`
-  - `python main.py --help`
-  - `python main.py report --help`
-  - `python main.py validate --help`
-- Pytest collection succeeded with 259 collected tests.
-- `report` currently exposes only `build`; future reporting work should wire existing `fpgai/reporting/` modules into this CLI group instead of adding duplicate tools.
-
-## Latest update
-
-- Basic CLI sanity check passed:
-  - `python -B -m py_compile main.py fpgai/cli.py`
-  - `python main.py --help`
-  - `python main.py report --help`
-  - `python main.py validate --help`
-- Pytest collection succeeded with 259 collected tests.
-- `report` currently exposes only `build`; future reporting work should wire existing `fpgai/reporting/` modules into this CLI group instead of adding duplicate tools.
-
-## Latest update
-
-- Classified generated/cache/archive files.
-- Confirmed `__pycache__` and `.pyc` files are not tracked by Git.
-- Confirmed root ZIP backup archives were untracked local files.
-- Removed local root ZIP backup archives:
-  - `configs.zip`
-  - `docs.zip`
-  - `fpgai.zip`
-  - `models.zip`
-  - `scripts.zip`
-  - `tests.zip`
-- Updated `.gitignore` to ignore root-level `/*.zip` backup archives.
-
-## Current next step
-
-Run focused tests for repaired config/materializer fixtures, then rerun full pytest baseline.
+Review public docs and reporting modules for stale wording such as old work-log labels, old output names, and outdated runtime/Vivado limitations.

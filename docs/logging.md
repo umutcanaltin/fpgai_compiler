@@ -1,4 +1,4 @@
-# P3B — Quiet Compile Logging
+# Quiet Compile Logging
 
 This update makes FPGAI usable as a public CLI tool by preventing vendor-tool output from flooding the terminal by default.
 
@@ -21,7 +21,7 @@ Verbose mode streams full output:
 fpgai compile --config configs/examples/inference_compile.yml --verbose
 ```
 
-Minimal mode prints only the shortest compile summary:
+Minimal mode prints a concise manifest-backed compile summary:
 
 ```bash
 fpgai compile --config configs/examples/inference_compile.yml --quiet
