@@ -431,3 +431,60 @@ def test_smallest_valid_candidate_is_selected(
     assert "operator_execution_schedule_v2" in (
         result.terminal_summary
     )
+
+
+def test_design_space_payload_marks_recommendations_as_configured_candidate_only() -> None:
+    from fpgai.analysis.design_space_report import _annotate_design_space_payload
+
+    payload = {
+        "format": "fpgai.design_space.v2",
+        "recommendation_policy": {
+            "mode": "balanced",
+        },
+        "results": [
+            {
+                "name": "fx8",
+                "valid": True,
+            },
+            {
+                "name": "fx16",
+                "valid": True,
+            },
+        ],
+        "recommended_smallest_valid": {
+            "name": "fx8",
+            "valid": True,
+        },
+        "recommended_balanced": {
+            "name": "fx8",
+            "valid": True,
+        },
+        "recommended_best_accuracy": {
+            "name": "fx16",
+            "valid": True,
+        },
+    }
+
+    annotated = _annotate_design_space_payload(payload)
+
+    assert annotated["recommendation_scope"] == "configured_candidates_only"
+    assert annotated["search_enabled"] is False
+    assert annotated["recommendation_kind"] == "estimate_based_recommendation"
+    assert annotated["dse_truth"]["configured_candidates_only"] is True
+    assert annotated["dse_truth"]["search_enabled"] is False
+    assert annotated["dse_truth"]["estimate_based"] is True
+
+    for row in annotated["results"]:
+        assert row["compile_ready"] is True
+        assert row["recommendation_scope"] == "configured_candidates_only"
+        assert row["search_enabled"] is False
+        assert row["materialization"]["unsupported_knobs"] == []
+        assert "optimization.parallel.pe" in row["materialization"]["materialized_knobs"]
+        assert "optimization.pipeline.ii" in row["materialization"]["materialized_knobs"]
+        assert "optimization.tiling.dense" in row["materialization"]["materialized_knobs"]
+        assert "data_movement.ps_pl.input" in row["materialization"]["materialized_knobs"]
+        assert "resource_prediction" in row["materialization"]["estimate_only_outputs"]
+
+    assert annotated["recommended_balanced"]["compile_ready"] is True
+    assert annotated["recommended_balanced"]["search_enabled"] is False
+    assert annotated["recommendation_policy"]["scope"] == "configured_candidates_only"

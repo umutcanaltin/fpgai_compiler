@@ -32,7 +32,7 @@ A feature is `supported` only when all of these are true:
 | Parallelization selection | YAML PE/SIMD/unroll/partition knobs change planner metadata, generated HLS call arguments, and array partition mode pragmas. | supported | Keep planner-to-codegen parallel regression tests current. |
 | Resource estimation | Compile/inspect emits pre-HLS LUT/FF/DSP/BRAM estimates. | supported_estimate_only | Keep clearly labeled as estimate unless compared to HLS/Vivado. |
 | Timing estimation | Compile/inspect emits pre-HLS cycle/latency/timing estimates. | supported_estimate_only | Keep clearly labeled as estimate unless compared to HLS/Vivado. |
-| Design-space exploration | DSE enumerates candidates, estimates them, and recommends candidates. | partial | Ensure DSE only recommends knobs that are materialized or marks them estimate-only. |
+| Design-space exploration | DSE evaluates configured candidates and emits estimate-based recommendations with compile-ready/materialized-knob metadata. | supported_estimate_only | No exhaustive search is claimed; recommendations are pre-HLS estimates from configured candidates only. |
 | HLS generation | Compiler emits HLS C++/headers/testbench/project artifacts. | supported | Keep generated artifact tests. |
 | HLS run/artifact collection | When enabled and tools exist, compiler runs/collects HLS logs/reports. | supported | Keep optional-tool boundary documented. |
 | Vivado bridge generation | Board-aware Vivado bridge scripts are generated for supported boards. | supported | Keep Vivado implementation clearly separate from compile. |

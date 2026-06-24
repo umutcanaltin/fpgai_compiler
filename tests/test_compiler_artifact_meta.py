@@ -241,6 +241,10 @@ def test_design_space_manifest_payload_includes_recommendations(tmp_path):
                 "recommended_smallest_valid": {"name": "fx8"},
                 "recommended_balanced": {"name": "fx12"},
                 "recommended_best_accuracy": {"name": "fx16"},
+                "recommendation_scope": "configured_candidates_only",
+                "search_enabled": False,
+                "recommendation_kind": "estimate_based_recommendation",
+                "dse_truth": {"configured_candidates_only": True},
             }
         ),
         encoding="utf-8",
@@ -263,6 +267,10 @@ def test_design_space_manifest_payload_includes_recommendations(tmp_path):
     assert payload["recommended_smallest_valid"]["name"] == "fx8"
     assert payload["recommended_balanced"]["name"] == "fx12"
     assert payload["recommended_best_accuracy"]["name"] == "fx16"
+    assert payload["recommendation_scope"] == "configured_candidates_only"
+    assert payload["search_enabled"] is False
+    assert payload["recommendation_kind"] == "estimate_based_recommendation"
+    assert payload["dse_truth"]["configured_candidates_only"] is True
 
 def test_hls_artifacts_manifest_payload_groups_hls_outputs(tmp_path):
     from types import SimpleNamespace

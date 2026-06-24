@@ -82,7 +82,7 @@ When `analysis.design_space.enabled: true`, compile writes estimate-based DSE ar
 <project.out_dir>/design_space/summary.txt
 ```
 
-The compile manifest records DSE artifact paths, analytical model names, recommendation policy, and recommended candidates. These are pre-HLS estimates unless compared with HLS/Vivado reports separately.
+The compile manifest records DSE artifact paths, analytical model names, recommendation policy, recommendation scope, and recommended candidates. DSE is recommendation-only: it evaluates configured YAML candidates and does not run an exhaustive search optimizer. Recommendations are pre-HLS estimates unless compared with HLS/Vivado reports separately.
 
 ## 5. HLS/Vitis artifacts
 
