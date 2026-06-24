@@ -1,5 +1,18 @@
 ## Latest update
 
+- Improved compile result summaries so quiet and normal compile output surface manifest-backed artifact status.
+- Quiet compile output now shows:
+  - manifest path, pipeline mode, top kernel, compile seconds;
+  - prediction artifact paths;
+  - grouped HLS artifact status;
+  - Vivado bridge status;
+  - runtime package status;
+  - compact pipeline stage statuses.
+- Added test coverage for quiet compile manifest-section output.
+- Verified quick compile terminal output now shows runtime package and artifact truth directly to the user.
+
+## Latest update
+
 - Finished the previously partial runtime package stage.
 - Added `fpgai.runtime.package.emit_runtime_package`.
 - Main compile now emits `runtime_package/package_manifest.json`.

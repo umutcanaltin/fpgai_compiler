@@ -105,6 +105,114 @@ class CompileResult:
 
         return lines if len(lines) > 1 else []
 
+    def _design_space_summary_lines(self) -> list[str]:
+        manifest = self._read_manifest()
+        if not manifest:
+            return []
+
+        design_space = manifest.get("design_space")
+        if not isinstance(design_space, dict) or not design_space:
+            return []
+
+        lines = ["Design space        : available"]
+        for key in [
+            "recommendation_policy",
+            "recommended_balanced",
+            "recommended_smallest_valid",
+            "recommended_best_accuracy",
+            "layer_breakdown_csv",
+        ]:
+            value = design_space.get(key)
+            if value:
+                lines.append(f"  - {key}: {value}")
+        return lines
+
+    def _hls_artifacts_summary_lines(self) -> list[str]:
+        manifest = self._read_manifest()
+        if not manifest:
+            return []
+
+        hls = manifest.get("hls_artifacts")
+        if not isinstance(hls, dict) or not hls:
+            return []
+
+        lines = [
+            "HLS artifacts       : available",
+            f"  - hls_ran: {hls.get('hls_ran')}",
+            f"  - hls_ok: {hls.get('hls_ok')}",
+            f"  - hls_returncode: {hls.get('hls_returncode')}",
+        ]
+
+        for key in ["stdout_log", "stderr_log", "csynth_report"]:
+            value = hls.get(key)
+            if value:
+                lines.append(f"  - {key}: {value}")
+
+        artifact_metadata = hls.get("artifact_metadata")
+        if isinstance(artifact_metadata, dict):
+            path = artifact_metadata.get("path")
+            file_count = artifact_metadata.get("file_count")
+            if path:
+                lines.append(f"  - artifact_metadata: {path}")
+            if file_count is not None:
+                lines.append(f"  - hls_file_count: {file_count}")
+
+        schedule_summary = hls.get("schedule_summary")
+        if isinstance(schedule_summary, dict) and schedule_summary.get("path"):
+            lines.append(f"  - schedule_summary: {schedule_summary.get('path')}")
+
+        ii_comparison = hls.get("ii_comparison")
+        if isinstance(ii_comparison, dict) and ii_comparison.get("path"):
+            lines.append(f"  - ii_comparison: {ii_comparison.get('path')}")
+
+        return lines
+
+    def _vivado_bridge_summary_lines(self) -> list[str]:
+        manifest = self._read_manifest()
+        if not manifest:
+            return []
+
+        bridge = manifest.get("vivado_bridge")
+        if not isinstance(bridge, dict) or not bridge:
+            return ["Vivado bridge       : not_requested"]
+
+        lines = ["Vivado bridge       : available"]
+        for key in [
+            "board",
+            "part",
+            "ps_type",
+            "vivado_bridge_generated",
+            "vivado_synth_requested",
+            "vivado_impl_requested",
+            "bitstream_requested",
+            "bitstream_exists",
+            "xsa_exists",
+        ]:
+            if key in bridge:
+                lines.append(f"  - {key}: {bridge.get(key)}")
+        return lines
+
+    def _runtime_package_summary_lines(self) -> list[str]:
+        manifest = self._read_manifest()
+        if not manifest:
+            return []
+
+        package = manifest.get("runtime_package")
+        if not isinstance(package, dict) or not package:
+            return []
+
+        lines = [
+            f"Runtime package     : {package.get('status', 'unknown')}",
+            f"  - package: {package.get('path')}",
+            f"  - deployable_overlay_present: {package.get('deployable_overlay_present')}",
+            f"  - bitstream_present: {package.get('bitstream_present')}",
+            f"  - hwh_present: {package.get('hwh_present')}",
+            f"  - xsa_present: {package.get('xsa_present')}",
+            f"  - file_count: {package.get('file_count')}",
+        ]
+        return [line for line in lines if not line.endswith(": None")]
+
+
     def _pipeline_stage_summary_lines(self) -> list[str]:
         manifest = self._read_manifest()
         if not manifest:
@@ -187,14 +295,18 @@ class CompileResult:
             lines.insert(-1, "---------------------------------------------------")
             lines[-1:-1] = manifest_lines
 
-        prediction_lines = self._prediction_artifact_summary_lines()
-        if prediction_lines:
-            lines.insert(-1, "---------------------------------------------------")
-            lines[-1:-1] = prediction_lines
+        manifest_section_groups = [
+            self._prediction_artifact_summary_lines(),
+            self._design_space_summary_lines(),
+            self._hls_artifacts_summary_lines(),
+            self._vivado_bridge_summary_lines(),
+            self._runtime_package_summary_lines(),
+            self._pipeline_stage_summary_lines(),
+        ]
 
-        pipeline_lines = self._pipeline_stage_summary_lines()
-        if pipeline_lines:
-            lines.insert(-1, "---------------------------------------------------")
-            lines[-1:-1] = pipeline_lines
+        for section_lines in manifest_section_groups:
+            if section_lines:
+                lines.insert(-1, "---------------------------------------------------")
+                lines[-1:-1] = section_lines
 
         return "\n".join(lines)

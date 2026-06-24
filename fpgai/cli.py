@@ -122,6 +122,28 @@ def _print_compile_result(
         print(f"HLS ran              : {getattr(result, 'hls_ran', None)}")
         print(f"HLS ok               : {getattr(result, 'hls_ok', None)}")
         print(f"HLS returncode       : {getattr(result, 'hls_returncode', None)}")
+
+        manifest_sections = []
+        for helper_name in [
+            "_manifest_summary_lines",
+            "_prediction_artifact_summary_lines",
+            "_design_space_summary_lines",
+            "_hls_artifacts_summary_lines",
+            "_vivado_bridge_summary_lines",
+            "_runtime_package_summary_lines",
+            "_pipeline_stage_summary_lines",
+        ]:
+            helper = getattr(result, helper_name, None)
+            if helper is None:
+                continue
+            section = helper()
+            if section:
+                manifest_sections.append(section)
+
+        for section in manifest_sections:
+            print("---------------------------------------------------")
+            for line in section:
+                print(line)
     else:
         print(result.summary())
 
