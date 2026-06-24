@@ -665,6 +665,41 @@ class Compiler:
             return p
         return None
 
+    def _hls_weight_storage_impl(self, memory_plan=None) -> str:
+        raw = self.cfg.raw
+        requested = _cfg_get(
+            raw,
+            "memory.storage.weights",
+            _cfg_get(
+                raw,
+                "training.storage.weights",
+                _cfg_get(raw, "memory.weight_storage", "bram"),
+            ),
+        )
+        requested = str(requested or "bram").strip().lower()
+
+        aliases = {
+            "embedded": "bram",
+            "on_chip": "bram",
+            "onchip": "bram",
+            "block": "bram",
+            "block_ram": "bram",
+            "bram": "bram",
+            "uram": "uram",
+            "ultra": "uram",
+            "ultra_ram": "uram",
+            "lutram": "lutram",
+            "lut_ram": "lutram",
+            "distributed": "lutram",
+            "ddr": "ddr",
+            "external": "ddr",
+            "external_ddr": "ddr",
+            "dma_ddr": "ddr",
+            "stream": "stream",
+            "streaming": "stream",
+        }
+        return aliases.get(requested, "bram")
+
     def _emit_hls(
         self,
         out_dir: Path,
@@ -734,6 +769,7 @@ class Compiler:
 
         normalized_weights_mode = str(weights_mode).strip().lower()
         runtime_weight_mode = _is_runtime_weight_mode(normalized_weights_mode)
+        storage_impl = self._hls_weight_storage_impl(memory_plan)
 
         if runtime_weight_mode:
             write_text(inc_dir / "weights_runtime.h", emit_weights_runtime_h(g))
@@ -744,11 +780,22 @@ class Compiler:
             )
             write_text(
                 src_dir / "fpgai_params.cpp",
-                emit_params_cpp(g, weights_mode=normalized_weights_mode),
+                emit_params_cpp(
+                    g,
+                    weights_mode=normalized_weights_mode,
+                    storage_impl=storage_impl,
+                ),
             )
         else:
             write_text(inc_dir / "fpgai_params.h", emit_params_h(g, weights_mode="embedded"))
-            write_text(src_dir / "fpgai_params.cpp", emit_params_cpp(g, weights_mode="embedded"))
+            write_text(
+                src_dir / "fpgai_params.cpp",
+                emit_params_cpp(
+                    g,
+                    weights_mode="embedded",
+                    storage_impl=storage_impl,
+                ),
+            )
 
         input_bin = str((out_dir / "input.bin").resolve())
 

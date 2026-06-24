@@ -7,6 +7,81 @@ import numpy as np
 from fpgai.backends.hls.emit.params_h import _conv_sizes, _dense_sizes
 
 
+def _normalise_storage_impl(storage_impl: str | None) -> str:
+    value = str(storage_impl or "bram").strip().lower()
+    aliases = {
+        "embedded": "bram",
+        "on_chip": "bram",
+        "onchip": "bram",
+        "block": "bram",
+        "block_ram": "bram",
+        "bram": "bram",
+        "uram": "uram",
+        "ultra": "uram",
+        "ultra_ram": "uram",
+        "lutram": "lutram",
+        "lut_ram": "lutram",
+        "distributed": "lutram",
+        "ddr": "ddr",
+        "external": "ddr",
+        "external_ddr": "ddr",
+        "dma_ddr": "ddr",
+        "stream": "stream",
+        "streaming": "stream",
+    }
+    return aliases.get(value, "bram")
+
+
+def _bind_storage_impl(storage_impl: str | None) -> str | None:
+    value = _normalise_storage_impl(storage_impl)
+    if value == "bram":
+        return "bram"
+    if value == "uram":
+        return "uram"
+    if value == "lutram":
+        return "lutram"
+    return None
+
+
+def _parameter_binding_pragmas(graph, storage_impl: str | None) -> list[str]:
+    impl = _bind_storage_impl(storage_impl)
+    if impl is None:
+        return [
+            "",
+            f"// FPGAI storage binding: {storage_impl or 'none'} uses runtime/external storage; no local BIND_STORAGE pragmas emitted.",
+        ]
+
+    lines = [
+        "",
+        f"// FPGAI storage binding: parameter arrays mapped to {impl.upper()}.",
+    ]
+    parameter_index = 0
+
+    for op in getattr(graph, "ops", []):
+        op_type = str(getattr(op, "op_type", "")).lower()
+        if op_type not in {"dense", "gemm", "conv"}:
+            continue
+
+        if op_type in {"dense", "gemm"}:
+            weight_count, bias_count = _dense_sizes(graph, op)
+        else:
+            weight_count, bias_count = _conv_sizes(graph, op)
+
+        if weight_count > 0:
+            lines.append(
+                f"#pragma HLS BIND_STORAGE variable=W{parameter_index} type=ram_1p impl={impl}"
+            )
+        if bias_count > 0:
+            lines.append(
+                f"#pragma HLS BIND_STORAGE variable=B{parameter_index} type=ram_1p impl={impl}"
+            )
+
+        parameter_index += 1
+
+    return lines
+
+
+
 WEIGHT_ATTR_KEYS = (
     "weights",
     "weight",
@@ -513,6 +588,7 @@ def emit_params_cpp(
     graph,
     *,
     weights_mode: str = "embedded",
+    storage_impl: str | None = "bram",
 ) -> str:
     normalized_mode = str(weights_mode).strip().lower()
 
@@ -713,5 +789,6 @@ def emit_params_cpp(
 
         parameter_index += 1
 
+    lines.extend(_parameter_binding_pragmas(graph, storage_impl))
     lines.extend(["} // namespace fpgai", ""])
     return "\n".join(lines)

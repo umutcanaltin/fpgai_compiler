@@ -80,6 +80,7 @@ Vivado bridge generation can emit:
 
 ## Latest update
 
+- Memory/storage selection now has generated HLS proof for embedded, AXI-stream preload, DDR/m_axi preload, and BRAM/URAM/LUTRAM parameter storage binding pragmas.
 - Precision selection now has an explicit regression proof from `precision_mode` materialization to generated HLS typedef changes.
 - Added `docs/FEATURE_MATRIX.md` as the public feature-support contract.
 - Core compiler features will only be marked supported when YAML, compiler, generated HLS/C++, manifest/reporting, and tests all agree.

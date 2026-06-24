@@ -790,3 +790,125 @@ def test_precision_mode_materialization_changes_generated_types() -> None:
     assert "typedef ap_fixed<16,6> wgt_t;" in fx16_header
     assert "typedef ap_fixed<24,10> bias_t;" in fx16_header
     assert "typedef ap_fixed<24,10> acc_t;" in fx16_header
+
+
+
+def test_weight_delivery_mode_changes_generated_hls_interfaces() -> None:
+    graph = _dense_graph()
+    resolve_layerwise_precision(
+        graph,
+        _base_config(),
+    )
+
+    embedded_h = emit_params_h(
+        graph,
+        weights_mode="embedded",
+    )
+    embedded_cpp = emit_params_cpp(
+        graph,
+        weights_mode="embedded",
+    )
+    embedded_top = emit_top_cpp(
+        graph,
+        top_name="deeplearn",
+        weights_mode="embedded",
+    )
+
+    stream_h = emit_params_h(
+        graph,
+        weights_mode="stream",
+    )
+    stream_cpp = emit_params_cpp(
+        graph,
+        weights_mode="stream",
+    )
+    stream_top = emit_top_cpp(
+        graph,
+        top_name="deeplearn",
+        weights_mode="stream",
+    )
+
+    ddr_h = emit_params_h(
+        graph,
+        weights_mode="ddr",
+    )
+    ddr_cpp = emit_params_cpp(
+        graph,
+        weights_mode="ddr",
+    )
+    ddr_top = emit_top_cpp(
+        graph,
+        top_name="deeplearn",
+        weights_mode="ddr",
+    )
+
+    assert "extern const op0_wgt_t W0[12];" in embedded_h
+    assert "const op0_wgt_t W0[12]" in embedded_cpp
+    assert "weight_stream" not in embedded_top
+    assert "weights_mem" not in embedded_top
+
+    assert "Runtime parameters are preloaded through the AXI weight stream." in stream_h
+    assert "extern op0_wgt_t W0[12];" in stream_h
+    assert "const op0_wgt_t W0_init[12]" in stream_cpp
+    assert "hls::stream<axis_t>& weight_stream" in stream_top
+    assert "#pragma HLS INTERFACE axis port=weight_stream" in stream_top
+    assert "fpgai_load_stream_vector<op0_wgt_t, 12>" in stream_top
+
+    assert "Runtime parameters are loaded from the external DDR/m_axi weight buffer." in ddr_h
+    assert "extern op0_wgt_t W0[12];" in ddr_h
+    assert "const op0_wgt_t W0_init[12]" in ddr_cpp
+    assert "const ap_uint<32>* weights_mem" in ddr_top
+    assert "#pragma HLS INTERFACE m_axi port=weights_mem" in ddr_top
+    assert "fpgai_load_ddr_vector<op0_wgt_t, 12>" in ddr_top
+
+    assert embedded_h != stream_h
+    assert stream_h != ddr_h
+    assert embedded_top != stream_top
+    assert stream_top != ddr_top
+
+
+
+def test_weight_storage_binding_changes_generated_hls_pragmas() -> None:
+    graph = _dense_graph()
+    resolve_layerwise_precision(
+        graph,
+        _base_config(),
+    )
+
+    bram_cpp = emit_params_cpp(
+        graph,
+        weights_mode="embedded",
+        storage_impl="bram",
+    )
+    uram_cpp = emit_params_cpp(
+        graph,
+        weights_mode="embedded",
+        storage_impl="uram",
+    )
+    lutram_cpp = emit_params_cpp(
+        graph,
+        weights_mode="embedded",
+        storage_impl="lutram",
+    )
+    ddr_cpp = emit_params_cpp(
+        graph,
+        weights_mode="ddr",
+        storage_impl="ddr",
+    )
+
+    assert "#pragma HLS BIND_STORAGE variable=W0 type=ram_1p impl=bram" in bram_cpp
+    assert "#pragma HLS BIND_STORAGE variable=B0 type=ram_1p impl=bram" in bram_cpp
+
+    assert "#pragma HLS BIND_STORAGE variable=W0 type=ram_1p impl=uram" in uram_cpp
+    assert "#pragma HLS BIND_STORAGE variable=B0 type=ram_1p impl=uram" in uram_cpp
+
+    assert "#pragma HLS BIND_STORAGE variable=W0 type=ram_1p impl=lutram" in lutram_cpp
+    assert "#pragma HLS BIND_STORAGE variable=B0 type=ram_1p impl=lutram" in lutram_cpp
+
+    assert "impl=bram" not in uram_cpp
+    assert "impl=uram" not in bram_cpp
+    assert "BIND_STORAGE variable=W0" not in ddr_cpp
+    assert "BIND_STORAGE variable=B0" not in ddr_cpp
+    assert "impl=bram" not in ddr_cpp
+    assert "impl=uram" not in ddr_cpp
+    assert "impl=lutram" not in ddr_cpp

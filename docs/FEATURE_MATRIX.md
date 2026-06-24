@@ -26,7 +26,7 @@ A feature is `supported` only when all of these are true:
 |---|---|---|---|
 | YAML-first inspect/compile | User can inspect and compile from YAML through `fpgai` CLI. | supported | Keep tests and docs current. |
 | Precision selection | YAML precision changes generated HLS/C++ data types and reports the applied precision. | supported | Keep materialization and generated-type regression tests current. |
-| Memory/storage selection | YAML memory strategy changes generated storage interfaces/pragmas/weight handling and reports the applied strategy. | partial | Prove BRAM/URAM/stream/DDR-style selections change generated artifacts or downgrade unsupported modes. |
+| Memory/storage selection | YAML weight delivery and storage choices change generated HLS interfaces and parameter storage pragmas. | supported | Keep generated-interface and BIND_STORAGE regression tests current. |
 | Tiling selection | YAML/DSE tile choices change generated loop/helper code and local buffers. | partial | Prove tile sizes are emitted and connected to top/layer code, not only reports. |
 | Pipeline selection | YAML pipeline style changes generated HLS pipeline pragmas/target II. | partial | Prove conservative/balanced/aggressive styles produce different generated pragmas or II metadata. |
 | Parallelization selection | YAML PE/SIMD/unroll/partition knobs change generated unroll/partition pragmas and reports. | partial | Prove unroll and partition factors are materialized per supported layer. |
