@@ -27,7 +27,11 @@ A feature is `supported` only when all of these are true:
 | YAML-first inspect/compile | User can inspect and compile from YAML through `fpgai` CLI. | supported | supported | supported | Keep tests and docs current. |
 | Precision selection | YAML precision changes generated HLS/C++ data types and reports the applied precision. | supported | supported | supported | Keep materialization and generated-type regression tests current. |
 | Memory/storage selection | YAML weight delivery and storage choices change generated HLS interfaces and parameter storage pragmas. | supported | supported | supported | Keep generated-interface and BIND_STORAGE regression tests current. |
+<<<<<<< HEAD
 | Tiling selection | YAML tiling choices change generated HLS dense/conv tiled helpers, tile template arguments, and architecture metadata. | supported | dense_backward_supported_conv_backward_planning_only | supported | Training forward dense/conv and dense backward/update tiling are materialized; conv backward/update tiling remains future work before full training parity. |
+=======
+| Tiling selection | YAML tiling choices change generated HLS dense/conv tiled helpers, tile template arguments, and architecture metadata. | supported | forward_supported_backward_planning_only | supported | Training forward dense/conv tiling is materialized; training backward/update tiling remains future work before full training parity. |
+>>>>>>> 901de078132a537e425cac7602bc09eef226e2d3
 | Pipeline selection | YAML pipeline style/II changes planner metadata and generated HLS layer call pipeline-II arguments. | supported | supported | supported | Keep planner-to-codegen pipeline regression tests current for inference and training. |
 | Parallelization selection | YAML PE/SIMD/unroll/partition knobs change planner metadata, generated HLS call arguments, and array partition mode pragmas. | supported | supported | supported | Keep planner-to-codegen parallel regression tests current for inference and training. |
 | Resource estimation | Compile/inspect emits pre-HLS LUT/FF/DSP/BRAM estimates. | supported_estimate_only | supported_estimate_only | supported_estimate_only | Keep clearly labeled as estimate unless compared to HLS/Vivado. |

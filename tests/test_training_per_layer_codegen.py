@@ -339,6 +339,7 @@ def test_training_forward_dense_tiling_is_materialized() -> None:
     assert "FPGAI training forward tiling materialized" in source
     assert "FPGAI real dense tiling helper" in source
     assert "dense_out_in_tiled<4, 3, 2, 2" in source
+<<<<<<< HEAD
     assert "dense_weight_grad_tiled<4, 3" in source
 
 
@@ -402,3 +403,6 @@ def test_training_dense_backward_update_tiling_is_materialized() -> None:
     assert "dense_backward_input_tiled<4, 3" in source
     assert "sgd_update_wgt_tiled<12" in source
     assert "sgd_update_bias_tiled<3" in source
+=======
+    assert "dense_weight_grad_typed<4, 3" in source
+>>>>>>> 901de078132a537e425cac7602bc09eef226e2d3
