@@ -80,6 +80,7 @@ Vivado bridge generation can emit:
 
 ## Latest update
 
+- Precision selection now has an explicit regression proof from `precision_mode` materialization to generated HLS typedef changes.
 - Added `docs/FEATURE_MATRIX.md` as the public feature-support contract.
 - Core compiler features will only be marked supported when YAML, compiler, generated HLS/C++, manifest/reporting, and tests all agree.
 - Documentation now has a clean entry point at `docs/README.md`.

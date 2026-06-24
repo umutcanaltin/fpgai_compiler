@@ -713,3 +713,80 @@ def test_mixed_precision_top_rejects_unresolved_add() -> None:
             top_name="deeplearn",
             weights_mode="embedded",
         )
+
+def test_precision_mode_materialization_changes_generated_types() -> None:
+    from fpgai.experiments.config_materializer import (
+        apply_parameter_overrides,
+    )
+
+    base_config = _base_config()
+    base_config["analysis"] = {
+        "precision_sweep": {
+            "candidates": [
+                {
+                    "name": "fx8_3",
+                    "defaults": {
+                        "activation": _spec(8, 3),
+                        "weight": _spec(8, 3),
+                        "bias": _spec(16, 6),
+                        "accum": _spec(16, 6),
+                    },
+                },
+                {
+                    "name": "fx16_6",
+                    "defaults": {
+                        "activation": _spec(16, 6),
+                        "weight": _spec(16, 6),
+                        "bias": _spec(24, 10),
+                        "accum": _spec(24, 10),
+                    },
+                },
+            ]
+        }
+    }
+
+    fx8_config, fx8_report = apply_parameter_overrides(
+        base_config,
+        {"precision_mode": "fx8_3"},
+    )
+    fx16_config, fx16_report = apply_parameter_overrides(
+        base_config,
+        {"precision_mode": "fx16_6"},
+    )
+
+    assert fx8_report.applied["precision_mode"] == "numerics.defaults"
+    assert fx16_report.applied["precision_mode"] == "numerics.defaults"
+
+    fx8_graph = _dense_graph()
+    resolve_layerwise_precision(
+        fx8_graph,
+        fx8_config,
+    )
+    fx8_header = emit_types_h(
+        fx8_graph,
+        top_name="deeplearn",
+        raw_cfg=fx8_config,
+    )
+
+    fx16_graph = _dense_graph()
+    resolve_layerwise_precision(
+        fx16_graph,
+        fx16_config,
+    )
+    fx16_header = emit_types_h(
+        fx16_graph,
+        top_name="deeplearn",
+        raw_cfg=fx16_config,
+    )
+
+    assert fx8_header != fx16_header
+
+    assert "typedef ap_fixed<8,3> act_t;" in fx8_header
+    assert "typedef ap_fixed<8,3> wgt_t;" in fx8_header
+    assert "typedef ap_fixed<16,6> bias_t;" in fx8_header
+    assert "typedef ap_fixed<16,6> acc_t;" in fx8_header
+
+    assert "typedef ap_fixed<16,6> act_t;" in fx16_header
+    assert "typedef ap_fixed<16,6> wgt_t;" in fx16_header
+    assert "typedef ap_fixed<24,10> bias_t;" in fx16_header
+    assert "typedef ap_fixed<24,10> acc_t;" in fx16_header
