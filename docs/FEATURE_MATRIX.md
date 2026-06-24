@@ -39,7 +39,7 @@ A feature is `supported` only when all of these are true:
 | Runtime package | Compile emits runtime package metadata and copies existing runtime-facing files. | supported | Keep hardware presence flags truthful. |
 | Inference correctness benchmark | Supported inference flows compare outputs against reference/ONNX Runtime. | supported | Keep benchmark limitations documented. |
 | Training support | Training config generates and validates training artifacts including forward/loss/gradient/update behavior. | experimental | Audit and either finish correctness/convergence support or downgrade all public claims. |
-| Communication optimization | Compiler models data movement and records communication plans. | partial | Separate modeled transfer planning from measured board-level DMA runtime. |
+| Communication optimization | Compiler models input/weight/output/aux tensor-edge data movement, per-edge precision/compression, transfer estimates, and generated HLS communication annotations. | supported | Compression codecs are modeled unless implemented_in_hls=true; measured board DMA speedup remains outside this claim. |
 
 ## Implementation order
 

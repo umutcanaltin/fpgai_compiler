@@ -80,6 +80,7 @@ Vivado bridge generation can emit:
 
 ## Latest update
 
+- Communication planning now models input, weight, output, and aux tensor edges with per-edge precision, compression codec, transfer-byte estimates, and generated HLS annotations. Codec compression is marked modeled unless implemented in generated HLS.
 - Parallelization selection now has YAML-to-planner-to-generated-HLS proof for PE/SIMD, unroll, partition factors, and array partition mode.
 - Pipeline selection now has YAML-to-planner-to-generated-HLS proof for style-derived and explicit initiation interval settings.
 - Tiling selection now has YAML-to-planner-to-generated-HLS proof for Dense and Conv tiled helper generation.

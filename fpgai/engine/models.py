@@ -462,6 +462,14 @@ class CommunicationEdge:
     axi_word_bits: int = 32
     burst_len: int = 16
     unpack_in_pl: bool = False
+    size_bytes: int = 0
+    transfer_bytes: int = 0
+    precision_bits: Optional[int] = None
+    compression_enabled: bool = False
+    codec: str = "raw"
+    source: str = "HOST"
+    destination: str = "PL"
+    implemented_in_hls: bool = False
     notes: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:

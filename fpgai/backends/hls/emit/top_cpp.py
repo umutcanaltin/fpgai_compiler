@@ -1780,3 +1780,74 @@ def emit_top_cpp(*args, **kwargs):
         "generated standalone HLS C simulation keeps embedded constants for reproducibility.\n"
     )
     return planning_comment + source
+
+
+
+# FPGAI communication-edge annotation wrapper.
+# The normal top emitter still implements raw AXI stream I/O.  This wrapper
+# makes tensor-edge communication planning visible in generated HLS artifacts
+# without claiming unsupported hardware compression decoders.
+_fpgai_comm_edge_previous_emit_top_cpp = emit_top_cpp
+
+
+def _fpgai_comm_plan_to_dict(plan):
+    if plan is None:
+        return {}
+    if hasattr(plan, "to_dict"):
+        data = plan.to_dict()
+        return data if isinstance(data, dict) else {}
+    return plan if isinstance(plan, dict) else {}
+
+
+def _fpgai_comm_edge_macros(communication_plan) -> str:
+    plan = _fpgai_comm_plan_to_dict(communication_plan)
+    edges = plan.get("edges", []) if isinstance(plan, dict) else []
+    if not edges:
+        return ""
+
+    lines = [
+        "// FPGAI communication tensor-edge plan.",
+        "// Compression codecs other than raw are modeled unless implemented_in_hls=true.",
+    ]
+
+    for edge in edges:
+        if not isinstance(edge, dict):
+            continue
+
+        tensor = str(edge.get("tensor_name", "tensor")).replace(" ", "_")
+        kind = str(edge.get("notes", {}).get("kind", tensor)).replace(" ", "_").upper()
+        direction = str(edge.get("direction", "?"))
+        codec = str(edge.get("codec", edge.get("encoding", "raw")))
+        precision_bits = edge.get("precision_bits")
+        transfer_bytes = edge.get("transfer_bytes")
+        size_bytes = edge.get("size_bytes")
+        implemented = edge.get("implemented_in_hls")
+
+        macro_prefix = "FPGAI_COMM_" + "".join(
+            ch if ch.isalnum() else "_"
+            for ch in kind
+        )
+
+        if precision_bits is not None:
+            lines.append(f"#define {macro_prefix}_PRECISION_BITS {int(precision_bits)}")
+        if transfer_bytes is not None:
+            lines.append(f"#define {macro_prefix}_TRANSFER_BYTES {int(transfer_bytes)}")
+
+        lines.append(
+            f"//   tensor={tensor} kind={kind.lower()} direction={direction} "
+            f"codec={codec} size_bytes={size_bytes} transfer_bytes={transfer_bytes} "
+            f"implemented_in_hls={implemented}"
+        )
+
+    return "\n".join(lines) + "\n\n"
+
+
+def emit_top_cpp(*args, **kwargs):
+    communication_plan = kwargs.get("communication_plan")
+    source = _fpgai_comm_edge_previous_emit_top_cpp(*args, **kwargs)
+    macros = _fpgai_comm_edge_macros(communication_plan)
+    if not macros:
+        return source
+    if "FPGAI communication tensor-edge plan" in source:
+        return source
+    return macros + source

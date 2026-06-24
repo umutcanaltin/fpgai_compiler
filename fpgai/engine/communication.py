@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 
 from fpgai.config.access import get_path
 from fpgai.engine.models import CommunicationEdge, CommunicationPlan, MemoryPlan
@@ -9,51 +9,358 @@ from fpgai.engine.models import CommunicationEdge, CommunicationPlan, MemoryPlan
 _cfg_get = get_path
 
 
-def _edge_direction(kind: str, region: str) -> str:
+def _as_dict(value: Any) -> Dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _positive_int(value: Any, default: int) -> int:
+    if value is None or isinstance(value, bool):
+        return int(default)
+    try:
+        parsed = int(value)
+    except Exception:
+        return int(default)
+    return parsed if parsed > 0 else int(default)
+
+
+def _bool_cfg(raw: Dict[str, Any], path: str, default: bool) -> bool:
+    value = _cfg_get(raw, path, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"1", "true", "yes", "on", "enabled"}:
+            return True
+        if lowered in {"0", "false", "no", "off", "disabled"}:
+            return False
+    return bool(default if value is None else value)
+
+
+def _edge_direction(kind: str, region: str, mode: str = "") -> str:
     kind_u = str(kind).lower()
     region_u = str(region).upper()
+    mode_u = str(mode).lower()
 
-    if kind_u in ("input", "weight") and region_u in ("HOST", "DDR"):
+    if kind_u in {"input", "weight", "bias", "target", "aux"}:
         return "PS_TO_PL"
-    if kind_u == "output":
+    if kind_u in {"output", "loss", "gradient", "updated_weight"}:
         return "PL_TO_PS"
-    if region_u in ("BRAM", "URAM", "LUTRAM"):
+    if mode_u in {"stream", "streamed", "ddr", "dma_ddr", "external_ddr"}:
+        return "PS_TO_PL"
+    if region_u in {"BRAM", "URAM", "LUTRAM"}:
         return "PL_TO_PL"
+    if region_u in {"HOST", "DDR"}:
+        return "PS_TO_PL"
     return "PS_TO_PL"
 
 
-def _choose_encoding(
+def _edge_path(kind: str) -> str:
+    kind_u = str(kind).lower()
+    if kind_u in {"input", "activation_in"}:
+        return "data_movement.ps_pl.input"
+    if kind_u in {"weight", "bias", "param", "parameter"}:
+        return "data_movement.ps_pl.weights"
+    if kind_u in {"target", "aux"}:
+        return "data_movement.ps_pl.aux"
+    if kind_u in {"output", "activation_out"}:
+        return "data_movement.pl_ps.output"
+    if kind_u in {"loss"}:
+        return "data_movement.pl_ps.loss"
+    if kind_u in {"gradient", "updated_weight"}:
+        return "data_movement.pl_ps.gradients"
+    return f"data_movement.tensor_edges.{kind_u}"
+
+
+def _edge_cfg(raw: Dict[str, Any], kind: str) -> Dict[str, Any]:
+    return _as_dict(_cfg_get(raw, _edge_path(kind), {}))
+
+
+def _global_compression_cfg(raw: Dict[str, Any], direction: str) -> Dict[str, Any]:
+    if direction == "PL_TO_PS":
+        cfg = _cfg_get(raw, "data_movement.pl_ps.compression", None)
+        if cfg is None:
+            cfg = _cfg_get(raw, "data_movement.compression", {})
+        return _as_dict(cfg)
+    cfg = _cfg_get(raw, "data_movement.ps_pl.compression", None)
+    if cfg is None:
+        cfg = _cfg_get(raw, "data_movement.compression", {})
+    return _as_dict(cfg)
+
+
+def _precision_bits_from_spec(spec: Any) -> int | None:
+    spec_d = _as_dict(spec)
+    value = spec_d.get("total_bits")
+    if value is None:
+        value = spec_d.get("bits")
+    if value is None:
+        return None
+    try:
+        parsed = int(value)
+    except Exception:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _precision_bits_for(kind: str, placement_notes: Dict[str, Any], edge_cfg: Dict[str, Any]) -> int | None:
+    explicit = _precision_bits_from_spec(edge_cfg.get("precision"))
+    if explicit is not None:
+        return explicit
+
+    kind_u = str(kind).lower()
+    if kind_u in {"weight", "bias", "param", "parameter"}:
+        value = placement_notes.get("weight_bits")
+        if value is None:
+            value = placement_notes.get("bias_bits")
+    else:
+        value = placement_notes.get("act_bits")
+
+    if isinstance(value, int) and value > 0:
+        return value
+    try:
+        parsed = int(value)
+    except Exception:
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _compression_policy(raw: Dict[str, Any], kind: str, direction: str, edge_cfg: Dict[str, Any]) -> tuple[bool, str]:
+    edge_compression = _as_dict(edge_cfg.get("compression"))
+    global_compression = _global_compression_cfg(raw, direction)
+
+    enabled = edge_compression.get("enabled", global_compression.get("enabled", False))
+    if isinstance(enabled, str):
+        enabled = enabled.strip().lower() in {"1", "true", "yes", "on", "enabled"}
+    enabled = bool(enabled)
+
+    codec = str(
+        edge_compression.get(
+            "codec",
+            edge_compression.get(
+                "encoding",
+                global_compression.get("codec", global_compression.get("encoding", "raw")),
+            ),
+        )
+        or "raw"
+    ).strip().lower()
+
+    if not enabled:
+        return False, "raw"
+
+    if codec in {"none", "off", "false"}:
+        return False, "raw"
+
+    if codec not in {"raw", "bitpack", "rle", "delta", "sparse"}:
+        codec = "bitpack"
+
+    return True, codec
+
+
+def _estimate_transfer_bytes(
     *,
+    size_bytes: int,
+    precision_bits: int | None,
+    compression_enabled: bool,
+    codec: str,
+    default_payload_bits: int = 32,
+) -> tuple[int, int | None]:
+    size_bytes = max(0, int(size_bytes))
+    packed_bits = precision_bits if precision_bits and precision_bits > 0 else None
+
+    if not compression_enabled or codec == "raw":
+        return size_bytes, packed_bits
+
+    if codec == "bitpack":
+        bits = packed_bits or default_payload_bits
+        # Existing tensors are byte-sized estimates. Interpret as default 32-bit
+        # elements unless precision metadata says otherwise.
+        elements = max(1, (size_bytes * 8 + default_payload_bits - 1) // default_payload_bits)
+        return max(1, (elements * bits + 7) // 8), bits
+
+    if codec == "rle":
+        return max(1, size_bytes // 2), packed_bits
+
+    if codec == "delta":
+        return max(1, (size_bytes * 3) // 4), packed_bits
+
+    if codec == "sparse":
+        return max(1, (size_bytes * 35) // 100), packed_bits
+
+    return size_bytes, packed_bits
+
+
+def _implemented_in_hls(kind: str, direction: str, codec: str, mode: str) -> bool:
+    # Current generated HLS implements raw AXI stream I/O and raw runtime
+    # weight preload through stream/DDR. Compression codecs are modeled unless
+    # a dedicated codec decoder/encoder is generated.
+    if codec != "raw":
+        return False
+
+    kind_u = str(kind).lower()
+    mode_u = str(mode).lower()
+    if kind_u in {"input", "output"}:
+        return True
+    if kind_u in {"weight", "bias", "param", "parameter"} and mode_u in {
+        "embedded",
+        "stream",
+        "streamed",
+        "ddr",
+        "dma_ddr",
+        "external_ddr",
+    }:
+        return True
+    return direction in {"PS_TO_PL", "PL_TO_PS", "PL_TO_PL"}
+
+
+def _default_mode_for(kind: str, region: str, edge_cfg: Dict[str, Any]) -> str:
+    configured = edge_cfg.get("mode")
+    if configured is not None:
+        return str(configured).strip().lower()
+
+    kind_u = str(kind).lower()
+    region_u = str(region).upper()
+    if kind_u in {"input", "output", "target", "aux", "loss", "gradient"}:
+        return "stream"
+    if kind_u in {"weight", "bias", "param", "parameter"}:
+        if region_u == "DDR":
+            return "ddr"
+        return "embedded"
+    return "internal"
+
+
+def _make_edge(
+    *,
+    raw: Dict[str, Any],
     policy_name: str,
-    enable_bitpack: bool,
-    enable_compression: bool,
+    tensor_name: str,
     kind: str,
     region: str,
     size_bytes: int,
-) -> str:
-    kind_u = str(kind).lower()
-    region_u = str(region).upper()
+    placement_notes: Dict[str, Any],
+    double_buffer: bool = False,
+    default_axi_word_bits: int,
+    default_burst_len: int,
+) -> CommunicationEdge:
+    edge_cfg = _edge_cfg(raw, kind)
+    mode = _default_mode_for(kind, region, edge_cfg)
+    direction = _edge_direction(kind, region, mode)
+    precision_bits = _precision_bits_for(kind, placement_notes, edge_cfg)
 
-    if kind_u == "output":
-        return "raw"
+    compression_enabled, codec = _compression_policy(raw, kind, direction, edge_cfg)
+    transfer_bytes, packed_bits = _estimate_transfer_bytes(
+        size_bytes=size_bytes,
+        precision_bits=precision_bits,
+        compression_enabled=compression_enabled,
+        codec=codec,
+    )
 
-    if region_u == "DDR" and enable_compression and size_bytes >= 64 * 1024:
-        return "rle"
+    axi_word_bits = _positive_int(
+        edge_cfg.get("axi_word_bits", _cfg_get(raw, "communication.axi.word_bits", default_axi_word_bits)),
+        default_axi_word_bits,
+    )
+    burst_len = _positive_int(
+        edge_cfg.get("burst_len", _cfg_get(raw, "communication.axi.burst_len", default_burst_len)),
+        default_burst_len,
+    )
 
-    if enable_bitpack and kind_u in ("weight", "activation", "input"):
-        return "bitpack"
+    unpack_in_pl = codec in {"bitpack", "rle", "delta", "sparse"} and direction == "PS_TO_PL"
 
-    return "raw"
+    return CommunicationEdge(
+        tensor_name=str(tensor_name),
+        direction=direction,
+        encoding=codec,
+        packed_bits=packed_bits if codec == "bitpack" else None,
+        axi_word_bits=axi_word_bits,
+        burst_len=burst_len,
+        unpack_in_pl=unpack_in_pl,
+        size_bytes=max(0, int(size_bytes)),
+        transfer_bytes=int(transfer_bytes),
+        precision_bits=precision_bits,
+        compression_enabled=compression_enabled,
+        codec=codec,
+        source="PL" if direction == "PL_TO_PS" else ("PL" if direction == "PL_TO_PL" else "HOST"),
+        destination="HOST" if direction == "PL_TO_PS" else "PL",
+        implemented_in_hls=_implemented_in_hls(kind, direction, codec, mode),
+        notes={
+            "policy_name": policy_name,
+            "kind": kind,
+            "region": region,
+            "mode": mode,
+            "double_buffer": bool(double_buffer),
+            "reason": placement_notes.get("reason"),
+            "edge_config_path": _edge_path(kind),
+            "modeled_transfer": codec != "raw",
+            "hardware_codec": codec == "raw",
+            "original_size_bytes": max(0, int(size_bytes)),
+            "estimated_transfer_bytes": int(transfer_bytes),
+        },
+    )
 
 
-def _packed_bits_for(notes: Dict[str, Any]) -> int | None:
-    act_bits = notes.get("act_bits")
-    weight_bits = notes.get("weight_bits")
-    if isinstance(weight_bits, int):
-        return weight_bits
-    if isinstance(act_bits, int):
-        return act_bits
-    return None
+def _synthetic_size(raw: Dict[str, Any], path: str, default: int) -> int:
+    return _positive_int(
+        _cfg_get(raw, f"{path}.size_bytes", _cfg_get(raw, f"{path}.bytes", default)),
+        default,
+    )
+
+
+def _append_synthetic_io_edges(
+    *,
+    raw: Dict[str, Any],
+    edges: List[CommunicationEdge],
+    policy_name: str,
+    default_axi_word_bits: int,
+    default_burst_len: int,
+    existing_kinds: set[str],
+) -> None:
+    # Ensure input/output communication is always represented even when the
+    # memory plan only contains parameter/internal activation placements.
+    if "input" not in existing_kinds:
+        input_cfg = _edge_cfg(raw, "input")
+        edges.append(
+            _make_edge(
+                raw=raw,
+                policy_name=policy_name,
+                tensor_name=str(input_cfg.get("tensor_name", "input")),
+                kind="input",
+                region=str(input_cfg.get("region", "HOST")),
+                size_bytes=_synthetic_size(raw, "data_movement.ps_pl.input", 4),
+                placement_notes={},
+                default_axi_word_bits=default_axi_word_bits,
+                default_burst_len=default_burst_len,
+            )
+        )
+
+    if "output" not in existing_kinds:
+        output_cfg = _edge_cfg(raw, "output")
+        edges.append(
+            _make_edge(
+                raw=raw,
+                policy_name=policy_name,
+                tensor_name=str(output_cfg.get("tensor_name", "output")),
+                kind="output",
+                region=str(output_cfg.get("region", "HOST")),
+                size_bytes=_synthetic_size(raw, "data_movement.pl_ps.output", 4),
+                placement_notes={},
+                default_axi_word_bits=default_axi_word_bits,
+                default_burst_len=default_burst_len,
+            )
+        )
+
+    aux_cfg = _edge_cfg(raw, "aux")
+    if aux_cfg.get("enabled", False) and "aux" not in existing_kinds and "target" not in existing_kinds:
+        edges.append(
+            _make_edge(
+                raw=raw,
+                policy_name=policy_name,
+                tensor_name=str(aux_cfg.get("tensor_name", "aux")),
+                kind="aux",
+                region=str(aux_cfg.get("region", "HOST")),
+                size_bytes=_synthetic_size(raw, "data_movement.ps_pl.aux", 4),
+                placement_notes={},
+                default_axi_word_bits=default_axi_word_bits,
+                default_burst_len=default_burst_len,
+            )
+        )
 
 
 def make_communication_plan(cfg, memory_plan: MemoryPlan) -> CommunicationPlan:
@@ -62,68 +369,64 @@ def make_communication_plan(cfg, memory_plan: MemoryPlan) -> CommunicationPlan:
 
     policy_name = str(cnotes.get("policy_name", "Balanced"))
 
-    # compiler notes may not be inside memory plan notes in older runs
     axi_word_bits = int(_cfg_get(raw, "communication.axi.word_bits", 128))
     burst_len = int(_cfg_get(raw, "communication.axi.burst_len", 32))
-    enable_bitpack = bool(_cfg_get(raw, "data_movement.ps_pl.compression.enabled", True))
-    enable_compression = bool(_cfg_get(raw, "data_movement.ps_pl.compression.enabled", True))
 
-    # policy-aware defaults if explicit config is absent
     if policy_name == "Fit-First":
         axi_word_bits = int(_cfg_get(raw, "communication.axi.word_bits", 64))
         burst_len = int(_cfg_get(raw, "communication.axi.burst_len", 16))
-        enable_bitpack = bool(_cfg_get(raw, "data_movement.ps_pl.compression.enabled", False))
     elif policy_name == "Latency-First":
         axi_word_bits = int(_cfg_get(raw, "communication.axi.word_bits", 128))
         burst_len = int(_cfg_get(raw, "communication.axi.burst_len", 64))
-        enable_bitpack = bool(_cfg_get(raw, "data_movement.ps_pl.compression.enabled", True))
 
     edges: List[CommunicationEdge] = []
+    existing_kinds: set[str] = set()
 
     for p in memory_plan.placements:
-        direction = _edge_direction(p.kind, p.region)
-        encoding = _choose_encoding(
-            policy_name=policy_name,
-            enable_bitpack=enable_bitpack,
-            enable_compression=enable_compression,
-            kind=p.kind,
-            region=p.region,
-            size_bytes=int(p.size_bytes),
-        )
-
-        packed_bits = None
-        if encoding == "bitpack":
-            packed_bits = _packed_bits_for(p.notes)
-
-        unpack_in_pl = encoding in ("bitpack", "rle") and direction != "PL_TO_PS"
+        notes = getattr(p, "notes", {}) or {}
+        kind = str(getattr(p, "kind", "tensor")).lower()
+        region = str(getattr(p, "region", "BRAM"))
+        existing_kinds.add(kind)
 
         edges.append(
-            CommunicationEdge(
-                tensor_name=p.tensor_name,
-                direction=direction,
-                encoding=encoding,
-                packed_bits=packed_bits,
-                axi_word_bits=axi_word_bits,
-                burst_len=burst_len,
-                unpack_in_pl=unpack_in_pl,
-                notes={
-                    "policy_name": policy_name,
-                    "kind": p.kind,
-                    "region": p.region,
-                    "double_buffer": p.double_buffer,
-                    "reason": p.notes.get("reason"),
-                },
+            _make_edge(
+                raw=raw,
+                policy_name=policy_name,
+                tensor_name=str(getattr(p, "tensor_name", kind)),
+                kind=kind,
+                region=region,
+                size_bytes=int(getattr(p, "size_bytes", 0) or 0),
+                placement_notes=notes,
+                double_buffer=bool(getattr(p, "double_buffer", False)),
+                default_axi_word_bits=axi_word_bits,
+                default_burst_len=burst_len,
             )
         )
+
+    _append_synthetic_io_edges(
+        raw=raw,
+        edges=edges,
+        policy_name=policy_name,
+        default_axi_word_bits=axi_word_bits,
+        default_burst_len=burst_len,
+        existing_kinds=existing_kinds,
+    )
+
+    total_original_bytes = sum(int(edge.size_bytes) for edge in edges)
+    total_transfer_bytes = sum(int(edge.transfer_bytes) for edge in edges)
 
     return CommunicationPlan(
         edges=edges,
         notes={
-            "planner": "policy_comm_v2",
+            "planner": "tensor_edge_comm_v1",
             "policy_name": policy_name,
             "axi_word_bits": axi_word_bits,
             "burst_len": burst_len,
-            "enable_bitpack": enable_bitpack,
-            "enable_compression": enable_compression,
+            "total_original_bytes": total_original_bytes,
+            "total_transfer_bytes": total_transfer_bytes,
+            "modeled_transfer_reduction_bytes": total_original_bytes - total_transfer_bytes,
+            "contains_modeled_codecs": any(edge.codec != "raw" for edge in edges),
+            "contains_hardware_codecs": any(edge.codec != "raw" and edge.implemented_in_hls for edge in edges),
+            "scope": "input_weight_output_aux_tensor_edges",
         },
     )

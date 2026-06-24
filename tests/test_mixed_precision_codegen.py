@@ -912,3 +912,193 @@ def test_weight_storage_binding_changes_generated_hls_pragmas() -> None:
     assert "impl=bram" not in ddr_cpp
     assert "impl=uram" not in ddr_cpp
     assert "impl=lutram" not in ddr_cpp
+
+
+
+def test_tensor_edge_communication_plan_models_input_weight_output_precision_and_compression() -> None:
+    from types import SimpleNamespace
+
+    from fpgai.engine.communication import make_communication_plan
+
+    cfg = SimpleNamespace(
+        raw={
+            "communication": {
+                "axi": {
+                    "word_bits": 128,
+                    "burst_len": 64,
+                }
+            },
+            "data_movement": {
+                "ps_pl": {
+                    "input": {
+                        "mode": "stream",
+                        "size_bytes": 128,
+                        "precision": {
+                            "type": "ap_fixed",
+                            "total_bits": 8,
+                            "int_bits": 3,
+                        },
+                        "compression": {
+                            "enabled": True,
+                            "codec": "bitpack",
+                        },
+                    },
+                    "weights": {
+                        "mode": "ddr",
+                        "compression": {
+                            "enabled": True,
+                            "codec": "rle",
+                        },
+                    },
+                    "aux": {
+                        "enabled": True,
+                        "mode": "stream",
+                        "size_bytes": 32,
+                        "precision": {
+                            "type": "ap_fixed",
+                            "total_bits": 12,
+                            "int_bits": 4,
+                        },
+                        "compression": {
+                            "enabled": True,
+                            "codec": "delta",
+                        },
+                    },
+                },
+                "pl_ps": {
+                    "output": {
+                        "mode": "stream",
+                        "size_bytes": 64,
+                        "precision": {
+                            "type": "ap_fixed",
+                            "total_bits": 16,
+                            "int_bits": 6,
+                        },
+                        "compression": {
+                            "enabled": False,
+                        },
+                    },
+                },
+            },
+        }
+    )
+
+    memory_plan = SimpleNamespace(
+        notes={
+            "policy_name": "Latency-First",
+        },
+        placements=[
+            SimpleNamespace(
+                tensor_name="W0",
+                kind="weight",
+                region="DDR",
+                size_bytes=256,
+                double_buffer=True,
+                notes={
+                    "weight_bits": 8,
+                    "reason": "unit-test",
+                },
+            )
+        ],
+    )
+
+    plan = make_communication_plan(cfg, memory_plan)
+    data = plan.to_dict()
+    edges = {
+        edge["tensor_name"]: edge
+        for edge in data["edges"]
+    }
+
+    assert data["notes"]["planner"] == "tensor_edge_comm_v1"
+    assert data["notes"]["scope"] == "input_weight_output_aux_tensor_edges"
+    assert data["notes"]["contains_modeled_codecs"] is True
+    assert data["notes"]["contains_hardware_codecs"] is False
+
+    assert edges["input"]["direction"] == "PS_TO_PL"
+    assert edges["input"]["precision_bits"] == 8
+    assert edges["input"]["codec"] == "bitpack"
+    assert edges["input"]["packed_bits"] == 8
+    assert edges["input"]["transfer_bytes"] < edges["input"]["size_bytes"]
+    assert edges["input"]["unpack_in_pl"] is True
+    assert edges["input"]["implemented_in_hls"] is False
+
+    assert edges["W0"]["direction"] == "PS_TO_PL"
+    assert edges["W0"]["codec"] == "rle"
+    assert edges["W0"]["transfer_bytes"] < edges["W0"]["size_bytes"]
+    assert edges["W0"]["implemented_in_hls"] is False
+
+    assert edges["output"]["direction"] == "PL_TO_PS"
+    assert edges["output"]["precision_bits"] == 16
+    assert edges["output"]["codec"] == "raw"
+    assert edges["output"]["transfer_bytes"] == edges["output"]["size_bytes"]
+    assert edges["output"]["implemented_in_hls"] is True
+
+    assert edges["aux"]["direction"] == "PS_TO_PL"
+    assert edges["aux"]["precision_bits"] == 12
+    assert edges["aux"]["codec"] == "delta"
+    assert edges["aux"]["transfer_bytes"] < edges["aux"]["size_bytes"]
+
+
+def test_communication_plan_is_visible_in_generated_top_cpp_artifact() -> None:
+    from types import SimpleNamespace
+
+    from fpgai.backends.hls.emit.top_cpp import emit_top_cpp
+    from fpgai.engine.communication import make_communication_plan
+
+    graph = _dense_graph()
+    resolve_layerwise_precision(
+        graph,
+        _base_config(),
+    )
+
+    cfg = SimpleNamespace(
+        raw={
+            "data_movement": {
+                "ps_pl": {
+                    "input": {
+                        "size_bytes": 128,
+                        "precision": {
+                            "total_bits": 8,
+                        },
+                        "compression": {
+                            "enabled": True,
+                            "codec": "bitpack",
+                        },
+                    },
+                    "weights": {
+                        "mode": "embedded",
+                        "compression": {
+                            "enabled": False,
+                        },
+                    },
+                },
+                "pl_ps": {
+                    "output": {
+                        "size_bytes": 64,
+                        "precision": {
+                            "total_bits": 16,
+                        },
+                        "compression": {
+                            "enabled": False,
+                        },
+                    }
+                },
+            }
+        }
+    )
+    memory_plan = SimpleNamespace(notes={}, placements=[])
+    communication_plan = make_communication_plan(cfg, memory_plan)
+
+    source = emit_top_cpp(
+        graph,
+        top_name="deeplearn",
+        weights_mode="embedded",
+        communication_plan=communication_plan,
+    )
+
+    assert "FPGAI communication tensor-edge plan" in source
+    assert "#define FPGAI_COMM_INPUT_PRECISION_BITS 8" in source
+    assert "#define FPGAI_COMM_INPUT_TRANSFER_BYTES" in source
+    assert "#define FPGAI_COMM_OUTPUT_PRECISION_BITS 16" in source
+    assert "codec=bitpack" in source
+    assert "implemented_in_hls=False" in source
