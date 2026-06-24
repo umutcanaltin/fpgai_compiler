@@ -103,11 +103,11 @@ template<
     int TILE_OH,
     int TILE_OW,
     int TILE_IC,
-    typename IN_T = act_t,
-    typename OUT_T = act_t,
-    typename W_T = weight_t,
-    typename B_T = bias_t,
-    typename ACC_T = acc_t,
+    typename IN_T,
+    typename OUT_T,
+    typename W_T,
+    typename B_T,
+    typename ACC_T,
     int PIPELINE_II = 1,
     int OC_UNROLL = 1,
     int IC_UNROLL = 1,
@@ -118,7 +118,7 @@ template<
 void conv2d_tiled(
     const IN_T input[IN_H * IN_W * IN_C],
     OUT_T output[OUT_H * OUT_W * OUT_C],
-    const W_T weights[OUT_C][IN_C][K][K],
+    const W_T weights[OUT_C * IN_C * K * K],
     const B_T bias[OUT_C]
 ) {
 #pragma HLS INLINE off
@@ -196,7 +196,7 @@ void conv2d_tiled(
 #pragma HLS PIPELINE II=PIPELINE_II
                                     weight_tile[oc_inner][ic_inner][kh][kw] =
                                         (oc < OUT_C && ic < IN_C)
-                                        ? weights[oc][ic][kh][kw]
+                                        ? weights[((oc) * IN_C * K * K) + ((ic) * K * K) + ((kh) * K) + (kw)]
                                         : (W_T)0;
                                 }
                             }

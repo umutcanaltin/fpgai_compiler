@@ -7,7 +7,7 @@ defaults:
   model_path: models/cnn_mnist.onnx
   board: kv260
   metrics_json: build/fpgai_example_dense/calibration/estimate_vs_hls.json
-  precision_mode: fixed
+  precision_mode: fx16_6
 parameters:
   policy:
   - resource_first

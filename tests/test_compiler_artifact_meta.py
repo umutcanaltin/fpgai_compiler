@@ -324,3 +324,15 @@ def test_compiler_manifest_records_training_reference_and_estimate_in_source() -
     assert "\"total_gradient_bytes\": kwargs[\"training_estimate_result\"].total_gradient_bytes" in source
     assert "\"total_optimizer_state_bytes\": kwargs[\"training_estimate_result\"].total_optimizer_state_bytes" in source
 
+
+
+
+def test_params_cpp_does_not_emit_file_scope_bind_storage_pragmas():
+    from pathlib import Path
+
+    source = Path("fpgai/backends/hls/emit/params_cpp.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "#pragma HLS BIND_STORAGE" not in source
+    assert "file-scope BIND_STORAGE disabled" in source

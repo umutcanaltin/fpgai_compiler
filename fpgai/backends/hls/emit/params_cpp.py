@@ -53,10 +53,11 @@ def _parameter_binding_pragmas(graph, storage_impl: str | None) -> list[str]:
 
     lines = [
         "",
-        f"// FPGAI storage binding: parameter arrays mapped to {impl.upper()}.",
+        f"// FPGAI storage binding: parameter arrays requested for {impl.upper()}.",
+        "// FPGAI note: file-scope BIND_STORAGE pragmas are disabled because Vitis HLS csynth rejects them on global const arrays.",
     ]
-    parameter_index = 0
 
+    parameter_index = 0
     for op in getattr(graph, "ops", []):
         op_type = str(getattr(op, "op_type", "")).lower()
         if op_type not in {"dense", "gemm", "conv"}:
@@ -69,16 +70,17 @@ def _parameter_binding_pragmas(graph, storage_impl: str | None) -> list[str]:
 
         if weight_count > 0:
             lines.append(
-                f"#pragma HLS BIND_STORAGE variable=W{parameter_index} type=ram_1p impl={impl}"
+                f"// FPGAI storage binding: {impl} requested for W{parameter_index}; file-scope BIND_STORAGE disabled."
             )
         if bias_count > 0:
             lines.append(
-                f"#pragma HLS BIND_STORAGE variable=B{parameter_index} type=ram_1p impl={impl}"
+                f"// FPGAI storage binding: {impl} requested for B{parameter_index}; file-scope BIND_STORAGE disabled."
             )
 
         parameter_index += 1
 
     return lines
+
 
 
 

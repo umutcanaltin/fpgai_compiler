@@ -896,14 +896,14 @@ def test_weight_storage_binding_changes_generated_hls_pragmas() -> None:
         storage_impl="ddr",
     )
 
-    assert "#pragma HLS BIND_STORAGE variable=W0 type=ram_1p impl=bram" in bram_cpp
-    assert "#pragma HLS BIND_STORAGE variable=B0 type=ram_1p impl=bram" in bram_cpp
+    assert "storage binding: bram requested for W0" in bram_cpp
+    assert "storage binding: bram requested for B0" in bram_cpp
 
-    assert "#pragma HLS BIND_STORAGE variable=W0 type=ram_1p impl=uram" in uram_cpp
-    assert "#pragma HLS BIND_STORAGE variable=B0 type=ram_1p impl=uram" in uram_cpp
+    assert "storage binding: uram requested for W0" in uram_cpp
+    assert "storage binding: uram requested for B0" in uram_cpp
 
-    assert "#pragma HLS BIND_STORAGE variable=W0 type=ram_1p impl=lutram" in lutram_cpp
-    assert "#pragma HLS BIND_STORAGE variable=B0 type=ram_1p impl=lutram" in lutram_cpp
+    assert "storage binding: lutram requested for W0" in lutram_cpp
+    assert "storage binding: lutram requested for B0" in lutram_cpp
 
     assert "impl=bram" not in uram_cpp
     assert "impl=uram" not in bram_cpp

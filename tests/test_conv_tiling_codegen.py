@@ -119,3 +119,21 @@ def test_top_cpp_is_wrapped_for_conv_tiling() -> None:
 
     assert "apply_conv_tiling_to_top_source" in source
     assert "_fpgai_conv_tiling_original_emit_top_cpp" in source
+
+
+def test_conv_tiled_helper_uses_explicit_types_and_flat_weights():
+    from pathlib import Path
+
+    source = Path("fpgai/backends/hls/emit/conv_tiling_codegen.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "typename IN_T = act_t" not in source
+    assert "typename OUT_T = act_t" not in source
+    assert "typename W_T = weight_t" not in source
+    assert "typename B_T = bias_t" not in source
+    assert "typename ACC_T = acc_t" not in source
+
+    assert "const W_T weights[OUT_C * IN_C * K * K]," in source
+    assert "weights[((" in source
+    assert "* IN_C * K * K" in source
