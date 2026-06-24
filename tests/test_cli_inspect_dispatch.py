@@ -55,3 +55,13 @@ def test_inspect_command_exposes_out_argument_in_parser_source():
     assert "model_profile_json" in source
     assert "prediction_summary_md" in source
 
+def test_inspect_prediction_helper_uses_existing_estimators_in_source():
+    from pathlib import Path
+
+    source = Path("fpgai/cli.py").read_text(encoding="utf-8")
+
+    assert "_inspection_predictions_from_config" in source
+    assert "estimate_resources_from_descriptors" in source
+    assert "estimate_performance" in source
+    assert "prediction_status" in source
+

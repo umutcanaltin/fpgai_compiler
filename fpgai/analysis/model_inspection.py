@@ -301,6 +301,9 @@ def inspect_config(
 def write_model_inspection_report(
     inspection: ModelInspection,
     out_dir: str | Path,
+    *,
+    resource_prediction: Mapping[str, Any] | None = None,
+    timing_prediction: Mapping[str, Any] | None = None,
 ) -> dict[str, str]:
     """Write model-inspection artifacts for CLI/report workflows."""
     output = Path(out_dir)
@@ -310,9 +313,33 @@ def write_model_inspection_report(
     )
 
     profile_json = output / "model_profile.json"
+    resource_json = output / "resource_prediction.json"
+    timing_json = output / "timing_prediction.json"
     summary_md = output / "prediction_summary.md"
 
     inspection.write_json(profile_json)
+
+    if resource_prediction is not None:
+        resource_json.write_text(
+            json.dumps(
+                dict(resource_prediction),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    if timing_prediction is not None:
+        timing_json.write_text(
+            json.dumps(
+                dict(timing_prediction),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
     lines = [
         "# FPGAI Model Inspection and Prediction Summary",
@@ -339,8 +366,16 @@ def write_model_inspection_report(
         "## Prediction status",
         "",
         "- `model_profile.json`: generated",
-        "- `resource_prediction.json`: not generated in this step",
-        "- `timing_prediction.json`: not generated in this step",
+        (
+            "- `resource_prediction.json`: generated"
+            if resource_prediction is not None
+            else "- `resource_prediction.json`: not generated"
+        ),
+        (
+            "- `timing_prediction.json`: generated"
+            if timing_prediction is not None
+            else "- `timing_prediction.json`: not generated"
+        ),
         "",
     ]
 
@@ -349,8 +384,16 @@ def write_model_inspection_report(
         encoding="utf-8",
     )
 
-    return {
+    paths = {
         "model_profile_json": str(profile_json),
         "prediction_summary_md": str(summary_md),
     }
+
+    if resource_prediction is not None:
+        paths["resource_prediction_json"] = str(resource_json)
+
+    if timing_prediction is not None:
+        paths["timing_prediction_json"] = str(timing_json)
+
+    return paths
 

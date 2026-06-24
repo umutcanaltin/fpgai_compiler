@@ -15,6 +15,12 @@ from typing import Any, Callable, TypeVar
 import yaml
 
 from fpgai.analysis.model_inspection import inspect_config, write_model_inspection_report
+from fpgai.analysis.performance_estimator import estimate_performance
+from fpgai.analysis.resource_estimator import estimate_resources_from_descriptors
+from fpgai.engine.planner import make_compile_plan
+from fpgai.engine.analysis import analyze_graph
+from fpgai.ir.passes import assign_stable_names
+from fpgai.frontend.onnx import import_onnx
 from fpgai.benchmark.pipeline import (
     run_compile_correctness_benchmark,
 )
@@ -315,6 +321,67 @@ def run_from_config(
         return 1
 
 
+def _inspection_predictions_from_config(cfg) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build honest pre-HLS resource/timing predictions for inspect artifacts."""
+    raw_cfg = getattr(cfg, "raw", {}) or {}
+    model_path = (
+        raw_cfg.get("model", {}).get("path")
+        or raw_cfg.get("model_path")
+        or getattr(getattr(cfg, "model", None), "path", None)
+    )
+
+    if model_path is None:
+        raise ValueError("Cannot build predictions without a model path")
+
+    graph = import_onnx(
+        model_path,
+        canonicalize=True,
+        infer_shapes=True,
+    )
+    graph = assign_stable_names(graph)
+
+    descriptors = analyze_graph(graph)
+    compile_plan = make_compile_plan(
+        cfg,
+        descriptors,
+    )
+
+    resource_prediction = estimate_resources_from_descriptors(
+        descriptors,
+        raw_cfg,
+        compile_plan=compile_plan,
+    )
+    timing_prediction = estimate_performance(
+        resource_estimate=resource_prediction,
+        raw_cfg=raw_cfg,
+    )
+
+    resource_prediction = dict(resource_prediction)
+    timing_prediction = dict(timing_prediction)
+
+    resource_prediction["prediction_kind"] = "pre_hls_resource_estimate"
+    resource_prediction["prediction_status"] = "estimate"
+    resource_prediction["model_path"] = str(model_path)
+    resource_prediction["descriptor_count"] = len(descriptors)
+    resource_prediction["architecture_signature"] = getattr(
+        compile_plan,
+        "architecture_signature",
+        None,
+    )
+
+    timing_prediction["prediction_kind"] = "pre_hls_timing_estimate"
+    timing_prediction["prediction_status"] = "estimate"
+    timing_prediction["model_path"] = str(model_path)
+    timing_prediction["descriptor_count"] = len(descriptors)
+    timing_prediction["architecture_signature"] = getattr(
+        compile_plan,
+        "architecture_signature",
+        None,
+    )
+
+    return resource_prediction, timing_prediction
+
+
 def inspect_from_config(
     config_path: str,
     *,
@@ -337,11 +404,18 @@ def inspect_from_config(
             wrote_anything = True
 
         if out is not None:
+            resource_prediction, timing_prediction = (
+                _inspection_predictions_from_config(cfg)
+            )
             paths = write_model_inspection_report(
                 report,
                 out,
+                resource_prediction=resource_prediction,
+                timing_prediction=timing_prediction,
             )
             print(f"[OK] Model profile JSON: {paths['model_profile_json']}")
+            print(f"[OK] Resource prediction JSON: {paths['resource_prediction_json']}")
+            print(f"[OK] Timing prediction JSON: {paths['timing_prediction_json']}")
             print(f"[OK] Prediction summary: {paths['prediction_summary_md']}")
             wrote_anything = True
 

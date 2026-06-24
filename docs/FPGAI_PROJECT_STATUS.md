@@ -75,6 +75,21 @@ Sprint 4: model inspection and resource/timing prediction.
 
 ## Latest update
 
+- Added Sprint 4B pre-HLS resource/timing prediction artifacts to the existing inspect output path.
+- Reused existing estimator modules:
+  - `estimate_resources_from_descriptors`
+  - `estimate_performance`
+  - `analyze_graph`
+  - `make_compile_plan`
+- `fpgai inspect --config ... --out <dir>` now writes:
+  - `model_profile.json`
+  - `resource_prediction.json`
+  - `timing_prediction.json`
+  - `prediction_summary.md`
+- Prediction JSONs are explicitly marked with `prediction_status: estimate`.
+
+## Latest update
+
 - Wired `fpgai inspect --config ... --out <dir>` through the existing `inspect_from_config()` helper.
 - The command now writes `model_profile.json` and `prediction_summary.md` without replacing the main CLI dispatch branch.
 - Existing `--json-output` behavior is preserved.

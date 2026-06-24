@@ -123,3 +123,51 @@ def test_write_model_inspection_report_outputs_profile_and_summary(tmp_path):
     assert "compilation_ready" in profile.read_text(encoding="utf-8")
     assert "Resource and timing prediction artifacts" in summary.read_text(encoding="utf-8")
 
+def test_write_model_inspection_report_outputs_resource_and_timing_predictions(tmp_path):
+    from fpgai.analysis.model_inspection import (
+        ModelInspection,
+        write_model_inspection_report,
+    )
+
+    inspection = ModelInspection(
+        model_path="model.onnx",
+        pipeline_mode="inference",
+        graph_name="main",
+        inputs=[],
+        outputs=[],
+        operator_counts={"Dense": 1},
+        operators=[],
+        constants=[],
+        parameter_values=10,
+        parameter_bytes=40,
+        disallowed_operators=[],
+        unsupported_operators=[],
+        limited_operators=[],
+    )
+
+    paths = write_model_inspection_report(
+        inspection,
+        tmp_path,
+        resource_prediction={
+            "prediction_status": "estimate",
+            "totals": {"predicted_lut": 10},
+        },
+        timing_prediction={
+            "prediction_status": "estimate",
+            "predicted_latency_ms": 0.1,
+        },
+    )
+
+    resource = tmp_path / "resource_prediction.json"
+    timing = tmp_path / "timing_prediction.json"
+    summary = tmp_path / "prediction_summary.md"
+
+    assert paths["resource_prediction_json"] == str(resource)
+    assert paths["timing_prediction_json"] == str(timing)
+    assert resource.exists()
+    assert timing.exists()
+    assert '"predicted_lut": 10' in resource.read_text(encoding="utf-8")
+    assert '"predicted_latency_ms": 0.1' in timing.read_text(encoding="utf-8")
+    assert "`resource_prediction.json`: generated" in summary.read_text(encoding="utf-8")
+    assert "`timing_prediction.json`: generated" in summary.read_text(encoding="utf-8")
+
