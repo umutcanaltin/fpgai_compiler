@@ -159,3 +159,170 @@ void top() {
     assert "typename IN_T = act_t" not in rewritten
     assert "const W_T weights[OUT * IN]" in rewritten
     assert "const W_T weights[OUT][IN]" in rewritten
+
+
+
+def test_yaml_dense_tiling_reaches_planner_and_generated_top_cpp() -> None:
+    from types import SimpleNamespace
+
+    from fpgai.backends.hls.emit.top_cpp import emit_top_cpp
+    from fpgai.engine.layerwise_precision import resolve_layerwise_precision
+    from fpgai.engine.planner import make_compile_plan
+    from tests.test_mixed_precision_codegen import _base_config, _dense_graph
+
+    graph = _dense_graph()
+    resolve_layerwise_precision(
+        graph,
+        _base_config(),
+    )
+
+    cfg = SimpleNamespace(
+        raw={
+            "targets": {
+                "platform": {
+                    "board": "unit_test",
+                    "part": "xck26-sfvc784-2LV-c",
+                }
+            },
+            "data_movement": {
+                "ps_pl": {
+                    "weights": {
+                        "mode": "embedded",
+                    }
+                }
+            },
+            "optimization": {
+                "parallel_policy": "Balanced",
+                "tiling": {
+                    "dense": {
+                        "tile_in": 2,
+                        "tile_out": 3,
+                    }
+                },
+            },
+        }
+    )
+    desc = SimpleNamespace(
+        node_name="dense0",
+        op_type="Dense",
+        attrs={
+            "in_features": 4,
+            "out_features": 3,
+        },
+        compute_hint="compute_bound",
+        backend_kernel=None,
+        param_bytes=0,
+        activation_bytes_in=0,
+        activation_bytes_out=0,
+    )
+
+    plan = make_compile_plan(
+        cfg,
+        [desc],
+    )
+
+    assert plan.layer_plans[0].tile == {
+        "in": 2,
+        "out": 3,
+    }
+    assert plan.layer_plans[0].architecture.tiling.sizes == {
+        "in": 2,
+        "out": 3,
+    }
+
+    generated = emit_top_cpp(
+        graph,
+        top_name="deeplearn",
+        weights_mode="embedded",
+        compile_plan=plan,
+    )
+
+    assert "FPGAI real dense tiling helper" in generated
+    assert "dense_out_in_tiled<4, 3, 2, 3" in generated
+
+
+def test_yaml_conv_tiling_reaches_planner_and_generated_top_cpp() -> None:
+    from types import SimpleNamespace
+
+    from fpgai.backends.hls.emit.top_cpp import emit_top_cpp
+    from fpgai.engine.layerwise_precision import resolve_layerwise_precision
+    from fpgai.engine.planner import make_compile_plan
+    from tests.test_mixed_precision_codegen import _base_config, _conv_graph
+
+    graph = _conv_graph()
+    resolve_layerwise_precision(
+        graph,
+        _base_config(),
+    )
+
+    cfg = SimpleNamespace(
+        raw={
+            "targets": {
+                "platform": {
+                    "board": "unit_test",
+                    "part": "xck26-sfvc784-2LV-c",
+                }
+            },
+            "data_movement": {
+                "ps_pl": {
+                    "weights": {
+                        "mode": "embedded",
+                    }
+                }
+            },
+            "optimization": {
+                "parallel_policy": "Balanced",
+                "tiling": {
+                    "conv": {
+                        "tile_ic": 1,
+                        "tile_oc": 2,
+                        "tile_oh": 2,
+                        "tile_ow": 2,
+                    }
+                },
+            },
+        }
+    )
+    desc = SimpleNamespace(
+        node_name="conv0",
+        op_type="Conv",
+        attrs={
+            "strides": [1, 1],
+            "pads": [0, 0, 0, 0],
+            "dilations": [1, 1],
+        },
+        compute_hint="compute_bound",
+        backend_kernel=None,
+        param_bytes=0,
+        activation_bytes_in=0,
+        activation_bytes_out=0,
+    )
+
+    plan = make_compile_plan(
+        cfg,
+        [desc],
+    )
+
+    assert plan.layer_plans[0].tile == {
+        "oh": 2,
+        "ow": 2,
+        "oc": 2,
+        "ic": 1,
+    }
+    assert plan.layer_plans[0].architecture.tiling.sizes == {
+        "oh": 2,
+        "ow": 2,
+        "oc": 2,
+        "ic": 1,
+    }
+
+    generated = emit_top_cpp(
+        graph,
+        top_name="deeplearn",
+        weights_mode="embedded",
+        compile_plan=plan,
+    )
+
+    assert "FPGAI real convolution tiling helper" in generated
+    assert "conv2d_tiled<" in generated
+    assert ", 2, 2, 2, 1," in generated

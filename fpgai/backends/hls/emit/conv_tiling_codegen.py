@@ -51,12 +51,25 @@ def _tile_value(tile: Mapping[str, Any], *keys: str) -> int | None:
     return None
 
 
+
+def _unwrap_tile_mapping(tile: Any) -> dict[str, Any]:
+    tile_dict = _to_dict(tile)
+    sizes = tile_dict.get("sizes")
+    if isinstance(sizes, Mapping):
+        merged = dict(tile_dict)
+        merged.update(dict(sizes))
+        return merged
+    return tile_dict
+
+
 def conv_tile_for_layer(layer_plan: Mapping[str, Any]) -> tuple[int, int, int, int] | None:
     architecture = layer_plan.get("architecture", {})
     if not isinstance(architecture, Mapping):
         architecture = {}
 
-    tile = architecture.get("tiling", layer_plan.get("tile", {}))
+    tile = _unwrap_tile_mapping(
+        architecture.get("tiling", layer_plan.get("tile", {}))
+    )
     if not isinstance(tile, Mapping):
         return None
 

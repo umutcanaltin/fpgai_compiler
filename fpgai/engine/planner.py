@@ -322,6 +322,173 @@ def _pipeline_ii_for(policy: Policy, compute_hint: str = "") -> int:
         return 4 if hint == "memory_bound" else 3
     return 2
 
+
+def _positive_tile_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except Exception:
+        return None
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _merge_tile_values(
+    target: Dict[str, int],
+    source: Any,
+    aliases: Dict[str, tuple[str, ...]],
+) -> Dict[str, int]:
+    section = _as_mapping(source)
+    if not section:
+        return target
+
+    sizes = section.get("sizes")
+    if isinstance(sizes, dict):
+        merged = dict(section)
+        merged.update(sizes)
+        section = merged
+
+    out = dict(target)
+
+    for canonical, keys in aliases.items():
+        for key in keys:
+            value = _positive_tile_int(section.get(key))
+            if value is not None:
+                out[canonical] = value
+                break
+
+    return out
+
+
+def _layer_specific_tile_section(raw: Dict[str, Any], node_name: str) -> Dict[str, Any]:
+    layers = _cfg_get(raw, "optimization.tiling.layers", {})
+
+    if isinstance(layers, dict):
+        section = layers.get(node_name)
+        return section if isinstance(section, dict) else {}
+
+    if isinstance(layers, list):
+        for item in layers:
+            if not isinstance(item, dict):
+                continue
+            match = item.get("match", {})
+            if isinstance(match, dict) and match.get("name") == node_name:
+                return item
+            if item.get("name") == node_name:
+                return item
+
+    return {}
+
+
+def _dense_tile_from_cfg(
+    raw: Dict[str, Any],
+    node_name: str,
+    default_tile: Dict[str, int],
+    *,
+    in_features: int,
+    out_features: int,
+) -> Dict[str, int]:
+    aliases = {
+        "in": (
+            "in",
+            "input",
+            "input_features",
+            "input_tile",
+            "tile_in",
+            "dense_tile_in",
+        ),
+        "out": (
+            "out",
+            "output",
+            "output_features",
+            "output_tile",
+            "tile_out",
+            "dense_tile_out",
+        ),
+    }
+
+    tile = dict(default_tile)
+    tile = _merge_tile_values(
+        tile,
+        _cfg_get(raw, "optimization.tiling.dense", {}),
+        aliases,
+    )
+    tile = _merge_tile_values(
+        tile,
+        _layer_specific_tile_section(raw, node_name),
+        aliases,
+    )
+
+    tile["in"] = max(1, min(int(in_features or 1), int(tile.get("in", 1))))
+    tile["out"] = max(1, min(int(out_features or 1), int(tile.get("out", 1))))
+    return tile
+
+
+def _conv_tile_from_cfg(
+    raw: Dict[str, Any],
+    node_name: str,
+    default_tile: Dict[str, int],
+) -> Dict[str, int]:
+    aliases = {
+        "ic": (
+            "ic",
+            "in_channels",
+            "input_channels",
+            "input_channel",
+            "tile_ic",
+            "conv_tile_ic",
+        ),
+        "oc": (
+            "oc",
+            "out_channels",
+            "output_channels",
+            "channel",
+            "channels",
+            "tile_oc",
+            "conv_tile_oc",
+        ),
+        "oh": (
+            "oh",
+            "output_height",
+            "spatial_height",
+            "height",
+            "tile_oh",
+            "conv_tile_oh",
+        ),
+        "ow": (
+            "ow",
+            "output_width",
+            "spatial_width",
+            "width",
+            "tile_ow",
+            "conv_tile_ow",
+        ),
+    }
+
+    tile = dict(default_tile)
+    tile = _merge_tile_values(
+        tile,
+        _cfg_get(raw, "optimization.tiling.conv", {}),
+        aliases,
+    )
+    tile = _merge_tile_values(
+        tile,
+        _layer_specific_tile_section(raw, node_name),
+        aliases,
+    )
+
+    return {
+        key: max(1, int(value))
+        for key, value in tile.items()
+    }
+
+
 def _layer_notes(desc: LayerDescriptor, precision: Dict[str, Any], policy: Policy) -> Dict[str, Any]:
     return {
         "policy_name": policy.name,
@@ -413,12 +580,17 @@ def _architecture_plan(
     )
 
 
-def _plan_conv(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: str, policy: Policy) -> LayerPlan:
-    tile = {
-        "oh": policy.conv_oh,
-        "ow": policy.conv_ow,
-        "oc": policy.conv_oc,
-    }
+def _plan_conv(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: str, policy: Policy, raw: Dict[str, Any]) -> LayerPlan:
+    tile = _conv_tile_from_cfg(
+        raw,
+        desc.node_name,
+        {
+            "oh": policy.conv_oh,
+            "ow": policy.conv_ow,
+            "oc": policy.conv_oc,
+            "ic": policy.simd,
+        },
+    )
     unroll = {"ic": policy.simd, "oc": policy.pe}
     pipeline_ii = _pipeline_ii_for(policy, desc.compute_hint)
     activation_mode = (
@@ -454,14 +626,20 @@ def _plan_conv(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: s
     )
 
 
-def _plan_dense(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: str, policy: Policy) -> LayerPlan:
+def _plan_dense(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: str, policy: Policy, raw: Dict[str, Any]) -> LayerPlan:
     out_features = int(desc.attrs.get("out_features", 1) or 1)
     in_features = int(desc.attrs.get("in_features", 1) or 1)
 
-    tile = {
-        "in": min(in_features, policy.dense_in),
-        "out": min(out_features, policy.dense_out),
-    }
+    tile = _dense_tile_from_cfg(
+        raw,
+        desc.node_name,
+        {
+            "in": min(in_features, policy.dense_in),
+            "out": min(out_features, policy.dense_out),
+        },
+        in_features=in_features,
+        out_features=out_features,
+    )
     unroll = {"in": policy.simd, "out": policy.pe}
     pipeline_ii = _pipeline_ii_for(policy, desc.compute_hint)
     activation_mode = (
@@ -606,9 +784,9 @@ def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
         precision = _descriptor_precision_info(desc, default_precision)
 
         if desc.op_type == "Conv":
-            plan = _plan_conv(desc, precision, weights_mode, policy)
+            plan = _plan_conv(desc, precision, weights_mode, policy, raw)
         elif desc.op_type == "Dense":
-            plan = _plan_dense(desc, precision, weights_mode, policy)
+            plan = _plan_dense(desc, precision, weights_mode, policy, raw)
         elif desc.op_type in ("MaxPool", "AvgPool"):
             plan = _plan_pool(desc, precision, policy)
         elif desc.op_type in ("Relu", "LeakyRelu", "Sigmoid", "Softmax", "Add", "Reshape", "Flatten"):
