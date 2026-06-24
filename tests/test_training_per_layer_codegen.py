@@ -505,3 +505,52 @@ def test_training_conv_backward_tiling_is_materialized() -> None:
     # a gradient for the conv input. This single-conv graph has a model
     # input, so weight/bias gradients are the materialized backward work.
     assert "conv2d_backward_input_typed<" not in source
+
+def test_training_top_materializes_loss_optimizer_modes_and_stream_io() -> None:
+    graph = _dense_graph()
+
+    source = emit_top_train_cpp(
+        graph=graph,
+        top_name="deeplearn_train",
+        weights_mode="stream",
+        training_cfg={
+            "loss": {"type": "mse"},
+            "optimizer": {"learning_rate": 0.01},
+            "execution": {
+                "gradient_accumulation": True,
+                "convergence_smoke": True,
+                "loss_eval_records": 2,
+            },
+        },
+        compile_plan=None,
+    )
+
+    # Training-specific stream IO.
+    assert "static inline void write_f32(" in source
+    assert "static inline float read_f32(" in source
+    assert "read_f32(in)" in source
+    assert "read_f32(aux)" in source
+    assert "write_f32(out" in source
+
+    # Forward/loss/backward-gradient path.
+    assert "loss_t loss_value = (loss_t)0;" in source
+    assert "loss_value +=" in source
+    assert "dense_weight_grad_typed<" in source
+    assert "dense_bias_grad_typed<" in source
+    assert "dense_backward_input_typed<" in source
+
+    # Optimizer/update path.
+    assert "sgd_update_wgt_typed<" in source
+    assert "sgd_update_bias_typed<" in source
+
+    # Native accumulated mini-batch optimizer modes.
+    assert "mode == 3" in source
+    assert "mode == 4" in source
+    assert "mode == 5" in source
+    assert "FPGAI native accumulated mini-batch optimizer state" in source
+
+    # Evaluation-only loss mode for convergence smoke.
+    assert "FPGAI loss_eval mode" in source
+    assert "if (mode == 6)" in source
+    assert "write_f32(out, (float)loss_value, true);" in source
+
