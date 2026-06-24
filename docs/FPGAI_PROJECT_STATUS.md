@@ -80,6 +80,7 @@ Vivado bridge generation can emit:
 
 ## Latest update
 
+- Training parity audit added explicit feature-scope truth: precision, memory, pipeline, and parallel knobs are training-supported; tiling is training-forward-supported but backward/update tiling remains planning-only; communication is training-supported with generated training HLS annotations; training support remains experimental.
 - DSE is now documented and emitted as recommendation-only: configured YAML candidates are evaluated with pre-HLS estimates, recommendations include compile-ready/materialized-knob metadata, and no exhaustive search optimizer is claimed.
 - Communication planning now models input, weight, output, and aux tensor edges with per-edge precision, compression codec, transfer-byte estimates, and generated HLS annotations. Codec compression is marked modeled unless implemented in generated HLS.
 - Parallelization selection now has YAML-to-planner-to-generated-HLS proof for PE/SIMD, unroll, partition factors, and array partition mode.
