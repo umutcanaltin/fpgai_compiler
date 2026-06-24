@@ -36,6 +36,7 @@ from fpgai.analysis.hls_ii_comparison import write_requested_achieved_ii_summary
 from fpgai.analysis.hls_artifact_metadata import emit_hls_artifact_metadata
 from fpgai.analysis.hls_calibration_runner import run_hls_calibration
 from fpgai.util.binio import write_f32_bin
+from fpgai.runtime.package import emit_runtime_package
 
 from fpgai.backends.hls.emit.types_h import emit_types_h
 from fpgai.backends.hls.emit.top_cpp import emit_top_cpp
@@ -203,12 +204,26 @@ class Compiler:
             out_dir,
             compile_plan,
         )
+        runtime_package = emit_runtime_package(
+            out_dir,
+            board=str(_cfg_get(raw, "targets.board", _cfg_get(raw, "project.board", "")) or ""),
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
+            top_name=top_name,
+            hls_artifacts=self._hls_artifacts_manifest_payload(
+                out_dir=out_dir,
+                hls_run=hls_run,
+                hls_schedule_summary=hls_schedule_summary,
+                hls_artifact_metadata=hls_artifact_metadata,
+                hls_ii_comparison=hls_ii_comparison,
+            ),
+        )
 
         if emit_manifest:
             self._emit_manifest(
                 hls_schedule_summary=hls_schedule_summary,
                 hls_artifact_metadata=hls_artifact_metadata,
                 hls_ii_comparison=hls_ii_comparison,
+                runtime_package=runtime_package,
                 out_dir=out_dir,
                 top_name=top_name,
                 weights_mode=weights_mode,
@@ -423,12 +438,26 @@ class Compiler:
             out_dir,
             compile_plan,
         )
+        runtime_package = emit_runtime_package(
+            out_dir,
+            board=str(_cfg_get(raw, "targets.board", _cfg_get(raw, "project.board", "")) or ""),
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
+            top_name=top_name,
+            hls_artifacts=self._hls_artifacts_manifest_payload(
+                out_dir=out_dir,
+                hls_run=hls_run,
+                hls_schedule_summary=hls_schedule_summary,
+                hls_artifact_metadata=hls_artifact_metadata,
+                hls_ii_comparison=hls_ii_comparison,
+            ),
+        )
 
         if emit_manifest:
             self._emit_manifest(
                 hls_schedule_summary=hls_schedule_summary,
                 hls_artifact_metadata=hls_artifact_metadata,
                 hls_ii_comparison=hls_ii_comparison,
+                runtime_package=runtime_package,
                 out_dir=out_dir,
                 top_name=top_name,
                 weights_mode=weights_mode,
@@ -1344,8 +1373,13 @@ class Compiler:
         stages.append(
             self._pipeline_stage(
                 "runtime_package",
-                "not_implemented",
-                detail="Runtime packaging is planned for a later sprint and is not claimed by this compile manifest.",
+                "done" if kwargs.get("runtime_package") is not None else "skipped",
+                detail=(
+                    "Runtime package manifest emitted under runtime_package/."
+                    if kwargs.get("runtime_package") is not None
+                    else "Runtime package was not emitted."
+                ),
+                artifacts=kwargs.get("runtime_package"),
             )
         )
 
@@ -1522,6 +1556,7 @@ class Compiler:
                 hls_artifact_metadata=kwargs.get("hls_artifact_metadata"),
                 hls_ii_comparison=kwargs.get("hls_ii_comparison"),
             ),
+            "runtime_package": kwargs.get("runtime_package"),
             "pipeline_stages": self._build_pipeline_stages(**kwargs),
             "seconds": round(float(kwargs["seconds"]), 6),
         }

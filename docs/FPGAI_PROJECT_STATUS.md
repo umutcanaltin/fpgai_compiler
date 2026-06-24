@@ -1,3 +1,13 @@
+## Latest update
+
+- Finished the previously partial runtime package stage.
+- Added `fpgai.runtime.package.emit_runtime_package`.
+- Main compile now emits `runtime_package/package_manifest.json`.
+- Main manifest now includes a `runtime_package` section.
+- Pipeline stage `runtime_package` now reports `done` when package metadata is emitted, and `skipped` only when absent.
+- Runtime package is truth-preserving: it copies existing runtime-facing artifacts and records missing bitstream/HWH/XSA files instead of claiming deployment.
+- Quick compile smoke confirmed `runtime_package.status=created` and `pipeline_stages.runtime_package.status=done`.
+
 # FPGAI Project Status
 
 This file is updated during cleanup and feature-completion work. It tracks what has been done, what remains, and what the next safe step is.

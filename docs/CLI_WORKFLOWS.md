@@ -95,6 +95,36 @@ This writes the manifest, IR plans, model profile, and pre-HLS resource/timing p
 
     build/fpgai_quick_compile/
 
+## Runtime package
+
+A compile run emits a runtime package manifest under:
+
+    <project.out_dir>/runtime_package/package_manifest.json
+
+The runtime package copies runtime-facing artifacts that already exist, such as:
+
+    runtime_package/manifest.json
+    runtime_package/inputs/input.bin
+    runtime_package/hls/hls_artifact_metadata.json
+    runtime_package/hls/hls_schedule_summary.json
+    runtime_package/hls/hls_ii_comparison.json
+    runtime_package/hardware/*.bit
+    runtime_package/hardware/*.hwh
+    runtime_package/hardware/*.xsa
+
+The package is truth-preserving. It does not run Vivado or deploy to hardware. It records whether bitstream, HWH, and XSA files are present:
+
+    bitstream_present
+    hwh_present
+    xsa_present
+    deployable_overlay_present
+
+For quick compile flows without Vivado implementation, these hardware fields are expected to be false.
+
+You can also create the package directly from an output directory:
+
+    python -m fpgai.runtime.package <project.out_dir> --board kv260 --pipeline-mode inference --top-name deeplearn
+
 ## Vivado bridge board support
 
 FPGAI supports board-aware Vivado bridge generation for these board keys:

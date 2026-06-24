@@ -201,7 +201,8 @@ def test_compiler_pipeline_stage_helper_returns_expected_names(tmp_path):
     assert by_name["run_hls"]["status"] == "skipped"
     assert by_name["training_artifacts"]["status"] == "skipped"
     assert by_name["vivado_bridge"]["status"] == "not_requested"
-    assert by_name["runtime_package"]["status"] == "not_implemented"
+    assert by_name["runtime_package"]["status"] == "skipped"
+    assert by_name["runtime_package"]["detail"] == "Runtime package was not emitted."
 
 def test_compiler_emits_prediction_artifacts_in_source() -> None:
     source = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")

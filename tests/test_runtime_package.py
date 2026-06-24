@@ -1,0 +1,84 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from fpgai.runtime.package import emit_runtime_package
+
+
+def test_emit_runtime_package_copies_existing_artifacts_and_records_missing_hw(tmp_path: Path) -> None:
+    out_dir = tmp_path / "build"
+    out_dir.mkdir()
+
+    (out_dir / "manifest.json").write_text('{"top_kernel_name": "deeplearn"}', encoding="utf-8")
+    (out_dir / "input.bin").write_bytes(b"input")
+    (out_dir / "hls_artifact_metadata.json").write_text('{"schema_version": 1}', encoding="utf-8")
+    (out_dir / "hls_schedule_summary.json").write_text('{"report_count": 0}', encoding="utf-8")
+    (out_dir / "hls_ii_comparison.json").write_text('{"summary": {}}', encoding="utf-8")
+
+    logs = out_dir / "hls" / "logs"
+    logs.mkdir(parents=True)
+    (logs / "vitis_hls_stdout.log").write_text("ok", encoding="utf-8")
+
+    result = emit_runtime_package(
+        out_dir,
+        board="kv260",
+        pipeline_mode="inference",
+        top_name="deeplearn",
+        hls_artifacts={"hls_ran": True},
+    )
+
+    assert result["status"] == "created"
+    assert result["path"] == "runtime_package/package_manifest.json"
+    assert result["deployable_overlay_present"] is False
+    assert result["bitstream_present"] is False
+    assert result["hwh_present"] is False
+    assert result["xsa_present"] is False
+
+    package_manifest = out_dir / "runtime_package" / "package_manifest.json"
+    data = json.loads(package_manifest.read_text(encoding="utf-8"))
+
+    assert data["board"] == "kv260"
+    assert data["pipeline_mode"] == "inference"
+    assert data["top_name"] == "deeplearn"
+    assert data["hls_artifacts"]["hls_ran"] is True
+    assert data["hardware"]["deployable_overlay_present"] is False
+    assert data["files"]["compile_manifest"]["package_path"] == "manifest.json"
+    assert data["files"]["input_bin"]["package_path"] == "inputs/input.bin"
+    assert data["files"]["hls_logs"][0]["package_path"].startswith("hls/logs/")
+    assert (out_dir / "runtime_package" / "README_RUNTIME.md").exists()
+
+
+def test_emit_runtime_package_records_deployable_overlay_when_hw_files_exist(tmp_path: Path) -> None:
+    out_dir = tmp_path / "build"
+    hw = out_dir / "vivado_bridge" / "bitstream"
+    hw.mkdir(parents=True)
+
+    (hw / "design.bit").write_bytes(b"bit")
+    (hw / "design.hwh").write_text("hwh", encoding="utf-8")
+
+    result = emit_runtime_package(
+        out_dir,
+        board="pynq_z2",
+        pipeline_mode="inference",
+        top_name="deeplearn",
+    )
+
+    assert result["deployable_overlay_present"] is True
+    assert result["bitstream_present"] is True
+    assert result["hwh_present"] is True
+    assert result["xsa_present"] is False
+
+    data = json.loads((out_dir / "runtime_package" / "package_manifest.json").read_text(encoding="utf-8"))
+    assert data["hardware"]["deployable_overlay_present"] is True
+    assert data["files"]["bitstream"]["package_path"] == "hardware/design.bit"
+    assert data["files"]["hwh"]["package_path"] == "hardware/design.hwh"
+
+
+def test_compiler_wires_runtime_package_into_manifest_source() -> None:
+    source = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
+
+    assert "emit_runtime_package" in source
+    assert "runtime_package=runtime_package" in source
+    assert '"runtime_package": kwargs.get("runtime_package")' in source
+    assert '"done" if kwargs.get("runtime_package") is not None else "skipped"' in source
