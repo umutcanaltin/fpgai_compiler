@@ -304,3 +304,23 @@ def test_hls_artifacts_manifest_payload_groups_hls_outputs(tmp_path):
     assert payload["schedule_summary"]["path"] == "hls_schedule_summary.json"
     assert payload["artifact_metadata"]["path"] == "hls_artifact_metadata.json"
     assert payload["ii_comparison"]["path"] == "hls_ii_comparison.json"
+
+
+def test_compiler_manifest_records_training_reference_and_estimate_in_source() -> None:
+    source = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
+
+    assert "\"training_reference\": None if kwargs[\"training_reference_result\"] is None else {" in source
+    assert "\"loss_before\": kwargs[\"training_reference_result\"].loss_before" in source
+    assert "\"loss_after\": kwargs[\"training_reference_result\"].loss_after" in source
+    assert "\"grads_ref_bin\": str(kwargs[\"training_reference_result\"].grads_flat_path)" in source
+    assert "\"weights_before_ref_bin\": str(kwargs[\"training_reference_result\"].weights_before_flat_path)" in source
+    assert "\"weights_after_ref_bin\": str(kwargs[\"training_reference_result\"].weights_after_flat_path)" in source
+    assert "\"summary_json\": str(kwargs[\"training_reference_result\"].summary_json)" in source
+    assert "\"summary_txt\": str(kwargs[\"training_reference_result\"].summary_txt)" in source
+
+    assert "\"training_estimate\": None if kwargs[\"training_estimate_result\"] is None else {" in source
+    assert "\"total_param_bytes\": kwargs[\"training_estimate_result\"].total_param_bytes" in source
+    assert "\"total_activation_cache_bytes\": kwargs[\"training_estimate_result\"].total_activation_cache_bytes" in source
+    assert "\"total_gradient_bytes\": kwargs[\"training_estimate_result\"].total_gradient_bytes" in source
+    assert "\"total_optimizer_state_bytes\": kwargs[\"training_estimate_result\"].total_optimizer_state_bytes" in source
+
