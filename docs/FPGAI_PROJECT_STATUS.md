@@ -53,7 +53,7 @@ The repository should not imply more than the generated artifacts prove.
 - Vivado bridge generation is separate from the main compile command.
 - Bitstream, HWH, and XSA files are only reported as present when actual files exist.
 - Physical-board runtime benchmarking is not the default public workflow.
-- Training-code generation exists, but full numerical training convergence remains a validation area.
+- Training-code generation and single-step reference reporting exist; multi-step convergence and physical-board training remain validation areas.
 
 ## Important current artifacts
 
@@ -80,15 +80,7 @@ Vivado bridge generation can emit:
 
 ## Latest update
 
-- Training parity audit added explicit feature-scope truth: precision, memory, pipeline, and parallel knobs are training-supported; tiling is training-supported for dense/conv forward and backward/update generated HLS call-site materialization; communication is training-supported with generated training HLS annotations; training support remains experimental.
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
-=======
-=======
->>>>>>> 901de078132a537e425cac7602bc09eef226e2d3
->>>>>>> 3bee440bcfecaa5c568eada8b00badde0308ba89
->>>>>>> f454ba351f99af4a8cdee17e9cd107e9679b99b9
+- Training parity audit split feature-scope truth: training code generation and single-step reference reporting are supported at generated-artifact/report level; multi-step convergence and physical-board training remain experimental until reproducible runtime artifacts exist.
 - DSE is now documented and emitted as recommendation-only: configured YAML candidates are evaluated with pre-HLS estimates, recommendations include compile-ready/materialized-knob metadata, and no exhaustive search optimizer is claimed.
 - Communication planning now models input, weight, output, and aux tensor edges with per-edge precision, compression codec, transfer-byte estimates, and generated HLS annotations. Codec compression is marked modeled unless implemented in generated HLS.
 - Parallelization selection now has YAML-to-planner-to-generated-HLS proof for PE/SIMD, unroll, partition factors, and array partition mode.

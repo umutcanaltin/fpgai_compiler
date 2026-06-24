@@ -177,7 +177,7 @@ FPGAI currently supports:
 FPGAI is an active research compiler. Public claims should follow generated artifacts.
 
 - Physical-board runtime benchmarking is not the default public workflow.
-- Training-code generation exists, but full numerical training convergence remains a validation area.
+- Training-code generation and single-step reference reporting exist; multi-step convergence and physical-board training remain validation areas.
 - Resource and timing predictions are exported as explicit pre-HLS estimate artifacts; calibration and HLS/Vivado comparison reports remain separate validation steps.
 - Communication optimization currently distinguishes modeled transfer planning from measured board-level DMA runtime.
 
