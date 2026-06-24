@@ -20,6 +20,9 @@ from fpgai.engine.result import CompileResult
 from fpgai.engine.partition import single_device_plan
 from fpgai.engine.layerwise_precision import resolve_layerwise_precision
 from fpgai.engine.training import build_training_plan, emit_training_artifacts
+from fpgai.analysis.model_inspection import inspect_config, write_model_inspection_report
+from fpgai.analysis.resource_estimator import estimate_resources_from_descriptors
+from fpgai.analysis.performance_estimator import estimate_performance
 from fpgai.analysis.quantization_report import run_quantization_report
 from fpgai.analysis.precision_sweep import run_precision_sweep
 from fpgai.analysis.design_space_report import run_design_space_report
@@ -127,6 +130,11 @@ class Compiler:
         )
 
         self._emit_ir_artifacts(out_dir, g, descriptors, compile_plan, memory_plan, communication_plan)
+        prediction_artifacts = self._emit_prediction_artifacts(
+            out_dir,
+            descriptors,
+            compile_plan,
+        )
         self._emit_dummy_input(out_dir, g)
 
         quant_result = run_quantization_report(
@@ -216,6 +224,7 @@ class Compiler:
                 design_result=design_result,
                 estimate_vs_hls_result=estimate_vs_hls_result,
                 hls_module_breakdown_result=hls_module_breakdown_result,
+                prediction_artifacts=prediction_artifacts,
                 training_plan=None,
                 training_reference_result=None,
                 training_compare_result=None,
@@ -336,6 +345,11 @@ class Compiler:
         )
 
         self._emit_ir_artifacts(out_dir, g, descriptors, compile_plan, memory_plan, communication_plan)
+        prediction_artifacts = self._emit_prediction_artifacts(
+            out_dir,
+            descriptors,
+            compile_plan,
+        )
 
         training_plan = build_training_plan(
             g,
@@ -430,6 +444,7 @@ class Compiler:
                 design_result=None,
                 estimate_vs_hls_result=None,
                 hls_module_breakdown_result=None,
+                prediction_artifacts=prediction_artifacts,
                 training_plan=training_plan,
                 training_reference_result=training_reference_result,
                 training_compare_result=training_compare_result,
@@ -509,6 +524,58 @@ class Compiler:
         g = assign_stable_names(g)
         validate_allowlist(g, self.cfg.operators.supported)
         return g
+
+    def _emit_prediction_artifacts(
+        self,
+        out_dir: Path,
+        descriptors,
+        compile_plan,
+    ) -> dict[str, str]:
+        """Write pre-HLS model/resource/timing prediction artifacts."""
+        raw = self.cfg.raw
+        reports_dir = out_dir / "reports"
+
+        inspection = inspect_config(self.cfg)
+
+        resource_prediction = estimate_resources_from_descriptors(
+            descriptors,
+            raw,
+            compile_plan=compile_plan,
+        )
+        timing_prediction = estimate_performance(
+            resource_estimate=resource_prediction,
+            raw_cfg=raw,
+        )
+
+        resource_prediction = dict(resource_prediction)
+        timing_prediction = dict(timing_prediction)
+
+        resource_prediction["prediction_kind"] = "pre_hls_resource_estimate"
+        resource_prediction["prediction_status"] = "estimate"
+        resource_prediction["model_path"] = str(self.cfg.model.path)
+        resource_prediction["descriptor_count"] = len(descriptors)
+        resource_prediction["architecture_signature"] = getattr(
+            compile_plan,
+            "architecture_signature",
+            None,
+        )
+
+        timing_prediction["prediction_kind"] = "pre_hls_timing_estimate"
+        timing_prediction["prediction_status"] = "estimate"
+        timing_prediction["model_path"] = str(self.cfg.model.path)
+        timing_prediction["descriptor_count"] = len(descriptors)
+        timing_prediction["architecture_signature"] = getattr(
+            compile_plan,
+            "architecture_signature",
+            None,
+        )
+
+        return write_model_inspection_report(
+            inspection,
+            reports_dir,
+            resource_prediction=resource_prediction,
+            timing_prediction=timing_prediction,
+        )
 
     def _emit_ir_artifacts(self, out_dir: Path, g, descriptors, compile_plan, memory_plan, communication_plan) -> None:
         write_text(out_dir / "ir_summary.txt", g.summary())
@@ -1281,6 +1348,7 @@ class Compiler:
             "architecture_capabilities": (
                 kwargs["capability_report"].to_dict()
             ),
+            "prediction_artifacts": kwargs.get("prediction_artifacts"),
             "num_memory_placements": len(kwargs["memory_plan"].placements),
             "num_communication_edges": len(kwargs["communication_plan"].edges),
             "memory_totals": kwargs["memory_plan"].total_bytes_by_region,

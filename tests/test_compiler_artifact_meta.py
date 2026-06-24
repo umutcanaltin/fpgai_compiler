@@ -203,3 +203,14 @@ def test_compiler_pipeline_stage_helper_returns_expected_names(tmp_path):
     assert by_name["vivado_bridge"]["status"] == "not_requested"
     assert by_name["runtime_package"]["status"] == "not_implemented"
 
+def test_compiler_emits_prediction_artifacts_in_source() -> None:
+    source = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
+
+    assert "_emit_prediction_artifacts" in source
+    assert "write_model_inspection_report" in source
+    assert "estimate_resources_from_descriptors" in source
+    assert "estimate_performance" in source
+    assert "out_dir / \"reports\"" in source
+    assert "prediction_artifacts=prediction_artifacts" in source
+    assert "\"prediction_artifacts\": kwargs.get(\"prediction_artifacts\")" in source
+

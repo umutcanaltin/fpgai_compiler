@@ -75,6 +75,17 @@ Sprint 4: model inspection and resource/timing prediction.
 
 ## Latest update
 
+- Added Sprint 4C compile-output prediction artifacts.
+- Normal compile now writes pre-HLS prediction artifacts under `<compile_out>/reports/`:
+  - `model_profile.json`
+  - `resource_prediction.json`
+  - `timing_prediction.json`
+  - `prediction_summary.md`
+- Reused the same model-inspection writer and existing resource/timing estimators used by `inspect --out`.
+- Manifest now records `prediction_artifacts` paths.
+
+## Latest update
+
 - Added Sprint 4B pre-HLS resource/timing prediction artifacts to the existing inspect output path.
 - Reused existing estimator modules:
   - `estimate_resources_from_descriptors`
