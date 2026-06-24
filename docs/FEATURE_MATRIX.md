@@ -30,7 +30,6 @@ A feature is `supported` only when all of these are true:
 <<<<<<< HEAD
 | Tiling selection | YAML tiling choices change generated HLS dense/conv tiled helpers, tile template arguments, training backward/update call-site materialization, and architecture metadata. | supported | supported | supported | Training dense/conv forward and backward/update tiling are materialized in generated HLS call sites and metadata. |
 =======
-| Tiling selection | YAML tiling choices change generated HLS dense/conv tiled helpers, tile template arguments, and architecture metadata. | supported | forward_supported_backward_planning_only | supported | Training forward dense/conv tiling is materialized; training backward/update tiling remains future work before full training parity. |
 >>>>>>> 901de078132a537e425cac7602bc09eef226e2d3
 | Pipeline selection | YAML pipeline style/II changes planner metadata and generated HLS layer call pipeline-II arguments. | supported | supported | supported | Keep planner-to-codegen pipeline regression tests current for inference and training. |
 | Parallelization selection | YAML PE/SIMD/unroll/partition knobs change planner metadata, generated HLS call arguments, and array partition mode pragmas. | supported | supported | supported | Keep planner-to-codegen parallel regression tests current for inference and training. |

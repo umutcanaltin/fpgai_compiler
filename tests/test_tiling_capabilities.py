@@ -80,10 +80,10 @@ def test_conv_inference_tiling_is_implemented() -> None:
     assert _status(report, "tiling") == IMPLEMENTED
 
 
-def test_training_tiling_remains_planning_only_until_training_emitters_are_tiled() -> None:
+def test_training_tiling_is_supported_after_training_emitters_are_tiled() -> None:
     report = validate_architecture_capabilities(
         _compile_plan("Dense"),
         pipeline_mode="training_on_device",
     )
 
-    assert _status(report, "tiling") == PLANNING_ONLY
+    assert _status(report, "tiling") == "implemented"

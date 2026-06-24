@@ -292,7 +292,7 @@ def _validate_layer_features(
         tiling_implemented = (
             has_tiling
             and forward_specialized
-            and pipeline_mode == "inference"
+            and pipeline_mode in {"inference", "training_on_device"}
         )
         _add(
             issues,
@@ -310,8 +310,8 @@ def _validate_layer_features(
                 else {"sizes": {}}
             ),
             detail=(
-                "Dense/Conv inference code generation emits tiled "
-                "compute loops for the requested tile sizes."
+                "Dense/Conv code generation emits tiled call sites "
+                "for the requested tile sizes."
                 if tiling_implemented
                 else "Tile sizes are recorded but generated compute loops "
                 "are not tiled for this pipeline/operator yet."
