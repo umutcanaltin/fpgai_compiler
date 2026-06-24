@@ -103,3 +103,42 @@ def test_compile_result_summary_includes_pipeline_stages_when_manifest_exists(tm
     assert "run_hls: skipped" in summary
     assert "vivado_bridge: not_requested" in summary
 
+def test_compile_result_summary_includes_prediction_artifacts_when_manifest_exists(tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    from fpgai.engine.result import CompileResult
+
+    manifest = {
+        "prediction_artifacts": {
+            "model_profile_json": "reports/model_profile.json",
+            "resource_prediction_json": "reports/resource_prediction.json",
+            "timing_prediction_json": "reports/timing_prediction.json",
+            "prediction_summary_md": "reports/prediction_summary.md",
+        }
+    }
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+
+    result = CompileResult(
+        out_dir=tmp_path,
+        graph=SimpleNamespace(
+            ops=[],
+            params={},
+            inputs=[],
+            outputs=[],
+        ),
+        hls_project_dir=None,
+        host_project_dir=None,
+    )
+
+    summary = result.summary()
+
+    assert "Prediction artifacts" in summary
+    assert "reports/model_profile.json" in summary
+    assert "reports/resource_prediction.json" in summary
+    assert "reports/timing_prediction.json" in summary
+    assert "reports/prediction_summary.md" in summary
+

@@ -101,7 +101,7 @@ FPGAI is an active research compiler. Some flows are still being strengthened. I
 
 - Physical-board runtime benchmarking is not yet the default public workflow.
 - Training-code generation exists, but full numerical training correctness is still being hardened.
-- Resource estimation is being moved toward explicit exported predictions and calibrated reports.
+- Resource and timing predictions are exported as explicit pre-HLS estimate artifacts; calibration and HLS/Vivado comparison reports remain separate validation steps.
 - Communication optimization currently distinguishes modeled transfer planning from measured board-level DMA runtime.
 
 These are implementation targets, not abandoned features.

@@ -52,6 +52,35 @@ class CompileResult:
     training_plan_json: Optional[Path] = None
     training_summary_txt: Optional[Path] = None
 
+    def _prediction_artifact_summary_lines(self) -> list[str]:
+        manifest_path = self.out_dir / "manifest.json"
+        if not manifest_path.exists():
+            return []
+
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+
+        artifacts = manifest.get("prediction_artifacts")
+        if not isinstance(artifacts, dict) or not artifacts:
+            return []
+
+        labels = [
+            ("model_profile_json", "Model profile JSON"),
+            ("resource_prediction_json", "Resource prediction"),
+            ("timing_prediction_json", "Timing prediction"),
+            ("prediction_summary_md", "Prediction summary"),
+        ]
+
+        lines = ["Prediction artifacts:"]
+        for key, label in labels:
+            value = artifacts.get(key)
+            if value:
+                lines.append(f"  - {label}: {value}")
+
+        return lines if len(lines) > 1 else []
+
     def _pipeline_stage_summary_lines(self) -> list[str]:
         manifest_path = self.out_dir / "manifest.json"
         if not manifest_path.exists():
@@ -133,6 +162,11 @@ class CompileResult:
             f"Training summary TXT : {self.training_summary_txt}",
             "===================================================",
         ]
+
+        prediction_lines = self._prediction_artifact_summary_lines()
+        if prediction_lines:
+            lines.insert(-1, "---------------------------------------------------")
+            lines[-1:-1] = prediction_lines
 
         pipeline_lines = self._pipeline_stage_summary_lines()
         if pipeline_lines:

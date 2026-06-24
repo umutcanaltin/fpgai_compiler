@@ -84,3 +84,25 @@ fpgai compile --config configs/examples/inference_compile.yml
 fpgai compile --config configs/examples/inference_compile.yml --verbose
 fpgai compile --config configs/examples/inference_compile.yml --quiet
 ```
+
+## Prediction artifacts
+
+Use inspect output for pre-HLS model/resource/timing artifacts:
+
+    fpgai inspect --config configs/examples/inference_compile.yml --out reports/inference_prediction
+
+This writes:
+
+    reports/inference_prediction/model_profile.json
+    reports/inference_prediction/resource_prediction.json
+    reports/inference_prediction/timing_prediction.json
+    reports/inference_prediction/prediction_summary.md
+
+A normal compile also writes the same pre-HLS prediction artifacts under:
+
+    <project.out_dir>/reports/model_profile.json
+    <project.out_dir>/reports/resource_prediction.json
+    <project.out_dir>/reports/timing_prediction.json
+    <project.out_dir>/reports/prediction_summary.md
+
+These files are estimates generated before HLS/Vivado. Real HLS/Vivado reports remain separate artifacts.

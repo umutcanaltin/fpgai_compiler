@@ -75,6 +75,13 @@ Sprint 4: model inspection and resource/timing prediction.
 
 ## Latest update
 
+- Started Sprint 5A: YAML-first compile flow polish.
+- `CompileResult.summary()` now surfaces prediction artifact paths from `manifest.json`.
+- Documented inspect/compile prediction artifacts in `docs/CLI_WORKFLOWS.md`.
+- Updated README wording so resource/timing prediction is no longer described as future work.
+
+## Latest update
+
 - Added Sprint 4C compile-output prediction artifacts.
 - Normal compile now writes pre-HLS prediction artifacts under `<compile_out>/reports/`:
   - `model_profile.json`
