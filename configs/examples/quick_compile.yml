@@ -170,6 +170,9 @@ analysis:
           total_bits: 24
           int_bits: 10
 optimization:
+  pipeline:
+    style: balanced
+    ii: 2
   tiling:
     dense:
       tile_in: 16

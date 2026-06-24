@@ -326,3 +326,114 @@ def test_yaml_conv_tiling_reaches_planner_and_generated_top_cpp() -> None:
     assert "FPGAI real convolution tiling helper" in generated
     assert "conv2d_tiled<" in generated
     assert ", 2, 2, 2, 1," in generated
+
+
+
+def test_yaml_pipeline_style_reaches_planner_and_generated_top_cpp() -> None:
+    from types import SimpleNamespace
+
+    from fpgai.backends.hls.emit.top_cpp import emit_top_cpp
+    from fpgai.engine.layerwise_precision import resolve_layerwise_precision
+    from fpgai.engine.planner import make_compile_plan
+    from tests.test_mixed_precision_codegen import _base_config, _dense_graph
+
+    graph = _dense_graph()
+    resolve_layerwise_precision(
+        graph,
+        _base_config(),
+    )
+
+    desc = SimpleNamespace(
+        node_name="dense0",
+        op_type="Dense",
+        attrs={
+            "in_features": 4,
+            "out_features": 3,
+        },
+        compute_hint="compute_bound",
+        backend_kernel=None,
+        param_bytes=0,
+        activation_bytes_in=0,
+        activation_bytes_out=0,
+    )
+
+    aggressive_cfg = SimpleNamespace(
+        raw={
+            "targets": {"platform": {"board": "unit_test", "part": "xck26-sfvc784-2LV-c"}},
+            "data_movement": {"ps_pl": {"weights": {"mode": "embedded"}}},
+            "optimization": {
+                "parallel_policy": "Balanced",
+                "pipeline": {
+                    "style": "aggressive",
+                },
+            },
+        }
+    )
+    conservative_cfg = SimpleNamespace(
+        raw={
+            "targets": {"platform": {"board": "unit_test", "part": "xck26-sfvc784-2LV-c"}},
+            "data_movement": {"ps_pl": {"weights": {"mode": "embedded"}}},
+            "optimization": {
+                "parallel_policy": "Balanced",
+                "pipeline": {
+                    "style": "conservative",
+                },
+            },
+        }
+    )
+    explicit_ii_cfg = SimpleNamespace(
+        raw={
+            "targets": {"platform": {"board": "unit_test", "part": "xck26-sfvc784-2LV-c"}},
+            "data_movement": {"ps_pl": {"weights": {"mode": "embedded"}}},
+            "optimization": {
+                "parallel_policy": "Balanced",
+                "pipeline": {
+                    "style": "aggressive",
+                    "ii": 5,
+                },
+            },
+        }
+    )
+
+    aggressive_plan = make_compile_plan(aggressive_cfg, [desc])
+    conservative_plan = make_compile_plan(conservative_cfg, [desc])
+    explicit_ii_plan = make_compile_plan(explicit_ii_cfg, [desc])
+
+    assert aggressive_plan.layer_plans[0].pipeline_ii == 1
+    assert aggressive_plan.layer_plans[0].architecture.pipeline.ii == 1
+    assert aggressive_plan.layer_plans[0].architecture.pipeline.style == "aggressive"
+
+    assert conservative_plan.layer_plans[0].pipeline_ii == 3
+    assert conservative_plan.layer_plans[0].architecture.pipeline.ii == 3
+    assert conservative_plan.layer_plans[0].architecture.pipeline.style == "conservative"
+
+    assert explicit_ii_plan.layer_plans[0].pipeline_ii == 5
+    assert explicit_ii_plan.layer_plans[0].architecture.pipeline.ii == 5
+
+    aggressive_top = emit_top_cpp(
+        graph,
+        top_name="deeplearn",
+        weights_mode="embedded",
+        compile_plan=aggressive_plan,
+    )
+    conservative_top = emit_top_cpp(
+        graph,
+        top_name="deeplearn",
+        weights_mode="embedded",
+        compile_plan=conservative_plan,
+    )
+    explicit_ii_top = emit_top_cpp(
+        graph,
+        top_name="deeplearn",
+        weights_mode="embedded",
+        compile_plan=explicit_ii_plan,
+    )
+
+    assert ", 1, " in aggressive_top
+    assert "pipeline_ii=1" in aggressive_top
+    assert ", 3, " in conservative_top
+    assert "pipeline_ii=3" in conservative_top
+    assert ", 5, " in explicit_ii_top
+    assert "pipeline_ii=5" in explicit_ii_top
+    assert aggressive_top != conservative_top
+    assert aggressive_top != explicit_ii_top

@@ -299,7 +299,35 @@ def _buffering_for(weights_mode: str, policy: Policy) -> str:
     return "double" if weights_mode in ("stream", "ddr") else "single"
 
 
-def _pipeline_ii_for(policy: Policy, compute_hint: str = "") -> int:
+
+def _pipeline_style_from_cfg(raw: Dict[str, Any], policy: Policy) -> str:
+    value = _cfg_get(
+        raw,
+        "optimization.pipeline.style",
+        _cfg_get(raw, "optimization.parallel.pipeline_style", policy.pipeline_style),
+    )
+    style = str(value or policy.pipeline_style).strip().lower()
+    if style in {"aggressive", "balanced", "conservative"}:
+        return style
+    return str(policy.pipeline_style or "balanced").strip().lower()
+
+
+def _pipeline_ii_override_from_cfg(raw: Dict[str, Any]) -> int | None:
+    value = _cfg_get(raw, "optimization.pipeline.ii", None)
+    if value is None:
+        value = _cfg_get(raw, "optimization.pipeline_ii", None)
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except Exception:
+        return None
+    if parsed <= 0:
+        return None
+    return parsed
+
+
+def _pipeline_ii_for(policy: Policy, compute_hint: str = "", raw: Dict[str, Any] | None = None) -> int:
     """Lower pipeline_style into distinct HLS initiation intervals.
 
     Pipeline policy goal: conservative, balanced, and aggressive must produce
@@ -311,7 +339,13 @@ def _pipeline_ii_for(policy: Policy, compute_hint: str = "") -> int:
     - balanced uses moderate pipelining.
     - aggressive targets II=1.
     """
-    style = str(getattr(policy, "pipeline_style", "balanced") or "balanced").lower()
+    if raw is not None:
+        override = _pipeline_ii_override_from_cfg(raw)
+        if override is not None:
+            return override
+        style = _pipeline_style_from_cfg(raw, policy)
+    else:
+        style = str(getattr(policy, "pipeline_style", "balanced") or "balanced").lower()
     hint = str(compute_hint or "").lower()
 
     if style == "aggressive":
@@ -520,6 +554,7 @@ def _architecture_plan(
     tile: Dict[str, int],
     unroll: Dict[str, int],
     pipeline_ii: int,
+    pipeline_style: str,
     weight_mode: str,
     activation_mode: str,
     buffering: str,
@@ -557,7 +592,7 @@ def _architecture_plan(
         ),
         pipeline=PipelinePlan(
             ii=pipeline_ii,
-            style=policy.pipeline_style,
+            style=pipeline_style,
         ),
         parallelism=ParallelismPlan(
             pe=pe,
@@ -592,7 +627,8 @@ def _plan_conv(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: s
         },
     )
     unroll = {"ic": policy.simd, "oc": policy.pe}
-    pipeline_ii = _pipeline_ii_for(policy, desc.compute_hint)
+    pipeline_style = _pipeline_style_from_cfg(raw, policy)
+    pipeline_ii = _pipeline_ii_for(policy, desc.compute_hint, raw)
     activation_mode = (
         "stream"
         if policy.name in ("Latency-First", "Throughput-First")
@@ -619,6 +655,7 @@ def _plan_conv(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: s
             tile=tile,
             unroll=unroll,
             pipeline_ii=pipeline_ii,
+            pipeline_style=pipeline_style,
             weight_mode=weights_mode,
             activation_mode=activation_mode,
             buffering=buffering,
@@ -641,7 +678,8 @@ def _plan_dense(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: 
         out_features=out_features,
     )
     unroll = {"in": policy.simd, "out": policy.pe}
-    pipeline_ii = _pipeline_ii_for(policy, desc.compute_hint)
+    pipeline_style = _pipeline_style_from_cfg(raw, policy)
+    pipeline_ii = _pipeline_ii_for(policy, desc.compute_hint, raw)
     activation_mode = (
         "stream"
         if policy.name in ("Latency-First", "Throughput-First")
@@ -669,6 +707,7 @@ def _plan_dense(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode: 
             tile=tile,
             unroll=unroll,
             pipeline_ii=pipeline_ii,
+            pipeline_style=pipeline_style,
             weight_mode=weights_mode,
             activation_mode=activation_mode,
             buffering=buffering,
@@ -700,6 +739,7 @@ def _plan_pool(desc: LayerDescriptor, precision: Dict[str, Any], policy: Policy)
             tile=tile,
             unroll={},
             pipeline_ii=pipeline_ii,
+            pipeline_style=policy.pipeline_style,
             weight_mode="embedded",
             activation_mode="stream",
             buffering="single",
@@ -730,6 +770,7 @@ def _plan_elementwise(desc: LayerDescriptor, precision: Dict[str, Any], policy: 
             tile={},
             unroll=unroll,
             pipeline_ii=pipeline_ii,
+            pipeline_style=policy.pipeline_style,
             weight_mode="embedded",
             activation_mode="stream",
             buffering="single",
@@ -760,6 +801,7 @@ def _plan_generic(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode
             tile={},
             unroll={},
             pipeline_ii=pipeline_ii,
+            pipeline_style=policy.pipeline_style,
             weight_mode=weights_mode,
             activation_mode="buffer",
             buffering=buffering,
@@ -849,6 +891,8 @@ def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
             "parallel_unroll_factor": policy.unroll_factor,
             "parallel_partition_factor": policy.partition_factor,
             "parallel_pipeline_style": policy.pipeline_style,
+            "pipeline_style_requested": str(_cfg_get(raw, "optimization.pipeline.style", _cfg_get(raw, "optimization.parallel.pipeline_style", policy.pipeline_style))),
+            "pipeline_ii_requested": _cfg_get(raw, "optimization.pipeline.ii", _cfg_get(raw, "optimization.pipeline_ii", None)),
             "weight_region_preference": list(policy.weight_region_preference),
             "activation_region_preference": list(policy.activation_region_preference),
             "axi_word_bits": policy.axi_word_bits,
