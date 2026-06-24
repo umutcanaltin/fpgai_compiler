@@ -527,6 +527,7 @@ def inspect_sweep_config(
         "point_name_template",
         "materialize_configs",
         "metadata",
+        "vivado",
     }
     top_keys = sorted(data.keys())
     unknown_keys = sorted(k for k in top_keys if k not in known_keys)
@@ -535,13 +536,15 @@ def inspect_sweep_config(
     defaults = data.get("defaults")
     errors: list[str] = []
 
+    vivado_cfg = data.get("vivado")
     has_parameters = isinstance(parameters, (dict, list)) and len(parameters) > 0
     has_design_points = isinstance(design_points, list) and len(design_points) > 0
+    has_vivado_marker = isinstance(vivado_cfg, dict) and bool(vivado_cfg.get("enabled", False))
 
-    if not isinstance(defaults, dict):
+    if not isinstance(defaults, dict) and not has_vivado_marker:
         errors.append("defaults: expected mapping")
-    if not has_parameters and not has_design_points:
-        errors.append("parameters/design_points: expected non-empty mapping/list or non-empty design_points list")
+    if not has_parameters and not has_design_points and not has_vivado_marker:
+        errors.append("parameters/design_points: expected non-empty mapping/list, non-empty design_points list, or enabled vivado marker")
     if has_parameters and "command_template" not in data:
         errors.append("command_template: missing for parameter sweep")
 
@@ -557,6 +560,7 @@ def inspect_sweep_config(
         "design_point_count": len(design_points) if isinstance(design_points, list) else 0,
         "has_defaults": isinstance(defaults, dict),
         "has_command_template": "command_template" in data,
+        "has_vivado_marker": has_vivado_marker,
         "errors": errors,
     }
 
@@ -568,6 +572,7 @@ def inspect_sweep_config(
     print(f"Design points         : {report['design_point_count']}")
     print(f"Has defaults          : {report['has_defaults']}")
     print(f"Has command template  : {report['has_command_template']}")
+    print(f"Has Vivado marker     : {report['has_vivado_marker']}")
     if unknown_keys:
         print(f"Unknown keys          : {unknown_keys}")
     if errors:

@@ -121,3 +121,30 @@ design_points:
     assert payload["parameter_count"] == 0
     assert payload["design_point_count"] == 2
     assert payload["unknown_keys"] == []
+
+
+def test_sweep_inspect_accepts_vivado_marker_schema(tmp_path):
+    cfg = tmp_path / "vivado_bridge.yml"
+    out = tmp_path / "inspection.json"
+    cfg.write_text(
+        """
+vivado:
+  enabled: true
+  board: pynq_z2
+  export_hls_ip: true
+  run_synth: false
+  run_impl: false
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rc = cli.inspect_sweep_config(str(cfg), json_output=str(out))
+
+    assert rc == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["valid"] is True
+    assert payload["parameter_count"] == 0
+    assert payload["design_point_count"] == 0
+    assert payload["has_vivado_marker"] is True
+    assert payload["unknown_keys"] == []
