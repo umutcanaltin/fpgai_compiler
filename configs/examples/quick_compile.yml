@@ -170,6 +170,12 @@ analysis:
           total_bits: 24
           int_bits: 10
 optimization:
+  parallel:
+    pe: 2
+    simd: 2
+    unroll_factor: 2
+    partition_factor: 2
+    array_partition_mode: cyclic
   pipeline:
     style: balanced
     ii: 2

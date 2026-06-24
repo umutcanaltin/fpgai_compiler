@@ -29,7 +29,7 @@ A feature is `supported` only when all of these are true:
 | Memory/storage selection | YAML weight delivery and storage choices change generated HLS interfaces and parameter storage pragmas. | supported | Keep generated-interface and BIND_STORAGE regression tests current. |
 | Tiling selection | YAML tiling choices change generated HLS dense/conv tiled helpers, tile template arguments, and architecture metadata. | supported | Keep planner-to-codegen tiling regression tests current. |
 | Pipeline selection | YAML pipeline style/II changes planner metadata and generated HLS layer call pipeline-II arguments. | supported | Keep planner-to-codegen pipeline regression tests current. |
-| Parallelization selection | YAML PE/SIMD/unroll/partition knobs change generated unroll/partition pragmas and reports. | partial | Prove unroll and partition factors are materialized per supported layer. |
+| Parallelization selection | YAML PE/SIMD/unroll/partition knobs change planner metadata, generated HLS call arguments, and array partition mode pragmas. | supported | Keep planner-to-codegen parallel regression tests current. |
 | Resource estimation | Compile/inspect emits pre-HLS LUT/FF/DSP/BRAM estimates. | supported_estimate_only | Keep clearly labeled as estimate unless compared to HLS/Vivado. |
 | Timing estimation | Compile/inspect emits pre-HLS cycle/latency/timing estimates. | supported_estimate_only | Keep clearly labeled as estimate unless compared to HLS/Vivado. |
 | Design-space exploration | DSE enumerates candidates, estimates them, and recommends candidates. | partial | Ensure DSE only recommends knobs that are materialized or marks them estimate-only. |

@@ -80,6 +80,7 @@ Vivado bridge generation can emit:
 
 ## Latest update
 
+- Parallelization selection now has YAML-to-planner-to-generated-HLS proof for PE/SIMD, unroll, partition factors, and array partition mode.
 - Pipeline selection now has YAML-to-planner-to-generated-HLS proof for style-derived and explicit initiation interval settings.
 - Tiling selection now has YAML-to-planner-to-generated-HLS proof for Dense and Conv tiled helper generation.
 - Memory/storage selection now has generated HLS proof for embedded, AXI-stream preload, DDR/m_axi preload, and BRAM/URAM/LUTRAM parameter storage binding pragmas.

@@ -437,3 +437,137 @@ def test_yaml_pipeline_style_reaches_planner_and_generated_top_cpp() -> None:
     assert "pipeline_ii=5" in explicit_ii_top
     assert aggressive_top != conservative_top
     assert aggressive_top != explicit_ii_top
+
+
+
+def test_yaml_parallel_knobs_reach_planner_and_generated_top_cpp() -> None:
+    from types import SimpleNamespace
+
+    from fpgai.backends.hls.emit.top_cpp import emit_top_cpp
+    from fpgai.engine.layerwise_precision import resolve_layerwise_precision
+    from fpgai.engine.planner import make_compile_plan
+    from tests.test_mixed_precision_codegen import _base_config, _dense_graph
+
+    graph = _dense_graph()
+    resolve_layerwise_precision(
+        graph,
+        _base_config(),
+    )
+
+    desc = SimpleNamespace(
+        node_name="dense0",
+        op_type="Dense",
+        attrs={
+            "in_features": 4,
+            "out_features": 3,
+        },
+        compute_hint="compute_bound",
+        backend_kernel=None,
+        param_bytes=0,
+        activation_bytes_in=0,
+        activation_bytes_out=0,
+    )
+
+    serial_cfg = SimpleNamespace(
+        raw={
+            "targets": {"platform": {"board": "unit_test", "part": "xck26-sfvc784-2LV-c"}},
+            "data_movement": {"ps_pl": {"weights": {"mode": "embedded"}}},
+            "optimization": {
+                "parallel_policy": "Balanced",
+                "parallel": {
+                    "pe": 1,
+                    "simd": 1,
+                    "unroll_factor": 1,
+                    "partition_factor": 1,
+                    "array_partition_mode": "block",
+                },
+            },
+        }
+    )
+    parallel_cfg = SimpleNamespace(
+        raw={
+            "targets": {"platform": {"board": "unit_test", "part": "xck26-sfvc784-2LV-c"}},
+            "data_movement": {"ps_pl": {"weights": {"mode": "embedded"}}},
+            "optimization": {
+                "parallel_policy": "Balanced",
+                "parallel": {
+                    "pe": 3,
+                    "simd": 2,
+                    "unroll_factor": 4,
+                    "partition_factor": 5,
+                    "array_partition_mode": "block",
+                },
+            },
+        }
+    )
+
+    serial_plan = make_compile_plan(serial_cfg, [desc])
+    parallel_plan = make_compile_plan(parallel_cfg, [desc])
+
+    serial_layer = serial_plan.layer_plans[0]
+    parallel_layer = parallel_plan.layer_plans[0]
+
+    assert serial_layer.unroll == {
+        "in": 1,
+        "out": 1,
+    }
+    assert serial_layer.architecture.parallelism.pe == 1
+    assert serial_layer.architecture.parallelism.simd == 1
+    assert serial_layer.architecture.partitioning.factor == 1
+    assert serial_layer.architecture.partitioning.mode == "block"
+
+    assert parallel_layer.unroll == {
+        "in": 2,
+        "out": 3,
+    }
+    assert parallel_layer.architecture.parallelism.pe == 3
+    assert parallel_layer.architecture.parallelism.simd == 2
+    assert parallel_layer.architecture.partitioning.factor == 5
+    assert parallel_layer.architecture.partitioning.mode == "block"
+    assert parallel_layer.architecture.partitioning.targets["input"] == 5
+    assert parallel_layer.architecture.partitioning.targets["output"] == 5
+    assert parallel_layer.architecture.partitioning.targets["weight"] == 6
+
+    serial_top = emit_top_cpp(
+        graph,
+        top_name="deeplearn",
+        weights_mode="embedded",
+        compile_plan=serial_plan,
+    )
+    parallel_top = emit_top_cpp(
+        graph,
+        top_name="deeplearn",
+        weights_mode="embedded",
+        compile_plan=parallel_plan,
+    )
+
+    assert "input_unroll=1 output_unroll=1 input_partition=1 output_partition=1 weight_partition=1" in serial_top
+    assert "input_unroll=2 output_unroll=3 input_partition=5 output_partition=5 weight_partition=6" in parallel_top
+    assert serial_top != parallel_top
+
+
+def test_yaml_array_partition_mode_changes_generated_layer_pragmas() -> None:
+    from types import SimpleNamespace
+
+    from fpgai.engine.compiler import Compiler
+
+    compiler = object.__new__(Compiler)
+    compiler.cfg = SimpleNamespace(
+        raw={
+            "optimization": {
+                "parallel": {
+                    "array_partition_mode": "block",
+                }
+            }
+        }
+    )
+
+    source = "#pragma HLS ARRAY_PARTITION variable=x cyclic factor=4 dim=1\n"
+    rewritten = compiler._apply_hls_array_partition_mode(
+        source,
+        compiler._hls_array_partition_mode(None),
+    )
+
+    assert "#pragma HLS ARRAY_PARTITION variable=x block factor=4 dim=1" in rewritten
+    assert "FPGAI array partition mode: block" in rewritten
+    assert "cyclic factor=4" not in rewritten

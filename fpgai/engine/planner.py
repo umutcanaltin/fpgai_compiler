@@ -262,7 +262,7 @@ def _override_policy_from_cfg(cfg, base: Policy) -> Policy:
         burst_len=base.burst_len,
         enable_bitpack=base.enable_bitpack,
         enable_compression=base.enable_compression,
-        array_partition_mode=base.array_partition_mode,
+        array_partition_mode=str(_cfg_get(raw, "optimization.parallel.array_partition_mode", base.array_partition_mode)),
         mac_style=base.mac_style,
         accum_strategy=base.accum_strategy,
         activation_impl=base.activation_impl,

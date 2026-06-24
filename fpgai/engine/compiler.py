@@ -665,6 +665,39 @@ class Compiler:
             return p
         return None
 
+    def _hls_array_partition_mode(self, compile_plan=None) -> str:
+        raw_mode = _cfg_get(
+            self.cfg.raw,
+            "optimization.parallel.array_partition_mode",
+            None,
+        )
+        if raw_mode is None and compile_plan is not None:
+            try:
+                raw_mode = compile_plan.notes.get("array_partition_mode")
+            except Exception:
+                raw_mode = None
+
+        mode = str(raw_mode or "cyclic").strip().lower()
+        if mode not in {"cyclic", "block"}:
+            mode = "cyclic"
+        return mode
+
+    def _apply_hls_array_partition_mode(self, source: str, mode: str) -> str:
+        mode = str(mode or "cyclic").strip().lower()
+        if mode not in {"cyclic", "block"}:
+            mode = "cyclic"
+
+        if mode == "cyclic":
+            return source
+
+        return source.replace(
+            "#pragma HLS ARRAY_PARTITION variable=",
+            f"// FPGAI array partition mode: {mode}\\n#pragma HLS ARRAY_PARTITION variable=",
+        ).replace(
+            " cyclic factor=",
+            f" {mode} factor=",
+        )
+
     def _hls_weight_storage_impl(self, memory_plan=None) -> str:
         raw = self.cfg.raw
         requested = _cfg_get(
@@ -745,6 +778,7 @@ class Compiler:
         inc_dir = hls_dir / "include"
         layers_inc_dir = inc_dir / "layers"
         src_dir = hls_dir / "src"
+        array_partition_mode = self._hls_array_partition_mode(compile_plan)
         layers_src_dir = src_dir / "layers"
 
         inc_dir.mkdir(parents=True, exist_ok=True)
@@ -757,11 +791,29 @@ class Compiler:
             emit_types_h(g, top_name=top_name, raw_cfg=raw, compile_plan=compile_plan),
         )
         write_text(layers_inc_dir / "dense.h", emit_dense_h())
-        write_text(layers_src_dir / "dense.cpp", emit_dense_cpp())
+        write_text(
+            layers_src_dir / "dense.cpp",
+            self._apply_hls_array_partition_mode(
+                emit_dense_cpp(),
+                array_partition_mode,
+            ),
+        )
         write_text(layers_inc_dir / "conv.h", emit_conv_h())
-        write_text(layers_src_dir / "conv.cpp", emit_conv_cpp())
+        write_text(
+            layers_src_dir / "conv.cpp",
+            self._apply_hls_array_partition_mode(
+                emit_conv_cpp(),
+                array_partition_mode,
+            ),
+        )
         write_text(layers_inc_dir / "pool.h", emit_pool_h())
-        write_text(layers_src_dir / "pool.cpp", emit_pool_cpp())
+        write_text(
+            layers_src_dir / "pool.cpp",
+            self._apply_hls_array_partition_mode(
+                emit_pool_cpp(),
+                array_partition_mode,
+            ),
+        )
         write_text(layers_inc_dir / "activations.h", emit_activations_h())
         write_text(layers_src_dir / "activations.cpp", emit_activations_cpp())
         write_text(layers_inc_dir / "batchnorm.h", emit_batchnorm_h())
