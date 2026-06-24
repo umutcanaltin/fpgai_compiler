@@ -52,14 +52,38 @@ class CompileResult:
     training_plan_json: Optional[Path] = None
     training_summary_txt: Optional[Path] = None
 
-    def _prediction_artifact_summary_lines(self) -> list[str]:
+    def _read_manifest(self) -> dict:
+        manifest_path = self.out_dir / "manifest.json"
+        if not manifest_path.exists():
+            return {}
+
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+        return data if isinstance(data, dict) else {}
+
+    def _manifest_summary_lines(self) -> list[str]:
         manifest_path = self.out_dir / "manifest.json"
         if not manifest_path.exists():
             return []
 
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except Exception:
+        manifest = self._read_manifest()
+        lines = [f"Manifest             : {manifest_path}"]
+
+        if manifest.get("pipeline_mode"):
+            lines.append(f"Pipeline mode        : {manifest.get('pipeline_mode')}")
+        if manifest.get("top_kernel_name"):
+            lines.append(f"Top kernel           : {manifest.get('top_kernel_name')}")
+        if manifest.get("seconds") is not None:
+            lines.append(f"Compile seconds      : {manifest.get('seconds')}")
+
+        return lines
+
+    def _prediction_artifact_summary_lines(self) -> list[str]:
+        manifest = self._read_manifest()
+        if not manifest:
             return []
 
         artifacts = manifest.get("prediction_artifacts")
@@ -82,13 +106,8 @@ class CompileResult:
         return lines if len(lines) > 1 else []
 
     def _pipeline_stage_summary_lines(self) -> list[str]:
-        manifest_path = self.out_dir / "manifest.json"
-        if not manifest_path.exists():
-            return []
-
-        try:
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except Exception:
+        manifest = self._read_manifest()
+        if not manifest:
             return []
 
         stages = manifest.get("pipeline_stages")
@@ -162,6 +181,11 @@ class CompileResult:
             f"Training summary TXT : {self.training_summary_txt}",
             "===================================================",
         ]
+
+        manifest_lines = self._manifest_summary_lines()
+        if manifest_lines:
+            lines.insert(-1, "---------------------------------------------------")
+            lines[-1:-1] = manifest_lines
 
         prediction_lines = self._prediction_artifact_summary_lines()
         if prediction_lines:

@@ -76,11 +76,14 @@ def test_compile_result_summary_includes_pipeline_stages_when_manifest_exists(tm
     from fpgai.engine.result import CompileResult
 
     manifest = {
+        "pipeline_mode": "inference",
+        "top_kernel_name": "deeplearn",
+        "seconds": 0.123,
         "pipeline_stages": [
             {"name": "load_config", "status": "done"},
             {"name": "run_hls", "status": "skipped"},
             {"name": "vivado_bridge", "status": "not_requested"},
-        ]
+        ],
     }
     (tmp_path / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
@@ -98,6 +101,10 @@ def test_compile_result_summary_includes_pipeline_stages_when_manifest_exists(tm
 
     summary = result.summary()
 
+    assert "Manifest" in summary
+    assert "Pipeline mode        : inference" in summary
+    assert "Top kernel           : deeplearn" in summary
+    assert "Compile seconds      : 0.123" in summary
     assert "Pipeline stages" in summary
     assert "load_config: done" in summary
     assert "run_hls: skipped" in summary
