@@ -80,6 +80,8 @@ Vivado bridge generation can emit:
 
 ## Latest update
 
+- Added `docs/FEATURE_MATRIX.md` as the public feature-support contract.
+- Core compiler features will only be marked supported when YAML, compiler, generated HLS/C++, manifest/reporting, and tests all agree.
 - Documentation now has a clean entry point at `docs/README.md`.
 - README is the public landing page.
 - Status documentation is a concise current-state summary instead of a development log.

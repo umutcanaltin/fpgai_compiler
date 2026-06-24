@@ -7,6 +7,7 @@ This directory contains user-facing and developer-facing documentation for FPGAI
 - [`../README.md`](../README.md): project overview, main workflow, supported boards, and current limitations.
 - [`CLI_WORKFLOWS.md`](CLI_WORKFLOWS.md): practical command examples for inspect, compile, benchmark, sweeps, reports, Vivado bridge generation, and runtime packages.
 - [`FPGAI_PROJECT_STATUS.md`](FPGAI_PROJECT_STATUS.md): concise current implementation status and truth boundaries.
+- [`FEATURE_MATRIX.md`](FEATURE_MATRIX.md): feature support contract and implementation status.
 
 ## Workflow references
 
