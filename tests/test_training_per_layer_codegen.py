@@ -339,4 +339,66 @@ def test_training_forward_dense_tiling_is_materialized() -> None:
     assert "FPGAI training forward tiling materialized" in source
     assert "FPGAI real dense tiling helper" in source
     assert "dense_out_in_tiled<4, 3, 2, 2" in source
-    assert "dense_weight_grad_typed<4, 3" in source
+    assert "dense_weight_grad_tiled<4, 3" in source
+
+
+
+def test_training_dense_backward_update_tiling_is_materialized() -> None:
+    graph = _dense_graph()
+    plan = CompilePlan(
+        layer_plans=[
+            LayerPlan(
+                node_name="dense0",
+                op_type="Dense",
+                architecture=ArchitecturePlan(
+                    precision=_precision(),
+                    pipeline=PipelinePlan(ii=2),
+                    parallelism=ParallelismPlan(
+                        pe=2,
+                        simd=2,
+                        unroll={
+                            "out": 2,
+                            "in": 2,
+                        },
+                    ),
+                    partitioning=PartitionPlan(
+                        factor=2,
+                        mode="cyclic",
+                        targets={
+                            "input": 2,
+                            "output": 2,
+                            "weight": 2,
+                        },
+                    ),
+                    tiling=TilingPlan(
+                        sizes={
+                            "input": 2,
+                            "output": 2,
+                        }
+                    ),
+                    buffering=BufferingPlan(),
+                    memory=LayerMemoryPlan(),
+                ),
+            )
+        ]
+    )
+
+    source = emit_top_train_cpp(
+        graph=graph,
+        top_name="deeplearn_train",
+        weights_mode="embedded",
+        training_cfg={
+            "loss": {"type": "mse"},
+            "optimizer": {"learning_rate": 0.01},
+        },
+        compile_plan=plan,
+    )
+
+    assert "FPGAI_DENSE_TRAINING_TILING_PRESENT" in source
+    assert "#define FPGAI_DENSE_TRAIN_TILE_0_IN 2" in source
+    assert "#define FPGAI_DENSE_TRAIN_TILE_0_OUT 2" in source
+    assert "dense_weight_grad_tiled<4, 3" in source
+    assert "dense_bias_grad_tiled<3" in source
+    assert "dense_backward_input_tiled<4, 3" in source
+    assert "sgd_update_wgt_tiled<12" in source
+    assert "sgd_update_bias_tiled<3" in source

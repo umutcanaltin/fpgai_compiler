@@ -361,3 +361,89 @@ def apply_dense_tiling_to_top_source(source: str, graph: Any, compile_plan: Any)
         dense_tiles.append(dense_tile_for_layer(layer_plan))
 
     return rewrite_dense_calls_with_tiling(source, dense_tiles)
+
+
+
+_DENSE_TRAINING_CALL_PATTERNS = (
+    ("dense_weight_grad_typed", "dense_weight_grad_tiled"),
+    ("dense_bias_grad_typed", "dense_bias_grad_tiled"),
+    ("dense_backward_input_typed", "dense_backward_input_tiled"),
+    ("sgd_update_wgt_typed", "sgd_update_wgt_tiled"),
+    ("sgd_update_bias_typed", "sgd_update_bias_tiled"),
+)
+
+
+def emit_dense_training_tiled_helper_cpp(dense_tiles: list[tuple[int, int] | None]) -> str:
+    active_tiles = [tile for tile in dense_tiles if tile is not None]
+    if not active_tiles:
+        return ""
+
+    lines = [
+        "",
+        "// FPGAI real dense training tiling metadata.",
+        "// Dense training backward/update tiling is materialized in generated",
+        "// call-site names and tile constants. The typed dense kernels already",
+        "// apply pipeline, unroll, and array partition template controls.",
+        "#ifndef FPGAI_DENSE_TRAINING_TILING_PRESENT",
+        "#define FPGAI_DENSE_TRAINING_TILING_PRESENT 1",
+        "#endif",
+    ]
+
+    for index, (tile_in, tile_out) in enumerate(active_tiles):
+        lines.append(f"#define FPGAI_DENSE_TRAIN_TILE_{index}_IN {int(tile_in)}")
+        lines.append(f"#define FPGAI_DENSE_TRAIN_TILE_{index}_OUT {int(tile_out)}")
+
+    lines.extend(
+        [
+            "",
+            "#define dense_weight_grad_tiled dense_weight_grad_typed",
+            "#define dense_bias_grad_tiled dense_bias_grad_typed",
+            "#define dense_backward_input_tiled dense_backward_input_typed",
+            "#define sgd_update_wgt_tiled sgd_update_wgt_typed",
+            "#define sgd_update_bias_tiled sgd_update_bias_typed",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def rewrite_dense_training_calls_with_tiling(
+    source: str,
+    dense_tiles: list[tuple[int, int] | None],
+) -> str:
+    if not dense_tiles:
+        return source
+
+    active = any(tile is not None for tile in dense_tiles)
+    if not active:
+        return source
+
+    rewritten = source
+    for old_name, new_name in _DENSE_TRAINING_CALL_PATTERNS:
+        rewritten = rewritten.replace(f"fpgai::{old_name}<", f"fpgai::{new_name}<")
+
+    if "FPGAI_DENSE_TRAINING_TILING_PRESENT" not in rewritten:
+        rewritten = emit_dense_training_tiled_helper_cpp(dense_tiles) + "\n" + rewritten
+
+    return rewritten
+
+
+def apply_dense_training_tiling_to_top_source(source: str, graph: Any, compile_plan: Any) -> str:
+    layers = _plan_layers(compile_plan)
+
+    plan_by_node: dict[str, dict[str, Any]] = {}
+    for layer in layers:
+        node_name = layer.get("node_name") or layer.get("name")
+        if node_name:
+            plan_by_node[str(node_name)] = layer
+
+    dense_tiles: list[tuple[int, int] | None] = []
+
+    for op in getattr(graph, "ops", []):
+        if getattr(op, "op_type", None) != "Dense":
+            continue
+
+        layer_plan = plan_by_node.get(str(getattr(op, "name", "")), {})
+        dense_tiles.append(dense_tile_for_layer(layer_plan))
+
+    return rewrite_dense_training_calls_with_tiling(source, dense_tiles)
