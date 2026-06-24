@@ -1100,6 +1100,38 @@ class Compiler:
             row["artifacts"] = artifacts
         return row
 
+    def _design_space_manifest_payload(self, design_result) -> Dict[str, Any] | None:
+        if design_result is None:
+            return None
+
+        payload: Dict[str, Any] = {
+            "prediction_status": "estimate",
+            "out_dir": str(design_result.out_dir),
+            "results_json": str(design_result.results_json),
+            "summary_txt": str(design_result.summary_txt),
+            "results_csv": str(design_result.results_csv),
+            "layer_breakdown_csv": str(design_result.out_dir / "layer_breakdown.csv"),
+        }
+
+        try:
+            data = json.loads(design_result.results_json.read_text(encoding="utf-8"))
+        except Exception:
+            data = {}
+
+        if isinstance(data, dict):
+            for key in (
+                "format",
+                "analytical_models",
+                "recommendation_policy",
+                "recommended_smallest_valid",
+                "recommended_balanced",
+                "recommended_best_accuracy",
+            ):
+                if key in data:
+                    payload[key] = data[key]
+
+        return payload
+
     def _build_pipeline_stages(
         self,
         **kwargs: Any,
@@ -1404,12 +1436,9 @@ class Compiler:
                 "summary_txt": str(kwargs["sweep_result"].summary_txt),
                 "results_csv": str(kwargs["sweep_result"].results_csv),
             },
-            "design_space": None if kwargs["design_result"] is None else {
-                "out_dir": str(kwargs["design_result"].out_dir),
-                "results_json": str(kwargs["design_result"].results_json),
-                "summary_txt": str(kwargs["design_result"].summary_txt),
-                "results_csv": str(kwargs["design_result"].results_csv),
-            },
+            "design_space": self._design_space_manifest_payload(
+                kwargs["design_result"]
+            ),
             "estimate_vs_hls": None if kwargs["estimate_vs_hls_result"] is None else {
                 "out_dir": str(kwargs["estimate_vs_hls_result"].out_dir),
                 "results_json": str(kwargs["estimate_vs_hls_result"].results_json),

@@ -75,6 +75,13 @@ Sprint 4: model inspection and resource/timing prediction.
 
 ## Latest update
 
+- Started Sprint 6: DSE integration polish.
+- Reused the existing design-space report instead of redesigning DSE.
+- Compile manifest now records DSE `prediction_status: estimate`, analytical model metadata, recommendation policy, recommended candidates, and `layer_breakdown.csv`.
+- Real DSE compile smoke confirmed the manifest records `design_space` as done and surfaces the recommended candidate metadata.
+
+## Latest update
+
 - Started Sprint 5C: cleaned compile summary output using the existing `manifest.json`.
 - Added manifest summary lines to `CompileResult.summary()` for manifest path, pipeline mode, top kernel, and compile seconds.
 - Reused the existing manifest/pipeline-stage/prediction-artifact structure instead of adding a separate artifact-index file.

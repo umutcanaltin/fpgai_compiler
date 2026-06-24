@@ -214,3 +214,51 @@ def test_compiler_emits_prediction_artifacts_in_source() -> None:
     assert "prediction_artifacts=prediction_artifacts" in source
     assert "\"prediction_artifacts\": kwargs.get(\"prediction_artifacts\")" in source
 
+
+def test_design_space_manifest_payload_includes_recommendations(tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    from fpgai.engine.compiler import Compiler
+
+    design_dir = tmp_path / "design_space"
+    design_dir.mkdir()
+
+    results_json = design_dir / "results.json"
+    results_json.write_text(
+        json.dumps(
+            {
+                "format": "fpgai.design_space.v2",
+                "analytical_models": {
+                    "resources": "operator_structural_v2",
+                    "performance": "operator_execution_schedule_v2",
+                },
+                "recommendation_policy": {
+                    "require_prediction_match": True,
+                    "minimum_cosine": 0.999,
+                },
+                "recommended_smallest_valid": {"name": "fx8"},
+                "recommended_balanced": {"name": "fx12"},
+                "recommended_best_accuracy": {"name": "fx16"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = SimpleNamespace(
+        out_dir=design_dir,
+        results_json=results_json,
+        summary_txt=design_dir / "summary.txt",
+        results_csv=design_dir / "results.csv",
+    )
+
+    compiler = Compiler.__new__(Compiler)
+    payload = compiler._design_space_manifest_payload(result)
+
+    assert payload["prediction_status"] == "estimate"
+    assert payload["format"] == "fpgai.design_space.v2"
+    assert payload["layer_breakdown_csv"].endswith("layer_breakdown.csv")
+    assert payload["analytical_models"]["resources"] == "operator_structural_v2"
+    assert payload["recommended_smallest_valid"]["name"] == "fx8"
+    assert payload["recommended_balanced"]["name"] == "fx12"
+    assert payload["recommended_best_accuracy"]["name"] == "fx16"

@@ -95,6 +95,21 @@ This writes the manifest, IR plans, model profile, and pre-HLS resource/timing p
 
     build/fpgai_quick_compile/
 
+## Compile with design-space exploration
+
+The full inference example enables design-space exploration:
+
+    fpgai compile --config configs/examples/inference_compile.yml --quiet
+
+When `analysis.design_space.enabled: true`, compile writes estimate-based DSE artifacts under:
+
+    <project.out_dir>/design_space/results.json
+    <project.out_dir>/design_space/results.csv
+    <project.out_dir>/design_space/layer_breakdown.csv
+    <project.out_dir>/design_space/summary.txt
+
+The compile manifest records the DSE artifact paths, analytical model names, recommendation policy, and recommended candidates. These are pre-HLS estimates unless compared with HLS/Vivado reports separately.
+
 ## Prediction artifacts
 
 Use inspect output for pre-HLS model/resource/timing artifacts:
