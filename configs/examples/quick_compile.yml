@@ -169,6 +169,17 @@ analysis:
           type: ap_fixed
           total_bits: 24
           int_bits: 10
+optimization:
+  tiling:
+    dense:
+      tile_in: 16
+      tile_out: 8
+    conv:
+      tile_ic: 1
+      tile_oc: 2
+      tile_oh: 4
+      tile_ow: 4
+
 data_movement:
   ps_pl:
     compression:
