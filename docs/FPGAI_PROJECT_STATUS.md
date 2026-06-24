@@ -1,10 +1,3 @@
-## Latest update
-
-- README was rewritten as a current public landing page.
-- README now reflects the implemented pipeline: inspect, prediction artifacts, optional sweeps/DSE, HLS, Vivado bridge generation, runtime package metadata, and manifest-backed summaries.
-- Fixed README markdown structure around the quick compile command.
-- Removed stale work-log style language from the main landing page.
-
 # FPGAI Project Status
 
 This document records the current implementation state of the FPGAI repository. It is intentionally concise so the public repository does not look like an unfinished work log.
@@ -87,10 +80,11 @@ Vivado bridge generation can emit:
 
 ## Latest update
 
-- Public status document was condensed into a professional current-state summary.
-- Old work-log language was removed from this file.
-- Current feature boundaries are documented in terms of implemented artifacts and validation status.
+- Documentation now has a clean entry point at `docs/README.md`.
+- README is the public landing page.
+- Status documentation is a concise current-state summary instead of a development log.
+- Public docs avoid stale work-log labels and unsupported implementation claims.
 
 ## Next cleanup target
 
-Review public docs and reporting modules for stale wording such as old work-log labels, old output names, and outdated runtime/Vivado limitations.
+Review `docs/CLI_WORKFLOWS.md` for ordering and duplication now that README and docs index are clean.
