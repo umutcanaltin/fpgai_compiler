@@ -7,11 +7,9 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from fpgai.backends.hls.emit.dense_tiling_codegen import apply_dense_tiling_to_top_source
-<<<<<<< HEAD
 from fpgai.backends.hls.emit.dense_tiling_codegen import apply_dense_training_tiling_to_top_source
-=======
->>>>>>> 901de078132a537e425cac7602bc09eef226e2d3
 from fpgai.backends.hls.emit.conv_tiling_codegen import apply_conv_tiling_to_top_source
+from fpgai.backends.hls.emit.conv_tiling_codegen import apply_conv_training_tiling_to_top_source
 from fpgai.engine.training_graph_utils import (
     as_chw as _as_chw,
     flat_size as _flat_size,
@@ -2177,20 +2175,14 @@ def emit_top_train_cpp(*args, **kwargs):
         return source
 
     source = apply_dense_tiling_to_top_source(source, graph, compile_plan)
-<<<<<<< HEAD
     source = apply_dense_training_tiling_to_top_source(source, graph, compile_plan)
-=======
->>>>>>> 901de078132a537e425cac7602bc09eef226e2d3
     source = apply_conv_tiling_to_top_source(source, graph, compile_plan)
+    source = apply_conv_training_tiling_to_top_source(source, graph, compile_plan)
 
     if "FPGAI real dense tiling helper" in source or "FPGAI real convolution tiling helper" in source:
         source = (
             "// FPGAI training forward tiling materialized. "
-<<<<<<< HEAD
-            "Dense backward/update tiling is materialized; conv backward/update tiling remains training-specific future work.\n"
-=======
-            "Backward/update tiling remains training-specific future work.\n"
->>>>>>> 901de078132a537e425cac7602bc09eef226e2d3
+            "Dense backward/update tiling is materialized; conv backward/update tiling is materialized.\n"
             + source
         )
 

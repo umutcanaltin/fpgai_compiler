@@ -81,7 +81,7 @@ Vivado bridge generation can emit:
 ## Latest update
 
 <<<<<<< HEAD
-- Training parity audit added explicit feature-scope truth: precision, memory, pipeline, and parallel knobs are training-supported; tiling is training-forward-supported and dense-backward/update-supported; conv backward/update tiling remains planning-only; communication is training-supported with generated training HLS annotations; training support remains experimental.
+- Training parity audit added explicit feature-scope truth: precision, memory, pipeline, and parallel knobs are training-supported; tiling is training-supported for dense/conv forward and backward/update generated HLS call-site materialization; communication is training-supported with generated training HLS annotations; training support remains experimental.
 =======
 - Training parity audit added explicit feature-scope truth: precision, memory, pipeline, and parallel knobs are training-supported; tiling is training-forward-supported but backward/update tiling remains planning-only; communication is training-supported with generated training HLS annotations; training support remains experimental.
 >>>>>>> 901de078132a537e425cac7602bc09eef226e2d3

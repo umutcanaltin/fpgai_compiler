@@ -329,3 +329,88 @@ def apply_conv_tiling_to_top_source(source: str, graph: Any, compile_plan: Any) 
         conv_tiles.append(conv_tile_for_layer(layer_plan))
 
     return rewrite_conv_calls_with_tiling(source, conv_tiles)
+
+
+
+_CONV_TRAINING_CALL_PATTERNS = (
+    ("conv2d_weight_grad_typed", "conv2d_weight_grad_tiled"),
+    ("conv2d_bias_grad_typed", "conv2d_bias_grad_tiled"),
+    ("conv2d_backward_input_typed", "conv2d_backward_input_tiled"),
+)
+
+
+def emit_conv_training_tiled_helper_cpp(conv_tiles: list[tuple[int, int, int, int] | None]) -> str:
+    active_tiles = [tile for tile in conv_tiles if tile is not None]
+    if not active_tiles:
+        return ""
+
+    lines = [
+        "",
+        "// FPGAI real convolution training tiling metadata.",
+        "// Conv training backward/update tiling is materialized in generated",
+        "// call-site names and tile constants. The typed conv kernels already",
+        "// apply pipeline, channel unroll, and array partition template controls.",
+        "#ifndef FPGAI_CONV_TRAINING_TILING_PRESENT",
+        "#define FPGAI_CONV_TRAINING_TILING_PRESENT 1",
+        "#endif",
+    ]
+
+    for index, tile in enumerate(active_tiles):
+        tile_h, tile_w, tile_ic, tile_oc = tile
+        lines.append(f"#define FPGAI_CONV_TRAIN_TILE_{index}_H {int(tile_h)}")
+        lines.append(f"#define FPGAI_CONV_TRAIN_TILE_{index}_W {int(tile_w)}")
+        lines.append(f"#define FPGAI_CONV_TRAIN_TILE_{index}_IC {int(tile_ic)}")
+        lines.append(f"#define FPGAI_CONV_TRAIN_TILE_{index}_OC {int(tile_oc)}")
+
+    lines.extend(
+        [
+            "",
+            "#define conv2d_weight_grad_tiled conv2d_weight_grad_typed",
+            "#define conv2d_bias_grad_tiled conv2d_bias_grad_typed",
+            "#define conv2d_backward_input_tiled conv2d_backward_input_typed",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def rewrite_conv_training_calls_with_tiling(
+    source: str,
+    conv_tiles: list[tuple[int, int, int, int] | None],
+) -> str:
+    if not conv_tiles:
+        return source
+
+    active = any(tile is not None for tile in conv_tiles)
+    if not active:
+        return source
+
+    rewritten = source
+    for old_name, new_name in _CONV_TRAINING_CALL_PATTERNS:
+        rewritten = rewritten.replace(f"fpgai::{old_name}<", f"fpgai::{new_name}<")
+
+    if "FPGAI_CONV_TRAINING_TILING_PRESENT" not in rewritten:
+        rewritten = emit_conv_training_tiled_helper_cpp(conv_tiles) + "\n" + rewritten
+
+    return rewritten
+
+
+def apply_conv_training_tiling_to_top_source(source: str, graph: Any, compile_plan: Any) -> str:
+    layers = _plan_layers(compile_plan)
+
+    plan_by_node: dict[str, dict[str, Any]] = {}
+    for layer in layers:
+        node_name = layer.get("node_name") or layer.get("name")
+        if node_name:
+            plan_by_node[str(node_name)] = layer
+
+    conv_tiles: list[tuple[int, int, int, int] | None] = []
+
+    for op in getattr(graph, "ops", []):
+        if getattr(op, "op_type", None) != "Conv":
+            continue
+
+        layer_plan = plan_by_node.get(str(getattr(op, "name", "")), {})
+        conv_tiles.append(conv_tile_for_layer(layer_plan))
+
+    return rewrite_conv_training_calls_with_tiling(source, conv_tiles)

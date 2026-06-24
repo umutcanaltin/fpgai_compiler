@@ -120,6 +120,49 @@ def _dense_graph() -> Graph:
     return graph
 
 
+
+def _conv_graph() -> Graph:
+    graph = Graph("training_conv_tiling_codegen")
+    graph.inputs = ["input"]
+    graph.outputs = ["output"]
+
+    graph.add_tensor("input", (1, 1, 4, 4))
+    graph.add_tensor("output", (1, 2, 2, 2))
+
+    graph.constants["w0"] = np.ones((2, 1, 3, 3), dtype=np.float32)
+    graph.constants["b0"] = np.zeros((2,), dtype=np.float32)
+
+    for name, value in graph.constants.items():
+        graph.add_tensor(name, value.shape)
+
+    graph.add_op(
+        "Conv",
+        ["input", "w0", "b0"],
+        ["output"],
+        name="conv0",
+        attrs={
+            "kernel_shape": [3, 3],
+            "strides": [1, 1],
+            "pads": [0, 0, 0, 0],
+        },
+    )
+
+    resolve_layerwise_precision(
+        graph,
+        {
+            "numerics": {
+                "defaults": {
+                    "activation": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
+                    "weight": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
+                    "bias": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
+                    "accum": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
+                }
+            }
+        },
+    )
+    return graph
+
+
 def test_dense_training_kernels_have_per_layer_controls() -> None:
     header = emit_dense_h()
 
@@ -339,7 +382,6 @@ def test_training_forward_dense_tiling_is_materialized() -> None:
     assert "FPGAI training forward tiling materialized" in source
     assert "FPGAI real dense tiling helper" in source
     assert "dense_out_in_tiled<4, 3, 2, 2" in source
-<<<<<<< HEAD
     assert "dense_weight_grad_tiled<4, 3" in source
 
 
@@ -403,6 +445,63 @@ def test_training_dense_backward_update_tiling_is_materialized() -> None:
     assert "dense_backward_input_tiled<4, 3" in source
     assert "sgd_update_wgt_tiled<12" in source
     assert "sgd_update_bias_tiled<3" in source
-=======
-    assert "dense_weight_grad_typed<4, 3" in source
->>>>>>> 901de078132a537e425cac7602bc09eef226e2d3
+
+
+
+def test_training_conv_backward_tiling_is_materialized() -> None:
+    graph = _conv_graph()
+    plan = CompilePlan(
+        layer_plans=[
+            LayerPlan(
+                node_name="conv0",
+                op_type="Conv",
+                architecture=ArchitecturePlan(
+                    precision=_precision(),
+                    pipeline=PipelinePlan(ii=2),
+                    parallelism=ParallelismPlan(
+                        pe=2,
+                        simd=1,
+                        unroll={"out": 2, "in": 1},
+                    ),
+                    partitioning=PartitionPlan(
+                        factor=2,
+                        mode="cyclic",
+                        targets={"input": 1, "output": 2, "weight": 2},
+                    ),
+                    tiling=TilingPlan(
+                        sizes={
+                            "height": 2,
+                            "width": 2,
+                            "in_channels": 1,
+                            "out_channels": 2,
+                        }
+                    ),
+                    buffering=BufferingPlan(),
+                    memory=LayerMemoryPlan(),
+                ),
+            )
+        ]
+    )
+
+    source = emit_top_train_cpp(
+        graph=graph,
+        top_name="deeplearn_train",
+        weights_mode="embedded",
+        training_cfg={
+            "loss": {"type": "mse"},
+            "optimizer": {"learning_rate": 0.01},
+        },
+        compile_plan=plan,
+    )
+
+    assert "FPGAI_CONV_TRAINING_TILING_PRESENT" in source
+    assert "#define FPGAI_CONV_TRAIN_TILE_0_H 2" in source
+    assert "#define FPGAI_CONV_TRAIN_TILE_0_W 2" in source
+    assert "#define FPGAI_CONV_TRAIN_TILE_0_IC 2" in source
+    assert "#define FPGAI_CONV_TRAIN_TILE_0_OC 1" in source
+    assert "conv2d_weight_grad_tiled<4, 4, 1" in source
+    assert "conv2d_bias_grad_tiled<2, 2, 2" in source
+    # Input-gradient conv backward is emitted only when the graph needs
+    # a gradient for the conv input. This single-conv graph has a model
+    # input, so weight/bias gradients are the materialized backward work.
+    assert "conv2d_backward_input_typed<" not in source

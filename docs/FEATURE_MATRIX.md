@@ -28,7 +28,7 @@ A feature is `supported` only when all of these are true:
 | Precision selection | YAML precision changes generated HLS/C++ data types and reports the applied precision. | supported | supported | supported | Keep materialization and generated-type regression tests current. |
 | Memory/storage selection | YAML weight delivery and storage choices change generated HLS interfaces and parameter storage pragmas. | supported | supported | supported | Keep generated-interface and BIND_STORAGE regression tests current. |
 <<<<<<< HEAD
-| Tiling selection | YAML tiling choices change generated HLS dense/conv tiled helpers, tile template arguments, and architecture metadata. | supported | dense_backward_supported_conv_backward_planning_only | supported | Training forward dense/conv and dense backward/update tiling are materialized; conv backward/update tiling remains future work before full training parity. |
+| Tiling selection | YAML tiling choices change generated HLS dense/conv tiled helpers, tile template arguments, training backward/update call-site materialization, and architecture metadata. | supported | supported | supported | Training dense/conv forward and backward/update tiling are materialized in generated HLS call sites and metadata. |
 =======
 | Tiling selection | YAML tiling choices change generated HLS dense/conv tiled helpers, tile template arguments, and architecture metadata. | supported | forward_supported_backward_planning_only | supported | Training forward dense/conv tiling is materialized; training backward/update tiling remains future work before full training parity. |
 >>>>>>> 901de078132a537e425cac7602bc09eef226e2d3
