@@ -85,6 +85,16 @@ fpgai compile --config configs/examples/inference_compile.yml --verbose
 fpgai compile --config configs/examples/inference_compile.yml --quiet
 ```
 
+## Quick compile without HLS/Vivado
+
+Use the quick compile example to validate the front half of the pipeline without requiring Vitis HLS or Vivado:
+
+    fpgai compile --config configs/examples/quick_compile.yml --quiet
+
+This writes the manifest, IR plans, model profile, and pre-HLS resource/timing prediction artifacts under:
+
+    build/fpgai_quick_compile/
+
 ## Prediction artifacts
 
 Use inspect output for pre-HLS model/resource/timing artifacts:

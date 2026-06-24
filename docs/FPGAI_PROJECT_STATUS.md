@@ -75,6 +75,12 @@ Sprint 4: model inspection and resource/timing prediction.
 
 ## Latest update
 
+- Started Sprint 5B: added `configs/examples/quick_compile.yml` for a fast YAML-first compile path.
+- The quick compile example disables HLS, Vitis HLS, host C++, benchmark, precision sweep, and design-space exploration.
+- Smoke compile confirmed prediction artifacts and pipeline stage metadata are generated under `build/fpgai_quick_compile/`.
+
+## Latest update
+
 - Started Sprint 5A: YAML-first compile flow polish.
 - `CompileResult.summary()` now surfaces prediction artifact paths from `manifest.json`.
 - Documented inspect/compile prediction artifacts in `docs/CLI_WORKFLOWS.md`.

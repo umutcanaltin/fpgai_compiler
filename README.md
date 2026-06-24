@@ -26,7 +26,9 @@ fpgai inspect --config configs/examples/inference_compile.yml
 Compile a model:
 
 ```bash
-fpgai compile --config configs/examples/inference_compile.yml
+fpgai compile --config configs/examples/quick_compile.yml
+The quick compile example runs the YAML-first front half of the pipeline without requiring Vitis HLS/Vivado. It emits the manifest, IR plans, model profile, and pre-HLS resource/timing prediction artifacts under `build/fpgai_quick_compile/`.
+
 ```
 
 Run a benchmark flow:
