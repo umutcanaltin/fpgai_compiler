@@ -1,100 +1,41 @@
 # FPGAI Project Status
 
-This document records the current implementation state of the FPGAI repository. It is intentionally concise so the public repository does not look like an unfinished work log.
+## Current sprint
 
-## Working rules
+Sprint 21: full real-pipeline sweep validation toward paper artifacts.
 
-- Prefer YAML-first workflows through the public CLI.
-- Inspect and reuse existing modules before adding new files.
-- Keep public claims tied to implemented behavior and generated artifacts.
-- Use tests during development; keep only useful public regression tests.
-- Use “experiments”, “reports”, “artifacts”, “validation”, and “traceability” wording in public docs.
+## Latest completed change
 
-## Current target
+Fixed CNN inference HLS code generation.
 
-FPGAI should provide a clear end-to-end compiler workflow:
+Completed fixes:
+- Tiled Conv HLS helper now supports flat parameter arrays emitted by the parameter generator.
+- Stale default type aliases in tiled Conv helper were removed.
+- Parameter emitter no longer emits file-scope `BIND_STORAGE` pragmas that Vitis HLS rejects during csynth.
+- `configs/sweeps/inference_policy.yml` now uses real precision candidate `fx16_6` instead of stale `fixed`.
 
-```text
-inspect config/model
-→ estimate model/resource/timing before HLS
-→ optionally run design-space exploration
-→ generate host/HLS artifacts
-→ optionally run Vitis HLS
-→ optionally generate/run Vivado bridge artifacts
-→ emit runtime package metadata
-→ report truthful artifact status in CLI output and manifest
-```
+Validated:
+- `inference_precision_single`: passed.
+- `inference_precision`: 4/4 passed.
+- `inference_policy`: 4/4 passed.
+- `inference_policy_fx16_check`: 1/1 passed with no skipped/unapplied precision mode.
 
-## Current implementation state
+## Truth boundary
 
-Implemented and tested:
+Supported after this sprint:
+- CNN inference HLS generation through CSim and csynth for the tested sweeps.
+- Precision and policy sweeps generate real HLS reports for tested CNN designs.
 
-- Config-first CLI workflows for compile, inspect, benchmark, sweep, experiment inspection, and report generation.
-- Quick compile flow that does not require Vitis HLS or Vivado.
-- Pre-HLS model profile, resource prediction, timing prediction, and prediction summary artifacts.
-- Manifest-backed pipeline stage reporting.
-- Design-space metadata in the compile manifest when DSE is enabled.
-- HLS artifact grouping in the compile manifest.
-- Board-aware Vivado bridge generation for:
-  - `pynq_z2` using `processing_system7`;
-  - `kv260` using `zynq_ultra_ps_e`;
-  - `kr260` using `zynq_ultra_ps_e`.
-- Runtime package emission from compile outputs:
-  - `runtime_package/package_manifest.json`;
-  - copied runtime-facing artifacts when present;
-  - truthful bitstream/HWH/XSA presence flags.
-- Quiet and normal compile summaries that surface manifest-backed artifact status.
+Still to validate:
+- All remaining sweeps across precision, tiling, memory, parallelism, pipeline, training, and hardware knobs.
+- Vivado report generation.
+- Bitstream generation.
+- Real board runtime inference/training timing and accuracy plots.
 
-## Truth boundaries
+## Next step
 
-The repository should not imply more than the generated artifacts prove.
-
-- Resource and timing predictions are pre-HLS estimates unless compared against HLS/Vivado reports.
-- Vivado bridge generation is separate from the main compile command.
-- Bitstream, HWH, and XSA files are only reported as present when actual files exist.
-- Physical-board runtime benchmarking is not the default public workflow.
-- Training-code generation and single-step reference reporting exist; multi-step convergence and physical-board training remain validation areas.
-
-## Important current artifacts
-
-A normal compile can emit:
-
-```text
-<out_dir>/manifest.json
-<out_dir>/reports/model_profile.json
-<out_dir>/reports/resource_prediction.json
-<out_dir>/reports/timing_prediction.json
-<out_dir>/reports/prediction_summary.md
-<out_dir>/hls_artifact_metadata.json
-<out_dir>/runtime_package/package_manifest.json
-```
-
-Vivado bridge generation can emit:
-
-```text
-<out_dir>/vivado_bridge/scripts/export_hls_ip.tcl
-<out_dir>/vivado_bridge/scripts/create_bd.tcl
-<out_dir>/vivado_bridge/scripts/run_vivado.tcl
-<out_dir>/vivado_bridge/vivado_bridge_manifest.json
-```
-
-## Latest update
-
-- Training parity audit split feature-scope truth: training code generation and single-step reference reporting are supported at generated-artifact/report level; multi-step convergence and physical-board training remain experimental until reproducible runtime artifacts exist.
-- DSE is now documented and emitted as recommendation-only: configured YAML candidates are evaluated with pre-HLS estimates, recommendations include compile-ready/materialized-knob metadata, and no exhaustive search optimizer is claimed.
-- Communication planning now models input, weight, output, and aux tensor edges with per-edge precision, compression codec, transfer-byte estimates, and generated HLS annotations. Codec compression is marked modeled unless implemented in generated HLS.
-- Parallelization selection now has YAML-to-planner-to-generated-HLS proof for PE/SIMD, unroll, partition factors, and array partition mode.
-- Pipeline selection now has YAML-to-planner-to-generated-HLS proof for style-derived and explicit initiation interval settings.
-- Tiling selection now has YAML-to-planner-to-generated-HLS proof for Dense and Conv tiled helper generation.
-- Memory/storage selection now has generated HLS proof for embedded, AXI-stream preload, DDR/m_axi preload, and BRAM/URAM/LUTRAM parameter storage binding pragmas.
-- Precision selection now has an explicit regression proof from `precision_mode` materialization to generated HLS typedef changes.
-- Added `docs/FEATURE_MATRIX.md` as the public feature-support contract.
-- Core compiler features will only be marked supported when YAML, compiler, generated HLS/C++, manifest/reporting, and tests all agree.
-- Documentation now has a clean entry point at `docs/README.md`.
-- README is the public landing page.
-- Status documentation is a concise current-state summary instead of a development log.
-- Public docs avoid stale work-log labels and unsupported implementation claims.
-
-## Next cleanup target
-
-Review `docs/CLI_WORKFLOWS.md` for ordering and duplication now that README and docs index are clean.
+Run full sweep validation in gates:
+1. Inspect every sweep config.
+2. Run every HLS/benchmark sweep.
+3. Collect artifact sensitivity and HLS reports.
+4. Run Vivado report/bitstream paths only after HLS sweeps are green.
