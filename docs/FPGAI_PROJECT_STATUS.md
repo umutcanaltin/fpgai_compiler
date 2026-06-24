@@ -1,3 +1,10 @@
+## Latest update
+
+- README was rewritten as a current public landing page.
+- README now reflects the implemented pipeline: inspect, prediction artifacts, optional sweeps/DSE, HLS, Vivado bridge generation, runtime package metadata, and manifest-backed summaries.
+- Fixed README markdown structure around the quick compile command.
+- Removed stale work-log style language from the main landing page.
+
 # FPGAI Project Status
 
 This document records the current implementation state of the FPGAI repository. It is intentionally concise so the public repository does not look like an unfinished work log.
