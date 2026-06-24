@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import fpgai.cli as cli
 
@@ -92,3 +93,31 @@ paper:
     rc = cli.inspect_experiment_config(str(cfg))
 
     assert rc == 1
+
+
+def test_sweep_inspect_accepts_design_points_schema(tmp_path):
+    cfg = tmp_path / "design_points_sweep.yml"
+    out = tmp_path / "inspection.json"
+    cfg.write_text(
+        """
+name: design_points_sweep
+defaults:
+  board: kv260
+design_points:
+  - name: one
+    command: "echo one"
+  - name: two
+    command: "echo two"
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    rc = cli.inspect_sweep_config(str(cfg), json_output=str(out))
+
+    assert rc == 0
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert payload["valid"] is True
+    assert payload["parameter_count"] == 0
+    assert payload["design_point_count"] == 2
+    assert payload["unknown_keys"] == []

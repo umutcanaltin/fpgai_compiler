@@ -521,6 +521,7 @@ def inspect_sweep_config(
         "description",
         "defaults",
         "parameters",
+        "design_points",
         "command_template",
         "design_name_template",
         "point_name_template",
@@ -530,17 +531,21 @@ def inspect_sweep_config(
     top_keys = sorted(data.keys())
     unknown_keys = sorted(k for k in top_keys if k not in known_keys)
     parameters = data.get("parameters")
+    design_points = data.get("design_points")
     defaults = data.get("defaults")
     errors: list[str] = []
 
+    has_parameters = isinstance(parameters, (dict, list)) and len(parameters) > 0
+    has_design_points = isinstance(design_points, list) and len(design_points) > 0
+
     if not isinstance(defaults, dict):
         errors.append("defaults: expected mapping")
-    if not isinstance(parameters, (dict, list)) or len(parameters) == 0:
-        errors.append("parameters: expected non-empty mapping or list")
-    if "command_template" not in data:
-        errors.append("command_template: missing")
+    if not has_parameters and not has_design_points:
+        errors.append("parameters/design_points: expected non-empty mapping/list or non-empty design_points list")
+    if has_parameters and "command_template" not in data:
+        errors.append("command_template: missing for parameter sweep")
 
-    points = _as_list(parameters)
+    points = _as_list(parameters) if has_parameters else []
     report = {
         "kind": "sweep",
         "config": config_path,
@@ -549,6 +554,7 @@ def inspect_sweep_config(
         "top_level_keys": top_keys,
         "unknown_keys": unknown_keys,
         "parameter_count": len(points),
+        "design_point_count": len(design_points) if isinstance(design_points, list) else 0,
         "has_defaults": isinstance(defaults, dict),
         "has_command_template": "command_template" in data,
         "errors": errors,
@@ -559,6 +565,7 @@ def inspect_sweep_config(
     print(f"Name                  : {report['name']}")
     print(f"Valid                 : {report['valid']}")
     print(f"Parameters            : {report['parameter_count']}")
+    print(f"Design points         : {report['design_point_count']}")
     print(f"Has defaults          : {report['has_defaults']}")
     print(f"Has command template  : {report['has_command_template']}")
     if unknown_keys:
