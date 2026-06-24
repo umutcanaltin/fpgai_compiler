@@ -1132,6 +1132,42 @@ class Compiler:
 
         return payload
 
+    def _hls_artifacts_manifest_payload(
+        self,
+        *,
+        out_dir: Path,
+        hls_run,
+        hls_schedule_summary,
+        hls_artifact_metadata,
+        hls_ii_comparison,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "hls_ran": hls_run is not None,
+            "hls_ok": hls_run.ok if hls_run is not None else None,
+            "hls_returncode": hls_run.returncode if hls_run is not None else None,
+            "hls_project_dir": str(out_dir / "hls"),
+            "stdout_log": (
+                str(hls_run.stdout_log)
+                if hls_run is not None and hls_run.stdout_log is not None
+                else None
+            ),
+            "stderr_log": (
+                str(hls_run.stderr_log)
+                if hls_run is not None and hls_run.stderr_log is not None
+                else None
+            ),
+            "csynth_report": (
+                str(hls_run.csynth_report)
+                if hls_run is not None and hls_run.csynth_report is not None
+                else None
+            ),
+            "schedule_summary": hls_schedule_summary,
+            "artifact_metadata": hls_artifact_metadata,
+            "ii_comparison": hls_ii_comparison,
+        }
+
+        return payload
+
     def _build_pipeline_stages(
         self,
         **kwargs: Any,
@@ -1478,6 +1514,13 @@ class Compiler:
                 str(kwargs["hls_run"].csynth_report)
                 if kwargs["hls_run"] is not None and kwargs["hls_run"].csynth_report is not None
                 else None
+            ),
+            "hls_artifacts": self._hls_artifacts_manifest_payload(
+                out_dir=out_dir,
+                hls_run=kwargs["hls_run"],
+                hls_schedule_summary=kwargs.get("hls_schedule_summary"),
+                hls_artifact_metadata=kwargs.get("hls_artifact_metadata"),
+                hls_ii_comparison=kwargs.get("hls_ii_comparison"),
             ),
             "pipeline_stages": self._build_pipeline_stages(**kwargs),
             "seconds": round(float(kwargs["seconds"]), 6),

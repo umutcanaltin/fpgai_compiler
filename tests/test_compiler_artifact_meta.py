@@ -262,3 +262,36 @@ def test_design_space_manifest_payload_includes_recommendations(tmp_path):
     assert payload["recommended_smallest_valid"]["name"] == "fx8"
     assert payload["recommended_balanced"]["name"] == "fx12"
     assert payload["recommended_best_accuracy"]["name"] == "fx16"
+
+def test_hls_artifacts_manifest_payload_groups_hls_outputs(tmp_path):
+    from types import SimpleNamespace
+
+    from fpgai.engine.compiler import Compiler
+
+    hls_run = SimpleNamespace(
+        ok=True,
+        returncode=0,
+        stdout_log=tmp_path / "hls" / "logs" / "stdout.log",
+        stderr_log=tmp_path / "hls" / "logs" / "stderr.log",
+        csynth_report=tmp_path / "hls" / "proj" / "sol1" / "syn" / "report" / "csynth.rpt",
+    )
+
+    compiler = Compiler.__new__(Compiler)
+    payload = compiler._hls_artifacts_manifest_payload(
+        out_dir=tmp_path,
+        hls_run=hls_run,
+        hls_schedule_summary={"path": "hls_schedule_summary.json"},
+        hls_artifact_metadata={"path": "hls_artifact_metadata.json"},
+        hls_ii_comparison={"path": "hls_ii_comparison.json"},
+    )
+
+    assert payload["hls_ran"] is True
+    assert payload["hls_ok"] is True
+    assert payload["hls_returncode"] == 0
+    assert payload["hls_project_dir"].endswith("hls")
+    assert payload["stdout_log"].endswith("stdout.log")
+    assert payload["stderr_log"].endswith("stderr.log")
+    assert payload["csynth_report"].endswith("csynth.rpt")
+    assert payload["schedule_summary"]["path"] == "hls_schedule_summary.json"
+    assert payload["artifact_metadata"]["path"] == "hls_artifact_metadata.json"
+    assert payload["ii_comparison"]["path"] == "hls_ii_comparison.json"

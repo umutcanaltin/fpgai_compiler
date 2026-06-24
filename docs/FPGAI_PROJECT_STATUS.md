@@ -75,6 +75,13 @@ Sprint 4: model inspection and resource/timing prediction.
 
 ## Latest update
 
+- Started Sprint 7: HLS/Vitis pipeline polish.
+- Reused existing HLS schedule summary, artifact metadata, and requested/achieved II comparison modules.
+- Compile manifest now includes a grouped `hls_artifacts` block with HLS run status, project path, logs, csynth report, schedule summary, artifact metadata, and II comparison.
+- Real HLS compile smoke confirmed the grouped HLS artifact metadata is present.
+
+## Latest update
+
 - Started Sprint 6: DSE integration polish.
 - Reused the existing design-space report instead of redesigning DSE.
 - Compile manifest now records DSE `prediction_status: estimate`, analytical model metadata, recommendation policy, recommended candidates, and `layer_breakdown.csv`.

@@ -95,6 +95,28 @@ This writes the manifest, IR plans, model profile, and pre-HLS resource/timing p
 
     build/fpgai_quick_compile/
 
+## HLS/Vitis artifacts
+
+When HLS is enabled and Vitis HLS runs, compile records HLS artifacts in `manifest.json` under `hls_artifacts`.
+
+The grouped HLS manifest block includes:
+
+    hls_project_dir
+    stdout_log
+    stderr_log
+    csynth_report
+    schedule_summary
+    artifact_metadata
+    ii_comparison
+
+The corresponding files are emitted under the compile output directory, including:
+
+    hls_artifact_metadata.json
+    hls_schedule_summary.json
+    hls_ii_comparison.json
+
+These artifacts describe generated HLS files, discovered schedule reports, and requested-versus-achieved II comparisons when vendor reports are available.
+
 ## Compile with design-space exploration
 
 The full inference example enables design-space exploration:
