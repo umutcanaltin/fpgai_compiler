@@ -75,6 +75,18 @@ Sprint 4: model inspection and resource/timing prediction.
 
 ## Latest update
 
+- Extended Sprint 8 from a Vivado truth audit into board-aware Vivado bridge support.
+- Added explicit board capability metadata for `pynq_z2`, `kv260`, and `kr260`.
+- Added board-specific block-design Tcl generation:
+  - `pynq_z2`: `processing_system7` / Zynq-7000 path.
+  - `kv260`: `zynq_ultra_ps_e` / Zynq UltraScale+ MPSoC path.
+  - `kr260`: `zynq_ultra_ps_e` / Zynq UltraScale+ MPSoC path.
+- Added focused tests that generate Vivado bridge artifacts for all three boards and verify board-specific Tcl, parts, support flags, and manifest metadata.
+- Real bridge-generation smoke confirmed all three board keys generate the expected board-specific Tcl and part settings.
+- Bitstream/XSA success is still recorded only when Vivado actually produces those files.
+
+## Latest update
+
 - Started Sprint 7: HLS/Vitis pipeline polish.
 - Reused existing HLS schedule summary, artifact metadata, and requested/achieved II comparison modules.
 - Compile manifest now includes a grouped `hls_artifacts` block with HLS run status, project path, logs, csynth report, schedule summary, artifact metadata, and II comparison.

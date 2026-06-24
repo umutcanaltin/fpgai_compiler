@@ -101,81 +101,59 @@ exit
 '''
 
 
-def _create_bd_tcl(board_name: str, top_name: str) -> str:
-    # Vivado bridge: real PYNQ-Z2/Zynq-7020 block-design wiring for the exported
-    # HLS IP. The generated HLS training top currently has one output stream and
-    # two input streams (in_r and aux), so the BD uses two AXI DMA blocks.
-    return f"""# Auto-generated FPGAI full Vivado block design.
-# Target: {board_name}, HLS top: {top_name}
-
-set design_name fpgai_bd
-create_bd_design $design_name
-
-proc fpgai_first_intf {{cell patterns}} {{
-  foreach pat $patterns {{
+def _bd_common_helpers() -> str:
+    return """proc fpgai_first_intf {cell patterns} {
+  foreach pat $patterns {
     set hits [get_bd_intf_pins -quiet "$cell/$pat"]
-    if {{[llength $hits] > 0}} {{ return [lindex $hits 0] }}
-  }}
+    if {[llength $hits] > 0} { return [lindex $hits 0] }
+  }
   set allpins [get_bd_intf_pins -quiet "$cell/*"]
-  foreach pat $patterns {{
-    foreach pin $allpins {{
+  foreach pat $patterns {
+    foreach pin $allpins {
       set short [lindex [split $pin /] end]
-      if {{[string match -nocase $pat $short]}} {{ return $pin }}
-    }}
-  }}
+      if {[string match -nocase $pat $short]} { return $pin }
+    }
+  }
   return ""
-}}
+}
 
-proc fpgai_first_pin {{cell patterns}} {{
-  foreach pat $patterns {{
+proc fpgai_first_pin {cell patterns} {
+  foreach pat $patterns {
     set hits [get_bd_pins -quiet "$cell/$pat"]
-    if {{[llength $hits] > 0}} {{ return [lindex $hits 0] }}
-  }}
+    if {[llength $hits] > 0} { return [lindex $hits 0] }
+  }
   set allpins [get_bd_pins -quiet "$cell/*"]
-  foreach pat $patterns {{
-    foreach pin $allpins {{
+  foreach pat $patterns {
+    foreach pin $allpins {
       set short [lindex [split $pin /] end]
-      if {{[string match -nocase $pat $short]}} {{ return $pin }}
-    }}
-  }}
+      if {[string match -nocase $pat $short]} { return $pin }
+    }
+  }
   return ""
-}}
+}
 
-proc fpgai_connect_intf_required {{src dst label}} {{
-  if {{$src eq "" || $dst eq ""}} {{
+proc fpgai_connect_intf_required {src dst label} {
+  if {$src eq "" || $dst eq ""} {
     error "FPGAI-Vivado missing interface for $label: src=$src dst=$dst"
-  }}
+  }
   puts "FPGAI-Vivado connect $label: $src -> $dst"
   connect_bd_intf_net $src $dst
-}}
+}
 
-proc fpgai_connect_pin_if_exists {{src dst label}} {{
-  if {{$src ne "" && $dst ne ""}} {{
+proc fpgai_connect_pin_if_exists {src dst label} {
+  if {$src ne "" && $dst ne ""} {
     puts "FPGAI-Vivado connect $label: $src -> $dst"
-    catch {{connect_bd_net $src $dst}} msg
-    if {{$msg ne ""}} {{ puts "FPGAI-Vivado optional pin connect result for $label: $msg" }}
-  }} else {{
+    catch {connect_bd_net $src $dst} msg
+    if {$msg ne ""} { puts "FPGAI-Vivado optional pin connect result for $label: $msg" }
+  } else {
     puts "FPGAI-Vivado skip optional pin $label: src=$src dst=$dst"
-  }}
-}}
+  }
+}
+"""
 
-create_bd_cell -type ip -vlnv xilinx.com:ip:processing_system7:* processing_system7_0
-set_property -dict [list \
-  CONFIG.PCW_USE_M_AXI_GP0 {{1}} \
-  CONFIG.PCW_USE_S_AXI_HP0 {{1}} \
-  CONFIG.PCW_EN_CLK0_PORT {{1}} \
-  CONFIG.PCW_EN_RST0_PORT {{1}} \
-  CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ {{100}} \
-] [get_bd_cells processing_system7_0]
 
-catch {{apply_bd_automation -rule xilinx.com:bd_rule:processing_system7 -config {{make_external "FIXED_IO, DDR" apply_board_preset "1"}} [get_bd_cells processing_system7_0]}} ps_auto_msg
-puts "FPGAI-Vivado PS automation result: $ps_auto_msg"
-catch {{make_bd_intf_pins_external [get_bd_intf_pins processing_system7_0/DDR]}} ddr_ext_msg
-catch {{make_bd_intf_pins_external [get_bd_intf_pins processing_system7_0/FIXED_IO]}} fixed_ext_msg
-puts "FPGAI-Vivado DDR external result: $ddr_ext_msg"
-puts "FPGAI-Vivado FIXED_IO external result: $fixed_ext_msg"
-
-set hls_top_name "{top_name}"
+def _bd_accelerator_tcl(top_name: str) -> str:
+    return f"""set hls_top_name "{top_name}"
 set hls_ip_defs [get_ipdefs -all "*$hls_top_name*"]
 puts "FPGAI-Vivado Candidate HLS IP defs for $hls_top_name: $hls_ip_defs"
 if {{[llength $hls_ip_defs] == 0}} {{
@@ -189,7 +167,7 @@ set hls_cell ${{hls_top_name}}_0
 
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:* axi_dma_0
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:* axi_dma_aux_0
-create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:* rst_ps7_0_100M
+create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:* rst_ps_0_100M
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect:* axi_ctrl_interconnect
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect:* axi_mem_interconnect
 
@@ -201,34 +179,30 @@ puts "FPGAI-Vivado DMA aux config result: $dmaaux_cfg_msg"
 set_property -dict [list CONFIG.NUM_SI {{1}} CONFIG.NUM_MI {{3}}] [get_bd_cells axi_ctrl_interconnect]
 set_property -dict [list CONFIG.NUM_SI {{3}} CONFIG.NUM_MI {{1}}] [get_bd_cells axi_mem_interconnect]
 
-set clk [get_bd_pins processing_system7_0/FCLK_CLK0]
-set rstn [get_bd_pins processing_system7_0/FCLK_RESET0_N]
-connect_bd_net $clk [get_bd_pins rst_ps7_0_100M/slowest_sync_clk]
-connect_bd_net $rstn [get_bd_pins rst_ps7_0_100M/ext_reset_in]
-set periph_aresetn [get_bd_pins rst_ps7_0_100M/peripheral_aresetn]
+connect_bd_net $clk [get_bd_pins rst_ps_0_100M/slowest_sync_clk]
+connect_bd_net $rstn [get_bd_pins rst_ps_0_100M/ext_reset_in]
+set periph_aresetn [get_bd_pins rst_ps_0_100M/peripheral_aresetn]
 
-fpgai_connect_pin_if_exists $clk [get_bd_pins processing_system7_0/M_AXI_GP0_ACLK] "PS GP0 clock"
-fpgai_connect_pin_if_exists $clk [get_bd_pins processing_system7_0/S_AXI_HP0_ACLK] "PS HP0 clock"
-foreach pin [concat \
-  [get_bd_pins -quiet axi_dma_0/*aclk] \
-  [get_bd_pins -quiet axi_dma_aux_0/*aclk] \
-  [get_bd_pins -quiet axi_ctrl_interconnect/*ACLK] \
-  [get_bd_pins -quiet axi_mem_interconnect/*ACLK] \
-  [list [fpgai_first_pin $hls_cell {{ap_clk aclk ACLK}}]] \
+foreach pin [concat \\
+  [get_bd_pins -quiet axi_dma_0/*aclk] \\
+  [get_bd_pins -quiet axi_dma_aux_0/*aclk] \\
+  [get_bd_pins -quiet axi_ctrl_interconnect/*ACLK] \\
+  [get_bd_pins -quiet axi_mem_interconnect/*ACLK] \\
+  [list [fpgai_first_pin $hls_cell {{ap_clk aclk ACLK}}]] \\
 ] {{
   if {{$pin ne ""}} {{ catch {{connect_bd_net $clk $pin}} clk_msg }}
 }}
-foreach pin [concat \
-  [get_bd_pins -quiet axi_dma_0/*aresetn] \
-  [get_bd_pins -quiet axi_dma_aux_0/*aresetn] \
-  [get_bd_pins -quiet axi_ctrl_interconnect/*ARESETN] \
-  [get_bd_pins -quiet axi_mem_interconnect/*ARESETN] \
-  [list [fpgai_first_pin $hls_cell {{ap_rst_n aresetn ARESETN}}]] \
+foreach pin [concat \\
+  [get_bd_pins -quiet axi_dma_0/*aresetn] \\
+  [get_bd_pins -quiet axi_dma_aux_0/*aresetn] \\
+  [get_bd_pins -quiet axi_ctrl_interconnect/*ARESETN] \\
+  [get_bd_pins -quiet axi_mem_interconnect/*ARESETN] \\
+  [list [fpgai_first_pin $hls_cell {{ap_rst_n aresetn ARESETN}}]] \\
 ] {{
   if {{$pin ne ""}} {{ catch {{connect_bd_net $periph_aresetn $pin}} rst_msg }}
 }}
 
-fpgai_connect_intf_required [get_bd_intf_pins processing_system7_0/M_AXI_GP0] [get_bd_intf_pins axi_ctrl_interconnect/S00_AXI] "PS GP0 to ctrl interconnect"
+fpgai_connect_intf_required $ps_ctrl_axi [get_bd_intf_pins axi_ctrl_interconnect/S00_AXI] "PS control master to ctrl interconnect"
 set hls_ctrl [fpgai_first_intf $hls_cell {{s_axi_CTRL S_AXI_CTRL CTRL s_axi_control S_AXI_CONTROL *CTRL* *control*}}]
 fpgai_connect_intf_required [get_bd_intf_pins axi_ctrl_interconnect/M00_AXI] $hls_ctrl "control to HLS AXI-Lite"
 fpgai_connect_intf_required [get_bd_intf_pins axi_ctrl_interconnect/M01_AXI] [get_bd_intf_pins axi_dma_0/S_AXI_LITE] "control to main DMA AXI-Lite"
@@ -237,7 +211,7 @@ fpgai_connect_intf_required [get_bd_intf_pins axi_ctrl_interconnect/M02_AXI] [ge
 fpgai_connect_intf_required [get_bd_intf_pins axi_dma_0/M_AXI_MM2S] [get_bd_intf_pins axi_mem_interconnect/S00_AXI] "main DMA MM2S to memory interconnect"
 fpgai_connect_intf_required [get_bd_intf_pins axi_dma_0/M_AXI_S2MM] [get_bd_intf_pins axi_mem_interconnect/S01_AXI] "main DMA S2MM to memory interconnect"
 fpgai_connect_intf_required [get_bd_intf_pins axi_dma_aux_0/M_AXI_MM2S] [get_bd_intf_pins axi_mem_interconnect/S02_AXI] "aux DMA MM2S to memory interconnect"
-fpgai_connect_intf_required [get_bd_intf_pins axi_mem_interconnect/M00_AXI] [get_bd_intf_pins processing_system7_0/S_AXI_HP0] "memory interconnect to PS HP0"
+fpgai_connect_intf_required [get_bd_intf_pins axi_mem_interconnect/M00_AXI] $ps_mem_axi "memory interconnect to PS memory slave"
 
 set hls_in [fpgai_first_intf $hls_cell {{in_r s_axis_in_r S_AXIS_IN_R *in_r* *input*}}]
 set hls_aux [fpgai_first_intf $hls_cell {{aux s_axis_aux S_AXIS_AUX *aux* *target*}}]
@@ -253,12 +227,104 @@ save_bd_design
 puts "FPGAI-Vivado Full block design validated: $design_name"
 """
 
+
+def _create_zynq7000_bd_tcl(board_name: str, top_name: str) -> str:
+    return f"""# Auto-generated FPGAI full Vivado block design.
+# Target: {board_name}, HLS top: {top_name}
+# Board family: Zynq-7000 / processing_system7
+
+set design_name fpgai_bd
+create_bd_design $design_name
+
+{_bd_common_helpers()}
+create_bd_cell -type ip -vlnv xilinx.com:ip:processing_system7:* processing_system7_0
+set_property -dict [list \\
+  CONFIG.PCW_USE_M_AXI_GP0 {{1}} \\
+  CONFIG.PCW_USE_S_AXI_HP0 {{1}} \\
+  CONFIG.PCW_EN_CLK0_PORT {{1}} \\
+  CONFIG.PCW_EN_RST0_PORT {{1}} \\
+  CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ {{100}} \\
+] [get_bd_cells processing_system7_0]
+
+catch {{apply_bd_automation -rule xilinx.com:bd_rule:processing_system7 -config {{make_external "FIXED_IO, DDR" apply_board_preset "1"}} [get_bd_cells processing_system7_0]}} ps_auto_msg
+puts "FPGAI-Vivado PS automation result: $ps_auto_msg"
+catch {{make_bd_intf_pins_external [get_bd_intf_pins processing_system7_0/DDR]}} ddr_ext_msg
+catch {{make_bd_intf_pins_external [get_bd_intf_pins processing_system7_0/FIXED_IO]}} fixed_ext_msg
+puts "FPGAI-Vivado DDR external result: $ddr_ext_msg"
+puts "FPGAI-Vivado FIXED_IO external result: $fixed_ext_msg"
+
+set clk [get_bd_pins processing_system7_0/FCLK_CLK0]
+set rstn [get_bd_pins processing_system7_0/FCLK_RESET0_N]
+set ps_ctrl_axi [get_bd_intf_pins processing_system7_0/M_AXI_GP0]
+set ps_mem_axi [get_bd_intf_pins processing_system7_0/S_AXI_HP0]
+fpgai_connect_pin_if_exists $clk [get_bd_pins processing_system7_0/M_AXI_GP0_ACLK] "PS GP0 clock"
+fpgai_connect_pin_if_exists $clk [get_bd_pins processing_system7_0/S_AXI_HP0_ACLK] "PS HP0 clock"
+
+{_bd_accelerator_tcl(top_name)}"""
+
+
+def _create_zynqmp_bd_tcl(board_name: str, top_name: str) -> str:
+    return f"""# Auto-generated FPGAI full Vivado block design.
+# Target: {board_name}, HLS top: {top_name}
+# Board family: Zynq UltraScale+ MPSoC / zynq_ultra_ps_e
+
+set design_name fpgai_bd
+create_bd_design $design_name
+
+{_bd_common_helpers()}
+create_bd_cell -type ip -vlnv xilinx.com:ip:zynq_ultra_ps_e:* zynq_ultra_ps_e_0
+catch {{apply_bd_automation -rule xilinx.com:bd_rule:zynq_ultra_ps_e -config {{apply_board_preset "1"}} [get_bd_cells zynq_ultra_ps_e_0]}} ps_auto_msg
+puts "FPGAI-Vivado ZynqMP PS automation result: $ps_auto_msg"
+
+catch {{set_property -dict [list \\
+  CONFIG.PSU__USE__M_AXI_GP0 {{1}} \\
+  CONFIG.PSU__USE__S_AXI_GP0 {{1}} \\
+  CONFIG.PSU__FPGA_PL0_ENABLE {{1}} \\
+  CONFIG.PSU__CRL_APB__PL0_REF_CTRL__FREQMHZ {{100}} \\
+] [get_bd_cells zynq_ultra_ps_e_0]}} zynqmp_cfg_msg
+puts "FPGAI-Vivado ZynqMP config result: $zynqmp_cfg_msg"
+
+catch {{make_bd_intf_pins_external [get_bd_intf_pins zynq_ultra_ps_e_0/DDR]}} ddr_ext_msg
+catch {{make_bd_intf_pins_external [get_bd_intf_pins zynq_ultra_ps_e_0/FIXED_IO]}} fixed_ext_msg
+puts "FPGAI-Vivado DDR external result: $ddr_ext_msg"
+puts "FPGAI-Vivado FIXED_IO external result: $fixed_ext_msg"
+
+set clk [fpgai_first_pin zynq_ultra_ps_e_0 {{pl_clk0 maxihpm0_fpd_aclk saxihpc0_fpd_aclk *pl_clk0*}}]
+set rstn [fpgai_first_pin zynq_ultra_ps_e_0 {{pl_resetn0 *resetn*}}]
+if {{$clk eq ""}} {{ error "FPGAI-Vivado could not find ZynqMP PL clock pin" }}
+if {{$rstn eq ""}} {{
+  puts "FPGAI-Vivado ZynqMP reset pin not found; creating active-low reset constant through proc_sys_reset only"
+  set rstn $clk
+}}
+
+set ps_ctrl_axi [fpgai_first_intf zynq_ultra_ps_e_0 {{M_AXI_HPM0_FPD M_AXI_HPM0_LPD *M_AXI_HPM* *M_AXI_GP*}}]
+set ps_mem_axi [fpgai_first_intf zynq_ultra_ps_e_0 {{S_AXI_HPC0_FPD S_AXI_HP0_FPD S_AXI_HPC1_FPD *S_AXI_HPC* *S_AXI_HP*}}]
+if {{$ps_ctrl_axi eq ""}} {{ error "FPGAI-Vivado could not find ZynqMP PS AXI master interface" }}
+if {{$ps_mem_axi eq ""}} {{ error "FPGAI-Vivado could not find ZynqMP PS AXI memory slave interface" }}
+
+foreach pin [concat \\
+  [get_bd_pins -quiet zynq_ultra_ps_e_0/*aclk] \\
+  [get_bd_pins -quiet zynq_ultra_ps_e_0/*ACLK] \\
+] {{
+  if {{$pin ne ""}} {{ catch {{connect_bd_net $clk $pin}} ps_clk_msg }}
+}}
+
+{_bd_accelerator_tcl(top_name)}"""
+
+
+def _create_bd_tcl(board_name: str, top_name: str, ps_type: str = "processing_system7") -> str:
+    if ps_type == "processing_system7":
+        return _create_zynq7000_bd_tcl(board_name, top_name)
+    if ps_type == "zynq_ultra_ps_e":
+        return _create_zynqmp_bd_tcl(board_name, top_name)
+    raise ValueError(f"Unsupported Vivado PS type for board {board_name}: {ps_type}")
+
 def _run_vivado_tcl(board: Dict[str, Any], top_name: str, run_impl_default: bool) -> str:
     run_impl = "1" if run_impl_default else "0"
     board_part = board.get("board_part") or ""
     return rf'''# Auto-generated by FPGAI.
 # Creates a Vivado project, imports exported HLS IP, runs OOC IP reports, and
-# optionally builds a full PYNQ-Z2 PS/DMA block design through bitstream/XSA.
+# optionally builds a board-specific PS/DMA block design through bitstream/XSA.
 
 set script_dir [file normalize [file dirname [info script]]]
 set vivado_dir [file normalize [file join $script_dir ..]]
@@ -440,7 +506,7 @@ def generate_vivado_bridge_for_artifact(
     reports_dir.mkdir(parents=True, exist_ok=True)
 
     _write(scripts_dir / "export_hls_ip.tcl", _hls_export_tcl(hls_dir, out_dir, top_name, board["part"]))
-    _write(scripts_dir / "create_bd.tcl", _create_bd_tcl(board["name"], top_name))
+    _write(scripts_dir / "create_bd.tcl", _create_bd_tcl(board["name"], top_name, board.get("ps_type", "processing_system7")))
     _write(scripts_dir / "run_vivado.tcl", _run_vivado_tcl(board, top_name, run_impl_default))
     _write(out_dir / "README_VIVADO.md", _readme(board, top_name))
 
@@ -453,6 +519,12 @@ def generate_vivado_bridge_for_artifact(
         "board": board["name"],
         "part": board["part"],
         "board_part": board.get("board_part"),
+        "ps_type": board.get("ps_type"),
+        "overlay_style": board.get("overlay_style"),
+        "supports_bridge_generation": board.get("supports_bridge_generation", True),
+        "supports_hls_ip_export": board.get("supports_hls_ip_export", True),
+        "supports_vivado_synth": board.get("supports_vivado_synth", True),
+        "supports_vivado_impl": board.get("supports_vivado_impl", True),
         "top_name": top_name,
         "artifact_dir": artifact.as_posix(),
         "build_dir": build_dir.as_posix(),

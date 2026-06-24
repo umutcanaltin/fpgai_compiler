@@ -1,8 +1,8 @@
 """Board metadata used by the FPGAI Vivado bridge.
 
-The first implementation targets PYNQ-Z2 because the bit/.hwh overlay flow is
-simpler than Kria. KV260/KR260 entries are included as metadata only; their
-block-design and deployment flows should be validated in later development stages.
+The Vivado bridge supports board-aware Tcl generation for PYNQ-Z2, KV260,
+and KR260. PYNQ-Z2 uses a Zynq-7000 Processing System block-design path;
+KV260/KR260 use a Zynq UltraScale+ MPSoC block-design path.
 """
 
 from __future__ import annotations
@@ -21,6 +21,10 @@ class BoardInfo:
     default_clock_mhz: float
     ps_type: str
     overlay_style: str
+    supports_bridge_generation: bool = True
+    supports_hls_ip_export: bool = True
+    supports_vivado_synth: bool = True
+    supports_vivado_impl: bool = True
     notes: str = ""
 
     def to_dict(self) -> Dict[str, object]:
@@ -37,7 +41,7 @@ _BOARDS: Dict[str, BoardInfo] = {
         default_clock_mhz=100.0,
         ps_type="processing_system7",
         overlay_style="pynq_bit_hwh",
-        notes="Primary Vivado bridge target: simple PYNQ overlay path.",
+        notes="Supported Vivado bridge target using Zynq-7000 PS7 and PYNQ bit/.hwh overlay path.",
     ),
     "kv260": BoardInfo(
         name="kv260",
@@ -47,8 +51,8 @@ _BOARDS: Dict[str, BoardInfo] = {
         board_part="xilinx.com:kv260_som:part0:1.4",
         default_clock_mhz=100.0,
         ps_type="zynq_ultra_ps_e",
-        overlay_style="kria_xsa_dtbo_later",
-        notes="Metadata only at this stage; Kria deployment comes later.",
+        overlay_style="kria_xsa_dtbo",
+        notes="Supported Vivado bridge target using ZynqMP PS and Kria XSA handoff path.",
     ),
     "kr260": BoardInfo(
         name="kr260",
@@ -58,8 +62,8 @@ _BOARDS: Dict[str, BoardInfo] = {
         board_part="xilinx.com:kr260_som:part0:1.1",
         default_clock_mhz=100.0,
         ps_type="zynq_ultra_ps_e",
-        overlay_style="kria_xsa_dtbo_later",
-        notes="Metadata only at this stage; Kria deployment comes later.",
+        overlay_style="kria_xsa_dtbo",
+        notes="Supported Vivado bridge target using ZynqMP PS and Kria XSA handoff path.",
     ),
 }
 

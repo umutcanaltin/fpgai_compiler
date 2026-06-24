@@ -95,6 +95,38 @@ This writes the manifest, IR plans, model profile, and pre-HLS resource/timing p
 
     build/fpgai_quick_compile/
 
+## Vivado bridge board support
+
+FPGAI supports board-aware Vivado bridge generation for these board keys:
+
+    pynq_z2
+    kv260
+    kr260
+
+The generated block-design Tcl is board-specific:
+
+    pynq_z2  -> processing_system7 / Zynq-7000
+    kv260    -> zynq_ultra_ps_e / Zynq UltraScale+ MPSoC
+    kr260    -> zynq_ultra_ps_e / Zynq UltraScale+ MPSoC
+
+Generate bridge artifacts for a compiled design:
+
+    python -m fpgai.backends.vivado.run_bridge <experiment_or_build_dir> --board pynq_z2 --export-hls-ip
+    python -m fpgai.backends.vivado.run_bridge <experiment_or_build_dir> --board kv260 --export-hls-ip
+    python -m fpgai.backends.vivado.run_bridge <experiment_or_build_dir> --board kr260 --export-hls-ip
+
+To request Vivado synthesis or implementation:
+
+    python -m fpgai.backends.vivado.run_bridge <experiment_or_build_dir> --board pynq_z2 --export-hls-ip --run-vivado-synth
+    python -m fpgai.backends.vivado.run_bridge <experiment_or_build_dir> --board kv260 --export-hls-ip --run-vivado-synth
+    python -m fpgai.backends.vivado.run_bridge <experiment_or_build_dir> --board kr260 --export-hls-ip --run-vivado-synth
+
+    python -m fpgai.backends.vivado.run_bridge <experiment_or_build_dir> --board pynq_z2 --export-hls-ip --run-vivado-impl
+    python -m fpgai.backends.vivado.run_bridge <experiment_or_build_dir> --board kv260 --export-hls-ip --run-vivado-impl
+    python -m fpgai.backends.vivado.run_bridge <experiment_or_build_dir> --board kr260 --export-hls-ip --run-vivado-impl
+
+Bitstream and XSA status are only treated as present when generated files are found in the Vivado bridge artifacts. Board-specific Tcl generation is tested in the repository; actual Vivado implementation success must be validated with the installed Vivado version, board files, and target hardware.
+
 ## HLS/Vitis artifacts
 
 When HLS is enabled and Vitis HLS runs, compile records HLS artifacts in `manifest.json` under `hls_artifacts`.
