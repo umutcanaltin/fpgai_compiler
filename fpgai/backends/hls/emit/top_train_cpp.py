@@ -6,6 +6,8 @@ from fpgai.backends.hls.emit.architecture_comments import emit_layer_architectur
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from fpgai.backends.hls.emit.dense_tiling_codegen import apply_dense_tiling_to_top_source
+from fpgai.backends.hls.emit.conv_tiling_codegen import apply_conv_tiling_to_top_source
 from fpgai.engine.training_graph_utils import (
     as_chw as _as_chw,
     flat_size as _flat_size,
@@ -2074,3 +2076,110 @@ def emit_top_train_cpp(
     )
 
     return _inject_native_accumulated_modes_from_cpp("\n".join(lines), input_size, learning_rate)
+
+
+# FPGAI training communication annotation wrapper.
+#
+# Training top generation already receives a communication_plan. This wrapper
+# makes the tensor-edge communication plan visible in generated HLS artifacts
+# without changing training runtime semantics.
+def _fpgai_train_comm_plan_to_dict(communication_plan):
+    if communication_plan is None:
+        return {}
+    if isinstance(communication_plan, dict):
+        return communication_plan
+    if hasattr(communication_plan, "to_dict"):
+        return communication_plan.to_dict()
+    return {
+        "edges": getattr(communication_plan, "edges", []),
+        "notes": getattr(communication_plan, "notes", {}),
+    }
+
+
+def _fpgai_train_comm_edge_macros(communication_plan) -> str:
+    plan = _fpgai_train_comm_plan_to_dict(communication_plan)
+    edges = plan.get("edges", []) if isinstance(plan, dict) else []
+    notes = plan.get("notes", {}) if isinstance(plan, dict) else {}
+
+    lines = [
+        "// FPGAI training communication tensor-edge plan.",
+        "// Compression codecs other than raw are modeled unless implemented_in_hls=true.",
+        "#define FPGAI_TRAIN_COMM_PLAN_PRESENT 1",
+    ]
+
+    scope = notes.get("scope") if isinstance(notes, dict) else None
+    if scope is not None:
+        lines.append(f"// communication_scope={scope}")
+
+    for edge in edges:
+        if not isinstance(edge, dict):
+            if hasattr(edge, "to_dict"):
+                edge = edge.to_dict()
+            else:
+                edge = dict(getattr(edge, "__dict__", {}) or {})
+
+        kind = str(edge.get("kind") or edge.get("tensor_name") or "tensor").upper()
+        safe_kind = "".join(ch if ch.isalnum() else "_" for ch in kind)
+        macro_prefix = f"FPGAI_TRAIN_COMM_{safe_kind}"
+
+        direction = edge.get("direction")
+        codec = edge.get("codec", edge.get("encoding", "raw"))
+        implemented = edge.get("implemented_in_hls", False)
+        precision_bits = edge.get("precision_bits")
+        transfer_bytes = edge.get("transfer_bytes")
+        size_bytes = edge.get("size_bytes")
+
+        lines.append(
+            f"// tensor={edge.get('tensor_name')} kind={edge.get('kind')} "
+            f"direction={direction} codec={codec} implemented_in_hls={implemented}"
+        )
+
+        if precision_bits is not None:
+            lines.append(f"#define {macro_prefix}_PRECISION_BITS {int(precision_bits)}")
+        if size_bytes is not None:
+            lines.append(f"#define {macro_prefix}_SIZE_BYTES {int(size_bytes)}")
+        if transfer_bytes is not None:
+            lines.append(f"#define {macro_prefix}_TRANSFER_BYTES {int(transfer_bytes)}")
+        lines.append(f"#define {macro_prefix}_IMPLEMENTED_IN_HLS {1 if implemented else 0}")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+_fpgai_train_comm_previous_emit_top_train_cpp = emit_top_train_cpp
+
+
+def emit_top_train_cpp(*args, **kwargs):
+    communication_plan = kwargs.get("communication_plan")
+    source = _fpgai_train_comm_previous_emit_top_train_cpp(*args, **kwargs)
+    macros = _fpgai_train_comm_edge_macros(communication_plan)
+    return macros + source
+
+
+
+# FPGAI training forward tiling wrapper.
+#
+# This reuses the existing dense/conv tiling materializers for the forward
+# training path. Backward-gradient/update kernels are intentionally left
+# untouched until training-specific tiled gradient kernels are implemented.
+_fpgai_train_tiling_previous_emit_top_train_cpp = emit_top_train_cpp
+
+
+def emit_top_train_cpp(*args, **kwargs):
+    source = _fpgai_train_tiling_previous_emit_top_train_cpp(*args, **kwargs)
+    graph = kwargs.get("graph")
+    compile_plan = kwargs.get("compile_plan")
+    if graph is None or compile_plan is None:
+        return source
+
+    source = apply_dense_tiling_to_top_source(source, graph, compile_plan)
+    source = apply_conv_tiling_to_top_source(source, graph, compile_plan)
+
+    if "FPGAI real dense tiling helper" in source or "FPGAI real convolution tiling helper" in source:
+        source = (
+            "// FPGAI training forward tiling materialized. "
+            "Backward/update tiling remains training-specific future work.\n"
+            + source
+        )
+
+    return source

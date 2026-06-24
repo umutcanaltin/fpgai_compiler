@@ -22,24 +22,24 @@ A feature is `supported` only when all of these are true:
 
 ## Core compiler features
 
-| Feature | Required public meaning | Current status | Required work before public support |
-|---|---|---|---|
-| YAML-first inspect/compile | User can inspect and compile from YAML through `fpgai` CLI. | supported | Keep tests and docs current. |
-| Precision selection | YAML precision changes generated HLS/C++ data types and reports the applied precision. | supported | Keep materialization and generated-type regression tests current. |
-| Memory/storage selection | YAML weight delivery and storage choices change generated HLS interfaces and parameter storage pragmas. | supported | Keep generated-interface and BIND_STORAGE regression tests current. |
-| Tiling selection | YAML tiling choices change generated HLS dense/conv tiled helpers, tile template arguments, and architecture metadata. | supported | Keep planner-to-codegen tiling regression tests current. |
-| Pipeline selection | YAML pipeline style/II changes planner metadata and generated HLS layer call pipeline-II arguments. | supported | Keep planner-to-codegen pipeline regression tests current. |
-| Parallelization selection | YAML PE/SIMD/unroll/partition knobs change planner metadata, generated HLS call arguments, and array partition mode pragmas. | supported | Keep planner-to-codegen parallel regression tests current. |
-| Resource estimation | Compile/inspect emits pre-HLS LUT/FF/DSP/BRAM estimates. | supported_estimate_only | Keep clearly labeled as estimate unless compared to HLS/Vivado. |
-| Timing estimation | Compile/inspect emits pre-HLS cycle/latency/timing estimates. | supported_estimate_only | Keep clearly labeled as estimate unless compared to HLS/Vivado. |
-| Design-space exploration | DSE evaluates configured candidates and emits estimate-based recommendations with compile-ready/materialized-knob metadata. | supported_estimate_only | No exhaustive search is claimed; recommendations are pre-HLS estimates from configured candidates only. |
-| HLS generation | Compiler emits HLS C++/headers/testbench/project artifacts. | supported | Keep generated artifact tests. |
-| HLS run/artifact collection | When enabled and tools exist, compiler runs/collects HLS logs/reports. | supported | Keep optional-tool boundary documented. |
-| Vivado bridge generation | Board-aware Vivado bridge scripts are generated for supported boards. | supported | Keep Vivado implementation clearly separate from compile. |
-| Runtime package | Compile emits runtime package metadata and copies existing runtime-facing files. | supported | Keep hardware presence flags truthful. |
-| Inference correctness benchmark | Supported inference flows compare outputs against reference/ONNX Runtime. | supported | Keep benchmark limitations documented. |
-| Training support | Training config generates and validates training artifacts including forward/loss/gradient/update behavior. | experimental | Audit and either finish correctness/convergence support or downgrade all public claims. |
-| Communication optimization | Compiler models input/weight/output/aux tensor-edge data movement, per-edge precision/compression, transfer estimates, and generated HLS communication annotations. | supported | Compression codecs are modeled unless implemented_in_hls=true; measured board DMA speedup remains outside this claim. |
+| Feature | Required public meaning | Inference scope | Training scope | Current status | Required work before public support |
+|---|---|---|---|---|---|
+| YAML-first inspect/compile | User can inspect and compile from YAML through `fpgai` CLI. | supported | supported | supported | Keep tests and docs current. |
+| Precision selection | YAML precision changes generated HLS/C++ data types and reports the applied precision. | supported | supported | supported | Keep materialization and generated-type regression tests current. |
+| Memory/storage selection | YAML weight delivery and storage choices change generated HLS interfaces and parameter storage pragmas. | supported | supported | supported | Keep generated-interface and BIND_STORAGE regression tests current. |
+| Tiling selection | YAML tiling choices change generated HLS dense/conv tiled helpers, tile template arguments, and architecture metadata. | supported | forward_supported_backward_planning_only | supported | Training forward dense/conv tiling is materialized; training backward/update tiling remains future work before full training parity. |
+| Pipeline selection | YAML pipeline style/II changes planner metadata and generated HLS layer call pipeline-II arguments. | supported | supported | supported | Keep planner-to-codegen pipeline regression tests current for inference and training. |
+| Parallelization selection | YAML PE/SIMD/unroll/partition knobs change planner metadata, generated HLS call arguments, and array partition mode pragmas. | supported | supported | supported | Keep planner-to-codegen parallel regression tests current for inference and training. |
+| Resource estimation | Compile/inspect emits pre-HLS LUT/FF/DSP/BRAM estimates. | supported_estimate_only | supported_estimate_only | supported_estimate_only | Keep clearly labeled as estimate unless compared to HLS/Vivado. |
+| Timing estimation | Compile/inspect emits pre-HLS cycle/latency/timing estimates. | supported_estimate_only | supported_estimate_only | supported_estimate_only | Keep clearly labeled as estimate unless compared to HLS/Vivado. |
+| Design-space exploration | DSE evaluates configured candidates and emits estimate-based recommendations with compile-ready/materialized-knob metadata. | supported_estimate_only | supported_estimate_only | supported_estimate_only | No exhaustive search is claimed; recommendations are pre-HLS estimates from configured candidates only. |
+| HLS generation | Compiler emits HLS C++/headers/testbench/project artifacts. | supported | supported | supported | Keep generated artifact tests. |
+| HLS run/artifact collection | When enabled and tools exist, compiler runs/collects HLS logs/reports. | supported | supported | supported | Keep optional-tool boundary documented. |
+| Vivado bridge generation | Board-aware Vivado bridge scripts are generated for supported boards. | supported | supported | supported | Keep Vivado implementation clearly separate from compile. |
+| Runtime package | Compile emits runtime package metadata and copies existing runtime-facing files. | supported | supported | supported | Keep hardware presence flags truthful. |
+| Inference correctness benchmark | Supported inference flows compare outputs against reference/ONNX Runtime. | supported | not_applicable | supported | Keep benchmark limitations documented; training validation is separate. |
+| Training support | Training config generates and validates training artifacts including forward/loss/gradient/update behavior. | not_applicable | experimental | experimental | Finish training correctness/convergence boundaries before claiming stable training support. |
+| Communication optimization | Compiler models input/weight/output/aux tensor-edge data movement, per-edge precision/compression, transfer estimates, and generated HLS communication annotations. | supported | supported | supported | Compression codecs are modeled unless implemented_in_hls=true; measured board DMA speedup remains outside this claim. |
 
 ## Implementation order
 
