@@ -724,6 +724,8 @@ def _inject_native_accumulated_modes_from_cpp(
         cpp = cpp[:insert_pos] + loss_eval_block + cpp[insert_pos:]
     return cpp
 
+
+
 def emit_top_train_cpp(
     *,
     graph: Graph,
@@ -2159,6 +2161,101 @@ def emit_top_train_cpp(*args, **kwargs):
 
 
 
+
+
+def _training_dense_tile_pairs_from_plan(compile_plan) -> list[tuple[int, int]]:
+    pairs: list[tuple[int, int]] = []
+    if compile_plan is None:
+        return pairs
+
+    for layer_plan in getattr(compile_plan, "layer_plans", []) or []:
+        if str(getattr(layer_plan, "op_type", "")).lower() != "dense":
+            continue
+
+        arch = getattr(layer_plan, "architecture", None)
+        tiling = getattr(arch, "tiling", None)
+        sizes = getattr(tiling, "sizes", {}) or {}
+
+        tile_in = int(
+            sizes.get("input")
+            or sizes.get("in")
+            or sizes.get("tile_in")
+            or 1
+        )
+        tile_out = int(
+            sizes.get("output")
+            or sizes.get("out")
+            or sizes.get("tile_out")
+            or 1
+        )
+        pairs.append((tile_in, tile_out))
+
+    return pairs
+
+
+def _rewrite_training_dense_forward_extra_template_calls(
+    source: str,
+    compile_plan,
+) -> str:
+    """Rewrite training Dense forward calls with extra policy template args.
+
+    Existing inference dense tiling rewriters may not match training calls like:
+
+      fpgai::dense_out_in<IN, OUT, act_t, act_t, wgt_t, bias_t, acc_t, ...>(...)
+
+    This rewrites only fpgai::dense_out_in<...> call sites in the final generated
+    C++ source to:
+
+      fpgai::dense_out_in_tiled<IN, OUT, TILE_IN, TILE_OUT, ...>(...)
+    """
+
+    pairs = _training_dense_tile_pairs_from_plan(compile_plan)
+    if not pairs:
+        return source
+
+    import re
+
+    pattern = re.compile(
+        r"fpgai::dense_out_in<\s*"
+        r"(?P<in>\d+)\s*,\s*"
+        r"(?P<out>\d+)\s*,\s*"
+        r"(?P<rest>[^>]*)>"
+    )
+
+    index = {"i": 0}
+
+    def repl(match: re.Match[str]) -> str:
+        i = index["i"]
+        index["i"] += 1
+        tile_in, tile_out = pairs[min(i, len(pairs) - 1)]
+
+        return (
+            f"fpgai::dense_out_in_tiled<"
+            f"{match.group('in')}, {match.group('out')}, "
+            f"{tile_in}, {tile_out}, "
+            f"{match.group('rest').strip()}>"
+        )
+
+    return pattern.sub(repl, source)
+
+
+
+def _rewrite_training_tiled_call_namespace(source: str) -> str:
+    """Training tiled helpers are emitted into generated source scope.
+
+    The existing tiling materializers emit conv2d_tiled/dense_out_in_tiled
+    helper definitions directly in the generated C++ source. They are not inside
+    namespace fpgai, while base untiled kernels are available as fpgai::conv2d
+    and fpgai::dense_out_in through included layer headers.
+
+    Therefore training tiled forward call sites must call the generated tiled
+    helpers unqualified.
+    """
+
+    source = source.replace("fpgai::conv2d_tiled<", "conv2d_tiled<")
+    source = source.replace("fpgai::dense_out_in_tiled<", "dense_out_in_tiled<")
+    return source
+
 # FPGAI training forward tiling wrapper.
 #
 # This reuses the existing dense/conv tiling materializers for the forward
@@ -2175,9 +2272,11 @@ def emit_top_train_cpp(*args, **kwargs):
         return source
 
     source = apply_dense_tiling_to_top_source(source, graph, compile_plan)
+    source = _rewrite_training_dense_forward_extra_template_calls(source, compile_plan)
     source = apply_dense_training_tiling_to_top_source(source, graph, compile_plan)
     source = apply_conv_tiling_to_top_source(source, graph, compile_plan)
     source = apply_conv_training_tiling_to_top_source(source, graph, compile_plan)
+    source = _rewrite_training_tiled_call_namespace(source)
 
     if "FPGAI real dense tiling helper" in source or "FPGAI real convolution tiling helper" in source:
         source = (

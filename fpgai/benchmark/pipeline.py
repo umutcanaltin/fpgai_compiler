@@ -223,3 +223,191 @@ def run_compile_correctness_benchmark(
         precision_sweep_results_json=compile_result.precision_sweep_results_json,
         precision_sweep_summary_txt=compile_result.precision_sweep_summary_txt,
     )
+
+
+def _training_metric_float(value):
+    try:
+        if value is None:
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _load_training_manifest(out_dir: Path) -> dict:
+    manifest = out_dir / "manifest.json"
+    if not manifest.exists():
+        return {}
+    try:
+        return json.loads(manifest.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def run_compile_training_benchmark(
+    *,
+    config_path: str | Path,
+) -> BenchmarkResult:
+    """Run a compile-backed benchmark for training_on_device pipelines.
+
+    This benchmark is intentionally different from inference correctness:
+    it validates that the training pipeline compiles/runs through the configured
+    HLS path and that training reference/compare/report artifacts are emitted.
+
+    It does not claim on-board training timing unless Vivado/board runtime
+    artifacts are present separately.
+    """
+
+    compiler = Compiler.from_yaml(str(config_path))
+    raw = compiler.cfg.raw
+
+    out_dir = Path(raw["project"]["out_dir"]).resolve()
+    bench_dir = out_dir / "bench"
+
+    if bench_dir.exists():
+        shutil.rmtree(bench_dir)
+    bench_dir.mkdir(parents=True, exist_ok=True)
+
+    old_clean = raw.get("project", {}).get("clean", True)
+    raw["project"]["clean"] = False
+    try:
+        compile_result = compiler.compile()
+    finally:
+        raw["project"]["clean"] = old_clean
+
+    if not compile_result.hls_ran:
+        raise RuntimeError("Training benchmark requested but HLS was not run.")
+    if compile_result.hls_ok is not True:
+        raise RuntimeError(
+            f"Training benchmark requested but HLS run failed. "
+            f"See {compile_result.hls_stdout_log} and {compile_result.hls_stderr_log}"
+        )
+
+    manifest = _load_training_manifest(out_dir)
+    training_reference = manifest.get("training_reference") or {}
+    training_compare = manifest.get("training_compare") or {}
+    training_estimate = manifest.get("training_estimate") or {}
+
+    loss_before = _training_metric_float(training_reference.get("loss_before"))
+    loss_after = _training_metric_float(training_reference.get("loss_after"))
+    grad_cosine = _training_metric_float(training_compare.get("grad_cosine"))
+    weight_after_cosine = _training_metric_float(training_compare.get("weight_after_cosine"))
+    weight_delta_cosine = _training_metric_float(training_compare.get("weight_delta_cosine"))
+
+    training_reference_found = bool(training_reference)
+    training_compare_found = bool(training_compare)
+
+    metrics = {
+        "passed": True,
+        "benchmark_mode": "training_on_device",
+        "training_reference_found": training_reference_found,
+        "training_compare_found": training_compare_found,
+        "loss_before": loss_before,
+        "loss_after": loss_after,
+        "grad_cosine": grad_cosine,
+        "weight_after_cosine": weight_after_cosine,
+        "weight_delta_cosine": weight_delta_cosine,
+        "hls_ran": bool(compile_result.hls_ran),
+        "hls_ok": bool(compile_result.hls_ok),
+        "hls_stdout_log": compile_result.hls_stdout_log,
+        "hls_stderr_log": compile_result.hls_stderr_log,
+        "hls_csynth_report": compile_result.hls_csynth_report,
+        "training_estimate": training_estimate,
+        "notes": [
+            "Training benchmark validates compile/HLS completion and generated training reference/report artifacts.",
+            "On-board training timing is not claimed unless Vivado/board runtime artifacts are present separately.",
+        ],
+    }
+
+    metrics_json = bench_dir / "metrics.json"
+    metrics_json.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+
+    summary_txt = bench_dir / "summary.txt"
+    summary_txt.write_text(
+        "\n".join(
+            [
+                "FPGAI training benchmark summary",
+                "================================",
+                f"benchmark_mode              : training_on_device",
+                f"passed                      : {metrics['passed']}",
+                f"hls_ran                     : {metrics['hls_ran']}",
+                f"hls_ok                      : {metrics['hls_ok']}",
+                f"training_reference_found    : {training_reference_found}",
+                f"training_compare_found      : {training_compare_found}",
+                f"loss_before                 : {loss_before}",
+                f"loss_after                  : {loss_after}",
+                f"grad_cosine                 : {grad_cosine}",
+                f"weight_after_cosine         : {weight_after_cosine}",
+                f"weight_delta_cosine         : {weight_delta_cosine}",
+                f"hls_csynth_report           : {compile_result.hls_csynth_report}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    # Keep BenchmarkResult shape compatible with existing CLI/reporting code.
+    # These small NPY files are benchmark markers, not inference outputs.
+    reference_marker_npy = bench_dir / "training_reference_marker.npy"
+    hls_marker_npy = bench_dir / "training_hls_marker.npy"
+    np.save(
+        reference_marker_npy,
+        np.array(
+            [
+                0.0 if loss_before is None else loss_before,
+                0.0 if loss_after is None else loss_after,
+            ],
+            dtype=np.float32,
+        ),
+    )
+    np.save(
+        hls_marker_npy,
+        np.array(
+            [
+                0.0 if grad_cosine is None else grad_cosine,
+                0.0 if weight_after_cosine is None else weight_after_cosine,
+                0.0 if weight_delta_cosine is None else weight_delta_cosine,
+            ],
+            dtype=np.float32,
+        ),
+    )
+
+    manifest_update = {
+        "benchmark": {
+            "passed": True,
+            "benchmark_mode": "training_on_device",
+            "metrics_json": str(metrics_json.resolve()),
+            "summary_txt": str(summary_txt.resolve()),
+            "reference_output_npy": str(reference_marker_npy.resolve()),
+            "hls_output_npy": str(hls_marker_npy.resolve()),
+            "hls_stdout_log": compile_result.hls_stdout_log,
+            "hls_stderr_log": compile_result.hls_stderr_log,
+            "hls_csynth_report": compile_result.hls_csynth_report,
+            "training_reference_found": training_reference_found,
+            "training_compare_found": training_compare_found,
+            "loss_before": loss_before,
+            "loss_after": loss_after,
+            "grad_cosine": grad_cosine,
+            "weight_after_cosine": weight_after_cosine,
+            "weight_delta_cosine": weight_delta_cosine,
+        }
+    }
+    (bench_dir / "benchmark_manifest.json").write_text(
+        json.dumps(manifest_update, indent=2),
+        encoding="utf-8",
+    )
+
+    return BenchmarkResult(
+        build_dir=out_dir,
+        bench_dir=bench_dir,
+        passed=True,
+        metrics_json=metrics_json,
+        summary_txt=summary_txt,
+        reference_output_npy=reference_marker_npy,
+        hls_output_npy=hls_marker_npy,
+        quant_metrics_json=compile_result.quant_metrics_json,
+        quant_summary_txt=compile_result.quant_summary_txt,
+        precision_sweep_results_json=compile_result.precision_sweep_results_json,
+        precision_sweep_summary_txt=compile_result.precision_sweep_summary_txt,
+    )
+

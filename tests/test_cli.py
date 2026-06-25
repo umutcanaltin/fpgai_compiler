@@ -170,14 +170,19 @@ def test_benchmark_action_runs_when_yaml_flag_is_disabled(
     }
 
 
-def test_benchmark_action_rejects_training_mode(
+
+def test_benchmark_action_runs_training_mode(
     monkeypatch,
-    capsys,
+    tmp_path: Path,
 ) -> None:
     cfg = _config(
         mode="training_on_device",
         benchmark_enabled=True,
     )
+    calls = {
+        "inference_benchmark": 0,
+        "training_benchmark": 0,
+    }
 
     monkeypatch.setattr(
         cli,
@@ -190,18 +195,42 @@ def test_benchmark_action_rejects_training_mode(
         lambda _: None,
     )
 
+    def fake_inference_benchmark(
+        *,
+        config_path: str,
+    ):
+        calls["inference_benchmark"] += 1
+        return _benchmark_result(tmp_path)
+
+    def fake_training_benchmark(
+        *,
+        config_path: str,
+    ):
+        assert config_path == "config.yml"
+        calls["training_benchmark"] += 1
+        return _benchmark_result(tmp_path)
+
+    monkeypatch.setattr(
+        cli,
+        "run_compile_correctness_benchmark",
+        fake_inference_benchmark,
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_compile_training_benchmark",
+        fake_training_benchmark,
+    )
+
     result = cli.run_from_config(
         "config.yml",
         action="benchmark",
     )
 
-    captured = capsys.readouterr()
-
-    assert result == 2
-    assert (
-        "supports pipeline.mode=inference only"
-        in captured.err
-    )
+    assert result == 0
+    assert calls == {
+        "inference_benchmark": 0,
+        "training_benchmark": 1,
+    }
 
 
 def test_auto_action_preserves_legacy_config_behavior(

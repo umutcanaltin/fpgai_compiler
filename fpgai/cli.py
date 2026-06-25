@@ -23,6 +23,7 @@ from fpgai.ir.passes import assign_stable_names
 from fpgai.frontend.onnx import import_onnx
 from fpgai.benchmark.pipeline import (
     run_compile_correctness_benchmark,
+    run_compile_training_benchmark,
 )
 from fpgai.config.loader import (
     ConfigError,
@@ -276,18 +277,23 @@ def run_from_config(
         )
 
         if should_benchmark:
-            if cfg.pipeline.mode != "inference":
+            if cfg.pipeline.mode == "inference":
+                def _run_benchmark():
+                    return run_compile_correctness_benchmark(
+                        config_path=config_path,
+                    )
+            elif cfg.pipeline.mode == "training_on_device":
+                def _run_benchmark():
+                    return run_compile_training_benchmark(
+                        config_path=config_path,
+                    )
+            else:
                 print(
-                    "[ERROR] Correctness benchmarking currently supports "
-                    "pipeline.mode=inference only.",
+                    "[ERROR] Benchmarking supports pipeline.mode=inference "
+                    "and pipeline.mode=training_on_device.",
                     file=sys.stderr,
                 )
                 return 2
-
-            def _run_benchmark():
-                return run_compile_correctness_benchmark(
-                    config_path=config_path,
-                )
 
             if verbose:
                 benchmark = _run_benchmark()
