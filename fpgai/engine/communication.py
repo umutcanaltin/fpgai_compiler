@@ -372,7 +372,7 @@ def make_communication_plan(cfg, memory_plan: MemoryPlan) -> CommunicationPlan:
     axi_word_bits = int(_cfg_get(raw, "communication.axi.word_bits", 128))
     burst_len = int(_cfg_get(raw, "communication.axi.burst_len", 32))
 
-    if policy_name == "Fit-First":
+    if policy_name in ("Fit-First", "Memory-First"):
         axi_word_bits = int(_cfg_get(raw, "communication.axi.word_bits", 64))
         burst_len = int(_cfg_get(raw, "communication.axi.burst_len", 16))
     elif policy_name == "Latency-First":

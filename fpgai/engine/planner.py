@@ -94,6 +94,19 @@ POLICIES: Dict[str, Policy] = {
         array_partition_mode="block", mac_style="balanced", accum_strategy="tree",
         activation_impl="small_lut", round_mode="trn", sat_mode="wrap",
     ),
+    "Memory-First": Policy(
+        name="Memory-First",
+        target_clock_mhz=190.0,
+        pe=1, simd=2, unroll_factor=1, partition_factor=1, pipeline_style="balanced",
+        conv_oh=4, conv_ow=4, conv_oc=4, dense_in=32, dense_out=8,
+        weight_region_preference=["BRAM", "DDR", "URAM"],
+        activation_region_preference=["BRAM", "DDR", "URAM"],
+        allow_double_buffer=False,
+        axi_word_bits=128, burst_len=32, enable_bitpack=True, enable_compression=True,
+        array_partition_mode="block", mac_style="balanced", accum_strategy="tree",
+        activation_impl="small_lut", round_mode="trn", sat_mode="wrap",
+    ),
+
     "Balanced": Policy(
         name="Balanced",
         target_clock_mhz=200.0,

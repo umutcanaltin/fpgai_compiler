@@ -101,3 +101,64 @@ def test_conflicting_policy_paths_are_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ConfigError, match="Conflicts with"):
         load_config(str(_write_config(tmp_path, raw)))
+
+
+
+def test_memory_first_policy_is_accepted(tmp_path: Path) -> None:
+    from fpgai.config.loader import load_config
+
+    cfg = tmp_path / "memory_first.yml"
+    cfg.write_text(
+        """
+version: 1
+project:
+  name: memory_first_test
+  out_dir: build/memory_first_test
+pipeline:
+  mode: inference
+model:
+  format: onnx
+  path: models/cnn_mnist.onnx
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+      - name: pl_clk0
+        target_mhz: 200
+operators:
+  supported:
+    - Dense
+    - Conv
+    - MaxPool
+    - Relu
+    - Softmax
+numerics:
+  defaults:
+    activation:
+      type: ap_fixed
+      total_bits: 16
+      int_bits: 6
+    weight:
+      type: ap_fixed
+      total_bits: 16
+      int_bits: 6
+    bias:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+    accum:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+optimization:
+  parallel_policy: Memory-First
+backends:
+  hls:
+    enabled: false
+""",
+        encoding="utf-8",
+    )
+
+    loaded = load_config(cfg)
+    assert loaded.raw["optimization"]["parallel_policy"] == "Memory-First"

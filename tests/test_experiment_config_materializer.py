@@ -118,3 +118,43 @@ def test_sweep_runner_materializes_config_and_command_strictly(tmp_path: Path):
     data = yaml.safe_load(generated.read_text(encoding="utf-8"))
     assert data["notes"]["parallel_policy"] == "ResourceFirst"
     assert "experiment" not in data
+
+
+
+
+
+def test_materializer_canonicalizes_memory_first_policy(tmp_path: Path):
+    import inspect
+    import yaml
+    from fpgai.experiments.config_materializer import materialize_design_config
+
+    base = tmp_path / "base.yml"
+    base.write_text(
+        """optimization:
+  parallel_policy: Balanced
+""",
+        encoding="utf-8",
+    )
+
+    out = tmp_path / "out.yml"
+
+    sig = inspect.signature(materialize_design_config)
+    kwargs = {
+        "base_config_path": base,
+        "output_config_path": out,
+        "design_name": "memory_first_test",
+        "parameters": {"policy": "memory_first"},
+        "parameter_mappings": {"policy": "optimization.parallel_policy"},
+        "options": {"compiler_policy_names": True},
+    }
+
+    # Keep compatibility with the repo's current materializer API.
+    if "metadata_path" in sig.parameters:
+        kwargs["metadata_path"] = tmp_path / "out.metadata.json"
+
+    report = materialize_design_config(**kwargs)
+
+    assert report["applied"]["policy"] == "optimization.parallel_policy"
+
+    data = yaml.safe_load(out.read_text())
+    assert data["optimization"]["parallel_policy"] == "Memory-First"

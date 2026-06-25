@@ -296,3 +296,25 @@ def test_compile_signature_changes_with_effective_architecture() -> None:
     assert first.architecture_signature != (
         changed.architecture_signature
     )
+
+
+
+
+
+
+def test_memory_first_policy_is_planned_as_memory_safe():
+    from fpgai.engine.planner import POLICIES
+
+    memory = POLICIES["Memory-First"]
+    bram = POLICIES["BRAM-Saver"]
+
+    assert memory.name == "Memory-First"
+
+    for field in ["pe", "simd", "unroll_factor", "partition_factor"]:
+        assert getattr(memory, field) == getattr(bram, field)
+
+    # Memory-First is a distinct, HLS-safe memory policy:
+    # use BRAM before URAM for initialized embedded parameter arrays.
+    assert memory.weight_region_preference[0] == "BRAM"
+    assert memory.activation_region_preference[0] == "BRAM"
+    assert "URAM" in memory.weight_region_preference

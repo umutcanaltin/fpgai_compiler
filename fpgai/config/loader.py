@@ -171,6 +171,7 @@ PARALLEL_POLICIES_V1 = {
     "Fit-First",
     "DSP-Saver",
     "BRAM-Saver",
+    "Memory-First",
     "Balanced",
     "Throughput-First",
     "Latency-First",

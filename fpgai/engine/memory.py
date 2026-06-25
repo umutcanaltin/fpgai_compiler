@@ -38,7 +38,7 @@ def _region_order_for_weight(policy_name: str, notes: Dict[str, Any]) -> List[st
         return [str(x).upper() for x in prefs]
     if policy_name == "Latency-First":
         return ["BRAM", "URAM", "DDR"]
-    if policy_name in ("Fit-First", "BRAM-Saver"):
+    if policy_name in ("Fit-First", "BRAM-Saver", "Memory-First"):
         return ["DDR", "URAM", "BRAM"]
     return ["URAM", "BRAM", "DDR"]
 
@@ -49,7 +49,7 @@ def _region_order_for_activation(policy_name: str, notes: Dict[str, Any]) -> Lis
         return [str(x).upper() for x in prefs]
     if policy_name == "Latency-First":
         return ["BRAM", "URAM", "DDR"]
-    if policy_name == "BRAM-Saver":
+    if policy_name in ("BRAM-Saver", "Memory-First"):
         return ["DDR", "URAM", "BRAM"]
     return ["BRAM", "URAM", "DDR"]
 
