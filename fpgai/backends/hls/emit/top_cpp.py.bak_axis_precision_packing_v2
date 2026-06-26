@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-from fpgai.numerics.precision_policy import default_precision_policy
 from fpgai.backends.hls.emit.architecture_comments import emit_layer_architecture_comments
 from fpgai.backends.hls.emit.dense_tiling_codegen import apply_dense_tiling_to_top_source
 from fpgai.backends.hls.emit.conv_tiling_codegen import apply_conv_tiling_to_top_source
@@ -580,29 +578,18 @@ def _emit_plan_comments(
     layer_plan: Dict[str, Any],
     output_memory: Dict[str, Any] | None,
     output_communication: Dict[str, Any] | None,
-    precision_policy: Dict[str, Any] | None = None,
 ) -> None:
-    activation_bits = layer_plan.get("act_bits")
-    weight_bits = layer_plan.get("weight_bits")
-    if precision_policy:
-        activation_bits = (
-            precision_policy.get("activation", {}) or {}
-        ).get("total_bits", activation_bits)
-        weight_bits = (
-            precision_policy.get("weight", {}) or {}
-        ).get("total_bits", weight_bits)
-
     lines.append(
         f"{indent}// precision_mode: "
         f"{layer_plan.get('precision_mode')}"
     )
     lines.append(
         f"{indent}// activation bits: "
-        f"{activation_bits}"
+        f"{layer_plan.get('act_bits')}"
     )
     lines.append(
         f"{indent}// weight bits: "
-        f"{weight_bits}"
+        f"{layer_plan.get('weight_bits')}"
     )
     lines.append(
         f"{indent}// tile: "
@@ -769,7 +756,6 @@ def emit_top_cpp(
     compile_plan: Any = None,
     memory_plan: Any = None,
     communication_plan: Any = None,
-    raw_cfg: Any = None,
 ) -> str:
     if not graph.inputs:
         raise ValueError(
@@ -856,28 +842,6 @@ def emit_top_cpp(
         "    return converter.i;",
         "}",
         "",
-        "static const int FPGAI_AXIS_WORD_BITS = 32;",
-        "",
-        "template<typename T, int VALUE_BITS>",
-        "static inline T fpgai_unpack_axis_value(axis_t packet, int lane) {",
-        "    ap_uint<VALUE_BITS> raw = packet.data.range(",
-        "        ((lane + 1) * VALUE_BITS) - 1,",
-        "        lane * VALUE_BITS",
-        "    );",
-        "    T value;",
-        "    value.range(VALUE_BITS - 1, 0) = raw;",
-        "    return value;",
-        "}",
-        "",
-        "template<typename T, int VALUE_BITS>",
-        "static inline void fpgai_pack_axis_value(axis_t& packet, T value, int lane) {",
-        "    ap_uint<VALUE_BITS> raw = value.range(VALUE_BITS - 1, 0);",
-        "    packet.data.range(",
-        "        ((lane + 1) * VALUE_BITS) - 1,",
-        "        lane * VALUE_BITS",
-        "    ) = raw;",
-        "}",
-        "",
         "#if defined(FPGAI_DEBUG_DUMP) && "
         "!defined(__SYNTHESIS__)",
         "template<typename T>",
@@ -914,10 +878,6 @@ def emit_top_cpp(
     )
     current_buffer = "layer_in"
     current_type = first_type
-    precision_policy = default_precision_policy(raw_cfg or {})
-    act_precision = precision_policy.get("activation", {})
-    act_bits = int(act_precision.get("total_bits", 16))
-    act_per_axis = max(1, 32 // act_bits)
 
     lines.append(
         f"    // Input transfer: "
@@ -938,25 +898,16 @@ def emit_top_cpp(
     )
     lines.extend(
         [
-            f"    static const int FPGAI_ACT_BITS = {act_bits};",
-            f"    static const int FPGAI_ACT_PER_AXIS = {act_per_axis};",
             (
-                f"    for (int base = 0; "
-                f"base < {input_size}; base += FPGAI_ACT_PER_AXIS) {{"
+                f"    for (int index = 0; "
+                f"index < {input_size}; ++index) {{"
             ),
-            "#pragma HLS PIPELINE II=1",
             "        axis_t packet = in_stream.read();",
-            "        for (int lane = 0; lane < FPGAI_ACT_PER_AXIS; ++lane) {",
-            "#pragma HLS UNROLL",
-            "            int index = base + lane;",
-            f"            if (index < {input_size}) {{",
             (
-                f"                {current_buffer}[index] = "
-                f"fpgai_unpack_axis_value<{current_type}, FPGAI_ACT_BITS>("
-                "packet, lane);"
+                f"        {current_buffer}[index] = "
+                f"bits_to_value<{current_type}>("
+                "packet.data.to_uint());"
             ),
-            "            }",
-            "        }",
             "    }",
             "",
         ]
@@ -1030,7 +981,6 @@ def emit_top_cpp(
             layer_plan,
             output_memory,
             output_communication,
-            precision_policy,
         )
         lines.append(
             f"    {output_type} "
@@ -1492,27 +1442,20 @@ def emit_top_cpp(
     lines.extend(
         [
             (
-                f"    for (int base = 0; "
-                f"base < {output_size}; base += FPGAI_ACT_PER_AXIS) {{"
+                f"    for (int index = 0; "
+                f"index < {output_size}; ++index) {{"
             ),
-            "#pragma HLS PIPELINE II=1",
             "        axis_t packet;",
-            "        packet.data = 0;",
+            (
+                f"        packet.data = "
+                f"value_to_bits<{current_type}>("
+                f"{current_buffer}[index]);"
+            ),
             "        packet.keep = -1;",
             "        packet.strb = -1;",
-            "        for (int lane = 0; lane < FPGAI_ACT_PER_AXIS; ++lane) {",
-            "#pragma HLS UNROLL",
-            "            int index = base + lane;",
-            f"            if (index < {output_size}) {{",
-            (
-                f"                fpgai_pack_axis_value<{current_type}, FPGAI_ACT_BITS>("
-                f"packet, {current_buffer}[index], lane);"
-            ),
-            "            }",
-            "        }",
             (
                 f"        packet.last = "
-                f"(base + FPGAI_ACT_PER_AXIS >= {output_size}) "
+                f"(index == {output_size - 1}) "
                 "? 1 : 0;"
             ),
             "        out_stream.write(packet);",

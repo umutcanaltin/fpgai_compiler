@@ -390,7 +390,18 @@ def _materialize_precision_defaults_from_candidates(
             cfg["numerics"] = {}
             numerics = cfg["numerics"]
         numerics["defaults"] = copy.deepcopy(dict(defaults))
-        return True, "numerics.defaults"
+        numerics["precision_mode"] = str(precision_mode)
+        _set_path(
+            cfg,
+            "analysis.precision_sweep.selected_candidate",
+            str(precision_mode),
+            create=True,
+        )
+        return True, (
+            "analysis.precision_sweep.selected_candidate,"
+            "numerics.precision_mode,"
+            "numerics.defaults"
+        )
 
     return False, (
         f"precision mode {precision_mode} not found in "
@@ -464,7 +475,7 @@ def apply_parameter_overrides(
 
         forced_candidate_paths: Optional[list[tuple[str, bool]]] = None
 
-        if param == "precision_mode" and mapping is None:
+        if param == "precision_mode":
             # Backwards-compatible behavior: if the base schema already has a
             # scalar precision selector, update that raw field. Only real
             # precision sweeps without such a scalar field should translate the

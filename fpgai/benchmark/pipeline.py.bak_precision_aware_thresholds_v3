@@ -72,17 +72,8 @@ def _precision_activation_lsb(raw: dict) -> float:
 
 
 def _precision_aware_compare_limits(raw: dict) -> dict:
-    """Return benchmark limits that scale with selected fixed-point precision.
-
-    By default, configured/default compare limits are treated as a lower bound.
-    Precision-aware limits may relax them for low-bit fixed-point modes so that
-    valid quantized HLS results are not rejected by float-like thresholds.
-
-    Set benchmark.compare.precision_aware: false to use the configured limits
-    exactly.
-    """
+    """Return benchmark limits that scale with selected fixed-point precision."""
     lsb = _precision_activation_lsb(raw)
-    precision_aware = bool(_cfg_get(raw, "benchmark.compare.precision_aware", True))
 
     configured_atol = _cfg_get(raw, "benchmark.compare.atol", None)
     configured_rtol = _cfg_get(raw, "benchmark.compare.rtol", None)
@@ -91,34 +82,38 @@ def _precision_aware_compare_limits(raw: dict) -> dict:
     configured_rmse = _cfg_get(raw, "benchmark.compare.rmse", None)
     configured_cos = _cfg_get(raw, "benchmark.compare.min_cosine_similarity", None)
 
-    base_atol = float(configured_atol) if configured_atol is not None else 1e-2
-    base_rtol = float(configured_rtol) if configured_rtol is not None else 1e-2
-    base_max = float(configured_max) if configured_max is not None else 0.08
-    base_mean = float(configured_mean) if configured_mean is not None else 0.03
-    base_rmse = float(configured_rmse) if configured_rmse is not None else 0.04
-    base_cos = float(configured_cos) if configured_cos is not None else 0.95
+    atol = float(configured_atol) if configured_atol is not None else max(1e-2, 2.0 * lsb)
+    rtol = float(configured_rtol) if configured_rtol is not None else max(1e-2, 2.0 * lsb)
 
-    if not precision_aware:
-        return {
-            "atol": base_atol,
-            "rtol": base_rtol,
-            "max_abs_error_limit": base_max,
-            "mean_abs_error_limit": base_mean,
-            "rmse_limit": base_rmse,
-            "min_cosine_similarity": base_cos,
-        }
-
-    relaxed_cos = 0.93 if lsb >= 0.03125 else 0.95
+    max_abs_error_limit = (
+        float(configured_max)
+        if configured_max is not None
+        else max(0.08, 4.0 * lsb)
+    )
+    mean_abs_error_limit = (
+        float(configured_mean)
+        if configured_mean is not None
+        else max(0.03, 1.5 * lsb)
+    )
+    rmse_limit = (
+        float(configured_rmse)
+        if configured_rmse is not None
+        else max(0.04, 2.0 * lsb)
+    )
+    min_cosine_similarity = (
+        float(configured_cos)
+        if configured_cos is not None
+        else (0.93 if lsb >= 0.03125 else 0.95)
+    )
 
     return {
-        "atol": float(max(base_atol, 2.0 * lsb)),
-        "rtol": float(max(base_rtol, 2.0 * lsb)),
-        "max_abs_error_limit": float(max(base_max, 4.0 * lsb)),
-        "mean_abs_error_limit": float(max(base_mean, 1.5 * lsb)),
-        "rmse_limit": float(max(base_rmse, 2.0 * lsb)),
-        "min_cosine_similarity": float(min(base_cos, relaxed_cos)),
+        "atol": float(atol),
+        "rtol": float(rtol),
+        "max_abs_error_limit": float(max_abs_error_limit),
+        "mean_abs_error_limit": float(mean_abs_error_limit),
+        "rmse_limit": float(rmse_limit),
+        "min_cosine_similarity": float(min_cosine_similarity),
     }
-
 
 def run_compile_correctness_benchmark(
     *,

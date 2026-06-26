@@ -137,13 +137,7 @@ def emit_types_h(
     lines.append("")
 
     for idx, op in enumerate(graph.ops):
-        # Sweep-materialized precision modes must be the HLS type source of
-        # truth. Imported/planner op attrs may contain stale per-layer precision
-        # metadata from an earlier analysis pass. Until explicit layerwise
-        # precision overrides are fully wired and validated, generated HLS
-        # per-op typedefs must follow numerics.defaults so compute types,
-        # AXIS packing, testbench packing, and reports use the same precision.
-        p = dflt
+        p = op.attrs.get("precision", dflt)
         tag = op.attrs.get("precision_tag", f"op{idx}")
         lp = layer_plan_map.get(op.name, {})
         lines.append(f"// layer: {op.name} ({op.op_type})")

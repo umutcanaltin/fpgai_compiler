@@ -135,6 +135,217 @@ def normalize_precision_spec(
     }
 
 
+def _ceil_div_int(a: int, b: int) -> int:
+    if b <= 0:
+        raise ValueError("division denominator must be positive")
+    return (int(a) + int(b) - 1) // int(b)
+
+
+def precision_role_bits(policy: Mapping[str, Mapping[str, Any]]) -> Dict[str, int]:
+    """Return total bit width for activation/weight/bias/accumulator roles."""
+    out: Dict[str, int] = {}
+    for role in PRECISION_ROLES:
+        spec = policy.get(role, DEFAULT_PRECISION[role])
+        out[role] = int(spec.get("total_bits", DEFAULT_PRECISION[role]["total_bits"]))
+    return out
+
+
+def values_per_word(value_bits: int, word_bits: int) -> int:
+    """How many precision values fit in one transport/storage word."""
+    value_bits = int(value_bits)
+    word_bits = int(word_bits)
+    if value_bits <= 0:
+        raise ValueError("value_bits must be positive")
+    if word_bits <= 0:
+        raise ValueError("word_bits must be positive")
+    return max(1, word_bits // value_bits)
+
+
+def packed_word_count(element_count: int, value_bits: int, word_bits: int) -> int:
+    """Number of packed words required to store/transfer element_count values."""
+    return _ceil_div_int(int(element_count), values_per_word(value_bits, word_bits))
+
+
+def packed_byte_count(element_count: int, value_bits: int, word_bits: int) -> int:
+    """Byte count after packing values into word_bits words."""
+    words = packed_word_count(element_count, value_bits, word_bits)
+    return words * _ceil_div_int(word_bits, 8)
+
+
+def raw_bit_count(element_count: int, value_bits: int) -> int:
+    return int(element_count) * int(value_bits)
+
+
+def raw_byte_count(element_count: int, value_bits: int) -> int:
+    return _ceil_div_int(raw_bit_count(element_count, value_bits), 8)
+
+
+def build_precision_layout(
+    raw_cfg: Mapping[str, Any],
+    *,
+    input_elements: int = 0,
+    output_elements: int = 0,
+    weight_elements: int = 0,
+    bias_elements: int = 0,
+    activation_buffer_elements: int = 0,
+    axis_word_bits: int | None = None,
+    axi_word_bits: int | None = None,
+) -> Dict[str, Any]:
+    """Build one shared precision/storage/communication layout.
+
+    This is the central truth used by codegen, runtime packing, estimators,
+    and reports. Precision must affect not only compute types, but also
+    activation/weight/bias storage and AXIS/AXI transfer sizes.
+    """
+    policy = default_precision_policy(raw_cfg)
+    bits = precision_role_bits(policy)
+
+    axis_word_bits = int(
+        axis_word_bits
+        if axis_word_bits is not None
+        else _cfg_get(raw_cfg, "data_movement.ps_pl.axis_word_bits", 32)
+    )
+    axi_word_bits = int(
+        axi_word_bits
+        if axi_word_bits is not None
+        else _cfg_get(raw_cfg, "data_movement.ps_pl.axi_word_bits", 128)
+    )
+
+    precision_mode = str(
+        _cfg_get(
+            raw_cfg,
+            "numerics.precision_mode",
+            _cfg_get(raw_cfg, "analysis.precision_sweep.selected_candidate", "custom"),
+        )
+    )
+
+    act_bits = bits["activation"]
+    weight_bits = bits["weight"]
+    bias_bits = bits["bias"]
+    accum_bits = bits["accum"]
+
+    layout: Dict[str, Any] = {
+        "precision_mode": precision_mode,
+        "roles": {
+            "activation": dict(policy["activation"]),
+            "weight": dict(policy["weight"]),
+            "bias": dict(policy["bias"]),
+            "accum": dict(policy["accum"]),
+        },
+        "bits": {
+            "activation": act_bits,
+            "weight": weight_bits,
+            "bias": bias_bits,
+            "accum": accum_bits,
+        },
+        "word_bits": {
+            "axis": axis_word_bits,
+            "axi": axi_word_bits,
+        },
+        "pack_factors": {
+            "activation_per_axis_word": values_per_word(act_bits, axis_word_bits),
+            "output_per_axis_word": values_per_word(act_bits, axis_word_bits),
+            "weight_per_axi_word": values_per_word(weight_bits, axi_word_bits),
+            "bias_per_axi_word": values_per_word(bias_bits, axi_word_bits),
+            "activation_per_axi_word": values_per_word(act_bits, axi_word_bits),
+        },
+        "element_counts": {
+            "input": int(input_elements),
+            "output": int(output_elements),
+            "weight": int(weight_elements),
+            "bias": int(bias_elements),
+            "activation_buffer": int(activation_buffer_elements),
+        },
+    }
+
+    layout["raw_bits"] = {
+        "input": raw_bit_count(input_elements, act_bits),
+        "output": raw_bit_count(output_elements, act_bits),
+        "weight": raw_bit_count(weight_elements, weight_bits),
+        "bias": raw_bit_count(bias_elements, bias_bits),
+        "activation_buffer": raw_bit_count(activation_buffer_elements, act_bits),
+    }
+
+    layout["raw_bytes"] = {
+        "input": raw_byte_count(input_elements, act_bits),
+        "output": raw_byte_count(output_elements, act_bits),
+        "weight": raw_byte_count(weight_elements, weight_bits),
+        "bias": raw_byte_count(bias_elements, bias_bits),
+        "activation_buffer": raw_byte_count(activation_buffer_elements, act_bits),
+    }
+
+    layout["packed_transfer_bytes"] = {
+        "input_axis": packed_byte_count(input_elements, act_bits, axis_word_bits),
+        "output_axis": packed_byte_count(output_elements, act_bits, axis_word_bits),
+        "weight_axi": packed_byte_count(weight_elements, weight_bits, axi_word_bits),
+        "bias_axi": packed_byte_count(bias_elements, bias_bits, axi_word_bits),
+        "activation_axi": packed_byte_count(activation_buffer_elements, act_bits, axi_word_bits),
+    }
+
+    layout["packed_word_counts"] = {
+        "input_axis": packed_word_count(input_elements, act_bits, axis_word_bits),
+        "output_axis": packed_word_count(output_elements, act_bits, axis_word_bits),
+        "weight_axi": packed_word_count(weight_elements, weight_bits, axi_word_bits),
+        "bias_axi": packed_word_count(bias_elements, bias_bits, axi_word_bits),
+        "activation_axi": packed_word_count(activation_buffer_elements, act_bits, axi_word_bits),
+    }
+
+    return layout
+
+
+def precision_layout_markdown(layout: Mapping[str, Any]) -> str:
+    bits = layout.get("bits", {})
+    pack = layout.get("pack_factors", {})
+    elems = layout.get("element_counts", {})
+    raw_bytes = layout.get("raw_bytes", {})
+    packed_bytes = layout.get("packed_transfer_bytes", {})
+
+    lines = [
+        "# Precision layout",
+        "",
+        f"- Precision mode: `{layout.get('precision_mode')}`",
+        f"- Activation bits: `{bits.get('activation')}`",
+        f"- Weight bits: `{bits.get('weight')}`",
+        f"- Bias bits: `{bits.get('bias')}`",
+        f"- Accumulator bits: `{bits.get('accum')}`",
+        "",
+        "## Pack factors",
+        "",
+        f"- Activation values per AXIS word: `{pack.get('activation_per_axis_word')}`",
+        f"- Output values per AXIS word: `{pack.get('output_per_axis_word')}`",
+        f"- Weight values per AXI word: `{pack.get('weight_per_axi_word')}`",
+        f"- Bias values per AXI word: `{pack.get('bias_per_axi_word')}`",
+        f"- Activation values per AXI word: `{pack.get('activation_per_axi_word')}`",
+        "",
+        "## Element counts",
+        "",
+        f"- Input elements: `{elems.get('input')}`",
+        f"- Output elements: `{elems.get('output')}`",
+        f"- Weight elements: `{elems.get('weight')}`",
+        f"- Bias elements: `{elems.get('bias')}`",
+        f"- Activation buffer elements: `{elems.get('activation_buffer')}`",
+        "",
+        "## Raw byte counts",
+        "",
+        f"- Input raw bytes: `{raw_bytes.get('input')}`",
+        f"- Output raw bytes: `{raw_bytes.get('output')}`",
+        f"- Weight raw bytes: `{raw_bytes.get('weight')}`",
+        f"- Bias raw bytes: `{raw_bytes.get('bias')}`",
+        f"- Activation-buffer raw bytes: `{raw_bytes.get('activation_buffer')}`",
+        "",
+        "## Packed transfer byte counts",
+        "",
+        f"- Input AXIS bytes: `{packed_bytes.get('input_axis')}`",
+        f"- Output AXIS bytes: `{packed_bytes.get('output_axis')}`",
+        f"- Weight AXI bytes: `{packed_bytes.get('weight_axi')}`",
+        f"- Bias AXI bytes: `{packed_bytes.get('bias_axi')}`",
+        f"- Activation AXI bytes: `{packed_bytes.get('activation_axi')}`",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+
 def default_precision_policy(
     raw_cfg: Mapping[str, Any],
 ) -> Dict[str, Dict[str, Any]]:

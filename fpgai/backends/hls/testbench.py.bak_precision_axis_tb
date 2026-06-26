@@ -1,121 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Mapping
-
-from fpgai.numerics.precision_policy import default_precision_policy
-
-
-def _precision_bits(raw_cfg: Mapping[str, Any] | None) -> tuple[int, int]:
-    policy = default_precision_policy(raw_cfg or {})
-    activation = policy.get("activation", {})
-    total_bits = int(activation.get("total_bits", 16))
-    int_bits = int(activation.get("int_bits", 6))
-    return total_bits, int_bits
-
-
-def _common_helpers(*, act_bits: int, act_int_bits: int, out_words: int) -> str:
-    act_per_axis = max(1, 32 // int(act_bits))
-    frac_bits = int(act_bits) - int(act_int_bits)
-
-    return f"""
-static const int FPGAI_ACT_BITS = {int(act_bits)};
-static const int FPGAI_ACT_INT_BITS = {int(act_int_bits)};
-static const int FPGAI_ACT_FRAC_BITS = {int(frac_bits)};
-static const int FPGAI_ACT_PER_AXIS = {int(act_per_axis)};
-static const int FPGAI_OUTPUT_VALUES = {int(out_words)};
-
-static unsigned int fpgai_float_to_raw(float value) {{
-    const double scale = (double)(1ULL << FPGAI_ACT_FRAC_BITS);
-    const long long qmin = -(1LL << (FPGAI_ACT_BITS - 1));
-    const long long qmax =  (1LL << (FPGAI_ACT_BITS - 1)) - 1LL;
-
-    double scaled_d = (double)value * scale;
-    long long scaled = (long long)(scaled_d >= 0.0 ? scaled_d + 0.5 : scaled_d - 0.5);
-
-    if (scaled < qmin) scaled = qmin;
-    if (scaled > qmax) scaled = qmax;
-
-    unsigned long long mask =
-        (FPGAI_ACT_BITS >= 32)
-            ? 0xffffffffULL
-            : ((1ULL << FPGAI_ACT_BITS) - 1ULL);
-
-    return (unsigned int)(((unsigned long long)scaled) & mask);
-}}
-
-static float fpgai_raw_to_float(unsigned int raw) {{
-    unsigned int mask =
-        (FPGAI_ACT_BITS >= 32)
-            ? 0xffffffffU
-            : ((1U << FPGAI_ACT_BITS) - 1U);
-
-    raw &= mask;
-
-    int signed_value = (int)raw;
-    if (FPGAI_ACT_BITS < 32) {{
-        unsigned int sign_bit = 1U << (FPGAI_ACT_BITS - 1);
-        if (raw & sign_bit) {{
-            signed_value = (int)(raw | (~mask));
-        }}
-    }}
-
-    const float scale = (float)(1U << FPGAI_ACT_FRAC_BITS);
-    return ((float)signed_value) / scale;
-}}
-
-static void push_packed_activations(
-    hls::stream<axis_t>& stream,
-    const std::vector<float>& values
-) {{
-    const int n = (int)values.size();
-
-    for (int base = 0; base < n; base += FPGAI_ACT_PER_AXIS) {{
-        axis_t pkt;
-        pkt.data = 0;
-        pkt.keep = -1;
-        pkt.strb = -1;
-        pkt.last = (base + FPGAI_ACT_PER_AXIS >= n) ? 1 : 0;
-
-        for (int lane = 0; lane < FPGAI_ACT_PER_AXIS; ++lane) {{
-            int index = base + lane;
-            if (index < n) {{
-                unsigned int raw = fpgai_float_to_raw(values[index]);
-                unsigned int lo = lane * FPGAI_ACT_BITS;
-                unsigned int hi = ((lane + 1) * FPGAI_ACT_BITS) - 1;
-                pkt.data.range(hi, lo) = raw;
-            }}
-        }}
-
-        stream.write(pkt);
-    }}
-}}
-
-static std::vector<float> read_packed_activations(
-    hls::stream<axis_t>& stream,
-    int expected_values
-) {{
-    std::vector<float> output_data;
-    output_data.reserve(expected_values);
-
-    while (!stream.empty() && (int)output_data.size() < expected_values) {{
-        axis_t pkt = stream.read();
-
-        for (int lane = 0; lane < FPGAI_ACT_PER_AXIS; ++lane) {{
-            int index = (int)output_data.size();
-            if (index >= expected_values) break;
-
-            unsigned int lo = lane * FPGAI_ACT_BITS;
-            unsigned int hi = ((lane + 1) * FPGAI_ACT_BITS) - 1;
-            unsigned int raw = pkt.data.range(hi, lo).to_uint();
-
-            output_data.push_back(fpgai_raw_to_float(raw));
-        }}
-    }}
-
-    return output_data;
-}}
-"""
 
 
 def emit_tb_cpp(
@@ -126,16 +11,9 @@ def emit_tb_cpp(
     out_words: int,
     weights_mode: str,
     weight_words: int = 0,
-    raw_cfg: Mapping[str, Any] | None = None,
 ) -> None:
     tb_path = tb_dir / "tb.cpp"
     mode = str(weights_mode).strip().lower()
-    act_bits, act_int_bits = _precision_bits(raw_cfg)
-    helpers = _common_helpers(
-        act_bits=act_bits,
-        act_int_bits=act_int_bits,
-        out_words=out_words,
-    )
 
     if mode in {"stream", "streamed"}:
         tb_text = f"""
@@ -157,7 +35,17 @@ extern "C" void {top_name}(
     int mode
 );
 
-{helpers}
+static void push_f32(hls::stream<axis_t>& s, float v, bool last=false) {{
+    union {{ float f; unsigned int i; }} u;
+    u.f = v;
+
+    axis_t pkt;
+    pkt.data = u.i;
+    pkt.keep = -1;
+    pkt.strb = -1;
+    pkt.last = last ? 1 : 0;
+    s.write(pkt);
+}}
 
 int main(int argc, char** argv) {{
     const char* in_path = "input.bin";
@@ -181,8 +69,6 @@ int main(int argc, char** argv) {{
     f.close();
 
     printf("[TB] Loaded %d inputs from %s\\n", n_floats, in_path);
-    printf("[TB] Precision AXIS packing: act_bits=%d act_int_bits=%d values_per_axis=%d\\n",
-           FPGAI_ACT_BITS, FPGAI_ACT_INT_BITS, FPGAI_ACT_PER_AXIS);
 
     hls::stream<axis_t> in_stream;
     hls::stream<axis_t> out_stream;
@@ -195,28 +81,35 @@ int main(int argc, char** argv) {{
         fprintf(stderr, "[TB] Error: expected %d runtime weight words, generated %d\\n", expected_weight_words, actual_weight_words);
         return 2;
     }}
-
     fpgai::fpgai_preload_runtime_weights(weight_stream);
     {top_name}(in_stream, out_stream, weight_stream, 0);
 
-    push_packed_activations(in_stream, input_data);
+    for (int i = 0; i < n_floats; i++) {{
+        push_f32(in_stream, input_data[i], i == n_floats - 1);
+    }}
 
     printf("[TB] Running inference...\\n");
     {top_name}(in_stream, out_stream, weight_stream, 1);
 
-    std::vector<float> output_data = read_packed_activations(out_stream, FPGAI_OUTPUT_VALUES);
+    std::vector<float> output_data;
+    while (!out_stream.empty()) {{
+        axis_t pkt = out_stream.read();
+        union {{ unsigned int i; float f; }} u;
+        u.i = pkt.data.to_uint();
+        output_data.push_back(u.f);
+    }}
 
     printf("[TB] Received %zu outputs.\\n", output_data.size());
 
-    std::ofstream of(out_path, std::ios::binary);
+    std::ofstream of("output.bin", std::ios::binary);
     if (!of) {{
-        fprintf(stderr, "[TB] Error: Could not open output file for writing: %s\\n", out_path);
+        fprintf(stderr, "[TB] Error: Could not open output.bin for writing\\n");
         return 3;
     }}
     of.write(reinterpret_cast<const char*>(output_data.data()), output_data.size() * sizeof(float));
     of.close();
 
-    printf("[TB] Wrote %s\\n", out_path);
+    printf("[TB] Wrote output.bin\\n");
     return 0;
 }}
 """
@@ -240,7 +133,17 @@ extern "C" void {top_name}(
     const ap_uint<32>* weights_mem
 );
 
-{helpers}
+static axis_t make_axis_f32(float v, bool last=false) {{
+    union {{ float f; unsigned int i; }} u;
+    u.f = v;
+
+    axis_t pkt;
+    pkt.data = u.i;
+    pkt.keep = -1;
+    pkt.strb = -1;
+    pkt.last = last ? 1 : 0;
+    return pkt;
+}}
 
 int main(int argc, char** argv) {{
     const char* in_path = "input.bin";
@@ -264,8 +167,6 @@ int main(int argc, char** argv) {{
     f.close();
 
     printf("[TB] Loaded %d inputs from %s\\n", n_floats, in_path);
-    printf("[TB] Precision AXIS packing: act_bits=%d act_int_bits=%d values_per_axis=%d\\n",
-           FPGAI_ACT_BITS, FPGAI_ACT_INT_BITS, FPGAI_ACT_PER_AXIS);
 
     hls::stream<axis_t> in_stream;
     hls::stream<axis_t> out_stream;
@@ -277,28 +178,35 @@ int main(int argc, char** argv) {{
         fprintf(stderr, "[TB] Error: expected %d runtime weight words, generated %d\\n", expected_weight_words, actual_weight_words);
         return 2;
     }}
-
     std::vector<ap_uint<32> > weights_mem(actual_weight_words);
     fpgai::fpgai_fill_runtime_weight_words(weights_mem.data(), actual_weight_words);
 
-    push_packed_activations(in_stream, input_data);
+    for (int i = 0; i < n_floats; i++) {{
+        in_stream.write(make_axis_f32(input_data[i], i == n_floats - 1));
+    }}
 
     printf("[TB] Running inference...\\n");
     {top_name}(in_stream, out_stream, weights_mem.data());
 
-    std::vector<float> output_data = read_packed_activations(out_stream, FPGAI_OUTPUT_VALUES);
+    std::vector<float> output_data;
+    while (!out_stream.empty()) {{
+        axis_t pkt = out_stream.read();
+        union {{ unsigned int i; float f; }} u;
+        u.i = pkt.data.to_uint();
+        output_data.push_back(u.f);
+    }}
 
     printf("[TB] Received %zu outputs.\\n", output_data.size());
 
-    std::ofstream of(out_path, std::ios::binary);
+    std::ofstream of("output.bin", std::ios::binary);
     if (!of) {{
-        fprintf(stderr, "[TB] Error: Could not open output file for writing: %s\\n", out_path);
+        fprintf(stderr, "[TB] Error: Could not open output.bin for writing\\n");
         return 3;
     }}
     of.write(reinterpret_cast<const char*>(output_data.data()), output_data.size() * sizeof(float));
     of.close();
 
-    printf("[TB] Wrote %s\\n", out_path);
+    printf("[TB] Wrote output.bin\\n");
     return 0;
 }}
 """
@@ -316,8 +224,6 @@ typedef ap_axis<32,0,0,0> axis_t;
 
 extern "C" void {top_name}(hls::stream<axis_t>& in, hls::stream<axis_t>& out);
 
-{helpers}
-
 int main(int argc, char** argv) {{
     const char* in_path = "input.bin";
     const char* out_path = "output.bin";
@@ -340,30 +246,44 @@ int main(int argc, char** argv) {{
     f.close();
 
     printf("[TB] Loaded %d inputs from %s\\n", n_floats, in_path);
-    printf("[TB] Precision AXIS packing: act_bits=%d act_int_bits=%d values_per_axis=%d\\n",
-           FPGAI_ACT_BITS, FPGAI_ACT_INT_BITS, FPGAI_ACT_PER_AXIS);
 
     hls::stream<axis_t> in_stream;
     hls::stream<axis_t> out_stream;
 
-    push_packed_activations(in_stream, input_data);
+    for(int i = 0; i < n_floats; i++) {{
+        union {{ float f; unsigned int i; }} u;
+        u.f = input_data[i];
+
+        axis_t pkt;
+        pkt.data = u.i;
+        pkt.keep = -1;
+        pkt.strb = -1;
+        pkt.last = (i == n_floats - 1);
+        in_stream.write(pkt);
+    }}
 
     printf("[TB] Running {top_name}...\\n");
     {top_name}(in_stream, out_stream);
 
-    std::vector<float> output_data = read_packed_activations(out_stream, FPGAI_OUTPUT_VALUES);
+    std::vector<float> output_data;
+    while(!out_stream.empty()) {{
+        axis_t pkt = out_stream.read();
+        union {{ unsigned int i; float f; }} u;
+        u.i = pkt.data.to_uint();
+        output_data.push_back(u.f);
+    }}
 
     printf("[TB] Received %zu outputs.\\n", output_data.size());
 
-    std::ofstream of(out_path, std::ios::binary);
+    std::ofstream of("output.bin", std::ios::binary);
     if (!of) {{
-        fprintf(stderr, "[TB] Error: Could not open output file for writing: %s\\n", out_path);
+        fprintf(stderr, "[TB] Error: Could not open output.bin for writing\\n");
         return 3;
     }}
     of.write(reinterpret_cast<const char*>(output_data.data()), output_data.size() * sizeof(float));
     of.close();
 
-    printf("[TB] Wrote %s\\n", out_path);
+    printf("[TB] Wrote output.bin\\n");
     return 0;
 }}
 """

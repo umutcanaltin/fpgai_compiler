@@ -1047,8 +1047,7 @@ class Compiler:
                 out_words=out_words,
                 weights_mode=weights_mode,
                 weight_words=runtime_weight_words,
-            
-                raw_cfg=self.cfg.raw,)
+            )
 
             write_text(
                 hls_dir / "run_hls.tcl",

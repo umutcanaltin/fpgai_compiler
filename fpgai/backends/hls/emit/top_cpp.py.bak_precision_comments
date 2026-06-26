@@ -580,29 +580,18 @@ def _emit_plan_comments(
     layer_plan: Dict[str, Any],
     output_memory: Dict[str, Any] | None,
     output_communication: Dict[str, Any] | None,
-    precision_policy: Dict[str, Any] | None = None,
 ) -> None:
-    activation_bits = layer_plan.get("act_bits")
-    weight_bits = layer_plan.get("weight_bits")
-    if precision_policy:
-        activation_bits = (
-            precision_policy.get("activation", {}) or {}
-        ).get("total_bits", activation_bits)
-        weight_bits = (
-            precision_policy.get("weight", {}) or {}
-        ).get("total_bits", weight_bits)
-
     lines.append(
         f"{indent}// precision_mode: "
         f"{layer_plan.get('precision_mode')}"
     )
     lines.append(
         f"{indent}// activation bits: "
-        f"{activation_bits}"
+        f"{layer_plan.get('act_bits')}"
     )
     lines.append(
         f"{indent}// weight bits: "
-        f"{weight_bits}"
+        f"{layer_plan.get('weight_bits')}"
     )
     lines.append(
         f"{indent}// tile: "
@@ -1030,7 +1019,6 @@ def emit_top_cpp(
             layer_plan,
             output_memory,
             output_communication,
-            precision_policy,
         )
         lines.append(
             f"    {output_type} "
