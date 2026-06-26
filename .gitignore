@@ -38,3 +38,13 @@ patches/
 
 # Local handoff / backup archives
 /*.zip
+# Python/runtime generated files
+# Local virtual environments
+# Local backup / patch artifacts
+*.bak
+*.bak_*
+*.orig
+*.rej
+*.tmp
+*~
+sprint*_inspection.txt

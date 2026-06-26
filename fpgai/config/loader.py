@@ -938,15 +938,38 @@ def _validate_clock_config(
                 ConfigIssue(f"{path}.name", "Expected a non-empty string")
             )
 
-        target_mhz = clock.get("target_mhz")
-        if (
-            type(target_mhz) not in {int, float}
-            or float(target_mhz) <= 0.0
-        ):
+        if "target_mhz" in clock:
+            target_mhz = clock.get("target_mhz")
+            if (
+                type(target_mhz) not in {int, float}
+                or float(target_mhz) <= 0.0
+            ):
+                issues.append(
+                    ConfigIssue(
+                        f"{path}.target_mhz",
+                        "Expected a positive number when provided",
+                    )
+                )
+
+
+def _validate_fit_policy(
+    raw: Dict[str, Any],
+    issues: List[ConfigIssue],
+) -> None:
+    allowed = {"report_only", "warn", "enforce"}
+
+    for path in ("targets.platform.fit_policy", "hardware.fit_policy"):
+        value = _deep_get(raw, path, None)
+        if value is None:
+            continue
+
+        normalized = str(value).strip().lower()
+        if normalized not in allowed:
             issues.append(
                 ConfigIssue(
-                    f"{path}.target_mhz",
-                    "Expected a positive number",
+                    path,
+                    "Invalid fit_policy. Expected one of: "
+                    + ", ".join(sorted(allowed)),
                 )
             )
 
@@ -1167,6 +1190,10 @@ def load_config(path: str) -> FPGAIConfig:
         issues,
     )
     _validate_clock_config(
+        raw,
+        issues,
+    )
+    _validate_fit_policy(
         raw,
         issues,
     )

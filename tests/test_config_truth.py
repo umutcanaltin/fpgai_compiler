@@ -162,3 +162,55 @@ backends:
 
     loaded = load_config(cfg)
     assert loaded.raw["optimization"]["parallel_policy"] == "Memory-First"
+
+
+def test_invalid_fit_policy_is_rejected(tmp_path):
+    import pytest
+    import yaml
+
+    from fpgai.config.loader import load_config
+
+    src = Path("configs/examples/inference_compile.yml")
+    cfg = yaml.safe_load(src.read_text(encoding="utf-8"))
+
+    cfg.setdefault("project", {})
+    cfg["project"]["out_dir"] = str(tmp_path / "out")
+
+    cfg.setdefault("targets", {})
+    cfg["targets"].setdefault("platform", {})
+    cfg["targets"]["platform"]["fit_policy"] = "aggressive"
+
+    path = tmp_path / "bad_fit_policy.yml"
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(Exception) as exc:
+        load_config(str(path))
+
+    msg = str(exc.value)
+    assert "fit_policy" in msg
+    assert "report_only" in msg
+    assert "warn" in msg
+    assert "enforce" in msg
+
+
+def test_named_clock_without_target_mhz_is_allowed(tmp_path):
+    import yaml
+
+    from fpgai.config.loader import load_config
+
+    src = Path("configs/examples/inference_compile.yml")
+    cfg = yaml.safe_load(src.read_text(encoding="utf-8"))
+    cfg.setdefault("project", {})
+    cfg["project"]["out_dir"] = str(tmp_path / "out")
+
+    cfg.setdefault("targets", {})
+    cfg["targets"].setdefault("platform", {})
+    cfg["targets"]["platform"]["board"] = "pynq_z2"
+    cfg["targets"]["platform"]["clocks"] = [{"name": "ap_clk"}]
+
+    path = tmp_path / "named_clock_no_target.yml"
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+
+    loaded = load_config(str(path))
+    assert loaded.raw["targets"]["platform"]["clocks"][0]["name"] == "ap_clk"
+    assert "target_mhz" not in loaded.raw["targets"]["platform"]["clocks"][0]

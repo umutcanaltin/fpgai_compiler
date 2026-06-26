@@ -336,3 +336,200 @@ def test_params_cpp_does_not_emit_file_scope_bind_storage_pragmas():
 
     assert "#pragma HLS BIND_STORAGE" not in source
     assert "file-scope BIND_STORAGE disabled" in source
+
+
+def test_compiler_emits_board_fit_artifacts_in_source() -> None:
+    source = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
+
+    assert "emit_board_fit_report" in source
+    assert "reports_dir" in source
+    assert "board_fit_json" in source
+    assert "board_fit_markdown" in source
+    assert '"targets.platform.board"' in source
+    assert '"targets.platform.clocks.0.target_mhz"' in source
+
+
+def test_hardware_feasibility_has_user_guiding_board_fit_reporter() -> None:
+    source = Path("fpgai/reporting/hardware_feasibility.py").read_text(encoding="utf-8")
+
+    assert "def emit_board_fit_report" in source
+    assert "def board_fit_markdown" in source
+    assert "suggested_yaml_actions" in source
+    assert "Truth boundary" in source
+    assert "prediction_based" in source
+
+
+def test_compiler_emits_hardware_knob_contract_in_source() -> None:
+    source = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
+
+    assert "_emit_hardware_knob_contract_reports" in source
+    assert "hardware_knob_contract.json" in source
+    assert "hardware_knob_contract.md" in source
+    assert "manual_yaml_override" in source
+    assert "optimization.parallel.pe" in source
+    assert "optimization.parallel.simd" in source
+    assert "optimization.pipeline.ii" in source
+    assert "optimization.tiling.dense" in source
+    assert "optimization.tiling.conv" in source
+    assert "targets.platform.fit_policy" in source
+    assert '"hardware_knob_contract": hardware_knob_contract' in source
+
+
+def test_hardware_knob_contract_is_layer_aware_in_source() -> None:
+    source = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
+
+    assert "first_layer_of_type_value" in source
+    assert "has_layer_type" in source
+    assert "dense_tiling_effective" in source
+    assert "conv_tiling_effective" in source
+    assert '"not_applicable"' in source
+
+
+def test_hardware_knob_contract_labels_board_aware_policy_in_source() -> None:
+    source = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
+
+    assert "board_aware_policy" in source
+    assert "policy_resource_awareness" in source
+    assert "board_aware_policy_scaling" in source
+
+
+def test_hardware_knob_contract_path_helpers_support_list_indexes() -> None:
+    import inspect
+
+    import fpgai.engine.compiler as compiler_module
+
+    compiler_cls = None
+    for _name, obj in inspect.getmembers(compiler_module, inspect.isclass):
+        if hasattr(obj, "_raw_has_path") and hasattr(obj, "_raw_get_path"):
+            compiler_cls = obj
+            break
+
+    assert compiler_cls is not None
+
+    compiler = object.__new__(compiler_cls)
+    raw = {
+        "targets": {
+            "platform": {
+                "clocks": [
+                    {
+                        "name": "ap_clk",
+                        "target_mhz": 200,
+                    }
+                ]
+            }
+        }
+    }
+
+    assert compiler._raw_has_path(raw, "targets.platform.clocks.0.target_mhz")
+    assert compiler._raw_get_path(raw, "targets.platform.clocks.0.target_mhz") == 200
+    assert not compiler._raw_has_path(raw, "targets.platform.clocks.1.target_mhz")
+
+
+def test_hardware_knob_contract_status_treats_numeric_equivalence_as_applied() -> None:
+    import inspect
+
+    import fpgai.engine.compiler as compiler_module
+
+    compiler_cls = None
+    for _name, obj in inspect.getmembers(compiler_module, inspect.isclass):
+        if hasattr(obj, "_contract_status"):
+            compiler_cls = obj
+            break
+
+    assert compiler_cls is not None
+    assert compiler_cls._contract_status(200, 200.0, manual=True) == "applied"
+    assert compiler_cls._contract_status(200, 100.0, manual=True) == "changed_or_clamped"
+    assert compiler_cls._contract_status(None, 100.0, manual=False) == "applied"
+    assert compiler_cls._contract_status(None, None, manual=False) == "unknown"
+
+
+def test_compiler_has_fit_policy_gate_in_source() -> None:
+    source = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
+
+    assert "def _fit_policy_gate" in source
+    assert '"fit_policy_gate": fit_policy_gate' in source
+    assert "targets.platform.fit_policy" in source
+    assert "hardware.fit_policy" in source
+    assert "blocked_stages" in source
+    assert "vivado_impl" in source
+    assert "bitstream" in source
+    assert "deployable_runtime_overlay" in source
+    assert "fit_policy is enforced through fit_policy_gate" in source
+
+
+def test_fit_policy_gate_modes_behavior() -> None:
+    from types import SimpleNamespace
+
+    from fpgai.engine.compiler import Compiler
+
+    prediction_artifacts = {
+        "board_fit": {
+            "status": "over_limit",
+            "limiting_dimension": "dsp",
+            "vivado_allowed": False,
+        }
+    }
+
+    expected = {
+        "report_only": (False, False, "info"),
+        "warn": (False, True, "warning"),
+        "enforce": (True, False, "error"),
+    }
+
+    for policy, (blocked, warning, severity) in expected.items():
+        compiler = object.__new__(Compiler)
+        compiler.cfg = SimpleNamespace(
+            raw={
+                "targets": {
+                    "platform": {
+                        "fit_policy": policy,
+                    }
+                }
+            }
+        )
+
+        gate = compiler._fit_policy_gate(prediction_artifacts)
+
+        assert gate["policy"] == policy
+        assert gate["board_fit_status"] == "over_limit"
+        assert gate["board_fit_limiting_dimension"] == "dsp"
+        assert gate["vivado_allowed_by_board_fit"] is False
+        assert gate["over_limit"] is True
+        assert gate["blocked"] is blocked
+        assert gate["warning"] is warning
+        assert gate["severity"] == severity
+
+    compiler = object.__new__(Compiler)
+    compiler.cfg = SimpleNamespace(
+        raw={
+            "targets": {
+                "platform": {
+                    "fit_policy": "invalid_policy_name",
+                }
+            }
+        }
+    )
+    gate = compiler._fit_policy_gate(prediction_artifacts)
+
+    assert gate["policy"] == "report_only"
+    assert gate["blocked"] is False
+    assert gate["warning"] is False
+
+
+def test_config_loader_validates_fit_policy_enum_in_source() -> None:
+    source = Path("fpgai/config/loader.py").read_text(encoding="utf-8")
+
+    assert "def _validate_fit_policy" in source
+    assert '"targets.platform.fit_policy"' in source
+    assert '"hardware.fit_policy"' in source
+    assert '{"report_only", "warn", "enforce"}' in source
+    assert "Invalid fit_policy" in source
+    assert "_validate_fit_policy(" in source
+
+
+def test_compiler_uses_compile_plan_clock_for_outputs_in_source() -> None:
+    source = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
+
+    assert 'getattr(compile_plan, "clock_mhz"' in source
+    assert 'target_clock_mhz = getattr(compile_plan, "clock_mhz"' in source
+    assert 'clk_mhz = float(getattr(compile_plan, "clock_mhz"' in source

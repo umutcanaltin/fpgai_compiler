@@ -110,6 +110,45 @@ def _exported_ip_artifacts(bridge: Path) -> List[str]:
     return sorted(set(paths))
 
 
+def _load_compile_manifest(project_dir: Path) -> dict:
+    manifest_path = project_dir / "manifest.json"
+    if not manifest_path.exists():
+        return {}
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _fit_policy_gate_from_manifest(project_dir: Path) -> dict:
+    manifest = _load_compile_manifest(project_dir)
+    gate = manifest.get("fit_policy_gate", {})
+    return gate if isinstance(gate, dict) else {}
+
+
+def _vivado_gate_block_reason(project_dir: Path, *, run_vivado_impl: bool) -> str:
+    if not run_vivado_impl:
+        return ""
+
+    gate = _fit_policy_gate_from_manifest(project_dir)
+    if not bool(gate.get("blocked")):
+        return ""
+
+    blocked_stages = gate.get("blocked_stages") or []
+    if "vivado_impl" not in blocked_stages and "bitstream" not in blocked_stages:
+        return ""
+
+    policy = gate.get("policy", "unknown")
+    status = gate.get("board_fit_status", "unknown")
+    limiting = gate.get("board_fit_limiting_dimension", "unknown")
+    reason = gate.get("reason", "fit_policy_gate blocked Vivado implementation.")
+    return (
+        f"fit_policy_gate blocked Vivado implementation: "
+        f"policy={policy}, board_fit_status={status}, limiting={limiting}. {reason}"
+    )
+
+
 def _bitstream_exists(bridge: Path) -> bool:
     return bool(list((bridge / "bitstream").glob("*.bit"))) if (bridge / "bitstream").exists() else False
 
@@ -273,6 +312,39 @@ def _run_for_artifact(
             "hls_ip_export_ok": row["hls_ip_export_ok"],
             "hls_ip_export_error": row.get("hls_ip_export_error", ""),
         })
+
+    compile_project_dir = bridge.parent
+    gate_block_reason = _vivado_gate_block_reason(compile_project_dir, run_vivado_impl=run_vivado_impl)
+    if gate_block_reason:
+        bridge.mkdir(parents=True, exist_ok=True)
+        manifest_path = bridge / "manifest.json"
+        blocked_manifest = {
+            "design": artifact.name,
+            "vivado_bridge_generated": False,
+            "fit_policy_gate_blocked": True,
+            "fit_policy_gate_reason": gate_block_reason,
+            "hls_ip_export_requested": bool(export_hls_ip or run_vivado_synth or run_vivado_impl),
+            "hls_ip_export_ran": False,
+            "hls_ip_export_reused_existing_ip": False,
+            "hls_ip_export_tool_ok": False,
+            "hls_ip_export_returncode": None,
+            "hls_ip_exported": False,
+            "component_xml_exists": False,
+            "component_xml_count": 0,
+            "vivado_synth_requested": bool(run_vivado_synth or run_vivado_impl),
+            "vivado_impl_requested": bool(run_vivado_impl),
+            "bitstream_requested": bool(run_vivado_impl),
+            "vivado_ran": False,
+            "vivado_ok": False,
+            "vivado_returncode": None,
+            "vivado_reports_present": False,
+            "bitstream_exists": False,
+            "xsa_exists": False,
+            "error": gate_block_reason,
+        }
+        _write_json(manifest_path, blocked_manifest)
+        print(f"[FPGAI] {gate_block_reason}")
+        return blocked_manifest
 
     if run_vivado_synth or run_vivado_impl:
         if export_hls_ip and not row.get("hls_ip_export_ok", False):

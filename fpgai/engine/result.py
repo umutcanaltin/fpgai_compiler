@@ -95,6 +95,8 @@ class CompileResult:
             ("resource_prediction_json", "Resource prediction"),
             ("timing_prediction_json", "Timing prediction"),
             ("prediction_summary_md", "Prediction summary"),
+            ("board_fit_json", "Board fit JSON"),
+            ("board_fit_markdown", "Board fit summary"),
         ]
 
         lines = ["Prediction artifacts:"]
@@ -103,7 +105,45 @@ class CompileResult:
             if value:
                 lines.append(f"  - {label}: {value}")
 
+        board_fit = artifacts.get("board_fit")
+        if isinstance(board_fit, dict):
+            status = board_fit.get("status")
+            limiting = board_fit.get("limiting_dimension")
+            vivado_allowed = board_fit.get("vivado_allowed")
+            if status is not None:
+                lines.append(f"  - Board fit status: {status}")
+            if limiting:
+                lines.append(f"  - Board fit limiting: {limiting}")
+            if vivado_allowed is not None:
+                lines.append(f"  - Vivado allowed by fit: {vivado_allowed}")
+
         return lines if len(lines) > 1 else []
+
+    def _hardware_knob_contract_summary_lines(self) -> list[str]:
+        manifest = self._read_manifest()
+        if not manifest:
+            return []
+
+        contract = manifest.get("hardware_knob_contract")
+        if not isinstance(contract, dict) or not contract:
+            return []
+
+        lines = ["Hardware knob contract: available"]
+
+        for key, label in [
+            ("json", "JSON"),
+            ("markdown", "Summary"),
+            ("knob_count", "Knob count"),
+            ("manual_yaml_count", "Manual YAML knobs"),
+            ("changed_or_clamped_count", "Changed/clamped"),
+            ("report_only_count", "Report-only"),
+        ]:
+            value = contract.get(key)
+            if value is not None:
+                lines.append(f"  - {label}: {value}")
+
+        return lines
+
 
     def _design_space_summary_lines(self) -> list[str]:
         manifest = self._read_manifest()
@@ -164,6 +204,36 @@ class CompileResult:
         ii_comparison = hls.get("ii_comparison")
         if isinstance(ii_comparison, dict) and ii_comparison.get("path"):
             lines.append(f"  - ii_comparison: {ii_comparison.get('path')}")
+
+        return lines
+
+    def _fit_policy_gate_summary_lines(self) -> list[str]:
+        manifest = self._read_manifest()
+        if not manifest:
+            return []
+
+        gate = manifest.get("fit_policy_gate")
+        if not isinstance(gate, dict) or not gate:
+            return []
+
+        lines = ["Fit policy gate    : available"]
+        for key, label in [
+            ("policy", "policy"),
+            ("board_fit_status", "board_fit_status"),
+            ("board_fit_limiting_dimension", "limiting"),
+            ("vivado_allowed_by_board_fit", "vivado_allowed_by_board_fit"),
+            ("over_limit", "over_limit"),
+            ("blocked", "blocked"),
+            ("warning", "warning"),
+            ("severity", "severity"),
+            ("reason", "reason"),
+        ]:
+            if key in gate:
+                lines.append(f"  - {label}: {gate.get(key)}")
+
+        blocked_stages = gate.get("blocked_stages")
+        if blocked_stages:
+            lines.append(f"  - blocked_stages: {blocked_stages}")
 
         return lines
 
@@ -299,6 +369,7 @@ class CompileResult:
             self._prediction_artifact_summary_lines(),
             self._design_space_summary_lines(),
             self._hls_artifacts_summary_lines(),
+            self._fit_policy_gate_summary_lines(),
             self._vivado_bridge_summary_lines(),
             self._runtime_package_summary_lines(),
             self._pipeline_stage_summary_lines(),
@@ -308,5 +379,10 @@ class CompileResult:
             if section_lines:
                 lines.insert(-1, "---------------------------------------------------")
                 lines[-1:-1] = section_lines
+
+        hardware_knob_contract_lines = self._hardware_knob_contract_summary_lines()
+        if hardware_knob_contract_lines:
+            lines.insert(-1, "---------------------------------------------------")
+            lines[-1:-1] = hardware_knob_contract_lines
 
         return "\n".join(lines)

@@ -571,3 +571,167 @@ def test_yaml_array_partition_mode_changes_generated_layer_pragmas() -> None:
     assert "#pragma HLS ARRAY_PARTITION variable=x block factor=4 dim=1" in rewritten
     assert "FPGAI array partition mode: block" in rewritten
     assert "cyclic factor=4" not in rewritten
+
+
+def test_board_aware_policy_caps_aggressive_policy_on_pynq_without_manual_overrides() -> None:
+    from types import SimpleNamespace
+
+    from fpgai.engine.models import LayerDescriptor
+    from fpgai.engine.planner import make_compile_plan
+
+    desc = LayerDescriptor(
+        node_name="dense0",
+        op_type="Dense",
+        inputs=["input"],
+        outputs=["output"],
+        input_shapes=[(8,)],
+        output_shapes=[(4,)],
+        param_bytes=128,
+        activation_bytes_in=32,
+        activation_bytes_out=16,
+        compute_hint="compute_bound",
+    )
+
+    cfg = SimpleNamespace(
+        raw={
+            "targets": {
+                "platform": {
+                    "board": "pynq_z2",
+                    "part": "xc7z020clg400-1",
+                }
+            },
+            "optimization": {
+                "parallel_policy": "Latency-First",
+            },
+            "numerics": {
+                "defaults": {
+                    "activation": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
+                    "weight": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
+                    "bias": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
+                    "accum": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
+                }
+            },
+        }
+    )
+
+    plan = make_compile_plan(cfg, [desc])
+    awareness = plan.notes["policy_resource_awareness"]
+
+    assert awareness["enabled"] is True
+    assert awareness["board"] == "pynq_z2"
+    assert awareness["board_tier"] == "small"
+    assert awareness["scaled"] is True
+    assert plan.notes["parallel_pe"] == 2
+    assert plan.notes["parallel_simd"] == 2
+    assert plan.notes["parallel_unroll_factor"] == 2
+    assert plan.notes["parallel_partition_factor"] == 2
+    assert plan.clock_mhz == 100.0
+
+
+def test_manual_parallel_overrides_survive_board_aware_policy_scaling() -> None:
+    from types import SimpleNamespace
+
+    from fpgai.engine.models import LayerDescriptor
+    from fpgai.engine.planner import make_compile_plan
+
+    desc = LayerDescriptor(
+        node_name="dense0",
+        op_type="Dense",
+        inputs=["input"],
+        outputs=["output"],
+        input_shapes=[(8,)],
+        output_shapes=[(4,)],
+        param_bytes=128,
+        activation_bytes_in=32,
+        activation_bytes_out=16,
+        compute_hint="compute_bound",
+    )
+
+    cfg = SimpleNamespace(
+        raw={
+            "targets": {
+                "platform": {
+                    "board": "pynq_z2",
+                    "part": "xc7z020clg400-1",
+                    "clocks": [{"target_mhz": 180}],
+                }
+            },
+            "optimization": {
+                "parallel_policy": "Latency-First",
+                "parallel": {
+                    "pe": 8,
+                    "simd": 7,
+                    "unroll_factor": 6,
+                    "partition_factor": 5,
+                },
+            },
+            "numerics": {
+                "defaults": {
+                    "activation": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
+                    "weight": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
+                    "bias": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
+                    "accum": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
+                }
+            },
+        }
+    )
+
+    plan = make_compile_plan(cfg, [desc])
+    awareness = plan.notes["policy_resource_awareness"]
+
+    assert awareness["manual_overrides_present"] is True
+    assert "optimization.parallel.pe" in awareness["manual_override_paths"]
+    assert "targets.platform.clocks.0.target_mhz" in awareness["manual_override_paths"]
+
+    assert plan.notes["parallel_pe"] == 8
+    assert plan.notes["parallel_simd"] == 7
+    assert plan.notes["parallel_unroll_factor"] == 6
+    assert plan.notes["parallel_partition_factor"] == 5
+    assert plan.clock_mhz == 180.0
+
+
+def test_named_clock_without_target_uses_board_safe_default() -> None:
+    from types import SimpleNamespace
+
+    from fpgai.engine.planner import make_compile_plan
+    from fpgai.engine.models import LayerDescriptor
+
+    cfg = SimpleNamespace(
+        raw={
+            "model": {"path": "dummy.onnx"},
+            "pipeline": {"mode": "inference"},
+            "operators": {"supported": ["Dense"]},
+            "targets": {
+                "platform": {
+                    "board": "pynq_z2",
+                    "part": "xc7z020clg400-1",
+                    "clocks": [{"name": "ap_clk"}],
+                }
+            },
+            "optimization": {
+                "parallel_policy": "Latency-First",
+            },
+        }
+    )
+
+    desc = LayerDescriptor(
+        node_name="dense0",
+        op_type="Dense",
+        inputs=["x", "w", "b"],
+        outputs=["y"],
+        input_shapes={"x": [1, 16], "w": [16, 4], "b": [4]},
+        output_shapes={"y": [1, 4]},
+        param_bytes=272,
+        activation_bytes_in=64,
+        activation_bytes_out=16,
+        compute_hint="compute_bound",
+        backend_kernel="dense",
+    )
+
+    plan = make_compile_plan(cfg, [desc])
+    awareness = plan.notes["policy_resource_awareness"]
+
+    assert plan.clock_mhz == 100.0
+    assert awareness["changes"]["target_clock_mhz"] == 100.0
+    assert "targets.platform.clocks.0.target_mhz" not in awareness["manual_override_paths"]
+    assert any("board safe/default clock" in reason for reason in awareness["reasons"])

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from fpgai.config.access import get_path
+from fpgai.backends.vivado.boards import get_board
 from fpgai.engine.models import (
     ArchitecturePlan,
     BufferingPlan,
@@ -253,8 +254,154 @@ def _bool_cfg(raw: Dict[str, Any], path: str, default: bool) -> bool:
     return bool(value)
 
 
+def _has_cfg_path(raw: Dict[str, Any], path: str) -> bool:
+    cur: Any = raw
+    for part in path.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+            continue
+        if isinstance(cur, list) and part.isdigit():
+            idx = int(part)
+            if 0 <= idx < len(cur):
+                cur = cur[idx]
+                continue
+        return False
+    return True
+
+
+def _target_board_name(raw: Dict[str, Any]) -> str:
+    return str(
+        _cfg_get(
+            raw,
+            "targets.platform.board",
+            _cfg_get(raw, "targets.board", "unknown"),
+        )
+    ).strip().lower().replace("-", "_")
+
+
+def _board_default_clock_mhz(raw: Dict[str, Any], fallback: float) -> float:
+    board = _target_board_name(raw)
+    try:
+        info = get_board(board)
+        return float(info.safe_clock_mhz or info.default_clock_mhz or fallback)
+    except Exception:
+        return float(fallback)
+
+
+def _clock_target_missing_but_clock_named(raw: Dict[str, Any]) -> bool:
+    clocks = _cfg_get(raw, "targets.platform.clocks", None)
+    if not isinstance(clocks, list) or not clocks:
+        return False
+    first = clocks[0]
+    if not isinstance(first, dict):
+        return False
+    name = first.get("name")
+    return bool(isinstance(name, str) and name.strip() and "target_mhz" not in first)
+
+
+def _board_policy_tier(raw: Dict[str, Any]) -> str:
+    board = _target_board_name(raw)
+    try:
+        info = get_board(board)
+    except Exception:
+        return "unknown"
+
+    dsp = int(info.dsp or 0)
+    lut = int(info.lut or 0)
+
+    if dsp <= 256 or lut <= 60000:
+        return "small"
+    if dsp <= 1500 or lut <= 150000:
+        return "medium"
+    return "large"
+
+
+def _copy_policy(base: Policy, **updates: Any) -> Policy:
+    data = dict(base.__dict__)
+    data.update(updates)
+    return Policy(**data)
+
+
+def _board_aware_policy_from_cfg(cfg, base: Policy) -> tuple[Policy, Dict[str, Any]]:
+    """Scale policy presets to the selected board before manual overrides.
+
+    This never changes explicit manual YAML knobs. Manual overrides are applied
+    later by _override_policy_from_cfg.
+    """
+    raw = cfg.raw
+    board = _target_board_name(raw)
+    tier = _board_policy_tier(raw)
+
+    manual_paths = {
+        "pe": "optimization.parallel.pe",
+        "simd": "optimization.parallel.simd",
+        "unroll_factor": "optimization.parallel.unroll_factor",
+        "partition_factor": "optimization.parallel.partition_factor",
+        "target_clock_mhz": "targets.platform.clocks.0.target_mhz",
+    }
+    manual = {
+        key: _has_cfg_path(raw, path)
+        for key, path in manual_paths.items()
+    }
+
+    updates: Dict[str, Any] = {}
+    reasons: list[str] = []
+
+    if _clock_target_missing_but_clock_named(raw) and not manual["target_clock_mhz"]:
+        default_clock = _board_default_clock_mhz(raw, base.target_clock_mhz)
+        if float(base.target_clock_mhz) != float(default_clock):
+            updates["target_clock_mhz"] = default_clock
+            reasons.append(
+                f"target_clock_mhz selected from board safe/default clock {default_clock} MHz for {board}"
+            )
+
+    if tier == "small":
+        cap = 2
+        for key in ["pe", "simd", "unroll_factor", "partition_factor"]:
+            value = int(getattr(base, key))
+            if not manual[key] and value > cap:
+                updates[key] = cap
+                reasons.append(f"{key} capped to {cap} for small board {board}")
+
+        # Avoid turning template policies into unrealistic clocks on small
+        # boards unless the user explicitly asked for the clock.
+        if not manual["target_clock_mhz"]:
+            try:
+                info = get_board(board)
+                safe_clock = float(info.safe_clock_mhz or info.default_clock_mhz or base.target_clock_mhz)
+            except Exception:
+                safe_clock = base.target_clock_mhz
+            if float(base.target_clock_mhz) > safe_clock:
+                updates["target_clock_mhz"] = safe_clock
+                reasons.append(f"target_clock_mhz capped to safe clock {safe_clock} MHz for {board}")
+
+    scaled = bool(updates)
+    policy = _copy_policy(base, **updates) if scaled else base
+
+    return policy, {
+        "enabled": True,
+        "board": board,
+        "board_tier": tier,
+        "input_policy": base.name,
+        "scaled": scaled,
+        "manual_overrides_present": any(manual.values()),
+        "manual_override_paths": [
+            path for key, path in manual_paths.items() if manual[key]
+        ],
+        "changes": updates,
+        "reasons": reasons,
+        "precedence": [
+            "manual_yaml_override",
+            "board_aware_policy_scaling",
+            "policy_preset",
+            "compiler_default",
+        ],
+    }
+
+
 def _override_policy_from_cfg(cfg, base: Policy) -> Policy:
     raw = cfg.raw
+    base, _policy_resource_awareness = _board_aware_policy_from_cfg(cfg, base)
     return Policy(
         name=base.name,
         target_clock_mhz=float(_cfg_get(raw, "targets.platform.clocks.0.target_mhz", base.target_clock_mhz)),
@@ -825,7 +972,9 @@ def _plan_generic(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode
 def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
     raw = cfg.raw
     default_precision = _default_precision_info(cfg)
-    policy = _override_policy_from_cfg(cfg, _pick_policy(cfg))
+    base_policy = _pick_policy(cfg)
+    _policy_resource_awareness_policy, policy_resource_awareness = _board_aware_policy_from_cfg(cfg, base_policy)
+    policy = _override_policy_from_cfg(cfg, base_policy)
 
     target_board = str(_cfg_get(raw, "targets.platform.board", "unknown"))
     target_part = str(_cfg_get(raw, "targets.platform.part", "unknown"))
@@ -893,6 +1042,7 @@ def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
             "bias_int_bits": default_precision["bias_int_bits"],
             "accum_int_bits": default_precision["accum_int_bits"],
             "parallel_policy": policy.name,
+            "policy_resource_awareness": policy_resource_awareness,
             "requested_clock_mhz": _cfg_get(
                 raw,
                 "targets.platform.clocks.0.target_mhz",

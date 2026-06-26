@@ -41,6 +41,7 @@ from fpgai.analysis.hls_artifact_metadata import emit_hls_artifact_metadata
 from fpgai.analysis.hls_calibration_runner import run_hls_calibration
 from fpgai.util.binio import write_f32_bin
 from fpgai.runtime.package import emit_runtime_package
+from fpgai.reporting.hardware_feasibility import emit_board_fit_report
 
 from fpgai.backends.hls.emit.types_h import emit_types_h
 from fpgai.backends.hls.emit.top_cpp import emit_top_cpp
@@ -170,7 +171,7 @@ class Compiler:
             raw_cfg=raw,
             compile_plan=compile_plan,
             hls_report_dir=(hls_dir if hls_dir is not None else out_dir),
-            clock_mhz=float(_cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0)),
+            clock_mhz=float(getattr(compile_plan, "clock_mhz", _cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0))),
             verbose=verbose,
         )
 
@@ -192,7 +193,7 @@ class Compiler:
                     out_dir=out_dir,
                     design_space_summary=best,
                     csynth_report_path=(hls_run.csynth_report if hls_run is not None else None),
-                    clock_mhz=float(_cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0)),
+                    clock_mhz=float(getattr(compile_plan, "clock_mhz", _cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0))),
                     top_name=top_name,
                 )
                 estimate_vs_hls_result = post_synthesis_result.estimate_comparison
@@ -411,7 +412,7 @@ class Compiler:
             raw_cfg=raw,
             compile_plan=compile_plan,
             hls_report_dir=(hls_dir if hls_dir is not None else out_dir),
-            clock_mhz=float(_cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0)),
+            clock_mhz=float(getattr(compile_plan, "clock_mhz", _cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0))),
             verbose=verbose,
         )
 
@@ -603,12 +604,38 @@ class Compiler:
             None,
         )
 
-        return write_model_inspection_report(
+        prediction_artifacts = write_model_inspection_report(
             inspection,
             reports_dir,
             resource_prediction=resource_prediction,
             timing_prediction=timing_prediction,
         )
+
+        board = str(
+            _cfg_get(
+                raw,
+                "targets.platform.board",
+                _cfg_get(raw, "targets.board", _cfg_get(raw, "project.board", "")),
+            )
+            or ""
+        )
+        part = str(_cfg_get(raw, "targets.platform.part", "") or "")
+        target_clock_mhz = getattr(compile_plan, "clock_mhz", _cfg_get(raw, "targets.platform.clocks.0.target_mhz", None))
+
+        board_fit_artifacts = emit_board_fit_report(
+            reports_dir,
+            resource_data=resource_prediction,
+            timing_data=timing_prediction,
+            board=board,
+            part=part,
+            target_clock_mhz=target_clock_mhz,
+            source="prediction",
+        )
+        prediction_artifacts["board_fit"] = board_fit_artifacts
+        prediction_artifacts["board_fit_json"] = board_fit_artifacts.get("json")
+        prediction_artifacts["board_fit_markdown"] = board_fit_artifacts.get("markdown")
+
+        return prediction_artifacts
 
     def _emit_ir_artifacts(self, out_dir: Path, g, descriptors, compile_plan, memory_plan, communication_plan) -> None:
         write_text(out_dir / "ir_summary.txt", g.summary())
@@ -752,7 +779,7 @@ class Compiler:
 
         raw = self.cfg.raw
         part = str(_cfg_get(raw, "targets.platform.part", "xck26-sfvc784-2LV-c"))
-        clk_mhz = float(_cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200))
+        clk_mhz = float(getattr(compile_plan, "clock_mhz", _cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200)))
         pipeline_mode = str(self.cfg.pipeline.mode).lower()
         training_cfg = (_cfg_get(raw, "training", {}) or {})
 
@@ -1812,9 +1839,485 @@ class Compiler:
             "packed_transfer_bytes": layout.get("packed_transfer_bytes"),
         }
 
+    @staticmethod
+    def _raw_has_path(raw: Dict[str, Any], path: str) -> bool:
+        cur: Any = raw
+        for part in path.split("."):
+            if isinstance(cur, dict) and part in cur:
+                cur = cur[part]
+                continue
+            if isinstance(cur, list) and part.isdigit():
+                idx = int(part)
+                if 0 <= idx < len(cur):
+                    cur = cur[idx]
+                    continue
+            return False
+        return True
+
+    @staticmethod
+    def _raw_get_path(raw: Dict[str, Any], path: str, default: Any = None) -> Any:
+        cur: Any = raw
+        for part in path.split("."):
+            if isinstance(cur, dict) and part in cur:
+                cur = cur[part]
+                continue
+            if isinstance(cur, list) and part.isdigit():
+                idx = int(part)
+                if 0 <= idx < len(cur):
+                    cur = cur[idx]
+                    continue
+            return default
+        return cur
+
+    @staticmethod
+    def _layer_plan_dicts(compile_plan) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for lp in getattr(compile_plan, "layer_plans", []) or []:
+            if hasattr(lp, "to_dict"):
+                try:
+                    out.append(lp.to_dict())
+                    continue
+                except Exception:
+                    pass
+            if isinstance(lp, dict):
+                out.append(lp)
+        return out
+
+    @staticmethod
+    def _contract_status(requested: Any, effective: Any, *, manual: bool) -> str:
+        if requested is None and effective is None:
+            return "unknown"
+
+        if effective is None:
+            return "not_requested"
+
+        if manual:
+            try:
+                if isinstance(requested, (int, float)) and isinstance(effective, (int, float)):
+                    return "applied" if float(requested) == float(effective) else "changed_or_clamped"
+            except Exception:
+                pass
+
+            return "applied" if str(requested) == str(effective) else "changed_or_clamped"
+
+        return "applied"
+
+    def _emit_hardware_knob_contract_reports(self, **kwargs) -> dict[str, Any]:
+        """Write user-facing traceability for YAML hardware decisions.
+
+        This is intentionally conservative: it reports what the compiler can
+        prove from the YAML, compile plan, and layer plans. It must not claim a
+        knob affects HLS/Vivado unless the generated artifacts expose that path.
+        """
+        out_dir = kwargs["out_dir"]
+        reports_dir = out_dir / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+
+        raw = self.cfg.raw
+        compile_plan = kwargs["compile_plan"]
+        notes = getattr(compile_plan, "notes", {}) or {}
+        layer_plans = self._layer_plan_dicts(compile_plan)
+
+        policy_resource_awareness = notes.get("policy_resource_awareness", {}) or {}
+        board_aware_changed = {
+            "optimization.parallel.pe": "pe",
+            "optimization.parallel.simd": "simd",
+            "optimization.parallel.unroll_factor": "unroll_factor",
+            "optimization.parallel.partition_factor": "partition_factor",
+            "targets.platform.clocks.0.target_mhz": "target_clock_mhz",
+        }
+
+        def source_for(path: str) -> str:
+            if self._raw_has_path(raw, path):
+                return "manual_yaml"
+            changes = policy_resource_awareness.get("changes", {})
+            changed_key = board_aware_changed.get(path)
+            if changed_key and changed_key in changes:
+                return "board_aware_policy"
+            if "policy" in path or path.startswith("optimization."):
+                return "policy_preset"
+            return "compiler_default"
+
+        def requested(path: str) -> Any:
+            return self._raw_get_path(raw, path, None)
+
+        def _dict_path_value(obj: dict[str, Any], path: str) -> tuple[bool, Any]:
+            cur: Any = obj
+            for part in path.split("."):
+                if isinstance(cur, dict) and part in cur:
+                    cur = cur[part]
+                else:
+                    return False, None
+            return True, cur
+
+        def first_layer_value(*paths: str) -> Any:
+            if not layer_plans:
+                return None
+            for path in paths:
+                ok, value = _dict_path_value(layer_plans[0], path)
+                if ok:
+                    return value
+            return None
+
+        def first_layer_of_type_value(op_type: str, *paths: str) -> Any:
+            wanted = str(op_type).lower()
+            for lp in layer_plans:
+                actual = str(lp.get("op_type", "")).lower()
+                if actual != wanted:
+                    continue
+                for path in paths:
+                    ok, value = _dict_path_value(lp, path)
+                    if ok:
+                        return value
+            return None
+
+        def has_layer_type(op_type: str) -> bool:
+            wanted = str(op_type).lower()
+            return any(str(lp.get("op_type", "")).lower() == wanted for lp in layer_plans)
+
+        contract: list[dict[str, Any]] = []
+
+        def add(
+            path: str,
+            effective: Any,
+            *,
+            applied_to: list[str],
+            note: str = "",
+            status: str | None = None,
+        ) -> None:
+            req = requested(path)
+            manual = self._raw_has_path(raw, path)
+            contract.append(
+                {
+                    "path": path,
+                    "source": source_for(path),
+                    "requested": req,
+                    "effective": effective,
+                    "status": status or self._contract_status(req, effective, manual=manual),
+                    "applied_to": applied_to,
+                    "note": note,
+                }
+            )
+
+        add(
+            "optimization.parallel_policy",
+            notes.get("parallel_policy"),
+            applied_to=["planner.policy", "compile_plan.notes.parallel_policy"],
+            note="Policy is a preset only. Manual YAML overrides below have priority.",
+        )
+        add(
+            "optimization.parallel.pe",
+            notes.get("parallel_pe", first_layer_value("architecture.parallelism.pe")),
+            applied_to=[
+                "planner.policy.pe",
+                "layer_plan.architecture.parallelism.pe",
+                "Dense output unroll / Conv output-channel unroll",
+                "generated HLS template args and artifact comments",
+            ],
+        )
+        add(
+            "optimization.parallel.simd",
+            notes.get("parallel_simd", first_layer_value("architecture.parallelism.simd")),
+            applied_to=[
+                "planner.policy.simd",
+                "layer_plan.architecture.parallelism.simd",
+                "Dense input unroll / Conv input-channel unroll",
+                "generated HLS template args and artifact comments",
+            ],
+        )
+        add(
+            "optimization.parallel.unroll_factor",
+            notes.get("parallel_unroll_factor", first_layer_value("architecture.parallelism.unroll.element")),
+            applied_to=[
+                "planner.policy.unroll_factor",
+                "elementwise activation unroll",
+                "FPGAI_ACT_UNROLL macro",
+            ],
+        )
+        add(
+            "optimization.parallel.partition_factor",
+            notes.get("parallel_partition_factor", first_layer_value("architecture.partitioning.factor")),
+            applied_to=[
+                "planner.policy.partition_factor",
+                "layer_plan.architecture.partitioning.factor",
+                "input/output/weight/gradient partition targets",
+                "generated HLS template args and ARRAY_PARTITION factors",
+            ],
+        )
+        add(
+            "optimization.parallel.array_partition_mode",
+            notes.get("parallel_array_partition_mode", first_layer_value("architecture.partitioning.mode")),
+            applied_to=[
+                "planner.policy.array_partition_mode",
+                "layer_plan.architecture.partitioning.mode",
+                "HLS ARRAY_PARTITION mode where supported",
+            ],
+        )
+        add(
+            "optimization.pipeline.style",
+            first_layer_value("architecture.pipeline.style", "pipeline_style"),
+            applied_to=[
+                "planner.pipeline_style",
+                "layer_plan.architecture.pipeline.style",
+                "pipeline II lowering",
+                "generated HLS artifact comments",
+            ],
+        )
+        add(
+            "optimization.pipeline.ii",
+            first_layer_value("architecture.pipeline.ii", "pipeline_ii"),
+            applied_to=[
+                "planner.pipeline_ii",
+                "layer_plan.pipeline_ii",
+                "FPGAI_PIPELINE_II macro / HLS template args",
+            ],
+            note="Manual II overrides policy-derived pipeline style.",
+        )
+        dense_tiling_effective = first_layer_of_type_value(
+            "Dense",
+            "architecture.tiling.sizes",
+            "tile",
+        )
+        add(
+            "optimization.tiling.dense",
+            dense_tiling_effective,
+            applied_to=[
+                "planner dense tile selection",
+                "layer_plan.architecture.tiling",
+                "dense_tiling_codegen rewrite when Dense layers are present",
+            ],
+            note="Layer-specific tiling can override global dense tiling.",
+            status=(
+                None
+                if has_layer_type("Dense")
+                else "not_applicable"
+            ),
+        )
+
+        conv_tiling_effective = first_layer_of_type_value(
+            "Conv",
+            "architecture.tiling.sizes",
+            "tile",
+        )
+        add(
+            "optimization.tiling.conv",
+            conv_tiling_effective,
+            applied_to=[
+                "planner conv tile selection",
+                "layer_plan.architecture.tiling",
+                "conv_tiling_codegen rewrite when Conv layers are present",
+            ],
+            note="Layer-specific tiling can override global conv tiling.",
+            status=(
+                None
+                if has_layer_type("Conv")
+                else "not_applicable"
+            ),
+        )
+        add(
+            "optimization.tiling.layers",
+            self._raw_get_path(raw, "optimization.tiling.layers", None),
+            applied_to=[
+                "planner layer-specific tile selection",
+                "layer_plan.architecture.tiling for matching layer names",
+            ],
+            note="Manual layer entries have priority over global tiling defaults.",
+            status="applied" if self._raw_has_path(raw, "optimization.tiling.layers") else "not_requested",
+        )
+        add(
+            "memory.weight_storage",
+            notes.get("weight_storage", self._raw_get_path(raw, "memory.weight_storage", None)),
+            applied_to=[
+                "memory plan",
+                "weight storage pragmas",
+                "embedded/stream/runtime weight path selection",
+            ],
+        )
+        add(
+            "memory.weight_region_preference",
+            notes.get("weight_region_preference", None),
+            applied_to=["planner memory policy", "layer_plan.memory.weight_region"],
+        )
+        add(
+            "memory.activation_region_preference",
+            notes.get("activation_region_preference", None),
+            applied_to=["planner memory policy", "layer_plan.memory.activation_region"],
+        )
+        add(
+            "memory.allow_double_buffer",
+            notes.get("allow_double_buffer", None),
+            applied_to=["planner buffering policy", "layer_plan.memory.double_buffer"],
+        )
+        add(
+            "targets.platform.board",
+            self._raw_get_path(raw, "targets.platform.board", self._raw_get_path(raw, "targets.board", None)),
+            applied_to=[
+                "board registry",
+                "board_fit.json",
+                "Vivado bridge board selection when requested",
+            ],
+        )
+        add(
+            "targets.platform.clocks.0.target_mhz",
+            getattr(compile_plan, "clock_mhz", None),
+            applied_to=[
+                "compile_plan.clock_mhz",
+                "timing_prediction.json",
+                "board_fit.json clock classification",
+                "HLS/Vivado clock when backend is enabled",
+            ],
+        )
+        add(
+            "targets.platform.fit_policy",
+            self._raw_get_path(raw, "targets.platform.fit_policy", self._raw_get_path(raw, "hardware.fit_policy", "report_only")),
+            applied_to=[
+                "board-fit reporting now",
+                "fit_policy_gate manifest decision",
+                "Vivado/bitstream gating decision",
+            ],
+            status="report_only",
+            note="fit_policy is enforced through fit_policy_gate. Main compile records the gate; the Vivado bridge flow must honor blocked=true before implementation/bitstream.",
+        )
+
+        payload = {
+            "format": "fpgai.hardware_knob_contract.v1",
+            "precedence": [
+                "manual_yaml_override",
+                "board_aware_policy_scaling",
+                "policy_preset",
+                "compiler_default",
+            ],
+            "truth_boundary": {
+                "planner_trace": True,
+                "hls_trace": "through generated macros/comments/template args where available",
+                "vivado_trace": "requires Vivado report/bitstream stages",
+                "runtime_trace": "requires real board runtime artifacts",
+            },
+            "knobs": contract,
+        }
+
+        json_path = reports_dir / "hardware_knob_contract.json"
+        md_path = reports_dir / "hardware_knob_contract.md"
+
+        write_text(json_path, json.dumps(payload, indent=2, sort_keys=True))
+
+        lines = [
+            "# FPGAI hardware knob contract",
+            "",
+            "Precedence:",
+            "1. manual YAML override",
+            "2. policy preset",
+            "3. compiler default",
+            "",
+            "| YAML path | source | requested | effective | status | applied to |",
+            "|---|---|---|---|---|---|",
+        ]
+        for item in contract:
+            applied = "<br>".join(str(x) for x in item.get("applied_to", []))
+            lines.append(
+                "| {path} | {source} | `{requested}` | `{effective}` | {status} | {applied} |".format(
+                    path=item.get("path"),
+                    source=item.get("source"),
+                    requested=item.get("requested"),
+                    effective=item.get("effective"),
+                    status=item.get("status"),
+                    applied=applied,
+                )
+            )
+            if item.get("note"):
+                lines.append(f"|  |  |  |  | note | {item['note']} |")
+
+        lines.extend(
+            [
+                "",
+                "## Truth boundary",
+                "",
+                "- This report proves YAML-to-planner traceability.",
+                "- HLS traceability is proven where generated macros, comments, template arguments, or pragmas expose the knob.",
+                "- Vivado and runtime truth require real Vivado reports, bitstreams, and board execution artifacts.",
+                "- If a manual YAML knob appears as `unknown`, `not_requested`, `changed_or_clamped`, or `report_only`, it must not be claimed as fully implemented until a later sprint fixes or validates it.",
+                "",
+            ]
+        )
+        write_text(md_path, "\n".join(lines))
+
+        return {
+            "json": str(json_path),
+            "markdown": str(md_path),
+            "knob_count": len(contract),
+            "manual_yaml_count": sum(1 for x in contract if x.get("source") == "manual_yaml"),
+            "changed_or_clamped_count": sum(1 for x in contract if x.get("status") == "changed_or_clamped"),
+            "report_only_count": sum(1 for x in contract if x.get("status") == "report_only"),
+        }
+
+
+    def _fit_policy_gate(self, prediction_artifacts: dict[str, Any] | None) -> dict[str, Any]:
+        raw = self.cfg.raw
+        policy = str(
+            self._raw_get_path(
+                raw,
+                "targets.platform.fit_policy",
+                self._raw_get_path(raw, "hardware.fit_policy", "report_only"),
+            )
+            or "report_only"
+        ).strip().lower()
+
+        if policy not in {"report_only", "warn", "enforce"}:
+            policy = "report_only"
+
+        board_fit = {}
+        if isinstance(prediction_artifacts, dict):
+            board_fit = prediction_artifacts.get("board_fit") or {}
+        if not isinstance(board_fit, dict):
+            board_fit = {}
+
+        status = board_fit.get("status", "unknown")
+        vivado_allowed = board_fit.get("vivado_allowed")
+        over_limit = bool(status == "over_limit" or vivado_allowed is False)
+
+        blocked = bool(policy == "enforce" and over_limit)
+        warning = bool(policy == "warn" and over_limit)
+
+        blocked_stages = []
+        if blocked:
+            blocked_stages = [
+                "vivado_impl",
+                "bitstream",
+                "deployable_runtime_overlay",
+            ]
+
+        if blocked:
+            reason = "Board fit status is over_limit under fit_policy=enforce."
+            severity = "error"
+        elif warning:
+            reason = "Board fit status is over_limit under fit_policy=warn."
+            severity = "warning"
+        elif over_limit:
+            reason = "Board fit status is over_limit but fit_policy=report_only does not block."
+            severity = "info"
+        else:
+            reason = "Board fit gate passed or board fit status is not over_limit."
+            severity = "info"
+
+        return {
+            "format": "fpgai.fit_policy_gate.v1",
+            "policy": policy,
+            "board_fit_status": status,
+            "board_fit_limiting_dimension": board_fit.get("limiting_dimension"),
+            "vivado_allowed_by_board_fit": vivado_allowed,
+            "over_limit": over_limit,
+            "blocked": blocked,
+            "warning": warning,
+            "severity": severity,
+            "blocked_stages": blocked_stages,
+            "reason": reason,
+        }
+
     def _emit_manifest(self, **kwargs) -> None:
         out_dir = kwargs["out_dir"]
         precision_layout_artifacts = self._emit_precision_layout_reports(**kwargs)
+        hardware_knob_contract = self._emit_hardware_knob_contract_reports(**kwargs)
+        fit_policy_gate = self._fit_policy_gate(kwargs.get("prediction_artifacts"))
         manifest = {
             "version": self.cfg.version,
             "model_path": self.cfg.model.path,
@@ -1880,6 +2383,8 @@ class Compiler:
             ),
             "prediction_artifacts": kwargs.get("prediction_artifacts"),
             "precision_layout_artifacts": precision_layout_artifacts,
+            "hardware_knob_contract": hardware_knob_contract,
+            "fit_policy_gate": fit_policy_gate,
             "num_memory_placements": len(kwargs["memory_plan"].placements),
             "num_communication_edges": len(kwargs["communication_plan"].edges),
             "memory_totals": kwargs["memory_plan"].total_bytes_by_region,

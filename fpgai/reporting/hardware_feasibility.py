@@ -21,9 +21,34 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from fpgai.backends.vivado.boards import board_resource_limits
+
+# Board resource limits are owned by fpgai.backends.vivado.boards.
+# This fallback is used only when the board registry cannot resolve a legacy
+# record. Values use normalized FPGAI keys; bram/bram_18k both mean BRAM_18K.
 BOARD_LIMITS = {
-    "pynq_z2": {"lut": 53200, "ff": 106400, "bram": 140, "dsp": 220},
-    "xc7z020clg400-1": {"lut": 53200, "ff": 106400, "bram": 140, "dsp": 220},
+    "pynq_z2": {
+        "lut": 53200,
+        "ff": 106400,
+        "bram": 280,
+        "bram_18k": 280,
+        "uram": 0,
+        "dsp": 220,
+        "ddr_bytes": 512 * 1024 * 1024,
+        "default_clock_mhz": 100.0,
+        "safe_clock_mhz": 100.0,
+    },
+    "xc7z020clg400-1": {
+        "lut": 53200,
+        "ff": 106400,
+        "bram": 280,
+        "bram_18k": 280,
+        "uram": 0,
+        "dsp": 220,
+        "ddr_bytes": 512 * 1024 * 1024,
+        "default_clock_mhz": 100.0,
+        "safe_clock_mhz": 100.0,
+    },
 }
 
 FIELDS = [
@@ -119,11 +144,468 @@ def _pct(value: Optional[int], limit: Optional[int]) -> Optional[float]:
     return round(100.0 * value / limit, 2)
 
 
+def _limits_for(board: str | None, part: str | None = None) -> Dict[str, Any]:
+    """Resolve board limits from the canonical board registry."""
+    try:
+        limits = board_resource_limits(board, part=part)
+    except Exception:
+        limits = {}
+    if limits:
+        return dict(limits)
+    return BOARD_LIMITS.get(str(board), BOARD_LIMITS.get(str(part), BOARD_LIMITS["pynq_z2"]))
+
+
+def _first_present(mapping: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in mapping and mapping.get(key) not in (None, ""):
+            return mapping.get(key)
+    return None
+
+
+def classify_board_fit(
+    resources: Dict[str, Any],
+    board: str | None,
+    part: str | None = None,
+    near_limit_ratio: float = 0.80,
+) -> Dict[str, Any]:
+    """Classify whether a resource/memory/clock request fits a board.
+
+    Status values:
+      fits       : all known dimensions <= near_limit_ratio
+      near_limit : at least one known dimension > near_limit_ratio, none > 1.0
+      over_limit : any known dimension > 1.0
+      unknown    : no usable board limits or no usable request/report values
+
+    Dimensions currently supported:
+      lut, ff, bram_18k, uram, dsp, ddr_bytes, target_clock_mhz
+    """
+    limits = _limits_for(board, part)
+    normalized = {
+        "lut": _to_int(_first_present(resources, "lut", "LUT", "luts", "LUTs")),
+        "ff": _to_int(_first_present(resources, "ff", "FF", "ffs", "FFs")),
+        "bram_18k": _to_int(
+            _first_present(resources, "bram_18k", "BRAM_18K", "bram", "BRAM", "bram18", "BRAM18")
+        ),
+        "uram": _to_int(_first_present(resources, "uram", "URAM", "uram_blocks", "URAMs")),
+        "dsp": _to_int(_first_present(resources, "dsp", "DSP", "dsps", "DSPs", "DSP48E")),
+        "ddr_bytes": _to_int(
+            _first_present(
+                resources,
+                "ddr_bytes",
+                "external_memory_bytes",
+                "required_ddr_bytes",
+                "runtime_memory_bytes",
+                "weight_axi_bytes",
+            )
+        ),
+        "target_clock_mhz": _to_float(
+            _first_present(resources, "target_clock_mhz", "clock_mhz", "requested_clock_mhz")
+        ),
+    }
+
+    per_dimension: Dict[str, Dict[str, Any]] = {}
+    any_value = False
+    any_over = False
+    any_near = False
+    limiting_dimension = None
+    max_ratio = -1.0
+
+    for key, used in normalized.items():
+        if key == "target_clock_mhz":
+            limit = limits.get("safe_clock_mhz") or limits.get("max_clock_mhz") or limits.get("default_clock_mhz")
+        else:
+            limit = limits.get(key)
+            if limit is None and key == "bram_18k":
+                limit = limits.get("bram")
+
+        ratio = None
+        status = "unknown"
+
+        if used is not None:
+            any_value = True
+
+        if used is not None and limit not in (None, 0):
+            ratio = float(used) / float(limit)
+            if ratio > max_ratio:
+                max_ratio = ratio
+                limiting_dimension = key
+
+            if key == "target_clock_mhz":
+                # Clock guide rails are not the same as fabric capacity.
+                # A request above safe/default is a warning until a hard max
+                # clock or real Vivado timing result proves it impossible.
+                max_clock = limits.get("max_clock_mhz")
+                if max_clock not in (None, 0) and float(used) > float(max_clock):
+                    status = "over_limit"
+                    any_over = True
+                elif ratio > 1.0:
+                    status = "near_limit"
+                    any_near = True
+                else:
+                    status = "fits"
+            elif ratio > 1.0:
+                status = "over_limit"
+                any_over = True
+            elif ratio > near_limit_ratio:
+                status = "near_limit"
+                any_near = True
+            else:
+                status = "fits"
+
+        per_dimension[key] = {
+            "used": used,
+            "available": limit,
+            "ratio": None if ratio is None else round(ratio, 6),
+            "util_pct": None if ratio is None else round(ratio * 100.0, 2),
+            "status": status,
+        }
+
+    if not limits or not any_value:
+        status = "unknown"
+    elif any_over:
+        status = "over_limit"
+    elif any_near:
+        status = "near_limit"
+    else:
+        status = "fits"
+
+    return {
+        "board": board,
+        "part": part,
+        "status": status,
+        "limiting_resource": limiting_dimension,
+        "limiting_dimension": limiting_dimension,
+        "near_limit_ratio": near_limit_ratio,
+        "resources": per_dimension,
+        "vivado_allowed": status != "over_limit",
+    }
+
+
+def _nested_resource_value(data: Dict[str, Any], *names: str) -> Any:
+    """Find a resource value across common prediction/report layouts.
+
+    FPGAI prediction artifacts may store values directly, under totals/top_level,
+    or as fields such as predicted_lut/predicted_bram18. This helper searches
+    recursively but returns the first exact/alias key match instead of guessing.
+    """
+    if not isinstance(data, dict):
+        return None
+
+    wanted = {str(n) for n in names}
+    wanted_lower = {str(n).lower() for n in names}
+
+    for key, value in data.items():
+        key_s = str(key)
+        if key_s in wanted or key_s.lower() in wanted_lower:
+            if value not in (None, ""):
+                return value
+
+    # Search common nested sections first to keep deterministic behavior.
+    for section_name in (
+        "totals",
+        "top_level",
+        "summary",
+        "resources",
+        "area",
+        "architecture",
+        "architecture_model",
+        "model",
+        "analytical_model",
+        "calibration",
+    ):
+        section = data.get(section_name)
+        if isinstance(section, dict):
+            val = _nested_resource_value(section, *names)
+            if val not in (None, ""):
+                return val
+
+    # Then recursively inspect remaining dictionaries/lists.
+    for value in data.values():
+        if isinstance(value, dict):
+            val = _nested_resource_value(value, *names)
+            if val not in (None, ""):
+                return val
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    val = _nested_resource_value(item, *names)
+                    if val not in (None, ""):
+                        return val
+
+    return None
+
+
+def extract_board_fit_resources(
+    resource_data: Dict[str, Any],
+    *,
+    timing_data: Dict[str, Any] | None = None,
+    target_clock_mhz: Any = None,
+) -> Dict[str, Any]:
+    """Normalize resource/timing fields for classify_board_fit.
+
+    This accepts FPGAI prediction artifacts, HLS/Vivado parsed rows, or simple
+    flat dictionaries. Missing dimensions remain absent/unknown; they are not
+    faked as zero.
+    """
+    timing_data = timing_data or {}
+
+    resources = {
+        "lut": _nested_resource_value(
+            resource_data,
+            "lut",
+            "LUT",
+            "luts",
+            "LUTs",
+            "predicted_lut",
+            "pred_lut",
+            "estimated_lut",
+            "total_lut",
+            "predicted_lut_raw",
+        ),
+        "ff": _nested_resource_value(
+            resource_data,
+            "ff",
+            "FF",
+            "ffs",
+            "FFs",
+            "predicted_ff",
+            "pred_ff",
+            "estimated_ff",
+            "total_ff",
+            "predicted_ff_raw",
+        ),
+        "bram_18k": _nested_resource_value(
+            resource_data,
+            "bram_18k",
+            "BRAM_18K",
+            "bram18",
+            "BRAM18",
+            "bram",
+            "BRAM",
+            "predicted_bram18",
+            "predicted_bram_18k",
+            "pred_bram18",
+            "estimated_bram18",
+            "estimated_bram_18k",
+            "total_bram18",
+            "predicted_bram18_raw",
+        ),
+        "uram": _nested_resource_value(
+            resource_data,
+            "uram",
+            "URAM",
+            "uram_blocks",
+            "URAMs",
+            "predicted_uram",
+            "estimated_uram",
+            "total_uram",
+        ),
+        "dsp": _nested_resource_value(
+            resource_data,
+            "dsp",
+            "DSP",
+            "dsps",
+            "DSPs",
+            "DSP48E",
+            "predicted_dsp",
+            "pred_dsp",
+            "estimated_dsp",
+            "total_dsp",
+            "predicted_dsp_raw",
+        ),
+        "ddr_bytes": _nested_resource_value(
+            resource_data,
+            "ddr_bytes",
+            "external_memory_bytes",
+            "required_ddr_bytes",
+            "runtime_memory_bytes",
+            "weight_axi_bytes",
+            "total_external_bytes",
+        ),
+    }
+
+    clock = target_clock_mhz
+    if clock in (None, ""):
+        clock = _nested_resource_value(timing_data, "target_clock_mhz", "clock_mhz", "requested_clock_mhz")
+    if clock not in (None, ""):
+        resources["target_clock_mhz"] = clock
+
+    return {k: v for k, v in resources.items() if v not in (None, "")}
+
+
+def _suggest_yaml_actions(fit: Dict[str, Any]) -> list[str]:
+    limiting = str(fit.get("limiting_dimension") or fit.get("limiting_resource") or "")
+    status = str(fit.get("status") or "unknown")
+
+    if status == "fits":
+        return [
+            "This design is within the current board-fit guide rails.",
+            "You can keep the current YAML settings for this board-fit stage.",
+            "Still validate timing, power, and runtime on real Vivado/board artifacts before deployment claims.",
+        ]
+
+    if limiting == "dsp":
+        return [
+            "Reduce optimization.parallel.pe, optimization.parallel.simd, or optimization.parallel.unroll_factor.",
+            "Use a resource-oriented policy such as DSP-Saver/resource_first if available.",
+            "Reduce manual conv/dense unroll overrides.",
+            "Try a lower precision_mode if accuracy remains acceptable.",
+            "Use hardware.fit_policy: report_only only for design-space analysis, not deployment.",
+        ]
+
+    if limiting in {"lut", "ff"}:
+        return [
+            "Reduce parallelism/unroll factors in YAML.",
+            "Prefer a resource-oriented policy instead of aggressive/latency-first settings.",
+            "Reduce tiling buffer fanout or array partition factors.",
+            "Check generated HLS comments/macros to see which manual override expanded logic.",
+        ]
+
+    if limiting == "bram_18k":
+        return [
+            "Reduce tile sizes that create local buffers.",
+            "Change memory.weight_storage or activation storage strategy if it reduces on-chip buffers.",
+            "Consider streaming weights/activations when supported by the design.",
+            "Inspect precision_layout.json and memory_plan.json for buffer byte pressure.",
+        ]
+
+    if limiting == "uram":
+        return [
+            "Disable or reduce URAM-backed buffers with memory.use_uram: false when supported.",
+            "Reduce large tile sizes and activation cache requirements.",
+            "Prefer BRAM/DDR placement only when the generated memory plan confirms it is supported.",
+        ]
+
+    if limiting == "ddr_bytes":
+        return [
+            "Reduce model size, batch size, cached activations, or optimizer-state storage.",
+            "Use lower precision for weights/activations/optimizer state if accuracy allows.",
+            "Check runtime memory/CMA limits; board DDR capacity is not always fully available to PL/runtime.",
+        ]
+
+    if limiting == "target_clock_mhz":
+        return [
+            "The requested clock is above the board safe/default guide rail.",
+            "This is allowed as an experiment, but it requires Vitis HLS/Vivado timing validation before deployment claims.",
+            "Lower targets.platform.clocks[0].target_mhz for a safer first implementation, or keep the higher clock and require timing reports.",
+            "Use pipeline settings to improve timing, but do not claim timing closure until Vivado reports pass.",
+        ]
+
+    return [
+        "Inspect reports/resource_prediction.json, reports/timing_prediction.json, and ir/compile_plan.json.",
+        "If the limiting dimension is unknown, add or fix the resource extractor for that artifact type.",
+        "Do not treat unknown board-fit as deployable until real HLS/Vivado/board reports exist.",
+    ]
+
+
+def board_fit_markdown(payload: Dict[str, Any]) -> str:
+    fit = payload.get("fit", {})
+    resources = fit.get("resources", {}) if isinstance(fit, dict) else {}
+    guidance = payload.get("suggested_yaml_actions", [])
+
+    lines = [
+        "# FPGAI board-fit report",
+        "",
+        f"- source: `{payload.get('source', '')}`",
+        f"- board: `{payload.get('board', '')}`",
+        f"- part: `{payload.get('part', '')}`",
+        f"- status: `{fit.get('status', 'unknown')}`",
+        f"- limiting_dimension: `{fit.get('limiting_dimension') or fit.get('limiting_resource') or ''}`",
+        f"- vivado_allowed_by_fit: `{fit.get('vivado_allowed')}`",
+        "",
+        "## Resource / memory / clock dimensions",
+        "",
+        "| dimension | used | available | utilization | status |",
+        "|---|---:|---:|---:|---|",
+    ]
+
+    for key in ("lut", "ff", "bram_18k", "uram", "dsp", "ddr_bytes", "target_clock_mhz"):
+        row = resources.get(key, {}) if isinstance(resources, dict) else {}
+        util = row.get("util_pct")
+        util_s = "" if util is None else f"{util}%"
+        lines.append(
+            f"| {key} | {row.get('used', '')} | {row.get('available', '')} | {util_s} | {row.get('status', 'unknown')} |"
+        )
+
+    lines.extend([
+        "",
+        "## Guidance",
+        "",
+    ])
+    for item in guidance:
+        lines.append(f"- {item}")
+
+    lines.extend([
+        "",
+        "## Truth boundary",
+        "",
+        "- This report classifies board fit from the available resource/memory/clock data.",
+        "- Prediction-based board fit is not a replacement for Vitis HLS, Vivado implementation, timing, power, or real-board runtime validation.",
+        "- Over-limit designs may still be useful for design-space analysis, but they should not be treated as deployable for the selected board.",
+        "",
+    ])
+
+    return "\n".join(lines)
+
+
+def emit_board_fit_report(
+    reports_dir: Path,
+    *,
+    resource_data: Dict[str, Any],
+    timing_data: Dict[str, Any] | None = None,
+    board: str | None = None,
+    part: str | None = None,
+    target_clock_mhz: Any = None,
+    source: str = "prediction",
+) -> Dict[str, Any]:
+    """Write reports/board_fit.json and reports/board_fit.md."""
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    normalized_resources = extract_board_fit_resources(
+        resource_data,
+        timing_data=timing_data,
+        target_clock_mhz=target_clock_mhz,
+    )
+    fit = classify_board_fit(normalized_resources, board=board, part=part)
+
+    payload = {
+        "format": "fpgai.board_fit.v1",
+        "source": source,
+        "board": board,
+        "part": part,
+        "normalized_resources": normalized_resources,
+        "fit": fit,
+        "suggested_yaml_actions": _suggest_yaml_actions(fit),
+        "truth_boundary": {
+            "prediction_based": source == "prediction",
+            "requires_hls_for_synthesis_truth": True,
+            "requires_vivado_for_implementation_truth": True,
+            "requires_board_runtime_for_deployment_truth": True,
+        },
+    }
+
+    json_path = reports_dir / "board_fit.json"
+    md_path = reports_dir / "board_fit.md"
+    json_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    md_path.write_text(board_fit_markdown(payload), encoding="utf-8")
+
+    return {
+        "json": str(json_path),
+        "markdown": str(md_path),
+        "source": source,
+        "board": board,
+        "part": part,
+        "status": fit.get("status"),
+        "limiting_dimension": fit.get("limiting_dimension"),
+        "vivado_allowed": fit.get("vivado_allowed"),
+    }
+
+
 def classify_record(rec: Dict[str, Any], run_rec: Dict[str, Any], default_board: str = "pynq_z2") -> Dict[str, Any]:
     design = rec.get("design") or rec.get("design_name") or rec.get("name") or "unknown"
     board = rec.get("board") or run_rec.get("board") or default_board
     part = rec.get("part") or run_rec.get("part") or ""
-    limits = BOARD_LIMITS.get(str(board), BOARD_LIMITS.get(str(part), BOARD_LIMITS["pynq_z2"]))
+    limits = _limits_for(board, part)
 
     lut = _to_int(rec.get("lut") or rec.get("LUT"))
     ff = _to_int(rec.get("ff") or rec.get("FF"))
@@ -178,8 +660,8 @@ def classify_record(rec: Dict[str, Any], run_rec: Dict[str, Any], default_board:
         "ff_limit": limits.get("ff"),
         "ff_util_pct": _pct(ff, limits.get("ff")),
         "bram": bram,
-        "bram_limit": limits.get("bram"),
-        "bram_util_pct": _pct(bram, limits.get("bram")),
+        "bram_limit": limits.get("bram_18k", limits.get("bram")),
+        "bram_util_pct": _pct(bram, limits.get("bram_18k", limits.get("bram"))),
         "dsp": dsp,
         "dsp_limit": limits.get("dsp"),
         "dsp_util_pct": _pct(dsp, limits.get("dsp")),
