@@ -61,6 +61,77 @@ def _layer_plan_map(compile_plan) -> Dict[str, Dict[str, Any]]:
     return {}
 
 
+
+def _op_precision_from_attrs(op: Any, fallback: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve per-op precision from graph op attrs.
+
+    Order:
+    1. Explicit resolved per-layer attrs written by resolve_layerwise_precision.
+    2. A nested attrs["precision"] dict, if present.
+    3. Fallback numerics.defaults.
+
+    This keeps explicit YAML numerics.layers visible in generated HLS typedefs
+    instead of silently falling back to global defaults.
+    """
+    attrs = getattr(op, "attrs", {}) or {}
+    if not isinstance(attrs, dict):
+        attrs = {}
+
+    nested = attrs.get("precision", {})
+    if not isinstance(nested, dict):
+        nested = {}
+
+    aliases = {
+        "activation": [
+            "activation",
+            "act",
+            "activation_precision",
+            "act_precision",
+            "activation_type",
+            "act_type",
+        ],
+        "weight": [
+            "weight",
+            "wgt",
+            "weight_precision",
+            "wgt_precision",
+            "weight_type",
+            "wgt_type",
+        ],
+        "bias": [
+            "bias",
+            "bias_precision",
+            "bias_type",
+        ],
+        "accum": [
+            "accum",
+            "accumulator",
+            "accum_precision",
+            "accumulator_precision",
+            "accum_type",
+            "accumulator_type",
+        ],
+    }
+
+    resolved: Dict[str, Any] = {}
+    for role, keys in aliases.items():
+        value = None
+
+        for key in keys:
+            if key in nested:
+                value = nested[key]
+                break
+
+        if value is None:
+            for key in keys:
+                if key in attrs:
+                    value = attrs[key]
+                    break
+
+        resolved[role] = value if isinstance(value, dict) else fallback[role]
+
+    return resolved
+
 def emit_types_h(
     graph: Graph,
     *,
@@ -137,13 +208,7 @@ def emit_types_h(
     lines.append("")
 
     for idx, op in enumerate(graph.ops):
-        # Sweep-materialized precision modes must be the HLS type source of
-        # truth. Imported/planner op attrs may contain stale per-layer precision
-        # metadata from an earlier analysis pass. Until explicit layerwise
-        # precision overrides are fully wired and validated, generated HLS
-        # per-op typedefs must follow numerics.defaults so compute types,
-        # AXIS packing, testbench packing, and reports use the same precision.
-        p = dflt
+        p = _op_precision_from_attrs(op, dflt)
         tag = op.attrs.get("precision_tag", f"op{idx}")
         lp = layer_plan_map.get(op.name, {})
         lines.append(f"// layer: {op.name} ({op.op_type})")

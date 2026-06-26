@@ -2286,3 +2286,76 @@ def emit_top_train_cpp(*args, **kwargs):
         )
 
     return source
+
+
+# FPGAI training storage-binding wrapper.
+
+def _fpgai_training_weight_storage_impl_from_compile_plan(compile_plan) -> str:
+    notes = getattr(compile_plan, "notes", {}) if compile_plan is not None else {}
+    if not isinstance(notes, dict):
+        notes = {}
+
+    requested = str(notes.get("weight_storage", "bram") or "bram").strip().lower()
+    aliases = {
+        "embedded": "bram",
+        "on_chip": "bram",
+        "onchip": "bram",
+        "block": "bram",
+        "block_ram": "bram",
+        "bram": "bram",
+        "uram": "uram",
+        "ultra": "uram",
+        "ultra_ram": "uram",
+        "lutram": "lutram",
+        "lut_ram": "lutram",
+        "distributed": "lutram",
+        "ddr": "bram",
+        "external": "bram",
+        "external_ddr": "bram",
+        "dma_ddr": "bram",
+        "stream": "bram",
+        "streaming": "bram",
+    }
+    return aliases.get(requested, "bram")
+
+
+def _fpgai_insert_training_storage_bindings(source: str, compile_plan) -> str:
+    impl = _fpgai_training_weight_storage_impl_from_compile_plan(compile_plan)
+    if impl not in {"bram", "uram", "lutram"}:
+        impl = "bram"
+
+    # Add pragmas immediately after static training parameter/state arrays.
+    # This is function-scope/static-array storage binding, not file-scope const
+    # binding, so it is intended to be Vitis-HLS compatible.
+    patterns = [
+        (r"(static\s+wgt_t\s+(W_[A-Za-z0-9_]+)\[[^\]]+\]\s*=\s*[^;]+;)", "weight"),
+        (r"(static\s+bias_t\s+(B_[A-Za-z0-9_]+)\[[^\]]+\]\s*=\s*[^;]+;)", "bias"),
+        (r"(static\s+grad_wgt_t\s+(dW_[A-Za-z0-9_]+)\[[^\]]+\]\s*;)", "weight_gradient"),
+        (r"(static\s+grad_bias_t\s+(dB_[A-Za-z0-9_]+)\[[^\]]+\]\s*;)", "bias_gradient"),
+    ]
+
+    updated = source
+    for pattern, role in patterns:
+        def repl(match):
+            declaration = match.group(1)
+            variable = match.group(2)
+            pragma = (
+                f"\\n#pragma HLS BIND_STORAGE variable={variable} "
+                f"type=ram_1p impl={impl}"
+                f"\\n// FPGAI training storage binding: {role} {variable} -> {impl.upper()}"
+            )
+            if f"variable={variable} type=ram_1p impl=" in updated:
+                return declaration
+            return declaration + pragma
+
+        updated = re.sub(pattern, repl, updated, flags=re.DOTALL)
+
+    return updated
+
+
+_fpgai_training_storage_previous_emit_top_train_cpp = emit_top_train_cpp
+
+def emit_top_train_cpp(*args, **kwargs):
+    source = _fpgai_training_storage_previous_emit_top_train_cpp(*args, **kwargs)
+    compile_plan = kwargs.get("compile_plan")
+    return _fpgai_insert_training_storage_bindings(source, compile_plan)

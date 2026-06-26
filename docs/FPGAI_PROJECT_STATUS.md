@@ -552,3 +552,44 @@ Validated:
 Remaining:
 - Clean duplicate/awkward Sprint 24F text in `docs/FPGAI_PROJECT_STATUS.md`.
 - Review generated smoke outputs and decide which configs/results should be tracked versus ignored.
+
+## Sprint 25C/25D update — end-to-end hardware knob traceability
+
+Completed:
+- Fixed `memory.weight_storage` so manual YAML BRAM/URAM selection reaches:
+  - hardware knob contract,
+  - compile/memory planning,
+  - inference HLS top source,
+  - training HLS top source,
+  - `fpgai_params.cpp` trace comments.
+- Fixed training HLS storage binding path:
+  - `top_train_cpp.py` now emits storage bindings for static training weights, biases, and gradients.
+- Fixed layerwise precision materialization:
+  - `emit_types_h()` now uses resolved per-op precision attributes from `resolve_layerwise_precision()` instead of silently forcing global defaults.
+- Kept stronger precision-mode traceability:
+  - precision sweep materialization records `analysis.precision_sweep.selected_candidate`, `numerics.precision_mode`, and `numerics.defaults`.
+- Added strict contract/source audit:
+  - `fpgai.devtools.contract_source_audit`
+  - parses `hardware_knob_contract.json`,
+  - fails on empty checks,
+  - verifies contract values against canonical HLS source/trace artifacts.
+
+Validated:
+- Full pytest passed after fixes.
+- Sprint 25 end-to-end audit generated four compile cases:
+  - `inference_pynq_safe`
+  - `inference_kv260_aggressive`
+  - `training_kv260_safe`
+  - `training_kv260_aggressive`
+- Contract/source audit passed with non-empty checks:
+  - 4 cases,
+  - 4 checks per case,
+  - `memory.weight_storage`,
+  - `optimization.pipeline.ii`,
+  - `optimization.parallel.partition_factor`,
+  - `optimization.parallel.unroll_factor`.
+
+Remaining truth boundary:
+- Vitis HLS and Vivado are not available on this machine PATH, so real HLS/Vivado report validation is still not proven here.
+- Runtime board validation is still not proven in this sprint.
+- Next sprint should run the same audit on a machine with Vitis/Vivado and attach real `csynth`, Vivado utilization/timing, bitstream, and board runtime artifacts.

@@ -58,6 +58,50 @@ class Policy:
     sat_mode: str
 
 
+
+def _weight_region_preference_from_storage(raw_cfg, fallback):
+    """Return weight-region preference implied by memory.weight_storage.
+
+    Manual memory.weight_storage must affect the compile-plan layer memory
+    region, because HLS top codegen reads layer_plan.architecture.memory.
+    """
+    requested = str(
+        _cfg_get(
+            raw_cfg,
+            "memory.weight_storage",
+            _cfg_get(raw_cfg, "memory.storage.weights", ""),
+        )
+        or ""
+    ).strip().lower()
+
+    aliases = {
+        "embedded": "BRAM",
+        "on_chip": "BRAM",
+        "onchip": "BRAM",
+        "block": "BRAM",
+        "block_ram": "BRAM",
+        "bram": "BRAM",
+        "uram": "URAM",
+        "ultra": "URAM",
+        "ultra_ram": "URAM",
+        "ddr": "DDR",
+        "external": "DDR",
+        "external_ddr": "DDR",
+        "dma_ddr": "DDR",
+        "stream": "DDR",
+        "streaming": "DDR",
+    }
+
+    first = aliases.get(requested)
+    if first is None:
+        return fallback
+
+    ordered = [first]
+    for region in ("BRAM", "URAM", "DDR"):
+        if region not in ordered:
+            ordered.append(region)
+    return ordered
+
 POLICIES: Dict[str, Policy] = {
     "Fit-First": Policy(
         name="Fit-First",
@@ -415,7 +459,7 @@ def _override_policy_from_cfg(cfg, base: Policy) -> Policy:
         conv_oc=base.conv_oc,
         dense_in=base.dense_in,
         dense_out=base.dense_out,
-        weight_region_preference=_list_cfg(raw, "memory.weight_region_preference", base.weight_region_preference),
+        weight_region_preference=_list_cfg(raw, "memory.weight_region_preference", _weight_region_preference_from_storage(raw, base.weight_region_preference)),
         activation_region_preference=_list_cfg(raw, "memory.activation_region_preference", base.activation_region_preference),
         allow_double_buffer=_bool_cfg(raw, "memory.allow_double_buffer", base.allow_double_buffer),
         axi_word_bits=base.axi_word_bits,

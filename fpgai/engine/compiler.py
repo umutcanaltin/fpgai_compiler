@@ -733,11 +733,11 @@ class Compiler:
         raw = self.cfg.raw
         requested = _cfg_get(
             raw,
-            "memory.storage.weights",
+            "memory.weight_storage",
             _cfg_get(
                 raw,
-                "training.storage.weights",
-                _cfg_get(raw, "memory.weight_storage", "bram"),
+                "memory.storage.weights",
+                _cfg_get(raw, "training.storage.weights", "bram"),
             ),
         )
         requested = str(requested or "bram").strip().lower()

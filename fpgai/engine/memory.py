@@ -54,12 +54,49 @@ def _region_order_for_activation(policy_name: str, notes: Dict[str, Any]) -> Lis
     return ["BRAM", "URAM", "DDR"]
 
 
+def _normalise_requested_weight_storage(notes: Dict[str, Any]) -> str | None:
+    requested = notes.get("weight_storage")
+    if requested is None:
+        return None
+
+    value = str(requested).strip().lower()
+    aliases = {
+        "embedded": "bram",
+        "on_chip": "bram",
+        "onchip": "bram",
+        "block": "bram",
+        "block_ram": "bram",
+        "bram": "bram",
+        "uram": "uram",
+        "ultra": "uram",
+        "ultra_ram": "uram",
+        "ddr": "ddr",
+        "external": "ddr",
+        "external_ddr": "ddr",
+        "dma_ddr": "ddr",
+        "stream": "stream",
+        "streaming": "stream",
+    }
+    return aliases.get(value)
+
+
 def _pick_weight_region(
     size_bytes: int,
     layer_weight_mode: str,
     policy_name: str,
     notes: Dict[str, Any],
 ) -> str:
+    # Manual YAML memory.weight_storage must affect the real layer memory
+    # placement.  Without this, the contract can say URAM while generated HLS
+    # still emits BRAM for small embedded weights.
+    requested_storage = _normalise_requested_weight_storage(notes)
+    if requested_storage == "uram":
+        return "URAM"
+    if requested_storage == "bram":
+        return "BRAM"
+    if requested_storage in {"ddr", "stream"}:
+        return "DDR"
+
     if layer_weight_mode == "embedded":
         return "BRAM" if size_bytes <= 64 * 1024 else "URAM"
     if layer_weight_mode == "stream":

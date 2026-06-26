@@ -754,8 +754,12 @@ def test_precision_mode_materialization_changes_generated_types() -> None:
         {"precision_mode": "fx16_6"},
     )
 
-    assert fx8_report.applied["precision_mode"] == "numerics.defaults"
-    assert fx16_report.applied["precision_mode"] == "numerics.defaults"
+    assert "numerics.defaults" in fx8_report.applied["precision_mode"]
+    assert "numerics.precision_mode" in fx8_report.applied["precision_mode"]
+    assert "analysis.precision_sweep.selected_candidate" in fx8_report.applied["precision_mode"]
+    assert "numerics.defaults" in fx16_report.applied["precision_mode"]
+    assert "numerics.precision_mode" in fx16_report.applied["precision_mode"]
+    assert "analysis.precision_sweep.selected_candidate" in fx16_report.applied["precision_mode"]
 
     fx8_graph = _dense_graph()
     resolve_layerwise_precision(
