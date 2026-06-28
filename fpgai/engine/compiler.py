@@ -215,6 +215,7 @@ class Compiler:
             board=str(_cfg_get(raw, "targets.board", _cfg_get(raw, "project.board", "")) or ""),
             pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
             top_name=top_name,
+            weights_mode=weights_mode,
             hls_artifacts=self._hls_artifacts_manifest_payload(
                 out_dir=out_dir,
                 hls_run=hls_run,
@@ -346,7 +347,7 @@ class Compiler:
         enable_hls = bool(_cfg_get(raw, "backends.hls.enabled", True))
         enable_host = bool(_cfg_get(raw, "backends.host_cpp.enabled", True))
         act_kind, act_alpha, act_except_last = self._read_activation_insert_cfg(raw)
-        weights_mode = str(_cfg_get(raw, "data_movement.ps_pl.weights.mode", "embedded")).lower()
+        weights_mode = self._resolve_hls_weights_mode(raw)
 
         g = self._import_and_prepare_graph(
             act_kind=act_kind,
@@ -449,6 +450,7 @@ class Compiler:
             board=str(_cfg_get(raw, "targets.board", _cfg_get(raw, "project.board", "")) or ""),
             pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
             top_name=top_name,
+            weights_mode=weights_mode,
             hls_artifacts=self._hls_artifacts_manifest_payload(
                 out_dir=out_dir,
                 hls_run=hls_run,
@@ -767,7 +769,7 @@ class Compiler:
         storage = storage_aliases.get(storage, "")
 
         legacy_mode = str(
-            _cfg_get(raw, "data_movement.ps_pl.weights.mode", "embedded") or "embedded"
+            _cfg_get(raw, "data_movement.weights.load.interface", _cfg_get(raw, "data_movement.ps_pl.weights.mode", "embedded")) or "embedded"
         ).strip().lower().replace("-", "_")
 
         if storage == "uram":
@@ -2395,8 +2397,8 @@ class Compiler:
                     ),
                     "weights_mode": _cfg_get(
                         self.cfg.raw,
-                        "data_movement.ps_pl.weights.mode",
-                        "embedded",
+                        "data_movement.weights.load.interface",
+                        _cfg_get(self.cfg.raw, "data_movement.ps_pl.weights.mode", "embedded"),
                     ),
                     "top_kernel_name": _cfg_get(
                         self.cfg.raw,

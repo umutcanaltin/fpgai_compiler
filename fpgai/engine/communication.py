@@ -54,6 +54,84 @@ def _edge_direction(kind: str, region: str, mode: str = "") -> str:
     return "PS_TO_PL"
 
 
+
+def _first_cfg_dict(raw: Dict[str, Any], *paths: str) -> Dict[str, Any]:
+    for path in paths:
+        value = _cfg_get(raw, path, None)
+        if isinstance(value, dict):
+            return _as_dict(value)
+    return {}
+
+
+def _first_cfg_value(raw: Dict[str, Any], *paths: str, default: Any = None) -> Any:
+    for path in paths:
+        value = _cfg_get(raw, path, None)
+        if value is not None:
+            return value
+    return default
+
+
+def _edge_cfg_paths(kind: str) -> tuple[str, ...]:
+    kind_u = str(kind).lower()
+    if kind_u in {"input", "activation_in"}:
+        return (
+            "data_movement.input.load",
+            "data_movement.ps_pl.input",
+        )
+    if kind_u in {"weight", "bias", "param", "parameter"}:
+        return (
+            "data_movement.weights.load",
+            "data_movement.ps_pl.weights",
+        )
+    if kind_u in {"target", "aux"}:
+        return (
+            "data_movement.aux.load",
+            "data_movement.ps_pl.aux",
+        )
+    if kind_u in {"output", "activation_out"}:
+        return (
+            "data_movement.output.store",
+            "data_movement.pl_ps.output",
+        )
+    if kind_u in {"loss"}:
+        return (
+            "data_movement.loss.store",
+            "data_movement.pl_ps.loss",
+        )
+    if kind_u in {"gradient", "updated_weight"}:
+        return (
+            "data_movement.gradients.store",
+            "data_movement.pl_ps.gradients",
+        )
+    return (f"data_movement.tensor_edges.{kind_u}",)
+
+
+def _edge_size_bytes(raw: Dict[str, Any], kind: str, default_words: int) -> int:
+    cfg = _edge_cfg(raw, kind)
+
+    size_bytes = cfg.get("size_bytes")
+    if size_bytes is not None:
+        return int(size_bytes)
+
+    size_words = cfg.get("size_words")
+    if size_words is not None:
+        return int(size_words) * 4
+
+    nbytes = cfg.get("bytes")
+    if nbytes is not None:
+        return int(nbytes)
+
+    words = cfg.get("words")
+    if words is not None:
+        return int(words) * 4
+
+    for path in _edge_cfg_paths(kind):
+        value = _synthetic_size(raw, path, default_words)
+        if value != default_words * 4:
+            return value
+
+    return default_words * 4
+
 def _edge_path(kind: str) -> str:
     kind_u = str(kind).lower()
     if kind_u in {"input", "activation_in"}:
@@ -72,7 +150,7 @@ def _edge_path(kind: str) -> str:
 
 
 def _edge_cfg(raw: Dict[str, Any], kind: str) -> Dict[str, Any]:
-    return _as_dict(_cfg_get(raw, _edge_path(kind), {}))
+    return _first_cfg_dict(raw, *_edge_cfg_paths(kind))
 
 
 def _global_compression_cfg(raw: Dict[str, Any], direction: str) -> Dict[str, Any]:
@@ -323,7 +401,7 @@ def _append_synthetic_io_edges(
                 tensor_name=str(input_cfg.get("tensor_name", "input")),
                 kind="input",
                 region=str(input_cfg.get("region", "HOST")),
-                size_bytes=_synthetic_size(raw, "data_movement.ps_pl.input", 4),
+                size_bytes=_edge_size_bytes(raw, "input", 4),
                 placement_notes={},
                 default_axi_word_bits=default_axi_word_bits,
                 default_burst_len=default_burst_len,
@@ -339,7 +417,7 @@ def _append_synthetic_io_edges(
                 tensor_name=str(output_cfg.get("tensor_name", "output")),
                 kind="output",
                 region=str(output_cfg.get("region", "HOST")),
-                size_bytes=_synthetic_size(raw, "data_movement.pl_ps.output", 4),
+                size_bytes=_edge_size_bytes(raw, "output", 4),
                 placement_notes={},
                 default_axi_word_bits=default_axi_word_bits,
                 default_burst_len=default_burst_len,
@@ -355,7 +433,7 @@ def _append_synthetic_io_edges(
                 tensor_name=str(aux_cfg.get("tensor_name", "aux")),
                 kind="aux",
                 region=str(aux_cfg.get("region", "HOST")),
-                size_bytes=_synthetic_size(raw, "data_movement.ps_pl.aux", 4),
+                size_bytes=_edge_size_bytes(raw, "aux", 4),
                 placement_notes={},
                 default_axi_word_bits=default_axi_word_bits,
                 default_burst_len=default_burst_len,

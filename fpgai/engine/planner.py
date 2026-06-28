@@ -59,6 +59,13 @@ class Policy:
 
 
 
+
+def _cfg_weight_load_interface(raw_cfg: Dict[str, Any], default: str = "embedded") -> str:
+    value = _cfg_get(raw_cfg, "data_movement.weights.load.interface", None)
+    if value is None:
+        value = _cfg_get(raw_cfg, "data_movement.ps_pl.weights.mode", default)
+    return str(value or default).lower().replace("-", "_")
+
 def _weight_region_preference_from_storage(raw_cfg, fallback):
     """Return weight-region preference implied by memory.weight_storage.
 
@@ -492,9 +499,7 @@ def _choose_weight_mode(desc: LayerDescriptor, raw_cfg: Dict[str, Any]) -> str:
     if storage in ("ddr", "dma_ddr", "external", "external_ddr"):
         return "ddr"
 
-    requested = str(
-        _cfg_get(raw_cfg, "data_movement.ps_pl.weights.mode", "embedded")
-    ).lower().replace("-", "_")
+    requested = _cfg_weight_load_interface(raw_cfg, "embedded")
     if requested in ("dma_ddr", "external", "external_ddr"):
         requested = "ddr"
     if requested in ("stream", "streaming", "streamed"):
@@ -1095,7 +1100,7 @@ def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
                 _cfg_get(
                     raw,
                     "memory.weight_storage",
-                    _cfg_get(raw, "data_movement.ps_pl.weights.mode", "embedded"),
+                    _cfg_weight_load_interface(raw, "embedded"),
                 )
             ).lower(),
             "precision_mode": default_precision["precision_mode"],

@@ -941,3 +941,135 @@ Next:
 - Rebuild paper numeric artifacts/tables so tiling rows use the corrected Dense HLS reports.
 - Continue Sprint 27G for real URAM storage or explicit unsupported/report-only classification.
 
+
+## Sprint 27G.2 — Runtime package model-weight payloads
+
+Implemented and validated runtime package support for model-weight payloads.
+
+Validated behavior:
+- BRAM / embedded weights:
+  - compiler passes weights_mode=embedded into runtime package generation
+  - runtime_weight_payload_required=false
+  - runtime_weight_payload_present=false
+  - no runtime_package/weights/weights.bin
+  - no runtime_package/weights/weight_layout.json
+- URAM / runtime-loaded weights:
+  - compiler passes weights_mode=uram into runtime package generation
+  - runtime_weight_payload_required=true
+  - runtime_weight_payload_present=true
+  - runtime_package/weights/weights.bin exists
+  - runtime_package/weights/weight_layout.json exists
+  - total_words=46
+  - payload format is packed32
+  - layout follows generated HLS parameter order W0, B0, W1, B1
+
+Validated compiler-path configs:
+- paper_experiments/full_pipeline_gate/sprint26_paper_matrix/configs/kv260_memory_uram.yml
+- paper_experiments/full_pipeline_gate/sprint26_paper_matrix/configs/kv260_memory_bram.yml
+
+Next sprint:
+- Implement and validate DDR model-weight storage using the same runtime package payload path.
+- DDR acceptance requires generated HLS weights_mem m_axi, runtime package weights payload/layout, HLS pass, and hardware knob contract applied status.
+
+## Sprint 27G.3 — DDR model-weight backend
+
+Implemented and validated DDR model-weight storage path.
+
+Validated behavior:
+- memory.storage.weights=ddr resolves to compiler weights_mode=ddr.
+- Generated HLS top has:
+  - const ap_uint<32>* weights_mem
+  - m_axi weights_mem interface on bundle gmem_weights
+  - Runtime DDR weight load path
+  - fpgai_load_ddr_vector calls
+- Runtime package has:
+  - runtime_package/weights/weights.bin
+  - runtime_package/weights/weight_layout.json
+  - manifest runtime_weights.weights_mode=ddr
+  - manifest required=true and present=true
+  - total_words=46
+- DDR uses the same packed32 runtime payload layout as URAM.
+- DDR does not emit URAM BIND_STORAGE pragmas.
+- Vitis HLS passed for kv260_memory_ddr.
+
+Measured DDR HLS result:
+- LUT 11750
+- FF 6932
+- DSP 34
+- BRAM18 9
+- URAM 0
+- WorstLatency 190
+
+Next:
+- Clean up/normalize PS/PL input/output schema while keeping backward compatibility with data_movement.ps_pl and data_movement.pl_ps.
+
+## Sprint 27G.4 — PS/PL data_movement schema normalization
+
+Implemented and validated read-compatible normalization for the new PS/PL data_movement schema while preserving legacy paths.
+
+Supported legacy schema:
+- data_movement.ps_pl.input
+- data_movement.pl_ps.output
+- data_movement.ps_pl.weights.mode
+
+Supported normalized schema:
+- data_movement.input.load.interface
+- data_movement.input.load.source
+- data_movement.output.store.interface
+- data_movement.output.store.destination
+- data_movement.weights.load.interface
+- data_movement.weights.load.source
+- data_movement.weights.store.interface
+- data_movement.weights.store.destination
+
+Validated behavior:
+- Compiler weight-mode resolver accepts data_movement.weights.load.interface.
+- memory.storage.weights still has priority over data_movement weight transport.
+- Communication planner accepts data_movement.input.load and data_movement.output.store.
+- New schema input/output tensor names and size_words are used by communication planning.
+- New schema DDR config compiles successfully.
+- Generated HLS emits DDR weights_mem m_axi path.
+- Runtime package emits weights.bin and weight_layout.json.
+- Vitis HLS passed for kv260_memory_ddr_new_schema.
+
+Validation:
+- 16 focused tests passed.
+- kv260_memory_ddr_new_schema compile returned 0.
+- Runtime package manifest reports:
+  - runtime_weights.weights_mode=ddr
+  - required=true
+  - present=true
+  - total_words=46
+
+Current memory + PS/PL status:
+- BRAM model weights:
+  - embedded/local HLS path
+  - no runtime weight payload
+  - HLS validated
+- URAM model weights:
+  - runtime-loaded local URAM storage
+  - weights_mem m_axi import path
+  - runtime package weight payload/layout
+  - HLS validated
+- DDR model weights:
+  - external/runtime DDR weight path
+  - weights_mem m_axi import path
+  - runtime package weight payload/layout
+  - HLS validated
+- Legacy and normalized PS/PL schemas both compile.
+
+Claim boundary:
+- Safe to claim YAML-controlled BRAM/URAM/DDR model-weight storage affects generated HLS source, HLS reports, runtime package manifests, and tests.
+- Safe to claim normalized PS/PL schema is backward compatible for current compiler/planner paths.
+- Do not claim board runtime, measured board power, measured board energy, or real FPGA execution yet.
+
+Next:
+- Run full scenario/knob traceability audit:
+  - YAML knob
+  - compiler effective value
+  - prediction artifact effect
+  - generated HLS source effect
+  - Vitis HLS actual report effect
+  - runtime package effect
+  - Vivado/report effect when available
+  - status: applied / report_only / estimate_only / missing / unsupported

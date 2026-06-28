@@ -157,3 +157,123 @@ def test_generated_uram_memory_design_has_nonzero_hls_uram_if_present() -> None:
     assert elem is not None
     assert elem.text is not None
     assert int(float(elem.text.strip())) > 0
+
+
+def test_generated_ddr_memory_design_has_real_ddr_source_if_present() -> None:
+    from pathlib import Path
+
+    run = Path("paper_experiments/full_pipeline_gate/sprint26_paper_matrix/runs/kv260_memory_ddr")
+    src = run / "hls/src/deeplearn.cpp"
+    if not src.exists():
+        return
+
+    text = src.read_text()
+    assert "Requested weights mode: ddr" in text
+    assert "const ap_uint<32>* weights_mem" in text
+    assert "#pragma HLS INTERFACE m_axi port=weights_mem" in text
+    assert "bundle=gmem_weights" in text
+    assert "Runtime DDR weight load" in text
+    assert "fpgai_load_ddr_vector" in text
+    assert "impl=uram" not in text
+
+
+def test_generated_ddr_runtime_package_has_weight_payload_if_present() -> None:
+    from pathlib import Path
+    import json
+
+    run = Path("paper_experiments/full_pipeline_gate/sprint26_paper_matrix/runs/kv260_memory_ddr")
+    manifest_path = run / "runtime_package/package_manifest.json"
+    if not manifest_path.exists():
+        return
+
+    pkg = run / "runtime_package"
+    manifest = json.loads(manifest_path.read_text())
+    runtime_weights = manifest["runtime_weights"]
+
+    assert runtime_weights["weights_mode"] == "ddr"
+    assert runtime_weights["required"] is True
+    assert runtime_weights["present"] is True
+    assert runtime_weights["total_words"] == 46
+    assert (pkg / "weights/weights.bin").exists()
+    assert (pkg / "weights/weight_layout.json").exists()
+
+    layout = json.loads((pkg / "weights/weight_layout.json").read_text())
+    assert layout["format"] == "packed32"
+    assert layout["total_words"] == 46
+    assert [entry["name"] for entry in layout["entries"]] == ["W0", "B0", "W1", "B1"]
+
+
+def test_compiler_weight_mode_resolver_accepts_new_weights_load_schema() -> None:
+    from fpgai.engine.compiler import Compiler
+
+    compiler = object.__new__(Compiler)
+
+    raw = {
+        "data_movement": {
+            "weights": {
+                "load": {
+                    "interface": "ddr",
+                    "source": "ps_ddr",
+                }
+            }
+        }
+    }
+    assert compiler._resolve_hls_weights_mode(raw) == "ddr"
+
+    raw = {
+        "memory": {
+            "storage": {
+                "weights": "uram",
+            }
+        },
+        "data_movement": {
+            "weights": {
+                "load": {
+                    "interface": "embedded",
+                }
+            }
+        },
+    }
+    assert compiler._resolve_hls_weights_mode(raw) == "uram"
+
+
+def test_communication_plan_accepts_new_input_output_schema(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    from fpgai.engine.communication import make_communication_plan
+    from fpgai.engine.memory import MemoryPlan
+
+    cfg = SimpleNamespace(
+        raw={
+            "data_movement": {
+                "input": {
+                    "load": {
+                        "tensor_name": "x_new",
+                        "region": "HOST",
+                        "size_words": 11,
+                        "interface": "dma",
+                    }
+                },
+                "output": {
+                    "store": {
+                        "tensor_name": "y_new",
+                        "region": "HOST",
+                        "size_words": 7,
+                        "interface": "dma",
+                    }
+                },
+            }
+        }
+    )
+    memory_plan = MemoryPlan(placements=[], notes={"policy_name": "Balanced"})
+
+    plan = make_communication_plan(cfg, memory_plan)
+
+    input_edges = [edge for edge in plan.edges if getattr(edge, "tensor_name", None) == "x_new"]
+    output_edges = [edge for edge in plan.edges if getattr(edge, "tensor_name", None) == "y_new"]
+
+    assert input_edges, [edge.__dict__ for edge in plan.edges]
+    assert output_edges, [edge.__dict__ for edge in plan.edges]
+
+    assert getattr(input_edges[0], "size_bytes") == 44
+    assert getattr(output_edges[0], "size_bytes") == 28

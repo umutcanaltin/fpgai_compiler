@@ -13,6 +13,13 @@ from fpgai.util.fs import write_text
 _cfg_get = get_path
 
 
+
+def _cfg_weight_load_interface(raw_cfg: Dict[str, Any], default: str = "embedded") -> str:
+    value = _cfg_get(raw_cfg, "data_movement.weights.load.interface", None)
+    if value is None:
+        value = _cfg_get(raw_cfg, "data_movement.ps_pl.weights.mode", default)
+    return str(value or default).lower().replace("-", "_")
+
 def _deep_merge(base: Any, override: Any) -> Any:
     if isinstance(base, dict) and isinstance(override, dict):
         out = copy.deepcopy(base)
