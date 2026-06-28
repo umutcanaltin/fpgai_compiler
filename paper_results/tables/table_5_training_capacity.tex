@@ -1,0 +1,15 @@
+\begin{table}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{llllllllllll}
+\hline
+design & precision\_or\_config & prediction\_lut & hls\_lut & hls\_dsp & hls\_bram18 & hls\_latency\_cycles & vivado\_status & failure\_class & required\_slice\_luts & available\_slice\_luts & slice\_lut\_util\_pct \\
+\hline
+training\_kv260\_safe\_fx16\_6 & safe\_fx16\_6 & 84343 & 166965 & 815 & 77.0 & 114686.0 & vivado\_board\_capacity\_rejected & vivado\_impl\_failed\_board\_capacity\_lut\_overutilized & 133729 & 117120 & 114.18 \\
+training\_kv260\_aggressive\_fx8\_3 & aggressive\_fx8\_3 & 105154 & 194087 & 518 & 74.0 & 86082.0 & hls\_only &  &  &  &  \\
+\hline
+\end{tabular}
+\caption{Training capacity}
+\label{tab:table\_5\_training\_capacity}
+\end{table}

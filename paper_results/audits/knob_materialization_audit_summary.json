@@ -1,0 +1,19 @@
+{
+  "tiling": {
+    "designs": [
+      "kv260_tiling_small",
+      "kv260_tiling_medium",
+      "kv260_tiling_large"
+    ],
+    "identical_hls_source_files": 102,
+    "differing_hls_source_files": 1
+  },
+  "memory": {
+    "designs": [
+      "kv260_memory_bram",
+      "kv260_memory_uram"
+    ],
+    "identical_hls_source_files": 102,
+    "differing_hls_source_files": 23
+  }
+}

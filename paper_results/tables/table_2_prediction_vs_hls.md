@@ -1,0 +1,24 @@
+# Prediction vs HLS
+
+| design | group | mode | pred_lut | hls_lut | lut_ape_pct | pred_dsp | hls_dsp | dsp_ape_pct | pred_bram18 | hls_bram18 | bram18_ape_pct | hls_latency_cycles |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| pynq_z2_baseline_safe_fx16 | baseline | inference | 3822 | 6054 | 36.87 | 10 | 10 | 0.00 | 7.0 | 7.0 | 0.00 | 188.0 |
+| kv260_baseline_safe_fx16 | baseline | inference | 3822 | 5991 | 36.20 | 10 | 10 | 0.00 | 7.0 | 7.0 | 0.00 | 182.0 |
+| kr260_baseline_safe_fx16 | baseline | inference | 3822 | 5991 | 36.20 | 10 | 10 | 0.00 | 7.0 | 7.0 | 0.00 | 182.0 |
+| kv260_precision_fx16_6 | precision | inference | 4400 | 5056 | 12.97 | 30 | 24 | 25.00 | 5.0 | 5.0 | 0.00 | 90.0 |
+| kv260_precision_fx12_4 | precision | inference | 4114 | 4876 | 15.63 | 24 | 20 | 20.00 | 5.0 | 5.0 | 0.00 | 85.0 |
+| kv260_precision_fx8_3 | precision | inference | 3842 | 4119 | 6.72 | 8 | 8 | 0.00 | 5.0 | 5.0 | 0.00 | 72.0 |
+| kv260_parallel_x1 | parallelism | inference | 2802 | 4869 | 42.45 | 6 | 6 | 0.00 | 5.0 | 5.0 | 0.00 | 247.0 |
+| kv260_parallel_x2 | parallelism | inference | 3822 | 5991 | 36.20 | 10 | 10 | 0.00 | 7.0 | 7.0 | 0.00 | 182.0 |
+| kv260_parallel_x4 | parallelism | inference | 4400 | 5056 | 12.97 | 30 | 24 | 25.00 | 5.0 | 5.0 | 0.00 | 90.0 |
+| kv260_parallel_x8 | parallelism | inference | 7640 | 3584 | 113.17 | 73 | 35 | 108.57 | 1.0 | 1.0 | 0.00 | 80.0 |
+| kv260_pipeline_balanced_ii2 | pipeline | inference | 4400 | 5056 | 12.97 | 30 | 24 | 25.00 | 5.0 | 5.0 | 0.00 | 90.0 |
+| kv260_pipeline_aggressive_ii1 | pipeline | inference | 4400 | 5041 | 12.72 | 30 | 24 | 25.00 | 5.0 | 5.0 | 0.00 | 88.0 |
+| kv260_tiling_small | tiling | inference | 4400 | 3899 | 12.85 | 30 | 14 | 114.29 | 5.0 | 5.0 | 0.00 | 93.0 |
+| kv260_tiling_medium | tiling | inference | 4400 | 4275 | 2.92 | 30 | 22 | 36.36 | 5.0 | 5.0 | 0.00 | 86.0 |
+| kv260_tiling_large | tiling | inference | 4400 | 4305 | 2.21 | 30 | 24 | 25.00 | 5.0 | 5.0 | 0.00 | 81.0 |
+| kv260_memory_bram | memory | inference | 4400 | 5056 | 12.97 | 30 | 24 | 25.00 | 5.0 | 5.0 | 0.00 | 90.0 |
+| kv260_memory_uram | memory | inference | 4400 | 5056 | 12.97 | 30 | 24 | 25.00 | 5.0 | 5.0 | 0.00 | 90.0 |
+| kv260_combined_aggressive_fx8 | combined | inference | 6277 | 3472 | 80.79 | 21 | 7 | 200.00 | 1.0 | 1.0 | 0.00 | 59.0 |
+| training_kv260_safe_fx16_6 | training | training_on_device | 84343 | 166965 | 49.48 | 774 | 815 | 5.03 | 63.0 | 77.0 | 18.18 | 114686.0 |
+| training_kv260_aggressive_fx8_3 | training | training_on_device | 105154 | 194087 | 45.82 | 924 | 518 | 78.38 | 68.0 | 74.0 | 8.11 | 86082.0 |

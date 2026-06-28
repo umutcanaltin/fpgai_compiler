@@ -252,6 +252,55 @@ def _refresh_manifest(bridge: Path, updates: Dict[str, Any] | None = None) -> Di
     return man
 
 
+def _classify_vivado_failure(bridge_dir: Path, res: Dict[str, Any]) -> str:
+    """Classify common Vivado failures from generated text logs/reports."""
+    text_parts: List[str] = [str(res.get("error") or "")]
+
+    for root in [
+        bridge_dir / "logs",
+        bridge_dir / "reports",
+        bridge_dir / "project" / "fpgai_vivado.runs" / "impl_1",
+    ]:
+        if root.exists():
+            for path in root.rglob("*"):
+                if path.is_file() and path.suffix.lower() in {".log", ".jou", ".rpt", ".txt", ".rst"}:
+                    try:
+                        text_parts.append(path.read_text(errors="ignore"))
+                    except Exception:
+                        pass
+
+    low = "\n".join(text_parts).lower()
+
+    if (
+        "utlz-1" in low
+        and "resource utilization" in low
+        and (
+            "lut as logic over-utilized" in low
+            or "slice luts over-utilized" in low
+            or ("slice lut" in low and "over-utilized" in low)
+        )
+    ):
+        return "vivado_impl_failed_board_capacity_lut_overutilized"
+
+    if "utlz-1" in low and "over-utilized" in low:
+        return "vivado_impl_failed_board_capacity_overutilized"
+
+    if "place_design failed" in low:
+        return "vivado_impl_failed_place_design"
+
+    if "route_design failed" in low:
+        return "vivado_impl_failed_route_design"
+
+    if "write_bitstream" in low and "failed" in low:
+        return "vivado_impl_failed_write_bitstream"
+
+    if not bool(res.get("ok")):
+        return "vivado_failed"
+
+    return ""
+
+
+
 def _run_for_artifact(
     artifact: Path,
     export_hls_ip: bool,
@@ -374,16 +423,33 @@ def _run_for_artifact(
                 if run_vivado_impl:
                     env["FPGAI_VIVADO_RUN_IMPL"] = "1"
                 res = _run_cmd(["vivado", "-mode", "batch", "-source", "scripts/run_vivado.tcl"], bridge, "vivado_build", timeout_sec, env=env)
+
+        failure_class = "" if bool(res.get("ok")) else _classify_vivado_failure(bridge, res)
+        if failure_class:
+            res["failure_class"] = failure_class
+            if not res.get("error"):
+                res["error"] = failure_class
+
         row.update({
             "vivado_run": res,
             "vivado_ran": bool(res.get("ran")),
             "vivado_ok": bool(res.get("ok")),
             "vivado_returncode": res.get("returncode"),
             "vivado_error": res.get("error", ""),
+            "vivado_failure_class": res.get("failure_class", ""),
             "vivado_stdout_log": res.get("stdout_log", ""),
             "vivado_stderr_log": res.get("stderr_log", ""),
         })
-        _refresh_manifest(bridge, {"vivado_run": res, "vivado_ok": row["vivado_ok"], "vivado_error": row.get("vivado_error", "")})
+        _refresh_manifest(
+            bridge,
+            {
+                "vivado_run": res,
+                "vivado_ok": row["vivado_ok"],
+                "vivado_returncode": row.get("vivado_returncode"),
+                "vivado_error": row.get("vivado_error", ""),
+                "vivado_failure_class": row.get("vivado_failure_class", ""),
+            },
+        )
 
     _mirror_hls_ip_to_bridge(bridge)
     man = _refresh_manifest(bridge)
@@ -484,7 +550,41 @@ def main() -> int:
                 stderr=_cell(stderr_log),
             )
         )
+    requested_tool_run = bool(args.export_hls_ip or args.run_vivado_synth or args.run_vivado_impl)
+    failed_rows = []
+
+    if requested_tool_run:
+        for row in run_rows:
+            design = row.get("design", "")
+            if row.get("error"):
+                failed_rows.append((design, row.get("error")))
+                continue
+
+            if args.export_hls_ip or args.run_vivado_synth or args.run_vivado_impl:
+                if not row.get("hls_ip_export_ok", False):
+                    failed_rows.append((design, row.get("hls_ip_export_error") or "HLS IP export failed"))
+                    continue
+
+            if args.run_vivado_synth or args.run_vivado_impl:
+                if not row.get("vivado_ok", False):
+                    failed_rows.append((design, row.get("vivado_error") or f"Vivado failed with returncode={row.get('vivado_returncode')}"))
+                    continue
+
+            if args.run_vivado_impl:
+                if not row.get("bitstream_exists", False):
+                    failed_rows.append((design, "Vivado implementation requested but bitstream was not produced"))
+                    continue
+                if not row.get("xsa_exists", False):
+                    failed_rows.append((design, "Vivado implementation requested but XSA was not produced"))
+                    continue
+
     print()
+    if failed_rows:
+        print(f"[ERROR] Wrote {out}, but {len(failed_rows)} requested tool run(s) failed:")
+        for design, reason in failed_rows:
+            print(f"  - {design}: {reason}")
+        return 1
+
     print(f"[OK] Wrote {out}")
     return 0
 

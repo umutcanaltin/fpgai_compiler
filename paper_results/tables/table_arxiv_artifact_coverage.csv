@@ -1,0 +1,7 @@
+Artifact,Count
+Prediction,20/20
+Vitis HLS csynth,20/20
+HLS latency,20/20
+Vivado bitstream/XSA,4/6
+Capacity rejection,1/6
+HLS-only designs,15/20

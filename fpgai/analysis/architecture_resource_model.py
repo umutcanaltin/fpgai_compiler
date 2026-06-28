@@ -101,6 +101,48 @@ def _memory_binding(
     return str(current).strip().lower()
 
 
+def _embedded_parameter_bram_realization(
+    *,
+    elements: int,
+    bits_per_element: int,
+    banks: int,
+    weight_mode: str,
+    weight_region: str,
+) -> int:
+    """Estimate actual HLS BRAM realization for embedded parameters.
+
+    For small embedded constant/static arrays, Vitis HLS often implements the
+    storage as constants, registers, distributed memory, or optimized ROMs
+    instead of allocating one BRAM18 per requested bank. Banked BRAM is only
+    modeled when the payload is large enough that BRAM inference is likely.
+    """
+    if elements <= 0 or bits_per_element <= 0:
+        return 0
+
+    weight_mode = str(weight_mode or "").strip().lower()
+    weight_region = str(weight_region or "").strip().upper()
+    bits = int(elements) * int(bits_per_element)
+
+    if weight_region == "URAM":
+        # Embedded initialized URAM pragmas are intentionally disabled in
+        # generated HLS, so do not claim real URAM/BRAM allocation here.
+        return 0
+
+    if weight_mode == "embedded":
+        # Small MLP/conv constants in the paper matrix are optimized heavily by
+        # HLS. Keep a tiny residual BRAM only when payload approaches BRAM scale.
+        if bits < 4_096:
+            return 0
+        if bits < BRAM18_BITS:
+            return 1
+
+    return _banked_bram18(
+        elements,
+        bits_per_element,
+        banks,
+    )
+
+
 def _parameter_bram(
     layer: LayerArchitecture,
     raw_cfg: Mapping[str, Any],
@@ -125,16 +167,22 @@ def _parameter_bram(
     bias_elements = int(
         dimensions.get("bias_elements", 0)
     )
+    weight_mode = str(memory.get("weight_mode", "")).strip().lower()
+    weight_region = str(memory.get("weight_region", "BRAM")).strip().upper()
 
-    weight_bram = _banked_bram18(
-        weight_elements,
-        int(arithmetic["weight_bits"]),
-        int(memory["weight_banks"]),
+    weight_bram = _embedded_parameter_bram_realization(
+        elements=weight_elements,
+        bits_per_element=int(arithmetic["weight_bits"]),
+        banks=int(memory["weight_banks"]),
+        weight_mode=weight_mode,
+        weight_region=weight_region,
     )
-    bias_bram = _banked_bram18(
-        bias_elements,
-        int(arithmetic["bias_bits"]),
-        int(memory["output_banks"]),
+    bias_bram = _embedded_parameter_bram_realization(
+        elements=bias_elements,
+        bits_per_element=int(arithmetic["bias_bits"]),
+        banks=int(memory["output_banks"]),
+        weight_mode=weight_mode,
+        weight_region=weight_region,
     )
 
     return weight_bram, bias_bram

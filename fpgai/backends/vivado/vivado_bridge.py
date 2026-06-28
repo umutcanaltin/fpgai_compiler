@@ -142,12 +142,30 @@ proc fpgai_connect_intf_required {src dst label} {
 
 proc fpgai_connect_pin_if_exists {src dst label} {
   if {$src ne "" && $dst ne ""} {
+    set existing [get_bd_nets -quiet -of_objects $dst]
+    if {[llength $existing] > 0} {
+      puts "FPGAI-Vivado skip already-connected pin $label: dst=$dst net=$existing"
+      return
+    }
     puts "FPGAI-Vivado connect $label: $src -> $dst"
-    catch {connect_bd_net $src $dst} msg
-    if {$msg ne ""} { puts "FPGAI-Vivado optional pin connect result for $label: $msg" }
+    connect_bd_net $src $dst
   } else {
     puts "FPGAI-Vivado skip optional pin $label: src=$src dst=$dst"
   }
+}
+
+proc fpgai_connect_net_if_unconnected {src dst label} {
+  if {$src eq "" || $dst eq ""} {
+    puts "FPGAI-Vivado skip net $label: src=$src dst=$dst"
+    return
+  }
+  set existing [get_bd_nets -quiet -of_objects $dst]
+  if {[llength $existing] > 0} {
+    puts "FPGAI-Vivado skip already-connected net $label: dst=$dst net=$existing"
+    return
+  }
+  puts "FPGAI-Vivado connect net $label: $src -> $dst"
+  connect_bd_net $src $dst
 }
 """
 
@@ -165,68 +183,98 @@ puts "FPGAI-Vivado Using HLS IP VLNV: $hls_vlnv"
 create_bd_cell -type ip -vlnv $hls_vlnv ${{hls_top_name}}_0
 set hls_cell ${{hls_top_name}}_0
 
+set hls_in [fpgai_first_intf $hls_cell {{in_stream in_r s_axis_in_r S_AXIS_IN_R *in_stream* *in_r* *input*}}]
+set hls_aux [fpgai_first_intf $hls_cell {{aux aux_stream s_axis_aux S_AXIS_AUX *aux* *target*}}]
+set hls_out [fpgai_first_intf $hls_cell {{out_stream out_r m_axis_out_r M_AXIS_OUT_R *out_stream* *out_r* *output*}}]
+puts "FPGAI-Vivado HLS stream interfaces: in=$hls_in aux=$hls_aux out=$hls_out"
+
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:* axi_dma_0
-create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:* axi_dma_aux_0
+if {{$hls_aux ne ""}} {{
+  create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:* axi_dma_aux_0
+}} else {{
+  puts "FPGAI-Vivado no aux AXIS interface detected; skipping auxiliary DMA."
+}}
 create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:* rst_ps_0_100M
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect:* axi_ctrl_interconnect
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect:* axi_mem_interconnect
 
 catch {{set_property -dict [list CONFIG.c_include_sg {{0}} CONFIG.c_include_mm2s {{1}} CONFIG.c_include_s2mm {{1}}] [get_bd_cells axi_dma_0]}} dma0_cfg_msg
-catch {{set_property -dict [list CONFIG.c_include_sg {{0}} CONFIG.c_include_mm2s {{1}} CONFIG.c_include_s2mm {{0}}] [get_bd_cells axi_dma_aux_0]}} dmaaux_cfg_msg
+if {{$hls_aux ne ""}} {{
+  catch {{set_property -dict [list CONFIG.c_include_sg {{0}} CONFIG.c_include_mm2s {{1}} CONFIG.c_include_s2mm {{0}}] [get_bd_cells axi_dma_aux_0]}} dmaaux_cfg_msg
+}} else {{
+  set dmaaux_cfg_msg "skipped: no aux AXIS interface"
+}}
 puts "FPGAI-Vivado DMA0 config result: $dma0_cfg_msg"
 puts "FPGAI-Vivado DMA aux config result: $dmaaux_cfg_msg"
 
-set_property -dict [list CONFIG.NUM_SI {{1}} CONFIG.NUM_MI {{3}}] [get_bd_cells axi_ctrl_interconnect]
-set_property -dict [list CONFIG.NUM_SI {{3}} CONFIG.NUM_MI {{1}}] [get_bd_cells axi_mem_interconnect]
+set ctrl_mi_count [expr {{$hls_aux ne "" ? 3 : 2}}]
+set mem_si_count [expr {{$hls_aux ne "" ? 3 : 2}}]
+set_property -dict [list CONFIG.NUM_SI {{1}} CONFIG.NUM_MI $ctrl_mi_count] [get_bd_cells axi_ctrl_interconnect]
+set_property -dict [list CONFIG.NUM_SI $mem_si_count CONFIG.NUM_MI {{1}}] [get_bd_cells axi_mem_interconnect]
 
 connect_bd_net $clk [get_bd_pins rst_ps_0_100M/slowest_sync_clk]
 connect_bd_net $rstn [get_bd_pins rst_ps_0_100M/ext_reset_in]
 set periph_aresetn [get_bd_pins rst_ps_0_100M/peripheral_aresetn]
 
+set aux_clk_pins {{}}
+if {{$hls_aux ne ""}} {{
+  set aux_clk_pins [get_bd_pins -quiet axi_dma_aux_0/*aclk]
+}}
 foreach pin [concat \\
   [get_bd_pins -quiet axi_dma_0/*aclk] \\
-  [get_bd_pins -quiet axi_dma_aux_0/*aclk] \\
+  $aux_clk_pins \\
   [get_bd_pins -quiet axi_ctrl_interconnect/*ACLK] \\
   [get_bd_pins -quiet axi_mem_interconnect/*ACLK] \\
   [list [fpgai_first_pin $hls_cell {{ap_clk aclk ACLK}}]] \\
 ] {{
-  if {{$pin ne ""}} {{ catch {{connect_bd_net $clk $pin}} clk_msg }}
+  if {{$pin ne ""}} {{ fpgai_connect_net_if_unconnected $clk $pin "accelerator clock fanout" }}
+}}
+set aux_reset_pins {{}}
+if {{$hls_aux ne ""}} {{
+  set aux_reset_pins [get_bd_pins -quiet axi_dma_aux_0/*aresetn]
 }}
 foreach pin [concat \\
   [get_bd_pins -quiet axi_dma_0/*aresetn] \\
-  [get_bd_pins -quiet axi_dma_aux_0/*aresetn] \\
+  $aux_reset_pins \\
   [get_bd_pins -quiet axi_ctrl_interconnect/*ARESETN] \\
   [get_bd_pins -quiet axi_mem_interconnect/*ARESETN] \\
   [list [fpgai_first_pin $hls_cell {{ap_rst_n aresetn ARESETN}}]] \\
 ] {{
-  if {{$pin ne ""}} {{ catch {{connect_bd_net $periph_aresetn $pin}} rst_msg }}
+  if {{$pin ne ""}} {{ fpgai_connect_net_if_unconnected $periph_aresetn $pin "accelerator reset fanout" }}
 }}
 
 fpgai_connect_intf_required $ps_ctrl_axi [get_bd_intf_pins axi_ctrl_interconnect/S00_AXI] "PS control master to ctrl interconnect"
 set hls_ctrl [fpgai_first_intf $hls_cell {{s_axi_CTRL S_AXI_CTRL CTRL s_axi_control S_AXI_CONTROL *CTRL* *control*}}]
 fpgai_connect_intf_required [get_bd_intf_pins axi_ctrl_interconnect/M00_AXI] $hls_ctrl "control to HLS AXI-Lite"
 fpgai_connect_intf_required [get_bd_intf_pins axi_ctrl_interconnect/M01_AXI] [get_bd_intf_pins axi_dma_0/S_AXI_LITE] "control to main DMA AXI-Lite"
-fpgai_connect_intf_required [get_bd_intf_pins axi_ctrl_interconnect/M02_AXI] [get_bd_intf_pins axi_dma_aux_0/S_AXI_LITE] "control to aux DMA AXI-Lite"
+if {{$hls_aux ne ""}} {{
+  fpgai_connect_intf_required [get_bd_intf_pins axi_ctrl_interconnect/M02_AXI] [get_bd_intf_pins axi_dma_aux_0/S_AXI_LITE] "control to aux DMA AXI-Lite"
+}} else {{
+  puts "FPGAI-Vivado skip aux DMA AXI-Lite connection: no aux AXIS interface"
+}}
 
 fpgai_connect_intf_required [get_bd_intf_pins axi_dma_0/M_AXI_MM2S] [get_bd_intf_pins axi_mem_interconnect/S00_AXI] "main DMA MM2S to memory interconnect"
 fpgai_connect_intf_required [get_bd_intf_pins axi_dma_0/M_AXI_S2MM] [get_bd_intf_pins axi_mem_interconnect/S01_AXI] "main DMA S2MM to memory interconnect"
-fpgai_connect_intf_required [get_bd_intf_pins axi_dma_aux_0/M_AXI_MM2S] [get_bd_intf_pins axi_mem_interconnect/S02_AXI] "aux DMA MM2S to memory interconnect"
+if {{$hls_aux ne ""}} {{
+  fpgai_connect_intf_required [get_bd_intf_pins axi_dma_aux_0/M_AXI_MM2S] [get_bd_intf_pins axi_mem_interconnect/S02_AXI] "aux DMA MM2S to memory interconnect"
+}} else {{
+  puts "FPGAI-Vivado skip aux DMA memory connection: no aux AXIS interface"
+}}
 fpgai_connect_intf_required [get_bd_intf_pins axi_mem_interconnect/M00_AXI] $ps_mem_axi "memory interconnect to PS memory slave"
 
-set hls_in [fpgai_first_intf $hls_cell {{in_r s_axis_in_r S_AXIS_IN_R *in_r* *input*}}]
-set hls_aux [fpgai_first_intf $hls_cell {{aux s_axis_aux S_AXIS_AUX *aux* *target*}}]
-set hls_out [fpgai_first_intf $hls_cell {{out_r m_axis_out_r M_AXIS_OUT_R *out_r* *output*}}]
-puts "FPGAI-Vivado HLS stream interfaces: in=$hls_in aux=$hls_aux out=$hls_out"
-fpgai_connect_intf_required [get_bd_intf_pins axi_dma_0/M_AXIS_MM2S] $hls_in "main DMA stream to HLS in_r"
-fpgai_connect_intf_required [get_bd_intf_pins axi_dma_aux_0/M_AXIS_MM2S] $hls_aux "aux DMA stream to HLS aux"
-fpgai_connect_intf_required $hls_out [get_bd_intf_pins axi_dma_0/S_AXIS_S2MM] "HLS out_r to main DMA stream return"
+fpgai_connect_intf_required [get_bd_intf_pins axi_dma_0/M_AXIS_MM2S] $hls_in "main DMA stream to HLS input"
+if {{$hls_aux ne ""}} {{
+  fpgai_connect_intf_required [get_bd_intf_pins axi_dma_aux_0/M_AXIS_MM2S] $hls_aux "aux DMA stream to HLS aux"
+}} else {{
+  puts "FPGAI-Vivado skip aux DMA stream connection: no aux AXIS interface"
+}}
+fpgai_connect_intf_required $hls_out [get_bd_intf_pins axi_dma_0/S_AXIS_S2MM] "HLS output to main DMA stream return"
 
 assign_bd_address
 validate_bd_design
 save_bd_design
 puts "FPGAI-Vivado Full block design validated: $design_name"
 """
-
 
 def _create_zynq7000_bd_tcl(board_name: str, top_name: str) -> str:
     return f"""# Auto-generated FPGAI full Vivado block design.
@@ -306,7 +354,7 @@ foreach pin [concat \\
   [get_bd_pins -quiet zynq_ultra_ps_e_0/*aclk] \\
   [get_bd_pins -quiet zynq_ultra_ps_e_0/*ACLK] \\
 ] {{
-  if {{$pin ne ""}} {{ catch {{connect_bd_net $clk $pin}} ps_clk_msg }}
+  if {{$pin ne ""}} {{ fpgai_connect_net_if_unconnected $clk $pin "PS clock fanout" }}
 }}
 
 {_bd_accelerator_tcl(top_name)}"""

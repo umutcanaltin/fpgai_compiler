@@ -1,0 +1,12 @@
+Design,Group,LUT x,DSP x,Lat. x,Status
+KV260 base,baseline,1.000,1.000,1.000,bit
+fx16,precision,0.844,2.400,0.495,HLS only
+fx12,precision,0.814,2.000,0.467,HLS only
+fx8,precision,0.688,0.800,0.396,bit
+x1,parallelism,0.813,0.600,1.357,HLS only
+x2,parallelism,1.000,1.000,1.000,HLS only
+x4,parallelism,0.844,2.400,0.495,HLS only
+x8,parallelism,0.598,3.500,0.440,bit
+pipe ii1,pipeline,0.841,2.400,0.484,HLS only
+URAM,memory,0.844,2.400,0.495,bit
+combined fx8,combined,0.580,0.700,0.324,HLS only

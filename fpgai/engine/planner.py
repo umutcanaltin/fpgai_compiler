@@ -633,6 +633,10 @@ def _dense_tile_from_cfg(
     out_features: int,
 ) -> Dict[str, int]:
     aliases = {
+        # Dense/Gemm tiling can be written either as explicit in/out names or
+        # as matrix-style tm/tn/tk values produced by the paper config
+        # generator.  For Dense, OUT maps to tm and IN maps to tk.  Accept tn
+        # as an additional input-tile alias for older/generated configs.
         "in": (
             "in",
             "input",
@@ -640,6 +644,8 @@ def _dense_tile_from_cfg(
             "input_tile",
             "tile_in",
             "dense_tile_in",
+            "tk",
+            "tn",
         ),
         "out": (
             "out",
@@ -648,6 +654,7 @@ def _dense_tile_from_cfg(
             "output_tile",
             "tile_out",
             "dense_tile_out",
+            "tm",
         ),
     }
 
@@ -681,6 +688,7 @@ def _conv_tile_from_cfg(
             "input_channel",
             "tile_ic",
             "conv_tile_ic",
+            "tn",
         ),
         "oc": (
             "oc",
@@ -690,6 +698,7 @@ def _conv_tile_from_cfg(
             "channels",
             "tile_oc",
             "conv_tile_oc",
+            "tm",
         ),
         "oh": (
             "oh",
@@ -698,6 +707,7 @@ def _conv_tile_from_cfg(
             "height",
             "tile_oh",
             "conv_tile_oh",
+            "tk",
         ),
         "ow": (
             "ow",
@@ -706,6 +716,7 @@ def _conv_tile_from_cfg(
             "width",
             "tile_ow",
             "conv_tile_ow",
+            "tk",
         ),
     }
 

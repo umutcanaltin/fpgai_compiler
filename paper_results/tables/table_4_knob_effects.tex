@@ -1,0 +1,29 @@
+\begin{table}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lllllllll}
+\hline
+design & group & hls\_lut & lut\_vs\_baseline & hls\_dsp & dsp\_vs\_baseline & hls\_latency\_cycles & latency\_vs\_baseline & vivado\_status \\
+\hline
+kv260\_baseline\_safe\_fx16 & baseline & 5991 & 1.000 & 10 & 1.000 & 182.0 & 1.000 & vivado\_impl\_bitstream\_ready \\
+kv260\_precision\_fx16\_6 & precision & 5056 & 0.844 & 24 & 2.400 & 90.0 & 0.495 & hls\_only \\
+kv260\_precision\_fx12\_4 & precision & 4876 & 0.814 & 20 & 2.000 & 85.0 & 0.467 & hls\_only \\
+kv260\_precision\_fx8\_3 & precision & 4119 & 0.688 & 8 & 0.800 & 72.0 & 0.396 & vivado\_impl\_bitstream\_ready \\
+kv260\_parallel\_x1 & parallelism & 4869 & 0.813 & 6 & 0.600 & 247.0 & 1.357 & hls\_only \\
+kv260\_parallel\_x2 & parallelism & 5991 & 1.000 & 10 & 1.000 & 182.0 & 1.000 & hls\_only \\
+kv260\_parallel\_x4 & parallelism & 5056 & 0.844 & 24 & 2.400 & 90.0 & 0.495 & hls\_only \\
+kv260\_parallel\_x8 & parallelism & 3584 & 0.598 & 35 & 3.500 & 80.0 & 0.440 & vivado\_impl\_bitstream\_ready \\
+kv260\_pipeline\_balanced\_ii2 & pipeline & 5056 & 0.844 & 24 & 2.400 & 90.0 & 0.495 & hls\_only \\
+kv260\_pipeline\_aggressive\_ii1 & pipeline & 5041 & 0.841 & 24 & 2.400 & 88.0 & 0.484 & hls\_only \\
+kv260\_tiling\_small & tiling & 3899 & 0.651 & 14 & 1.400 & 93.0 & 0.511 & hls\_only \\
+kv260\_tiling\_medium & tiling & 4275 & 0.714 & 22 & 2.200 & 86.0 & 0.473 & hls\_only \\
+kv260\_tiling\_large & tiling & 4305 & 0.719 & 24 & 2.400 & 81.0 & 0.445 & hls\_only \\
+kv260\_memory\_bram & memory & 5056 & 0.844 & 24 & 2.400 & 90.0 & 0.495 & hls\_only \\
+kv260\_memory\_uram & memory & 5056 & 0.844 & 24 & 2.400 & 90.0 & 0.495 & vivado\_impl\_bitstream\_ready \\
+kv260\_combined\_aggressive\_fx8 & combined & 3472 & 0.580 & 7 & 0.700 & 59.0 & 0.324 & hls\_only \\
+\hline
+\end{tabular}
+\caption{Design knob effects}
+\label{tab:table\_4\_knob\_effects}
+\end{table}

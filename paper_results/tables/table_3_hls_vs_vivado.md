@@ -1,0 +1,9 @@
+# HLS vs Vivado implementation
+
+| design | paper_status | hls_lut | vivado_lut | vivado_over_hls_lut | hls_dsp | vivado_dsp | vivado_over_hls_dsp | hls_bram18 | vivado_bram18 | vivado_over_hls_bram18 | wns_ns | vivado_power_w_est | failure_class |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| kv260_baseline_safe_fx16 | vivado_impl_bitstream_ready | 5991 | 6565.0 | 1.096 | 10 | 7.0 | 0.700 | 7.0 | 7.0 | 1.000 | 2.462 | 2.768 |  |
+| kv260_precision_fx8_3 | vivado_impl_bitstream_ready | 4119 | 4691.0 | 1.139 | 8 | 8.0 | 1.000 | 5.0 | 5.0 | 1.000 | 3.991 | 2.749 |  |
+| kv260_parallel_x8 | vivado_impl_bitstream_ready | 3584 | 5523.0 | 1.541 | 35 | 34.0 | 0.971 | 1.0 | 1.0 | 1.000 | 2.901 | 2.775 |  |
+| kv260_memory_uram | vivado_impl_bitstream_ready | 5056 | 5870.0 | 1.161 | 24 | 23.0 | 0.958 | 5.0 | 5.0 | 1.000 | 2.243 | 2.774 |  |
+| training_kv260_safe_fx16_6 | vivado_board_capacity_rejected | 166965 |  |  | 815 |  |  | 77.0 |  |  |  |  | vivado_impl_failed_board_capacity_lut_overutilized |

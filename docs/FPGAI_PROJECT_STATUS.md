@@ -593,3 +593,351 @@ Remaining truth boundary:
 - Vitis HLS and Vivado are not available on this machine PATH, so real HLS/Vivado report validation is still not proven here.
 - Runtime board validation is still not proven in this sprint.
 - Next sprint should run the same audit on a machine with Vitis/Vivado and attach real `csynth`, Vivado utilization/timing, bitstream, and board runtime artifacts.
+
+## Sprint 26G — Full HLS completion for inference and training
+
+Completed:
+- Fixed inference URAM HLS generation by disabling invalid BIND_STORAGE pragmas on embedded initialized W*/B* parameter arrays.
+- Fixed training HLS C++ generation by replacing literal `\n` source text with real generated newlines.
+- Fixed training HLS synthesis by disabling file-scope BIND_STORAGE pragmas and keeping explicit trace comments instead.
+- Reran both training designs successfully:
+  - `training_kv260_safe_fx16_6`
+  - `training_kv260_aggressive_fx8_3`
+- Both training designs now complete Vitis HLS csynth and emit top-level `deeplearn_csynth` reports.
+
+Current truth boundary:
+- Full Stage 2 HLS csynth coverage should now be available for all 20 paper-matrix designs.
+- Embedded URAM/training storage requests are represented in plans, reports, contracts, and generated trace comments.
+- Real URAM-resident embedded parameter/training state storage still requires a synthesis-safe runtime-loaded or local-buffer implementation.
+
+Final Sprint 27F paper artifact counts:
+- 20 total paper designs.
+- 20/20 prediction rows.
+- 20/20 Vitis HLS rows.
+- 15 HLS-only rows.
+- 4 Vivado bitstream/XSA-ready rows.
+- 1 Vivado board-capacity rejected row.
+- 4 Vivado power/report rows.
+- 0 missing manifests.
+- Regression tests updated to match the current regenerated paper matrix.
+- Final targeted validation: 14 tests passed.
+
+Next:
+- Rebuild Stage 2 prediction-vs-HLS and full-csynth subset tables.
+- Build HLS calibration summary over the full 20-design dataset.
+- Add regression tests for:
+  - no literal `\\n#pragma` in generated training HLS
+  - no file-scope BIND_STORAGE in training HLS
+  - training HLS artifact status reaches full csynth in smoke mode
+
+## Sprint 26H / 26H.1 closed — Estimator calibration against Vitis HLS csynth
+
+Status: closed.
+
+Final estimator label:
+`operator_structural_v4_inference_hls_sharing_training_problem_shared`
+
+Final validation:
+- 20/20 paper-matrix designs compile successfully.
+- 20/20 designs have Vitis HLS `full_csynth` reports.
+- Stage 2 prediction-vs-HLS table rebuilt.
+- Stage 2 HLS calibration summary rebuilt.
+- Boundary: results are Vitis HLS csynth comparisons, not Vivado implementation or real board-runtime measurements.
+
+Final V5 calibration summary:
+- all LUT mean APE: 30.80%
+- all DSP mean APE: 31.85%
+- all BRAM18 mean APE: 1.31%
+- inference BRAM18 mean APE: 0.00%
+- inference DSP mean APE: 30.75%
+- training DSP mean APE: 41.70%
+
+Implemented estimator fixes:
+- logical training resource overhead model,
+- training DSP saturation,
+- embedded small-parameter BRAM realization model,
+- top-level residual BRAM model,
+- inference precision/lane-aware HLS sharing model,
+- training isolation so inference-specific sharing does not damage training,
+- training keeps problem-size sharing.
+
+Known remaining estimator limitations:
+- high-parallel x8 LUT/DSP overestimation,
+- combined aggressive fx8 DSP overestimation,
+- training LUT underestimation,
+- aggressive training DSP still imperfect,
+- HLS latency/cycle parsing is still missing in the final table.
+
+Next sprint:
+Sprint 26I — Vivado implementation subset.
+
+## Sprint 27A started — Paper artifact index
+
+Status: first milestone complete.
+
+Generated tool:
+- `fpgai/devtools/build_paper_artifact_index.py`
+
+Generated paper-result artifacts:
+- `paper_results/index/paper_artifact_index.csv`
+- `paper_results/index/paper_artifact_index.json`
+- `paper_results/index/paper_artifact_index.md`
+
+Current paper artifact coverage:
+- 20/20 paper-matrix designs have prediction artifacts.
+- 20/20 paper-matrix designs have Vitis HLS csynth artifacts.
+- 5 Vivado implementation subset designs produced bitstream/XSA.
+- 1 Vivado implementation subset design was rejected by board capacity.
+- 14 designs are currently HLS-only.
+
+Current artifact-index summary:
+- `designs=20`
+- `hls_only=14`
+- `vivado_impl_bitstream_ready=5`
+- `vivado_board_capacity_rejected=1`
+
+Important classification:
+- `training_kv260_safe_fx16_6` is classified as `vivado_board_capacity_rejected`.
+- Vivado failure class: `vivado_impl_failed_board_capacity_lut_overutilized`.
+
+Next sprint:
+Sprint 27B — parse numeric HLS/Vivado resource, timing, and power reports into paper-ready CSV files.
+
+## Sprint 27B — Numeric paper-result extraction
+
+Status: functional extraction complete.
+
+Generated tool:
+- `fpgai/devtools/build_paper_numeric_results.py`
+
+Generated paper-result artifacts:
+- `paper_results/parsed/prediction_numeric_results.csv`
+- `paper_results/parsed/hls_numeric_results.csv`
+- `paper_results/parsed/vivado_numeric_results.csv`
+- `paper_results/parsed/paper_numeric_joined.csv`
+
+Validated coverage:
+- 20/20 designs have prediction LUT/DSP/BRAM18 numeric rows.
+- 20/20 designs have HLS numeric rows.
+- 20/20 designs have HLS worst-case latency cycles parsed.
+- 5/5 successful Vivado implementation designs have Vivado numeric utilization rows.
+- 5/5 successful Vivado implementation designs have Vivado estimated power rows.
+- 1/1 Vivado board-capacity rejection has parsed capacity-failure numbers.
+
+Important parsed failure:
+- `training_kv260_safe_fx16_6`
+  - failure class: `vivado_impl_failed_board_capacity_lut_overutilized`
+  - required Slice LUTs: 133729
+  - available Slice LUTs: 117120
+  - utilization: 114.18%
+
+Regression guard:
+- `tests/test_paper_result_artifacts.py` validates artifact-index and numeric-result coverage when generated paper results are present.
+
+Boundary:
+- Vivado power rows are Vivado estimated power, not measured board power.
+- Real board runtime, real board power, and real energy remain future validation sprints.
+
+Next sprint:
+Sprint 27C — paper tables generated from `paper_results/parsed/paper_numeric_joined.csv`.
+
+## Sprint 27C — Generated paper tables
+
+Status: functional table generation complete.
+
+Generated tool:
+- `fpgai/devtools/build_paper_tables.py`
+
+Generated paper-result tables:
+- `paper_results/tables/table_1_artifact_coverage.csv`
+- `paper_results/tables/table_1_artifact_coverage.md`
+- `paper_results/tables/table_2_prediction_vs_hls.csv`
+- `paper_results/tables/table_2_prediction_vs_hls.md`
+- `paper_results/tables/table_3_hls_vs_vivado.csv`
+- `paper_results/tables/table_3_hls_vs_vivado.md`
+- `paper_results/tables/table_4_knob_effects.csv`
+- `paper_results/tables/table_4_knob_effects.md`
+- `paper_results/tables/table_5_training_capacity.csv`
+- `paper_results/tables/table_5_training_capacity.md`
+
+Validated table coverage:
+- artifact coverage table rows: 8
+- prediction-vs-HLS table rows: 20
+- HLS-vs-Vivado table rows: 6
+- KV260 inference knob-effect table rows: 16
+- training-capacity table rows: 2
+
+Important paper boundaries:
+- Vivado power values are estimated power from Vivado reports, not measured board power.
+- Bitstream/XSA exists for 5 implementation subset designs.
+- `training_kv260_safe_fx16_6` is rejected by board capacity, not silently failed.
+- Full board runtime, measured power, and energy are not claimed yet.
+
+Next sprint:
+Sprint 27D — generated paper figures from the parsed numeric CSVs.
+
+## Sprint 27D — ArXiv comparison tables
+
+Status: pivoted from PDF figures to arXiv-ready comparison tables.
+
+Decision:
+- PDF figures are optional and not the main arXiv artifact.
+- The arXiv version should prioritize compact LaTeX tables for comparison, traceability, and honest claim support.
+
+Main outputs should be:
+- LaTeX tables (`.tex`)
+- Markdown previews (`.md`)
+- CSV source tables (`.csv`)
+
+Required arXiv comparison tables:
+- artifact coverage table
+- prediction-vs-HLS comparison table
+- HLS-vs-Vivado implementation table
+- design knob comparison table
+- training capacity table
+- claim-support / limitation table
+
+Boundary:
+- Vivado power values are estimated power from Vivado reports, not measured board power.
+- Real board runtime, measured board power, and measured energy are not claimed yet.
+
+Next sprint:
+Sprint 27D.1 — generate arXiv-ready LaTeX comparison tables.
+
+## Sprint 27F — Tiling and memory materialization audit
+
+Status: tiling fixed and validated; memory/URAM limitation remains open.
+
+Tiling fixes:
+- Regenerated `paper_design_matrix.json` before `generate_paper_configs`.
+- Fixed paper tiling matrix so small/medium/large remain distinct for the tiny paper MLP.
+- Patched Dense tiling planner aliases so generated `tm/tn/tk` values are accepted.
+- Dense mapping:
+  - `tm` -> Dense output tile
+  - `tk` / `tn` -> Dense input tile
+
+Validated tiling chain:
+- YAML/config tiling values:
+  - small: `1x1x1`
+  - medium: `2x2x2`
+  - large: `4x4x4`
+- Planner tiles:
+  - small layer 0: `{'in': 1, 'out': 1}`
+  - medium layer 0: `{'in': 2, 'out': 2}`
+  - large layer 0: `{'in': 4, 'out': 4}`
+- HLS source:
+  - small: `dense_out_in_tiled<8, 4, 1, 1, ...>`
+  - medium: `dense_out_in_tiled<8, 4, 2, 2, ...>`
+  - large: `dense_out_in_tiled<8, 4, 4, 4, ...>`
+- HLS source hashes differ across small/medium/large.
+- Vitis HLS passed for all three tiling designs.
+
+Measured HLS effect:
+- small: LUT 3899, FF 3567, DSP 14, BRAM18 5, latency 93
+- medium: LUT 4275, FF 3633, DSP 22, BRAM18 5, latency 86
+- large: LUT 4305, FF 3706, DSP 24, BRAM18 5, latency 81
+
+Claim boundary:
+- Tiling can now be claimed as materially emitted into HLS source and reflected in HLS reports for the paper MLP.
+- URAM is still not proven as real embedded-weight URAM storage. Existing BRAM/URAM memory comparison must remain limited or labeled as requested/not-inferred until runtime-loaded mutable URAM buffers are implemented.
+
+Final Sprint 27F paper artifact counts:
+- 20 total paper designs.
+- 20/20 prediction rows.
+- 20/20 Vitis HLS rows.
+- 15 HLS-only rows.
+- 4 Vivado bitstream/XSA-ready rows.
+- 1 Vivado board-capacity rejected row.
+- 4 Vivado power/report rows.
+- 0 missing manifests.
+- Regression tests updated to match the current regenerated paper matrix.
+- Final targeted validation: 14 tests passed.
+
+Next:
+- Add and keep `tests/test_tiling_materialization.py`.
+- Rebuild paper numeric artifacts/tables so tiling rows use the corrected HLS reports.
+- Continue Sprint 27G for real URAM storage or explicit unsupported/report-only classification.
+
+## Sprint 27F — Tiling materialization
+
+Status: closed for Dense/Gemm and Conv tiling.
+
+Dense/Gemm tiling validation:
+- Paper matrix tiling values were changed to remain distinct for the tiny MLP:
+  - small: `1x1x1`
+  - medium: `2x2x2`
+  - large: `4x4x4`
+- Regenerated `paper_design_matrix.json` before `generate_paper_configs`.
+- Patched planner Dense aliases so generated `tm/tn/tk` values are accepted.
+- Dense mapping:
+  - `tm` -> Dense output tile
+  - `tk` / `tn` -> Dense input tile
+
+Validated Dense chain:
+- small source: `dense_out_in_tiled<8, 4, 1, 1, ...>`
+- medium source: `dense_out_in_tiled<8, 4, 2, 2, ...>`
+- large source: `dense_out_in_tiled<8, 4, 4, 4, ...>`
+- Source hashes differ across small/medium/large.
+- Vitis HLS passed for all three designs.
+
+Measured Dense HLS effect:
+- small: LUT 3899, FF 3567, DSP 14, BRAM18 5, latency 93
+- medium: LUT 4275, FF 3633, DSP 22, BRAM18 5, latency 86
+- large: LUT 4305, FF 3706, DSP 24, BRAM18 5, latency 81
+
+Conv tiling fixes:
+- Patched Conv planner aliases so generated `tm/tn/tk` values are accepted.
+- Conv mapping:
+  - `tm` -> output-channel tile `oc`
+  - `tn` -> input-channel tile `ic`
+  - `tk` -> spatial tiles `oh` and `ow`
+- Added regression tests for generated `tm/tn/tk` Conv aliases and layer-specific overrides.
+- Existing Conv tiling codegen tests pass.
+
+Validated Conv chain:
+- `configs/suite/cnn_no_pool.yml` compiled successfully.
+- `CONV_COMPILE_RETURN=0`
+- HLS ran and passed.
+- Generated HLS source contains:
+  - `// FPGAI real convolution tiling helper.`
+  - `conv2d_tiled<28, 28, 1, 28, 28, 4, 3, 1, 1, 8, 8, 8, 2, ...>`
+  - `conv2d_tiled<28, 28, 4, 28, 28, 4, 3, 1, 1, 8, 8, 8, 2, ...>`
+- Generated type comments record:
+  - `planner_tile: {'oh': 8, 'ow': 8, 'oc': 8, 'ic': 2}`
+- Hardware knob contract reports `optimization.tiling.conv` as `applied`.
+
+Measured Conv HLS result:
+- LUT 93849
+- FF 159193
+- DSP 3462
+- BRAM18 39
+- URAM 0
+- WorstLatency 141221
+
+Validated tests:
+- `PY_COMPILE_PLANNER_RETURN=0`
+- `PY_COMPILE_TEST_RETURN=0`
+- `PYTEST_TILING_RETURN=0`
+- `PYTEST_CONV_TILING_RETURN=0`
+- Latest targeted result: 9 tests passed.
+
+Claim boundary:
+- Dense/Gemm tiling and Conv tiling may now be claimed as materially emitted into generated HLS source and validated by Vitis HLS reports.
+- URAM remains open: embedded initialized weights are not yet proven to infer real URAM storage.
+
+Final Sprint 27F paper artifact counts:
+- 20 total paper designs.
+- 20/20 prediction rows.
+- 20/20 Vitis HLS rows.
+- 15 HLS-only rows.
+- 4 Vivado bitstream/XSA-ready rows.
+- 1 Vivado board-capacity rejected row.
+- 4 Vivado power/report rows.
+- 0 missing manifests.
+- Regression tests updated to match the current regenerated paper matrix.
+- Final targeted validation: 14 tests passed.
+
+Next:
+- Rebuild paper numeric artifacts/tables so tiling rows use the corrected Dense HLS reports.
+- Continue Sprint 27G for real URAM storage or explicit unsupported/report-only classification.
+

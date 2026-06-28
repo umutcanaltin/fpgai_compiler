@@ -1,0 +1,18 @@
+\begin{table}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{llllllllllllll}
+\hline
+design & paper\_status & hls\_lut & vivado\_lut & vivado\_over\_hls\_lut & hls\_dsp & vivado\_dsp & vivado\_over\_hls\_dsp & hls\_bram18 & vivado\_bram18 & vivado\_over\_hls\_bram18 & wns\_ns & vivado\_power\_w\_est & failure\_class \\
+\hline
+kv260\_baseline\_safe\_fx16 & vivado\_impl\_bitstream\_ready & 5991 & 6565.0 & 1.096 & 10 & 7.0 & 0.700 & 7.0 & 7.0 & 1.000 & 2.462 & 2.768 &  \\
+kv260\_precision\_fx8\_3 & vivado\_impl\_bitstream\_ready & 4119 & 4691.0 & 1.139 & 8 & 8.0 & 1.000 & 5.0 & 5.0 & 1.000 & 3.991 & 2.749 &  \\
+kv260\_parallel\_x8 & vivado\_impl\_bitstream\_ready & 3584 & 5523.0 & 1.541 & 35 & 34.0 & 0.971 & 1.0 & 1.0 & 1.000 & 2.901 & 2.775 &  \\
+kv260\_memory\_uram & vivado\_impl\_bitstream\_ready & 5056 & 5870.0 & 1.161 & 24 & 23.0 & 0.958 & 5.0 & 5.0 & 1.000 & 2.243 & 2.774 &  \\
+training\_kv260\_safe\_fx16\_6 & vivado\_board\_capacity\_rejected & 166965 &  &  & 815 &  &  & 77.0 &  &  &  &  & vivado\_impl\_failed\_board\_capacity\_lut\_overutilized \\
+\hline
+\end{tabular}
+\caption{HLS vs Vivado implementation}
+\label{tab:table\_3\_hls\_vs\_vivado}
+\end{table}

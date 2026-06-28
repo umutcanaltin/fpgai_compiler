@@ -2340,11 +2340,13 @@ def _fpgai_insert_training_storage_bindings(source: str, compile_plan) -> str:
             declaration = match.group(1)
             variable = match.group(2)
             pragma = (
-                f"\\n#pragma HLS BIND_STORAGE variable={variable} "
-                f"type=ram_1p impl={impl}"
-                f"\\n// FPGAI training storage binding: {role} {variable} -> {impl.upper()}"
+                f"\n// FPGAI training storage binding requested: "
+                f"{role} {variable} -> {impl.upper()} "
+                "(file-scope BIND_STORAGE disabled because Vitis HLS only "
+                "allows this pragma in function scope; real training BRAM/URAM "
+                "placement requires synthesis-safe local/runtime buffers)."
             )
-            if f"variable={variable} type=ram_1p impl=" in updated:
+            if f"FPGAI training storage binding requested: {role} {variable}" in updated:
                 return declaration
             return declaration + pragma
 

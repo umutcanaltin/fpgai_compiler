@@ -701,15 +701,13 @@ def _emit_weight_storage_pragmas(
         f"    // Weight cache placement: "
         f"{_placement_comment(memory_info)}"
     )
-    _emit_storage_pragma(
-        lines,
-        f"W{parameter_index}",
-        memory_info,
-    )
-    _emit_storage_pragma(
-        lines,
-        f"B{parameter_index}",
-        memory_info,
+    lines.append(
+        "    // FPGAI storage binding requested for embedded parameter "
+        f"W{parameter_index}/B{parameter_index}; "
+        "top-level BIND_STORAGE is disabled for initialized W/B arrays "
+        "because Vitis HLS rejects initialized global/static parameter "
+        "arrays bound this way. Use runtime-loaded URAM buffers for real "
+        "URAM parameter storage."
     )
 
 
