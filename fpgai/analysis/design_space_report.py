@@ -740,6 +740,10 @@ _FPGAI_DSE_MATERIALIZED_KNOBS = [
     "data_movement.ps_pl.weights.compression",
     "data_movement.ps_pl.aux",
     "data_movement.pl_ps.output",
+    "data_movement.input.load",
+    "data_movement.output.store",
+    "data_movement.weights.load.interface",
+    "data_movement.weights.store.interface",
     "memory.storage.weights",
 ]
 

@@ -2234,6 +2234,56 @@ class Compiler:
             note="fit_policy is enforced through fit_policy_gate. Main compile records the gate; the Vivado bridge flow must honor blocked=true before implementation/bitstream.",
         )
 
+        # Normalized PS/PL data_movement schema reporting.
+        # Legacy ps_pl/pl_ps rows remain supported; these rows expose the
+        # normalized schema when it is present in YAML.
+        normalized_data_movement_rows = [
+            (
+                "data_movement.input.load",
+                "data_movement.input.load",
+                [
+                    "communication planner input edge",
+                    "PS-to-PL load interface selection",
+                    "runtime/HLS input transfer metadata",
+                ],
+            ),
+            (
+                "data_movement.output.store",
+                "data_movement.output.store",
+                [
+                    "communication planner output edge",
+                    "PL-to-PS store interface selection",
+                    "runtime/HLS output transfer metadata",
+                ],
+            ),
+            (
+                "data_movement.weights.load.interface",
+                "data_movement.weights.load.interface",
+                [
+                    "compiler weight-mode resolver",
+                    "HLS weight import/storage path selection",
+                    "runtime package weight payload requirement",
+                ],
+            ),
+            (
+                "data_movement.weights.store.interface",
+                "data_movement.weights.store.interface",
+                [
+                    "weight export/store schema",
+                    "training/runtime weight movement metadata when enabled",
+                ],
+            ),
+        ]
+        for report_path, value_path, applied_to in normalized_data_movement_rows:
+            if self._raw_has_path(raw, value_path):
+                add(
+                    report_path,
+                    self._raw_get_path(raw, value_path, None),
+                    applied_to=applied_to,
+                    status="applied",
+                    note="Normalized data_movement schema path. Legacy ps_pl/pl_ps paths remain supported.",
+                )
+
         payload = {
             "format": "fpgai.hardware_knob_contract.v1",
             "precedence": [

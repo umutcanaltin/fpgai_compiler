@@ -1073,3 +1073,39 @@ Next:
   - runtime package effect
   - Vivado/report effect when available
   - status: applied / report_only / estimate_only / missing / unsupported
+
+## Sprint 27H.1 — normalized schema report cleanup
+
+Implemented normalized data_movement reporting for hardware knob contracts and design-space materialization metadata.
+
+Validated behavior:
+- New-schema DDR compile returns 0.
+- Hardware knob contract now reports normalized data movement rows:
+  - data_movement.input.load
+  - data_movement.output.store
+  - data_movement.weights.load.interface
+  - data_movement.weights.store.interface
+- Contract rows are marked applied when the normalized YAML path is present.
+- Hardware knob contract increased from 18 to 22 rows for the new-schema DDR config.
+- Design-space materialization metadata includes both legacy and normalized data_movement paths for backward compatibility.
+- Normalized data_movement paths appear in:
+  - manifest.json
+  - estimate_vs_hls/results.json
+  - design_space/results.json
+  - reports/hardware_knob_contract.json
+  - reports/hardware_knob_contract.md
+
+Validation:
+- kv260_memory_ddr_new_schema compile returned 0.
+- HLS passed.
+- Runtime package created.
+- Runtime weights remain weights_mode=ddr, required=true, present=true.
+- Focused runtime/memory tests pass.
+
+Claim boundary:
+- Safe to claim reports now expose normalized schema paths in the hardware knob contract.
+- Safe to claim design-space materialization metadata knows both legacy and normalized data_movement paths.
+- Still do not claim Vivado implementation or board runtime for this matrix unless those artifacts are generated.
+
+Next:
+- Generate the full knob/effect traceability table from current run artifacts.
