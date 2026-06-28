@@ -1769,12 +1769,20 @@ def _fpgai_runtime_load_block(graph, *, mode: str) -> str:
             ]
         )
     else:
-        lines.extend(
-            [
-                "    // Runtime DDR weight load.",
-                "    int fpgai_weight_offset = 0;",
-            ]
-        )
+        if mode == "uram":
+            lines.extend(
+                [
+                    "    // Runtime-loaded URAM weight storage.",
+                    "    // Weights are loaded through weights_mem, then stored in mutable URAM-bound arrays.",
+                ]
+            )
+            for parameter_index, precision_tag, weight_count, bias_count, op_type, op_name in specs:
+                lines.append(f"    // {op_type} {op_name}: bind W{parameter_index}[{weight_count}], B{parameter_index}[{bias_count}] to URAM")
+                lines.append(f"#pragma HLS BIND_STORAGE variable=W{parameter_index} type=ram_2p impl=uram")
+                lines.append(f"#pragma HLS BIND_STORAGE variable=B{parameter_index} type=ram_2p impl=uram")
+        else:
+            lines.append("    // Runtime DDR weight load.")
+        lines.append("    int fpgai_weight_offset = 0;")
         for parameter_index, precision_tag, weight_count, bias_count, op_type, op_name in specs:
             lines.append(f"    // {op_type} {op_name}: W{parameter_index}[{weight_count}], B{parameter_index}[{bias_count}]")
             lines.append(
@@ -1815,7 +1823,7 @@ def _fpgai_insert_runtime_load_block(source: str, graph, *, mode: str) -> str:
 
 def emit_top_cpp(*args, **kwargs):
     requested_mode = _fpgai_runtime_weight_mode(kwargs.get("weights_mode", "embedded"))
-    if requested_mode not in {"stream", "streamed", "ddr", "dma_ddr"}:
+    if requested_mode not in {"stream", "streamed", "ddr", "dma_ddr", "uram"}:
         return _fpgai_runtime_weight_previous_emit_top_cpp(*args, **kwargs)
 
     graph, top_name = _fpgai_runtime_recover_graph_top(args, kwargs)

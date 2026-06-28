@@ -367,6 +367,7 @@ def emit_params_h(
         "streamed",
         "ddr",
         "dma_ddr",
+        "uram",
     }:
         raise ValueError(
             f"Unsupported weights mode: {weights_mode!r}"
@@ -377,6 +378,7 @@ def emit_params_h(
         "streamed",
         "ddr",
         "dma_ddr",
+        "uram",
     }
 
     if mutable_runtime_parameters:

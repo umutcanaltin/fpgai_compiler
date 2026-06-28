@@ -90,3 +90,70 @@ def test_manual_bram_weight_storage_drives_memory_plan_region():
     }
 
     assert weight_regions == {"BRAM"}
+
+
+def test_memory_storage_uram_resolves_to_runtime_uram_mode() -> None:
+    from fpgai.engine.planner import _choose_weight_mode
+
+    raw = {
+        "memory": {"storage": {"weights": "uram"}},
+        "data_movement": {"ps_pl": {"weights": {"mode": "embedded"}}},
+    }
+
+    assert _choose_weight_mode(None, raw) == "uram"
+
+
+def test_memory_storage_ddr_resolves_to_runtime_ddr_mode() -> None:
+    from fpgai.engine.planner import _choose_weight_mode
+
+    raw = {
+        "memory": {"storage": {"weights": "ddr"}},
+        "data_movement": {"ps_pl": {"weights": {"mode": "embedded"}}},
+    }
+
+    assert _choose_weight_mode(None, raw) == "ddr"
+
+
+def test_memory_storage_bram_keeps_embedded_mode() -> None:
+    from fpgai.engine.planner import _choose_weight_mode
+
+    raw = {
+        "memory": {"storage": {"weights": "bram"}},
+        "data_movement": {"ps_pl": {"weights": {"mode": "embedded"}}},
+    }
+
+    assert _choose_weight_mode(None, raw) == "embedded"
+
+
+def test_generated_uram_memory_design_has_real_uram_source_if_present() -> None:
+    from pathlib import Path
+
+    run = Path("paper_experiments/full_pipeline_gate/sprint26_paper_matrix/runs/kv260_memory_uram")
+    src = run / "hls/src/deeplearn.cpp"
+    if not src.exists():
+        return
+
+    text = src.read_text()
+    assert "Requested weights mode: uram" in text
+    assert "Runtime-loaded URAM weight storage" in text
+    assert "#pragma HLS INTERFACE m_axi port=weights_mem" in text
+    assert "#pragma HLS BIND_STORAGE variable=W0 type=ram_2p impl=uram" in text
+    assert "#pragma HLS BIND_STORAGE variable=W1 type=ram_2p impl=uram" in text
+
+
+def test_generated_uram_memory_design_has_nonzero_hls_uram_if_present() -> None:
+    from pathlib import Path
+    import xml.etree.ElementTree as ET
+
+    p = Path(
+        "paper_experiments/full_pipeline_gate/sprint26_paper_matrix/runs/"
+        "kv260_memory_uram/hls/fpgai_hls_proj/sol1/syn/report/deeplearn_csynth.xml"
+    )
+    if not p.exists():
+        return
+
+    root = ET.parse(p).getroot()
+    elem = root.find("AreaEstimates/Resources/URAM")
+    assert elem is not None
+    assert elem.text is not None
+    assert int(float(elem.text.strip())) > 0

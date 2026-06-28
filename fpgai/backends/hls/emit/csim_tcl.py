@@ -12,7 +12,7 @@ def emit_csim_tcl(
     intermediate_dump: bool = False,
 ) -> str:
     normalized_mode = str(weights_mode).strip().lower()
-    runtime_mode = normalized_mode in {"stream", "streamed", "ddr", "dma_ddr"}
+    runtime_mode = normalized_mode in {"stream", "streamed", "ddr", "dma_ddr", "uram"}
 
     extra_cflags = ""
     if intermediate_dump:

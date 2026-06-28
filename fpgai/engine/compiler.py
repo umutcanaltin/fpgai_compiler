@@ -71,6 +71,7 @@ def _is_runtime_weight_mode(weights_mode: str) -> bool:
         "streamed",
         "ddr",
         "dma_ddr",
+        "uram",
     }
 
 
@@ -116,7 +117,7 @@ class Compiler:
         enable_precision_sweep = bool(_cfg_get(raw, "analysis.precision_sweep.enabled", False))
         enable_design_space = bool(_cfg_get(raw, "analysis.design_space.enabled", False))
         act_kind, act_alpha, act_except_last = self._read_activation_insert_cfg(raw)
-        weights_mode = str(_cfg_get(raw, "data_movement.ps_pl.weights.mode", "embedded")).lower()
+        weights_mode = self._resolve_hls_weights_mode(raw)
 
         g = self._import_and_prepare_graph(
             act_kind=act_kind,
@@ -728,6 +729,58 @@ class Compiler:
             " cyclic factor=",
             f" {mode} factor=",
         )
+
+    def _resolve_hls_weights_mode(self, raw: Dict[str, Any]) -> str:
+        """Resolve model-weight storage into the legacy HLS weight mode.
+
+        memory.storage.weights is model tensor placement.
+        data_movement.ps_pl.weights.mode is a legacy transport/mode knob.
+
+        BRAM -> embedded constants/local arrays.
+        URAM -> runtime-loaded local URAM cache.
+        DDR  -> runtime/external AXI weight memory.
+        """
+        storage = str(
+            _cfg_get(
+                raw,
+                "memory.storage.weights",
+                _cfg_get(raw, "memory.weight_storage", ""),
+            )
+            or ""
+        ).strip().lower().replace("-", "_")
+
+        storage_aliases = {
+            "embedded": "bram",
+            "on_chip": "bram",
+            "onchip": "bram",
+            "block": "bram",
+            "block_ram": "bram",
+            "bram": "bram",
+            "uram": "uram",
+            "ultra": "uram",
+            "ultra_ram": "uram",
+            "ddr": "ddr",
+            "external": "ddr",
+            "external_ddr": "ddr",
+            "dma_ddr": "ddr",
+        }
+        storage = storage_aliases.get(storage, "")
+
+        legacy_mode = str(
+            _cfg_get(raw, "data_movement.ps_pl.weights.mode", "embedded") or "embedded"
+        ).strip().lower().replace("-", "_")
+
+        if storage == "uram":
+            return "uram"
+        if storage == "ddr":
+            return "ddr"
+
+        if legacy_mode in {"stream", "streamed"}:
+            return "stream"
+        if legacy_mode in {"ddr", "dma_ddr", "external", "external_ddr"}:
+            return "ddr"
+        return "embedded"
+
 
     def _hls_weight_storage_impl(self, memory_plan=None) -> str:
         raw = self.cfg.raw

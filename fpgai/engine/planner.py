@@ -477,21 +477,32 @@ def _override_policy_from_cfg(cfg, base: Policy) -> Policy:
 
 def _choose_weight_mode(desc: LayerDescriptor, raw_cfg: Dict[str, Any]) -> str:
     del desc
-    requested = str(
+
+    storage = str(
         _cfg_get(
             raw_cfg,
-            "data_movement.ps_pl.weights.mode",
-            _cfg_get(raw_cfg, "memory.weight_storage", "embedded"),
+            "memory.storage.weights",
+            _cfg_get(raw_cfg, "memory.weight_storage", ""),
         )
+        or ""
+    ).lower().replace("-", "_")
+
+    if storage in ("uram", "ultra", "ultra_ram"):
+        return "uram"
+    if storage in ("ddr", "dma_ddr", "external", "external_ddr"):
+        return "ddr"
+
+    requested = str(
+        _cfg_get(raw_cfg, "data_movement.ps_pl.weights.mode", "embedded")
     ).lower().replace("-", "_")
     if requested in ("dma_ddr", "external", "external_ddr"):
         requested = "ddr"
-    if requested in ("stream", "streaming"):
+    if requested in ("stream", "streaming", "streamed"):
         requested = "stream"
-    if requested in ("embedded", "on_chip", "onchip", "bram", "uram"):
+    if requested in ("embedded", "on_chip", "onchip", "bram"):
         requested = "embedded"
 
-    if requested in ("stream", "ddr"):
+    if requested in ("stream", "ddr", "uram"):
         return requested
 
     return "embedded"
@@ -500,7 +511,7 @@ def _choose_weight_mode(desc: LayerDescriptor, raw_cfg: Dict[str, Any]) -> str:
 def _buffering_for(weights_mode: str, policy: Policy) -> str:
     if not policy.allow_double_buffer:
         return "single"
-    return "double" if weights_mode in ("stream", "ddr") else "single"
+    return "double" if weights_mode in ("stream", "ddr", "uram") else "single"
 
 
 

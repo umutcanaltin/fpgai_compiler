@@ -600,6 +600,7 @@ def emit_params_cpp(
         "streamed",
         "ddr",
         "dma_ddr",
+        "uram",
     }:
         raise ValueError(
             f"Unsupported weights mode: {weights_mode!r}"
@@ -610,6 +611,7 @@ def emit_params_cpp(
         "streamed",
         "ddr",
         "dma_ddr",
+        "uram",
     }
 
     lines: List[str] = [

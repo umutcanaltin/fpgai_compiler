@@ -220,7 +220,7 @@ int main(int argc, char** argv) {{
     return 0;
 }}
 """
-    elif mode in {"ddr", "dma_ddr"}:
+    elif mode in {"ddr", "dma_ddr", "uram"}:
         tb_text = f"""
 #include <cstdio>
 #include <cstdlib>
