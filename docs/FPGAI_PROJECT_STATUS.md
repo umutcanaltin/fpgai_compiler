@@ -1109,3 +1109,55 @@ Claim boundary:
 
 Next:
 - Generate the full knob/effect traceability table from current run artifacts.
+
+## Sprint 27H.2 — run-level knob/effect traceability table
+
+Generated and committed run-level artifact traceability tables:
+- paper_results/knob_effect_traceability.csv
+- paper_results/knob_effect_traceability.md
+
+Validated scope:
+- 22 paper-matrix runs summarized.
+- 22/22 have hardware knob contracts.
+- 22/22 have generated HLS source markers.
+- 22/22 have Vitis HLS csynth reports.
+- 4/22 have Vivado bridge/bitstream/project artifacts.
+- 0/22 are claimed as real-board runtime measurements.
+
+Key validated scenarios:
+- BRAM model weights:
+  - runtime_weights_mode=embedded
+  - runtime payload not required
+  - HLS URAM=0
+- DDR model weights:
+  - runtime_weights_mode=ddr
+  - runtime payload required/present
+  - total_words=46
+  - HLS uses weights_mem m_axi
+  - HLS URAM=0
+- URAM model weights:
+  - runtime_weights_mode=uram
+  - runtime payload required/present
+  - total_words=46
+  - HLS uses weights_mem m_axi and URAM bind markers
+  - HLS URAM=18
+- Normalized schema DDR:
+  - normalized_schema_reported=true
+  - runtime_weights_mode=ddr
+  - HLS/runtime behavior matches DDR legacy config
+
+Claim boundary:
+- Safe to claim generated HLS source and Vitis HLS csynth effects for all 22 rows.
+- Safe to claim Vivado artifacts only for the 4 rows marked Vivado=true in the traceability table.
+- Do not claim real-board execution, measured power, measured energy, or board accuracy from this table.
+
+Next:
+- Generate per-knob traceability table:
+  - knob
+  - values tested
+  - prediction effect
+  - generated HLS source effect
+  - Vitis HLS actual effect
+  - runtime package effect
+  - Vivado effect
+  - claim status
