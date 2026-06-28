@@ -1161,3 +1161,47 @@ Next:
   - runtime package effect
   - Vivado effect
   - claim status
+
+## Sprint 27H.4 — YAML to generated HLS C++ traceability audit
+
+Generated YAML-to-HLS-C++ traceability artifacts:
+- paper_results/yaml_to_hls_cpp_traceability.csv
+- paper_results/yaml_to_hls_cpp_traceability.md
+
+Validated scope:
+- 198 traceability records generated.
+- 0 records marked check_needed.
+- Every checked major knob is classified as applied, applied_or_not_applicable, not_required, or report_only_or_backend.
+
+Validated logical effects:
+- Pipeline knobs:
+  - optimization.pipeline.ii maps to generated PIPELINE pragmas.
+  - HLS csynth latency/resource results are recorded per run.
+- Parallel knobs:
+  - optimization.parallel.unroll_factor maps to generated UNROLL pragmas.
+  - optimization.parallel.partition_factor maps to generated ARRAY_PARTITION pragmas.
+  - HLS csynth resource/latency differences are recorded per run.
+- Tiling knobs:
+  - optimization.tiling.dense maps to dense_out_in_tiled markers.
+  - optimization.tiling.conv is applied for Conv/training rows and marked not applicable for non-Conv rows.
+- Memory storage:
+  - BRAM/embedded rows do not expose external weights_mem and do not allocate URAM.
+  - DDR rows expose weights_mem and m_axi port=weights_mem, and HLS URAM remains 0.
+  - URAM rows expose weights_mem, impl=uram, and HLS URAM is greater than 0.
+- Data movement:
+  - AXIS/AXI interface markers are present.
+  - Normalized DDR schema maps to the same generated DDR HLS path as legacy DDR.
+- Precision:
+  - Parameter artifacts are present.
+  - Further precision-specific comparison should inspect generated typedef/parameter widths directly across fx8/fx12/fx16 rows.
+- Board:
+  - targets.platform.board is treated as report/backend target metadata unless Vivado/bitstream artifacts are generated.
+
+Claim boundary:
+- Safe to claim YAML knobs now have artifact-level traceability to generated HLS C++ markers and/or explicit report/backend-only boundaries.
+- Safe to claim memory BRAM/DDR/URAM choices are logically different in generated C++ and HLS csynth reports.
+- Still do not claim real-board execution, measured power, measured energy, or board accuracy.
+
+Next:
+- Add a precision-width specific audit to compare generated typedef/parameter widths across fx8/fx12/fx16 rows.
+- Then move traceability generation into the existing reporting library so the tables are reproducible from the CLI.
