@@ -380,6 +380,40 @@ class Compiler:
             memory_plan=memory_plan,
             communication_plan=communication_plan,
         )
+
+        # Training kernels mutate weights during optimizer/update. The inference
+        # backend supports runtime DDR/URAM weights through weights_mem/m_axi and
+        # runtime-load helpers, but the generated training top does not yet expose
+        # or update an external/runtime weight buffer. Reject this combination
+        # instead of silently generating a runtime package that the training HLS
+        # top does not consume.
+        training_weight_storage = str(getattr(training_plan, "weight_storage", "") or "").strip().lower()
+        training_weights_mode = str(getattr(training_plan, "weights_mode", "") or "").strip().lower()
+        hls_weights_mode = str(weights_mode or "").strip().lower()
+        unsupported_training_weight_modes = {
+            "ddr",
+            "dma_ddr",
+            "uram",
+            "runtime",
+            "runtime_external",
+            "external",
+            "external_ddr",
+        }
+        if (
+            training_weight_storage in unsupported_training_weight_modes
+            or training_weights_mode in unsupported_training_weight_modes
+            or hls_weights_mode in unsupported_training_weight_modes
+        ):
+            raise ValueError(
+                "Training runtime/external weight storage is not implemented in generated HLS yet: "
+                f"weight_storage={training_weight_storage!r}, "
+                f"weights_mode={training_weights_mode!r}, "
+                f"hls_weights_mode={hls_weights_mode!r}. "
+                "Use embedded/bram training weights for now, or implement the training "
+                "weights_mem/m_axi load-update-store backend before enabling DDR/URAM "
+                "training weight storage."
+            )
+
         emit_training_artifacts(out_dir, training_plan)
 
         training_estimate_result = None

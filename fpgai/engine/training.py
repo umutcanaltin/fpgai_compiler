@@ -173,10 +173,14 @@ def _resolve_storage_policy(raw_cfg: Dict[str, Any], compile_plan=None, memory_p
     weights_mode = str(
         _cfg_get(
             raw_cfg,
-            "data_movement.ps_pl.weights.mode",
-            notes.get("global_weights_mode_requested", "embedded"),
+            "data_movement.weights.load.interface",
+            _cfg_get(
+                raw_cfg,
+                "data_movement.ps_pl.weights.mode",
+                notes.get("global_weights_mode_requested", "embedded"),
+            ),
         )
-    ).lower()
+    ).lower().replace("-", "_")
 
     weight_pref = notes.get("weight_region_preference") or ["BRAM"]
     act_pref = notes.get("activation_region_preference") or ["BRAM"]
