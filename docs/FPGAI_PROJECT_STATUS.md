@@ -1205,3 +1205,35 @@ Claim boundary:
 Next:
 - Add a precision-width specific audit to compare generated typedef/parameter widths across fx8/fx12/fx16 rows.
 - Then move traceability generation into the existing reporting library so the tables are reproducible from the CLI.
+
+## Sprint 28B/28C — Memory semantics cleanup
+
+Problem:
+- The Sprint 27J validation passed generated-code checks, but the memory rows were not safe to describe as a pure BRAM-vs-DDR-vs-URAM comparison.
+- The current DDR implementation loads runtime weights from `weights_mem` into full local W/B arrays before compute.
+- Therefore current DDR is `ddr_preload_full`, not scalable `ddr_tiled`.
+
+Implemented:
+- Added memory semantics classifier:
+  - `embedded_constants`
+  - `ddr_preload_full`
+  - `uram_preload_full`
+  - `ddr_tiled`
+  - `invalid_or_ambiguous`
+- Added tests for generated Sprint 27J memory rows.
+- Generated paper-safe memory and precision tables under:
+  - `paper_results/sprint28c/memory_semantics_table.md`
+  - `paper_results/sprint28c/precision_effect_table.md`
+  - `paper_results/sprint28c/paper_claim_boundary.md`
+
+Validated classifications:
+- `kv260_memory_bram`: `embedded_constants`
+- `kv260_memory_ddr`: `ddr_preload_full`
+- `kv260_memory_ddr_new_schema`: `ddr_preload_full`
+- `kv260_memory_uram`: `uram_preload_full`
+- precision rows: `embedded_constants`
+
+Claim boundary:
+- Safe: embedded constants, DDR preload-full, URAM preload-full, generated HLS, runtime packages, and Vitis HLS reports.
+- Not safe: scalable DDR-resident/tiled large-network execution.
+- Not safe: pure BRAM-vs-DDR-vs-URAM storage-only comparison.
