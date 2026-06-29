@@ -2,7 +2,7 @@
 
 ## Problem found in Sprint 28A
 
-The current paper-validation matrix compiles and passes structural artifact checks, but memory results are not yet architecturally clean enough for strong paper claims.
+The Sprint 27J paper-validation matrix compiles and passes structural artifact checks, but the memory rows are not yet architecturally clean enough for strong paper claims.
 
 Current inference memory modes are:
 
@@ -12,7 +12,7 @@ Current inference memory modes are:
 
 The current DDR path is not a scalable large-network DDR-resident design because generated HLS loads the full model weights from `weights_mem` into local W/B arrays before compute.
 
-Therefore current results must not be presented as a pure BRAM-vs-DDR-vs-URAM storage comparison.
+Therefore current results must not be presented as a pure BRAM-vs-DDR-vs-URAM storage-only comparison.
 
 ## Required terminology
 
@@ -64,11 +64,11 @@ Use these terms instead of ambiguous `ddr`:
 - Local storage scales with tile size, not model size.
 - This is the required mode for large-network external DDR execution.
 
-## Paper claim boundary
+## Current paper claim boundary
 
 Safe current claim:
 
-FPGAI materializes embedded weights, DDR-preloaded weights, and URAM-cached weights for inference, and validates generated HLS source, runtime packages, and Vitis HLS reports.
+FPGAI materializes embedded weights, DDR-preloaded weights, and URAM-cached/preloaded weights for inference, and validates generated HLS source, runtime packages, and Vitis HLS reports.
 
 Not safe current claim:
 
@@ -81,22 +81,22 @@ FPGAI already supports scalable DDR-resident large-network weight execution.
    - `bram_local`
    - `uram_local`
    - `ddr_preload_full`
+   - `uram_preload_full`
    - `ddr_tiled`
    - `invalid_or_ambiguous`
 
 2. Rename/report current DDR mode as `ddr_preload_full`.
 
-3. Implement `ddr_tiled_weights` for Dense first:
+3. Implement `ddr_tiled_weights` later for Dense first:
    - remove full local W/B arrays for DDR-tiled mode
    - load only `weight_tile` from `weights_mem`
    - compute using tile buffers
    - keep activation storage independently controlled
 
 4. Add tests proving:
-   - `ddr_tiled` has `weights_mem` and `m_axi`
-   - `ddr_tiled` has tile buffers
-   - `ddr_tiled` has no full local W/B arrays
-   - `uram_weights` has URAM bind for W/B buffers
-   - activation BRAM is separate from weight storage
+   - current DDR inference is classified as `ddr_preload_full`
+   - current URAM inference is classified as `uram_preload_full`
+   - embedded/BRAM rows are not mislabeled as scalable DDR
+   - training DDR/URAM remains rejected until implemented
 
-5. Rerun paper memory experiments on a larger model where memory behavior is visible.
+5. Rerun paper memory experiments on a larger model only after `ddr_tiled_weights` exists.
