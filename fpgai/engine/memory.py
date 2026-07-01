@@ -74,8 +74,7 @@ def _normalise_requested_weight_storage(notes: Dict[str, Any]) -> str | None:
         "external": "ddr",
         "external_ddr": "ddr",
         "dma_ddr": "ddr",
-        "stream": "stream",
-        "streaming": "stream",
+        # stream is a transport/interface, not a public storage location.
     }
     return aliases.get(value)
 
@@ -94,7 +93,7 @@ def _pick_weight_region(
         return "URAM"
     if requested_storage == "bram":
         return "BRAM"
-    if requested_storage in {"ddr", "stream"}:
+    if requested_storage == "ddr":
         return "DDR"
 
     if layer_weight_mode == "embedded":
@@ -110,6 +109,12 @@ def _pick_weight_region(
 
 
 def _pick_activation_region(size_bytes: int, policy_name: str, notes: Dict[str, Any]) -> str:
+    requested = str(notes.get("resolved_activation_storage", notes.get("requested_activation_storage", "")) or "").strip().lower().replace("-", "_")
+    if requested in {"bram", "block", "block_ram"}:
+        return "BRAM"
+    if requested in {"uram", "ultra", "ultra_ram"}:
+        return "URAM"
+
     order = _region_order_for_activation(policy_name, notes)
 
     # latency-first tries to keep more on chip
@@ -293,5 +298,21 @@ def make_memory_plan(g, descriptors: List[LayerDescriptor], compile_plan: Compil
             "allow_double_buffer": allow_double_buffer,
             "weight_region_preference": cnotes.get("weight_region_preference"),
             "activation_region_preference": cnotes.get("activation_region_preference"),
+            "requested_activation_storage": cnotes.get("requested_activation_storage"),
+            "resolved_activation_storage": cnotes.get("resolved_activation_storage"),
+            "activation_storage_semantics": cnotes.get("activation_storage_semantics"),
+            "activation_local_buffers": cnotes.get("activation_local_buffers"),
+            "requested_weight_storage": cnotes.get("requested_weight_storage", cnotes.get("weight_storage")),
+            "resolved_weight_storage": cnotes.get("resolved_weight_storage"),
+            "resolved_weight_semantics": cnotes.get("resolved_weight_semantics"),
+            "memory_semantics_mode": cnotes.get("memory_semantics_mode"),
+            "weight_import_interface": cnotes.get("weight_import_interface"),
+            "weight_import_transport": cnotes.get("weight_import_transport"),
+            "weight_import_policy": cnotes.get("weight_import_policy"),
+            "weight_export_interface": cnotes.get("weight_export_interface"),
+            "weight_export_transport": cnotes.get("weight_export_transport"),
+            "weight_export_policy": cnotes.get("weight_export_policy"),
+            "runtime_weight_payload_required": cnotes.get("runtime_weight_payload_required"),
+            "reload_before_each_compute": cnotes.get("reload_before_each_compute"),
         },
     )

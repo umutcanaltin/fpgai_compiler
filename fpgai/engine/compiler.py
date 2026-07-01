@@ -21,11 +21,30 @@ from fpgai.engine.partition import single_device_plan
 from fpgai.engine.layerwise_precision import resolve_layerwise_precision
 from fpgai.engine.training import build_training_plan, emit_training_artifacts
 from fpgai.analysis.model_inspection import inspect_config, write_model_inspection_report
+from fpgai.analysis.model_compatibility import emit_model_compatibility_reports
 from fpgai.analysis.resource_estimator import estimate_resources_from_descriptors
 from fpgai.analysis.performance_estimator import estimate_performance
-from fpgai.analysis.quantization_report import run_quantization_report
-from fpgai.analysis.precision_sweep import run_precision_sweep
-from fpgai.analysis.design_space_report import run_design_space_report
+try:
+    from fpgai.analysis.quantization_report import run_quantization_report
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised in lightweight test envs
+    _QUANTIZATION_REPORT_IMPORT_ERROR = exc
+
+    def run_quantization_report(*args, **kwargs):
+        raise _QUANTIZATION_REPORT_IMPORT_ERROR
+try:
+    from fpgai.analysis.precision_sweep import run_precision_sweep
+except ModuleNotFoundError as exc:  # pragma: no cover
+    _PRECISION_SWEEP_IMPORT_ERROR = exc
+
+    def run_precision_sweep(*args, **kwargs):
+        raise _PRECISION_SWEEP_IMPORT_ERROR
+try:
+    from fpgai.analysis.design_space_report import run_design_space_report
+except ModuleNotFoundError as exc:  # pragma: no cover
+    _DESIGN_SPACE_IMPORT_ERROR = exc
+
+    def run_design_space_report(*args, **kwargs):
+        raise _DESIGN_SPACE_IMPORT_ERROR
 from fpgai.analysis.post_synthesis import run_post_synthesis_analysis
 from fpgai.analysis.training_resource_estimate import run_training_resource_estimate
 from fpgai.benchmark.training_reference import run_training_reference_step
@@ -41,7 +60,11 @@ from fpgai.analysis.hls_artifact_metadata import emit_hls_artifact_metadata
 from fpgai.analysis.hls_calibration_runner import run_hls_calibration
 from fpgai.util.binio import write_f32_bin
 from fpgai.runtime.package import emit_runtime_package
+from fpgai.validation.numeric import emit_numeric_validation_report
+from fpgai.paper.verification import emit_paper_verification_artifacts
+from fpgai.backends.vivado.boards import get_board
 from fpgai.reporting.hardware_feasibility import emit_board_fit_report
+from fpgai.reporting.hls_explanation import emit_generated_hls_explanation_reports
 
 from fpgai.backends.hls.emit.types_h import emit_types_h
 from fpgai.backends.hls.emit.top_cpp import emit_top_cpp
@@ -72,6 +95,12 @@ def _is_runtime_weight_mode(weights_mode: str) -> bool:
         "ddr",
         "dma_ddr",
         "uram",
+        "bram_import_full",
+        "bram_import_export_full",
+        "uram_import_full",
+        "uram_import_export_full",
+        "ddr_tiled",
+        "ddr_tiled_mutable",
     }
 
 
@@ -85,6 +114,918 @@ def _runtime_weight_word_count(graph) -> int:
             weight_count, bias_count = _dense_sizes(graph, op)
             total += int(weight_count) + int(bias_count)
     return int(total)
+
+
+_BUILD_STAGE_KEYS = (
+    "cpp",
+    "testbench",
+    "hls_project",
+    "hls_synthesis",
+    "vivado_project",
+    "vivado_implementation",
+    "bitstream",
+    "runtime_package",
+    "reports",
+    "host_cpp",
+)
+
+
+def _cfg_has_path(raw: Dict[str, Any], path: str) -> bool:
+    cur: Any = raw
+    for part in path.split("."):
+        if not isinstance(cur, dict) or part not in cur:
+            return False
+        cur = cur[part]
+    return True
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "enabled"}
+    return bool(value)
+
+
+def _resolve_build_stages(raw: Dict[str, Any]) -> Dict[str, bool]:
+    """Resolve user-facing build.stages into an explicit stage contract.
+
+    Legacy configs without build.stages keep the old behavior: HLS source/project
+    generation follows backends.hls.enabled, Vitis execution follows
+    toolchain.vitis_hls.enabled, host C++ follows backends.host_cpp.enabled, and
+    runtime package/report metadata are emitted.
+    """
+    explicit = _cfg_has_path(raw, "build.stages")
+    requested = _cfg_get(raw, "build.stages", {}) or {}
+    if requested is not None and not isinstance(requested, dict):
+        raise ValueError("build.stages must be a mapping of stage names to booleans.")
+
+    legacy_hls = _as_bool(_cfg_get(raw, "backends.hls.enabled", True))
+    legacy_host = _as_bool(_cfg_get(raw, "backends.host_cpp.enabled", True))
+    legacy_hls_run = _as_bool(_cfg_get(raw, "toolchain.vitis_hls.enabled", False))
+
+    if explicit:
+        stages: Dict[str, bool] = {
+            "cpp": True,
+            "testbench": True,
+            "hls_project": False,
+            "hls_synthesis": False,
+            "vivado_project": False,
+            "vivado_implementation": False,
+            "bitstream": False,
+            "runtime_package": True,
+            "reports": True,
+            "host_cpp": legacy_host,
+        }
+        unknown = sorted(set(requested) - set(_BUILD_STAGE_KEYS) - {"existing_hls_ip"})
+        if unknown:
+            raise ValueError(
+                "Unsupported build.stages keys: " + ", ".join(unknown) + ". "
+                "Supported keys are: " + ", ".join(_BUILD_STAGE_KEYS) + "."
+            )
+        for key, value in requested.items():
+            if key in stages:
+                stages[key] = _as_bool(value)
+    else:
+        stages = {
+            "cpp": legacy_hls,
+            "testbench": legacy_hls,
+            "hls_project": legacy_hls,
+            "hls_synthesis": legacy_hls and legacy_hls_run,
+            "vivado_project": False,
+            "vivado_implementation": False,
+            "bitstream": False,
+            "runtime_package": True,
+            "reports": True,
+            "host_cpp": legacy_host,
+        }
+
+    _validate_build_stage_dependencies(raw, stages)
+    return stages
+
+
+def _validate_build_stage_dependencies(raw: Dict[str, Any], stages: Dict[str, bool]) -> None:
+    if stages.get("testbench") and not stages.get("cpp"):
+        raise ValueError("build.stages.testbench=true requires build.stages.cpp=true.")
+    if stages.get("hls_project") and not stages.get("cpp"):
+        raise ValueError("build.stages.hls_project=true requires build.stages.cpp=true.")
+    if stages.get("hls_synthesis") and not stages.get("hls_project"):
+        raise ValueError("build.stages.hls_synthesis=true requires build.stages.hls_project=true.")
+
+    existing_hls_ip = _as_bool(_cfg_get(raw, "build.existing_hls_ip", False))
+    if stages.get("vivado_project") and not (stages.get("hls_synthesis") or existing_hls_ip):
+        raise ValueError(
+            "build.stages.vivado_project=true requires build.stages.hls_synthesis=true "
+            "or build.existing_hls_ip=true."
+        )
+    if stages.get("vivado_implementation") and not stages.get("vivado_project"):
+        raise ValueError("build.stages.vivado_implementation=true requires build.stages.vivado_project=true.")
+    if stages.get("bitstream") and not (stages.get("vivado_project") and stages.get("vivado_implementation")):
+        raise ValueError(
+            "build.stages.bitstream=true requires build.stages.vivado_project=true "
+            "and build.stages.vivado_implementation=true."
+        )
+
+
+def _build_stage_summary(stages: Dict[str, bool]) -> Dict[str, Any]:
+    return {key: bool(stages.get(key, False)) for key in _BUILD_STAGE_KEYS}
+
+
+_RUNTIME_COMMANDS = {
+    "import_weights",
+    "run_inference",
+    "run_training",
+    "export_weights",
+    "export_gradients",
+    "reset_accumulators",
+    "accumulate_gradients",
+    "apply_accumulated_gradients",
+}
+
+_CODEGEN_READABILITY = {"compact", "normal", "high", "debug"}
+
+
+def _movement_cfg(raw: Dict[str, Any], tensor: str, direction: str) -> Dict[str, str]:
+    cfg = _cfg_get(raw, f"data_movement.{tensor}.{direction}", {}) or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+    return {
+        "interface": str(cfg.get("interface", "")).strip().lower().replace("-", "_"),
+        "transport": str(cfg.get("transport", "")).strip().lower().replace("-", "_"),
+        "policy": str(cfg.get("policy", "")).strip().lower().replace("-", "_"),
+    }
+
+
+def _resolve_training_io_movement(raw: Dict[str, Any]) -> Dict[str, Any]:
+    def _one(tensor: str, direction: str) -> Dict[str, Any]:
+        mv = _movement_cfg(raw, tensor, direction)
+        interface = mv["interface"] or ("axi_stream" if tensor in {"inputs", "labels", "outputs"} else "none")
+        transport = mv["transport"] or ("ps_runtime" if interface == "m_axi" else ("dma" if interface == "axi_stream" else "none"))
+        policy = mv["policy"] or ("full" if interface != "none" else "none")
+        if interface == "m_axi" and policy == "tiled":
+            resolved = f"m_axi_{direction}_tiled"
+        elif interface == "m_axi" and policy == "full":
+            resolved = f"m_axi_{direction}_full"
+        elif interface == "axi_stream" and policy == "tiled":
+            resolved = f"axi_stream_{direction}_tiled"
+        elif interface == "axi_stream":
+            resolved = f"axi_stream_{direction}_full"
+        else:
+            resolved = "none"
+        return {"interface": interface, "transport": transport, "policy": policy, "resolved": resolved}
+    return {
+        "inputs": {"import": _one("inputs", "import")},
+        "labels": {"import": _one("labels", "import")},
+        "outputs": {"export": _one("outputs", "export")},
+    }
+
+
+def _resolve_gradient_export_mode(raw: Dict[str, Any]) -> Dict[str, Any]:
+    mv = _movement_cfg(raw, "gradients", "export")
+    interface = mv["interface"] or "none"
+    transport = mv["transport"] or ("ps_runtime" if interface == "m_axi" else "none")
+    policy = mv["policy"] or "none"
+    if interface == "none" or policy == "none":
+        resolved = "none"
+        supported = False
+    elif interface == "m_axi" and policy == "full":
+        resolved = "m_axi_export_full"
+        supported = True
+    elif interface == "m_axi" and policy == "tiled":
+        resolved = "m_axi_export_tiled"
+        supported = True
+    else:
+        raise ValueError(
+            "data_movement.gradients.export currently supports interface=m_axi, transport=ps_runtime, policy=full; "
+            f"got interface={interface!r}, transport={transport!r}, policy={policy!r}."
+        )
+    return {"interface": interface, "transport": transport, "policy": policy, "resolved": resolved, "supported": supported}
+
+
+def _write_training_movement_reports(out_dir: Path, raw: Dict[str, Any]) -> Dict[str, str]:
+    reports_dir = out_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    io = _resolve_training_io_movement(raw)
+    grad = _resolve_gradient_export_mode(raw)
+    (reports_dir / "training_io_movement.json").write_text(json.dumps(io, indent=2, sort_keys=True), encoding="utf-8")
+    (reports_dir / "gradient_export.json").write_text(json.dumps(grad, indent=2, sort_keys=True), encoding="utf-8")
+    (reports_dir / "training_io_movement.md").write_text(
+        "# Training I/O movement\n\n"
+        f"- inputs.import: `{io['inputs']['import']['resolved']}`\n"
+        f"- labels.import: `{io['labels']['import']['resolved']}`\n"
+        f"- outputs.export: `{io['outputs']['export']['resolved']}`\n",
+        encoding="utf-8",
+    )
+    (reports_dir / "gradient_export.md").write_text(
+        "# Gradient export\n\n"
+        f"- resolved: `{grad['resolved']}`\n"
+        f"- supported: `{grad['supported']}`\n",
+        encoding="utf-8",
+    )
+    return {
+        "training_io_movement_json": str(reports_dir / "training_io_movement.json"),
+        "gradient_export_json": str(reports_dir / "gradient_export.json"),
+    }
+
+
+def _as_positive_int(value: Any, default: int = 1) -> int:
+    try:
+        ivalue = int(value)
+    except Exception:
+        ivalue = int(default)
+    return max(1, ivalue)
+
+
+def _resolve_training_batch_accumulation_contract(raw: Dict[str, Any]) -> Dict[str, Any]:
+    # Prefer the new public shorthand training.batch_size when present, while
+    # preserving the older training.execution.batch_size path for legacy configs.
+    # Do not use nested _cfg_get(...) calls as default arguments here: Python
+    # evaluates defaults eagerly and training.execution.batch_size=1 would mask
+    # a user-specified training.batch_size=2.
+    batch_raw = _cfg_get(raw, "training.batch_size", None)
+    if batch_raw is None:
+        batch_raw = _cfg_get(raw, "training.execution.batch_size", 1)
+    batch_size = _as_positive_int(batch_raw, 1)
+
+    steps_raw = _cfg_get(raw, "training.gradient_accumulation.steps", None)
+    if steps_raw is None:
+        steps_raw = _cfg_get(raw, "training.accumulation.steps", 1)
+    steps = _as_positive_int(steps_raw, 1)
+
+    mode_raw = _cfg_get(raw, "training.gradient_accumulation.mode", None)
+    if mode_raw is None:
+        mode_raw = _cfg_get(raw, "training.accumulation.mode", "none")
+    mode = str(mode_raw or "none").strip().lower().replace("-", "_")
+    if steps <= 1 and mode in {"", "none", "false"}:
+        mode = "none"
+    supported_modes = {"none", "native", "testbench", "native_accumulated", "testbench_accumulated"}
+    if mode not in supported_modes:
+        raise ValueError(
+            "training.gradient_accumulation.mode must be one of none, native, testbench, "
+            f"native_accumulated, or testbench_accumulated; got {mode!r}."
+        )
+    native = mode in {"native", "native_accumulated"}
+    testbench = mode in {"testbench", "testbench_accumulated"}
+    active = steps > 1 or batch_size > 1 or native or testbench
+    return {
+        "batch_size": batch_size,
+        "accumulation_steps": steps,
+        "mode": mode,
+        "active": bool(active),
+        "native_update_boundary": bool(native),
+        "testbench_accumulation": bool(testbench),
+        "generated_hls_status": "implemented" if mode in {"none", "native", "native_accumulated"} else "testbench_only",
+        "numeric_validation_status": "requires_training_compare_artifacts" if active else "not_required_for_batch1",
+        "hls_modes": {
+            "accumulate_gradients": 3,
+            "apply_accumulated_gradients": 4,
+            "reset_accumulators": 5,
+        } if native else {},
+        "runtime_commands": [
+            "reset_accumulators",
+            "accumulate_gradients",
+            "apply_accumulated_gradients",
+        ] if native else [],
+        "truth_boundary": (
+            "Native batch/gradient accumulation generates explicit HLS modes 3/4/5 for "
+            "reset, accumulate, and apply/update. Paper-safe correctness still requires the "
+            "training numeric comparison artifacts to pass for the selected model/config."
+        ),
+    }
+
+
+def _resolve_stream_tiled_io_contract(raw: Dict[str, Any], *, pipeline_mode: str) -> Dict[str, Any]:
+    def _one(tensor: str, direction: str) -> Dict[str, Any]:
+        mv = _movement_cfg(raw, tensor, direction)
+        interface = mv["interface"] or "axi_stream"
+        transport = mv["transport"] or ("dma" if interface == "axi_stream" else "ps_runtime" if interface == "m_axi" else "none")
+        policy = mv["policy"] or "full"
+        requested = interface == "axi_stream" and policy == "tiled"
+        if requested and pipeline_mode == "training_on_device":
+            status = "generated_interface_supported"
+            reason = "training AXI-stream tiled I/O is implemented by generated tile buffers, stream tile readers/writers, and TLAST-aware output emission"
+        elif requested:
+            status = "generated_interface_supported"
+            reason = "inference AXI-stream tiled I/O is supported by the HLS top interface contract"
+        else:
+            status = "not_requested"
+            reason = "full/default I/O path selected"
+        return {
+            "interface": interface,
+            "transport": transport,
+            "policy": policy,
+            "requested": bool(requested),
+            "status": status,
+            "reason": reason,
+        }
+    return {
+        "pipeline_mode": pipeline_mode,
+        "inputs": {"import": _one("inputs", "import")},
+        "outputs": {"export": _one("outputs", "export")},
+    }
+
+
+def _write_execution_semantics_reports(
+    out_dir: Path,
+    raw: Dict[str, Any],
+    *,
+    pipeline_mode: str,
+    memory_plan=None,
+    communication_plan=None,
+    prediction_artifacts: Optional[Dict[str, Any]] = None,
+) -> Dict[str, str]:
+    reports_dir = out_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    batch = _resolve_training_batch_accumulation_contract(raw)
+    stream_io = _resolve_stream_tiled_io_contract(raw, pipeline_mode=pipeline_mode)
+    board_fit = {}
+    if isinstance(prediction_artifacts, dict):
+        board_fit = prediction_artifacts.get("board_fit") or {}
+        if not isinstance(board_fit, dict):
+            board_fit = {}
+    memory_notes = dict(getattr(memory_plan, "notes", {}) or {}) if memory_plan is not None else {}
+    comm_notes = dict(getattr(communication_plan, "notes", {}) or {}) if communication_plan is not None else {}
+    hardware_contract = {
+        "board": str(_cfg_get(raw, "targets.platform.board", _cfg_get(raw, "targets.board", _cfg_get(raw, "project.board", ""))) or ""),
+        "memory_semantics_mode": memory_notes.get("memory_semantics_mode"),
+        "activation_storage": memory_notes.get("resolved_activation_storage"),
+        "weight_storage": memory_notes.get("resolved_weight_storage"),
+        "communication_scope": comm_notes.get("scope"),
+        "board_fit_status": board_fit.get("status", "unknown"),
+        "board_fit_limiting_dimension": board_fit.get("limiting_dimension"),
+        "vivado_allowed_by_board_fit": board_fit.get("vivado_allowed"),
+        "enforcement_status": "report_generated",
+        "truth_boundary": (
+            "This contract records compiler-side feasibility and selected knobs. "
+            "Vivado/bitstream enforcement is paper-safe only when Vivado artifacts are present."
+        ),
+    }
+
+    paths = {
+        "training_batch_accumulation_json": reports_dir / "training_batch_accumulation.json",
+        "stream_tiled_io_json": reports_dir / "stream_tiled_io.json",
+        "hardware_knob_contract_json": reports_dir / "hardware_knob_contract.json",
+    }
+    paths["training_batch_accumulation_json"].write_text(json.dumps(batch, indent=2, sort_keys=True), encoding="utf-8")
+    paths["stream_tiled_io_json"].write_text(json.dumps(stream_io, indent=2, sort_keys=True), encoding="utf-8")
+    paths["hardware_knob_contract_json"].write_text(json.dumps(hardware_contract, indent=2, sort_keys=True), encoding="utf-8")
+
+    (reports_dir / "training_batch_accumulation.md").write_text(
+        "# Training batch and gradient accumulation\n\n"
+        f"- batch_size: `{batch['batch_size']}`\n"
+        f"- accumulation_steps: `{batch['accumulation_steps']}`\n"
+        f"- mode: `{batch['mode']}`\n"
+        f"- generated_hls_status: `{batch['generated_hls_status']}`\n",
+        encoding="utf-8",
+    )
+    (reports_dir / "stream_tiled_io.md").write_text(
+        "# AXI-stream tiled I/O contract\n\n"
+        f"- pipeline_mode: `{pipeline_mode}`\n"
+        f"- inputs.import: `{stream_io['inputs']['import']['status']}`\n"
+        f"- outputs.export: `{stream_io['outputs']['export']['status']}`\n",
+        encoding="utf-8",
+    )
+    (reports_dir / "hardware_knob_contract.md").write_text(
+        "# Hardware knob contract\n\n"
+        f"- board_fit_status: `{hardware_contract['board_fit_status']}`\n"
+        f"- limiting_dimension: `{hardware_contract['board_fit_limiting_dimension']}`\n"
+        f"- vivado_allowed_by_board_fit: `{hardware_contract['vivado_allowed_by_board_fit']}`\n",
+        encoding="utf-8",
+    )
+    return {key: str(value) for key, value in paths.items()}
+
+
+def _runtime_io_summary_from_plan(communication_plan: Any | None) -> Dict[str, Any]:
+    summary: Dict[str, Any] = {
+        "inputs": {"import": {"interface": "axi_stream", "transport": "dma", "policy": "full", "resolved": "dma_stream_import_full"}},
+        "outputs": {"export": {"interface": "axi_stream", "transport": "dma", "policy": "full", "resolved": "dma_stream_export_full"}},
+    }
+    edges = getattr(communication_plan, "edges", []) or []
+    for edge in edges:
+        notes = getattr(edge, "notes", {}) or {}
+        kind = str(notes.get("kind", "")).strip().lower()
+        interface = str(notes.get("interface") or "").strip().lower().replace("-", "_")
+        transport = str(notes.get("transport") or "").strip().lower().replace("-", "_")
+        policy = str(notes.get("policy") or "").strip().lower().replace("-", "_")
+        if not interface:
+            mode = str(notes.get("mode") or "").strip().lower().replace("-", "_")
+            interface = "m_axi" if mode in {"m_axi", "maxi", "ddr"} else "axi_stream"
+        if not transport:
+            transport = "ps_runtime" if interface == "m_axi" else "dma"
+        if not policy:
+            policy = "full"
+        if kind in {"input", "inputs", "activation_in"}:
+            if interface == "m_axi" and policy == "tiled":
+                resolved = "m_axi_import_tiled"
+            elif interface == "m_axi":
+                resolved = "m_axi_import_full"
+            elif interface == "axi_stream" and policy == "tiled":
+                resolved = "dma_stream_import_tiled"
+            else:
+                resolved = "dma_stream_import_full"
+            summary["inputs"] = {"import": {"interface": interface, "transport": transport, "policy": policy, "resolved": resolved}}
+        elif kind in {"output", "outputs", "activation_out"}:
+            if interface == "m_axi" and policy == "tiled":
+                resolved = "m_axi_export_tiled"
+            elif interface == "m_axi":
+                resolved = "m_axi_export_full"
+            elif interface == "axi_stream" and policy == "tiled":
+                resolved = "dma_stream_export_tiled"
+            else:
+                resolved = "dma_stream_export_full"
+            summary["outputs"] = {"export": {"interface": interface, "transport": transport, "policy": policy, "resolved": resolved}}
+    return summary
+
+
+def _scan_hls_top_ports(hls_dir: Optional[Path]) -> Dict[str, Any]:
+    source = None
+    if hls_dir is not None:
+        candidate = Path(hls_dir) / "src" / "deeplearn.cpp"
+        if candidate.exists():
+            source = candidate.read_text(encoding="utf-8", errors="replace")
+    if not source:
+        return {"source_present": False, "m_axi_ports": [], "axis_ports": [], "dma_required": None}
+    m_axi_ports = sorted(set(__import__('re').findall(r"#pragma\s+HLS\s+INTERFACE\s+m_axi\s+port\s*=\s*([A-Za-z_][A-Za-z0-9_]*)", source)))
+    axis_ports = sorted(set(__import__('re').findall(r"#pragma\s+HLS\s+INTERFACE\s+axis\s+port\s*=\s*([A-Za-z_][A-Za-z0-9_]*)", source)))
+    return {
+        "source_present": True,
+        "m_axi_ports": m_axi_ports,
+        "axis_ports": axis_ports,
+        "dma_required": bool(axis_ports),
+    }
+
+
+def _write_vivado_bd_contract_reports(
+    out_dir: Path,
+    raw: Dict[str, Any],
+    *,
+    pipeline_mode: str,
+    build_stages: Dict[str, bool],
+    memory_plan=None,
+    communication_plan=None,
+    hls_dir: Optional[Path] = None,
+) -> Dict[str, str]:
+    reports_dir = out_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    io_summary = _runtime_io_summary_from_plan(communication_plan)
+    source_ports = _scan_hls_top_ports(hls_dir)
+    notes = dict(getattr(memory_plan, "notes", {}) or {}) if memory_plan is not None else {}
+    m_axi_ports = list(source_ports.get("m_axi_ports") or [])
+    axis_ports = list(source_ports.get("axis_ports") or [])
+    required_blocks = ["axi_lite_control", "ps_memory_port"]
+    if axis_ports:
+        required_blocks.append("axi_dma")
+    if m_axi_ports:
+        required_blocks.append("axi_interconnect_or_smartconnect")
+    if pipeline_mode == "training_on_device":
+        required_blocks.append("training_aux_buffers")
+    status = "not_requested"
+    if build_stages.get("vivado_project"):
+        status = "contract_generated_waiting_for_vivado_bridge"
+    payload = {
+        "format": "fpgai.vivado_bd_contract.v1",
+        "pipeline_mode": pipeline_mode,
+        "board": str(_cfg_get(raw, "targets.board", _cfg_get(raw, "project.board", "")) or ""),
+        "status": status,
+        "build_stages": {str(k): bool(v) for k, v in build_stages.items()},
+        "memory_semantics_mode": notes.get("memory_semantics_mode"),
+        "input_movement": io_summary["inputs"]["import"],
+        "output_movement": io_summary["outputs"]["export"],
+        "source_ports": source_ports,
+        "required_blocks": required_blocks,
+        "wiring_contract": {
+            "axi_lite_control": "PS control master -> AXI-Lite interconnect -> HLS s_axi_control",
+            "stream_dma": "PS DDR -> AXI DMA MM2S -> HLS AXIS input; HLS AXIS output -> AXI DMA S2MM -> PS DDR" if axis_ports else "not_required_by_generated_ports",
+            "m_axi_memory": "HLS m_axi bundles -> AXI interconnect/smartconnect -> PS DDR HP/HPC port" if m_axi_ports else "not_required_by_generated_ports",
+        },
+        "truth_boundary": "This report records the expected Vivado block-design wiring from generated HLS interfaces. It is not proof that Vivado implemented the design; Vivado reports/bitstream are required for that claim.",
+    }
+    json_path = reports_dir / "vivado_bd_contract.json"
+    md_path = reports_dir / "vivado_bd_contract.md"
+    json_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    md_path.write_text(
+        "# Vivado BD wiring contract\n\n"
+        f"- status: `{payload['status']}`\n"
+        f"- pipeline_mode: `{pipeline_mode}`\n"
+        f"- m_axi_ports: `{', '.join(m_axi_ports) if m_axi_ports else 'none'}`\n"
+        f"- axis_ports: `{', '.join(axis_ports) if axis_ports else 'none'}`\n"
+        f"- required_blocks: `{', '.join(required_blocks)}`\n\n"
+        "This is a contract derived from generated HLS interfaces, not a Vivado implementation result.\n",
+        encoding="utf-8",
+    )
+    return {"vivado_bd_contract_json": str(json_path), "vivado_bd_contract_md": str(md_path)}
+
+
+def _write_feature_truth_reports(
+    out_dir: Path,
+    *,
+    pipeline_mode: str,
+    build_stages: Dict[str, bool],
+    hls_dir: Optional[Path],
+    hls_run: Any | None,
+    runtime_package: Any | None,
+    numeric_validation_artifacts: Optional[Dict[str, Any]],
+    paper_verification_artifacts: Optional[Dict[str, Any]],
+    vivado_bd_contract_artifacts: Optional[Dict[str, str]],
+) -> Dict[str, str]:
+    reports_dir = out_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    source_generated = bool(hls_dir is not None and (Path(hls_dir) / "src" / "deeplearn.cpp").exists())
+    hls_synthesized = bool(hls_run is not None and getattr(hls_run, "ok", False))
+    runtime_manifest = out_dir / "runtime_package" / "package_manifest.json"
+    runtime_packaged = bool(runtime_manifest.exists())
+    numeric_validated = False
+    if numeric_validation_artifacts:
+        nv_path = numeric_validation_artifacts.get("numeric_validation_json")
+        try:
+            nv = json.loads(Path(nv_path).read_text(encoding="utf-8")) if nv_path else {}
+            numeric_validated = bool(nv.get("numeric_validated") or nv.get("passed"))
+        except Exception:
+            numeric_validated = False
+    paper_safe = False
+    if paper_verification_artifacts:
+        pv_path = paper_verification_artifacts.get("paper_verification_json") or paper_verification_artifacts.get("paper_row_json")
+        try:
+            pv = json.loads(Path(pv_path).read_text(encoding="utf-8")) if pv_path else {}
+            paper_safe = bool(pv.get("paper_safe"))
+        except Exception:
+            paper_safe = False
+    features = [
+        {"feature": "source_generation", "status": "validated_by_generated_source" if source_generated else "not_generated", "paper_safe_for": ["source-exists claims"] if source_generated else []},
+        {"feature": "numeric_correctness", "status": "validated" if numeric_validated else "not_validated", "paper_safe_for": ["correctness claims"] if numeric_validated else []},
+        {"feature": "hls_resource_timing", "status": "validated_by_hls" if hls_synthesized else "not_validated", "paper_safe_for": ["HLS resource/timing claims"] if hls_synthesized else []},
+        {"feature": "vivado_bd_wiring", "status": "contract_generated" if vivado_bd_contract_artifacts else "not_generated", "paper_safe_for": ["BD contract claims"] if vivado_bd_contract_artifacts else []},
+        {"feature": "runtime_package", "status": "packaged" if runtime_packaged else "not_packaged", "paper_safe_for": ["runtime package existence claims"] if runtime_packaged else []},
+        {"feature": "fpga_execution", "status": "not_validated", "paper_safe_for": []},
+    ]
+    payload = {
+        "format": "fpgai.feature_contract.v1",
+        "pipeline_mode": pipeline_mode,
+        "build_stages": {str(k): bool(v) for k, v in build_stages.items()},
+        "source_generated": source_generated,
+        "numeric_validated": numeric_validated,
+        "hls_synthesized": hls_synthesized,
+        "runtime_packaged": runtime_packaged,
+        "paper_safe": paper_safe,
+        "features": features,
+        "truth_boundary": "Each feature is paper-safe only at the verification level recorded here. Contract/report generation is not the same as HLS, Vivado, bitstream, or FPGA validation.",
+    }
+    json_path = reports_dir / "feature_contract.json"
+    audit_path = reports_dir / "claim_audit.md"
+    json_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    lines = ["# FPGAI claim audit", "", f"- pipeline_mode: `{pipeline_mode}`", f"- source_generated: `{source_generated}`", f"- numeric_validated: `{numeric_validated}`", f"- hls_synthesized: `{hls_synthesized}`", f"- runtime_packaged: `{runtime_packaged}`", f"- paper_safe: `{paper_safe}`", "", "| Feature | Status | Paper-safe for |", "|---|---|---|"]
+    for item in features:
+        lines.append(f"| {item['feature']} | {item['status']} | {', '.join(item['paper_safe_for']) if item['paper_safe_for'] else 'none'} |")
+    lines.extend(["", "This audit must be used by paper table/plot generation to avoid intention-only claims.", ""])
+    audit_path.write_text("\n".join(lines), encoding="utf-8")
+    return {"feature_contract_json": str(json_path), "claim_audit_md": str(audit_path)}
+
+
+_TRAINING_OPTIMIZER_TYPES = {"sgd", "momentum", "adam"}
+_TRAINING_LOSS_TYPES = {"mse", "cross_entropy"}
+_OPTIMIZER_STATE_STORAGE = {"none", "bram", "uram", "ddr"}
+
+
+def _resolve_optimizer_state_movement(raw: Dict[str, Any], direction: str) -> Dict[str, Any]:
+    mv = _movement_cfg(raw, "optimizer_state", direction)
+    interface = mv["interface"] or "none"
+    transport = mv["transport"] or ("ps_runtime" if interface == "m_axi" else "none")
+    policy = mv["policy"] or "none"
+    if interface == "none" or policy == "none":
+        resolved = "none"
+        supported = False
+    elif interface == "m_axi" and policy == "full":
+        resolved = f"m_axi_{direction}_full"
+        supported = True
+    elif interface == "m_axi" and policy == "tiled":
+        resolved = f"m_axi_{direction}_tiled"
+        supported = True
+    else:
+        raise ValueError(
+            f"data_movement.optimizer_state.{direction} currently supports "
+            "interface=m_axi, transport=ps_runtime, policy=full; "
+            f"got interface={interface!r}, transport={transport!r}, policy={policy!r}."
+        )
+    return {"interface": interface, "transport": transport, "policy": policy, "resolved": resolved, "supported": supported}
+
+
+def _resolve_training_optimizer_loss_contract(raw: Dict[str, Any]) -> Dict[str, Any]:
+    optimizer_type = str(_cfg_get(raw, "training.optimizer.type", "sgd") or "sgd").strip().lower().replace("-", "_")
+    if optimizer_type not in _TRAINING_OPTIMIZER_TYPES:
+        raise ValueError(
+            "training.optimizer.type must be one of "
+            + ", ".join(sorted(_TRAINING_OPTIMIZER_TYPES))
+            + f"; got {optimizer_type!r}."
+        )
+    learning_rate = float(_cfg_get(raw, "training.optimizer.learning_rate", 0.01))
+    if learning_rate <= 0.0:
+        raise ValueError("training.optimizer.learning_rate must be positive.")
+
+    loss_type = str(_cfg_get(raw, "training.loss.type", "mse") or "mse").strip().lower().replace("-", "_")
+    if loss_type not in _TRAINING_LOSS_TYPES:
+        raise ValueError(
+            "training.loss.type must be one of "
+            + ", ".join(sorted(_TRAINING_LOSS_TYPES))
+            + f"; got {loss_type!r}."
+        )
+
+    storage_raw = _cfg_get(raw, "training.storage.optimizer_state", None)
+    if storage_raw is None:
+        # SGD has no persistent optimizer state. Momentum/Adam will require it once
+        # their generated update kernels are implemented.
+        storage = "none" if optimizer_type == "sgd" else "bram"
+        explicit_storage = False
+    else:
+        storage = str(storage_raw or "none").strip().lower().replace("-", "_")
+        explicit_storage = True
+    if storage not in _OPTIMIZER_STATE_STORAGE:
+        raise ValueError(
+            "training.storage.optimizer_state must be one of none, bram, uram, ddr; "
+            f"got {storage!r}."
+        )
+
+    import_movement = _resolve_optimizer_state_movement(raw, "import")
+    export_movement = _resolve_optimizer_state_movement(raw, "export")
+
+    state_required = optimizer_type in {"momentum", "adam"}
+    hls_update_status = "implemented" if optimizer_type in {"sgd", "momentum", "adam"} else "not_implemented"
+    loss_hls_status = "implemented" if loss_type in {"mse", "cross_entropy"} else "not_implemented"
+    loss_numeric_status = (
+        "implemented"
+        if loss_type in {"mse", "cross_entropy"}
+        else "not_implemented"
+    )
+
+    generated_state = storage in {"bram", "uram", "ddr"} or import_movement["supported"] or export_movement["supported"]
+    return {
+        "schema_version": 1,
+        "optimizer": {
+            "type": optimizer_type,
+            "learning_rate": learning_rate,
+            "momentum": float(_cfg_get(raw, "training.optimizer.momentum", 0.9) or 0.9),
+            "beta1": float(_cfg_get(raw, "training.optimizer.beta1", 0.9) or 0.9),
+            "beta2": float(_cfg_get(raw, "training.optimizer.beta2", 0.999) or 0.999),
+            "epsilon": float(_cfg_get(raw, "training.optimizer.epsilon", 1.0e-8) or 1.0e-8),
+            "hls_update_status": hls_update_status,
+            "numeric_validation_status": "implemented" if optimizer_type in {"sgd", "momentum", "adam"} else "not_implemented",
+        },
+        "optimizer_state": {
+            "required": state_required,
+            "explicit_storage": explicit_storage,
+            "storage": storage,
+            "storage_supported": storage in {"none", "bram", "uram", "ddr"},
+            "generated_interface": bool(generated_state),
+            "export_capture_mode": 9 if (state_required and export_movement["supported"]) else None,
+            "export_capture_status": "generated_hls_mode" if (state_required and export_movement["supported"]) else "not_requested",
+            "export_capture_words_known_after_codegen": bool(state_required and export_movement["supported"]),
+            "import": import_movement,
+            "export": export_movement,
+        },
+        "loss": {
+            "type": loss_type,
+            "hls_status": loss_hls_status,
+            "numeric_validation_status": loss_numeric_status,
+        },
+    }
+
+
+def _write_training_optimizer_loss_reports(out_dir: Path, raw: Dict[str, Any]) -> Dict[str, str]:
+    reports_dir = out_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    contract = _resolve_training_optimizer_loss_contract(raw)
+    opt_path = reports_dir / "training_optimizer_state.json"
+    loss_path = reports_dir / "training_loss_contract.json"
+    opt_payload = {
+        "schema_version": 1,
+        "optimizer": contract["optimizer"],
+        "optimizer_state": contract["optimizer_state"],
+    }
+    loss_payload = {
+        "schema_version": 1,
+        "loss": contract["loss"],
+        "labels_movement": _resolve_training_io_movement(raw).get("labels", {}),
+    }
+    opt_path.write_text(json.dumps(opt_payload, indent=2, sort_keys=True), encoding="utf-8")
+    loss_path.write_text(json.dumps(loss_payload, indent=2, sort_keys=True), encoding="utf-8")
+    (reports_dir / "training_optimizer_state.md").write_text(
+        "# Training optimizer/state contract\n\n"
+        f"- optimizer: `{contract['optimizer']['type']}`\n"
+        f"- learning_rate: `{contract['optimizer']['learning_rate']}`\n"
+        f"- optimizer_state.storage: `{contract['optimizer_state']['storage']}`\n"
+        f"- optimizer_state.import: `{contract['optimizer_state']['import']['resolved']}`\n"
+        f"- optimizer_state.export: `{contract['optimizer_state']['export']['resolved']}`\n"
+        f"- hls_update_status: `{contract['optimizer']['hls_update_status']}`\n",
+        encoding="utf-8",
+    )
+    (reports_dir / "training_loss_contract.md").write_text(
+        "# Training loss contract\n\n"
+        f"- loss: `{contract['loss']['type']}`\n"
+        f"- hls_status: `{contract['loss']['hls_status']}`\n",
+        encoding="utf-8",
+    )
+    return {
+        "training_optimizer_state_json": str(opt_path),
+        "training_loss_contract_json": str(loss_path),
+    }
+
+
+def _resolve_codegen_readability(raw: Dict[str, Any]) -> str:
+    value = str(_cfg_get(raw, "codegen.readability", "high") or "high").strip().lower().replace("-", "_")
+    if value not in _CODEGEN_READABILITY:
+        raise ValueError(
+            "codegen.readability must be one of "
+            + ", ".join(sorted(_CODEGEN_READABILITY))
+            + f"; got {value!r}."
+        )
+    return value
+
+
+def _runtime_support_from_semantics(memory_semantics_mode: str, *, pipeline_mode: str, raw: Optional[Dict[str, Any]] = None) -> Dict[str, bool]:
+    mode = str(memory_semantics_mode or "").strip().lower()
+    is_training = str(pipeline_mode).strip().lower() == "training_on_device"
+    raw_cfg = raw or {}
+    gradient_export = _resolve_gradient_export_mode(raw_cfg).get("resolved") in {"m_axi_export_full", "m_axi_export_tiled"}
+    batch_contract = _resolve_training_batch_accumulation_contract(raw_cfg) if is_training else {}
+    native_accumulation = bool(batch_contract.get("native_update_boundary"))
+    return {
+        "import_weights": mode in {
+            "bram_import_full",
+            "uram_import_full",
+            "bram_import_export_full",
+            "uram_import_export_full",
+            "ddr_tiled",
+            "ddr_tiled_mutable",
+        },
+        "export_weights": mode in {
+            "bram_import_export_full",
+            "uram_import_export_full",
+            "ddr_tiled_mutable",
+        },
+        "run_inference": not is_training,
+        "run_training": is_training,
+        "export_gradients": bool(is_training and gradient_export),
+        "reset_accumulators": bool(is_training and native_accumulation),
+        "accumulate_gradients": bool(is_training and native_accumulation),
+        "apply_accumulated_gradients": bool(is_training and native_accumulation),
+    }
+
+
+def _normalize_runtime_sequence_entry(entry: Any) -> Dict[str, Any]:
+    if isinstance(entry, str):
+        command = entry.strip().lower().replace("-", "_")
+        args: Dict[str, Any] = {}
+    elif isinstance(entry, dict) and len(entry) == 1:
+        command, args_raw = next(iter(entry.items()))
+        command = str(command).strip().lower().replace("-", "_")
+        args = dict(args_raw or {}) if isinstance(args_raw, dict) else {}
+    else:
+        raise ValueError("Each runtime.sequence entry must be a command string or a single-key mapping.")
+
+    if command not in _RUNTIME_COMMANDS:
+        raise ValueError(
+            f"Unsupported runtime sequence command {command!r}. "
+            "Supported commands are: " + ", ".join(sorted(_RUNTIME_COMMANDS)) + "."
+        )
+
+    if command == "run_inference":
+        repeat = int(args.get("repeat", 1))
+        if repeat < 1:
+            raise ValueError("runtime.sequence run_inference.repeat must be a positive integer.")
+        args["repeat"] = repeat
+    if command == "run_training":
+        steps = int(args.get("steps", 1))
+        if steps < 1:
+            raise ValueError("runtime.sequence run_training.steps must be a positive integer.")
+        args["steps"] = steps
+    if command == "accumulate_gradients":
+        steps = int(args.get("steps", args.get("micro_batches", 1)))
+        if steps < 1:
+            raise ValueError("runtime.sequence accumulate_gradients.steps must be a positive integer.")
+        args["steps"] = steps
+    return {"command": command, "args": args}
+
+
+def _resolve_runtime_sequence(
+    raw: Dict[str, Any],
+    *,
+    pipeline_mode: str,
+    memory_semantics_mode: str,
+) -> Dict[str, Any]:
+    explicit = _cfg_has_path(raw, "runtime.sequence")
+    raw_sequence = _cfg_get(raw, "runtime.sequence", None)
+    if raw_sequence is None:
+        raw_sequence = ["run_training"] if str(pipeline_mode).lower() == "training_on_device" else ["run_inference"]
+    if not isinstance(raw_sequence, list) or not raw_sequence:
+        raise ValueError("runtime.sequence must be a non-empty list of runtime commands.")
+
+    sequence = [_normalize_runtime_sequence_entry(entry) for entry in raw_sequence]
+    support = _runtime_support_from_semantics(memory_semantics_mode, pipeline_mode=pipeline_mode, raw=raw)
+    unsupported = [item["command"] for item in sequence if not support.get(item["command"], False)]
+    if unsupported:
+        raise ValueError(
+            "runtime.sequence requests command(s) not supported by generated artifacts: "
+            + ", ".join(unsupported)
+            + f". memory_semantics_mode={memory_semantics_mode!r}, pipeline_mode={pipeline_mode!r}."
+        )
+    return {
+        "schema_version": 1,
+        "explicit": explicit,
+        "pipeline_mode": str(pipeline_mode),
+        "memory_semantics_mode": str(memory_semantics_mode),
+        "supported_commands": support,
+        "sequence": sequence,
+    }
+
+
+def _write_runtime_sequence_report(out_dir: Path, runtime_sequence: Dict[str, Any]) -> Path:
+    reports_dir = out_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    path = reports_dir / "runtime_sequence.json"
+    path.write_text(json.dumps(runtime_sequence, indent=2, sort_keys=True), encoding="utf-8")
+    md = [
+        "# Runtime sequence",
+        "",
+        f"- pipeline_mode: `{runtime_sequence.get('pipeline_mode')}`",
+        f"- memory_semantics_mode: `{runtime_sequence.get('memory_semantics_mode')}`",
+        f"- explicit: `{runtime_sequence.get('explicit')}`",
+        "",
+        "## Commands",
+    ]
+    for item in runtime_sequence.get("sequence", []):
+        md.append(f"- `{item.get('command')}` args=`{json.dumps(item.get('args', {}), sort_keys=True)}`")
+    (reports_dir / "runtime_sequence.md").write_text("\n".join(md) + "\n", encoding="utf-8")
+    return path
+
+
+def _emit_resolved_config_reports(
+    out_dir: Path,
+    raw: Dict[str, Any],
+    *,
+    build_stages: Dict[str, bool],
+    runtime_sequence: Dict[str, Any],
+    memory_plan: Any,
+    communication_plan: Any,
+    weights_mode: str,
+) -> Dict[str, str]:
+    reports_dir = out_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    resolved = {
+        "schema_version": 1,
+        "pipeline_mode": str(_cfg_get(raw, "pipeline.mode", "inference")),
+        "top_kernel_name": str(_cfg_get(raw, "pipeline.outputs.top_kernel_name", "deeplearn")),
+        "weights_mode": str(weights_mode),
+        "memory_semantics_mode": str(_plan_notes(memory_plan).get("memory_semantics_mode", weights_mode)),
+        "build_stages": _build_stage_summary(build_stages),
+        "runtime_sequence": runtime_sequence,
+        "codegen": {"readability": _resolve_codegen_readability(raw)},
+        "memory_plan_notes": _plan_notes(memory_plan),
+        "communication_edges": [getattr(edge, "to_dict", lambda: dict(edge))() if not isinstance(edge, dict) else edge for edge in getattr(communication_plan, "edges", [])],
+    }
+    json_path = reports_dir / "resolved_config.json"
+    json_path.write_text(json.dumps(resolved, indent=2, sort_keys=True), encoding="utf-8")
+    yml_path = reports_dir / "resolved_config.yml"
+    try:
+        import yaml  # type: ignore
+        yml_path.write_text(yaml.safe_dump(resolved, sort_keys=False), encoding="utf-8")
+    except Exception:
+        yml_path.write_text(json.dumps(resolved, indent=2, sort_keys=True), encoding="utf-8")
+    contract = {
+        "schema_version": 1,
+        "top_level_sections": sorted(list(getattr(__import__("fpgai.config.loader", fromlist=["TOP_LEVEL_SECTIONS_V1"]), "TOP_LEVEL_SECTIONS_V1"))),
+        "build_stage_keys": list(_BUILD_STAGE_KEYS),
+        "runtime_commands": sorted(_RUNTIME_COMMANDS),
+        "codegen_readability": sorted(_CODEGEN_READABILITY),
+        "training_optimizer_types": sorted(_TRAINING_OPTIMIZER_TYPES),
+        "training_loss_types": sorted(_TRAINING_LOSS_TYPES),
+        "optimizer_state_storage": sorted(_OPTIMIZER_STATE_STORAGE),
+        "priority_rules": [
+            "manual data_movement overrides user-facing modes",
+            "user-facing modes override policy/defaults",
+            "unsupported runtime commands reject clearly",
+        ],
+    }
+    contract_path = reports_dir / "config_contract.json"
+    contract_path.write_text(json.dumps(contract, indent=2, sort_keys=True), encoding="utf-8")
+    return {
+        "resolved_config_json": str(json_path),
+        "resolved_config_yml": str(yml_path),
+        "config_contract_json": str(contract_path),
+    }
+
+
+def _plan_notes(plan: Any) -> Dict[str, Any]:
+    if plan is None:
+        return {}
+    notes = getattr(plan, "notes", None)
+    if isinstance(notes, dict):
+        return dict(notes)
+    if isinstance(plan, dict):
+        notes = plan.get("notes", plan)
+        return dict(notes) if isinstance(notes, dict) else {}
+    return {}
 
 
 @dataclass
@@ -111,12 +1052,16 @@ class Compiler:
         top_name = str(_cfg_get(raw, "pipeline.outputs.top_kernel_name", "deeplearn"))
         verbose = bool(_cfg_get(raw, "debug.verbose", False))
         emit_manifest = bool(_cfg_get(raw, "project.reproducibility.emit_manifest", True))
-        enable_hls = bool(_cfg_get(raw, "backends.hls.enabled", True))
-        enable_host = bool(_cfg_get(raw, "backends.host_cpp.enabled", True))
+        build_stages = _resolve_build_stages(raw)
+        enable_hls = bool(build_stages.get("cpp", False))
+        enable_host = bool(build_stages.get("host_cpp", False))
+        enable_reports = bool(build_stages.get("reports", True))
+        enable_runtime_package = bool(build_stages.get("runtime_package", True))
         enable_quant_report = bool(_cfg_get(raw, "analysis.quantization_report.enabled", False))
         enable_precision_sweep = bool(_cfg_get(raw, "analysis.precision_sweep.enabled", False))
         enable_design_space = bool(_cfg_get(raw, "analysis.design_space.enabled", False))
         act_kind, act_alpha, act_except_last = self._read_activation_insert_cfg(raw)
+        self._reject_unsupported_training_weight_storage(raw)
         weights_mode = self._resolve_hls_weights_mode(raw)
 
         g = self._import_and_prepare_graph(
@@ -129,7 +1074,26 @@ class Compiler:
         descriptors = analyze_graph(g)
         compile_plan = make_compile_plan(self.cfg, descriptors)
         memory_plan = make_memory_plan(g, descriptors, compile_plan)
+        self._annotate_memory_movement_semantics(compile_plan, memory_plan, raw)
         communication_plan = make_communication_plan(self.cfg, memory_plan)
+        runtime_sequence = _resolve_runtime_sequence(
+            raw,
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
+            memory_semantics_mode=str(memory_plan.notes.get("memory_semantics_mode", weights_mode)),
+        )
+        resolved_config_artifacts = _emit_resolved_config_reports(
+            out_dir,
+            raw,
+            build_stages=build_stages,
+            runtime_sequence=runtime_sequence,
+            memory_plan=memory_plan,
+            communication_plan=communication_plan,
+            weights_mode=weights_mode,
+        )
+        _write_runtime_sequence_report(out_dir, runtime_sequence)
+        training_movement_artifacts = _write_training_movement_reports(out_dir, raw)
+        training_optimizer_loss_artifacts = _write_training_optimizer_loss_reports(out_dir, raw)
+        training_movement_artifacts.update(training_optimizer_loss_artifacts)
         capability_report = self._validate_architecture(
             out_dir,
             compile_plan,
@@ -142,6 +1106,14 @@ class Compiler:
             descriptors,
             compile_plan,
         )
+        execution_semantics_artifacts = _write_execution_semantics_reports(
+            out_dir,
+            raw,
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
+            memory_plan=memory_plan,
+            communication_plan=communication_plan,
+            prediction_artifacts=prediction_artifacts,
+        ) if enable_reports else None
         self._emit_dummy_input(out_dir, g)
 
         quant_result = run_quantization_report(
@@ -164,9 +1136,10 @@ class Compiler:
             compile_plan=compile_plan,
             memory_plan=memory_plan,
             communication_plan=communication_plan,
+            build_stages=build_stages,
         ) if enable_hls else None
         host_dir: Optional[Path] = self._emit_hostcpp(out_dir, g, top_name=top_name) if enable_host else None
-        hls_run = self._maybe_run_vitis_hls(hls_dir) if enable_hls and hls_dir is not None else None
+        hls_run = self._maybe_run_vitis_hls(hls_dir, build_stages=build_stages) if enable_hls and hls_dir is not None else None
         hls_calibration_result = run_hls_calibration(
             out_dir=out_dir,
             raw_cfg=raw,
@@ -174,7 +1147,7 @@ class Compiler:
             hls_report_dir=(hls_dir if hls_dir is not None else out_dir),
             clock_mhz=float(getattr(compile_plan, "clock_mhz", _cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0))),
             verbose=verbose,
-        )
+        ) if enable_reports else None
 
         estimate_vs_hls_result = None
         hls_module_breakdown_result = None
@@ -200,22 +1173,31 @@ class Compiler:
                 estimate_vs_hls_result = post_synthesis_result.estimate_comparison
                 hls_module_breakdown_result = post_synthesis_result.module_breakdown
 
-        hls_schedule_summary = self._emit_hls_schedule_summary(out_dir)
-        hls_artifact_metadata = emit_hls_artifact_metadata(
-            out_dir,
-            compile_plan,
-            schedule_summary=hls_schedule_summary,
-        )
-        hls_ii_comparison = write_requested_achieved_ii_summary(
-            out_dir,
-            compile_plan,
-        )
+        if enable_reports:
+            hls_schedule_summary = self._emit_hls_schedule_summary(out_dir)
+            hls_artifact_metadata = emit_hls_artifact_metadata(
+                out_dir,
+                compile_plan,
+                schedule_summary=hls_schedule_summary,
+            )
+            hls_ii_comparison = write_requested_achieved_ii_summary(
+                out_dir,
+                compile_plan,
+            )
+        else:
+            hls_schedule_summary = None
+            hls_artifact_metadata = None
+            hls_ii_comparison = None
         runtime_package = emit_runtime_package(
             out_dir,
             board=str(_cfg_get(raw, "targets.board", _cfg_get(raw, "project.board", "")) or ""),
             pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
             top_name=top_name,
-            weights_mode=weights_mode,
+            weights_mode=memory_plan.notes.get("memory_semantics_mode", weights_mode),
+            communication_plan=communication_plan,
+            memory_plan=memory_plan,
+            build_stages=build_stages,
+            runtime_sequence=runtime_sequence,
             hls_artifacts=self._hls_artifacts_manifest_payload(
                 out_dir=out_dir,
                 hls_run=hls_run,
@@ -223,7 +1205,61 @@ class Compiler:
                 hls_artifact_metadata=hls_artifact_metadata,
                 hls_ii_comparison=hls_ii_comparison,
             ),
-        )
+        ) if enable_runtime_package else None
+        vivado_bd_contract_artifacts = _write_vivado_bd_contract_reports(
+            out_dir,
+            raw,
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
+            build_stages=build_stages,
+            memory_plan=memory_plan,
+            communication_plan=communication_plan,
+            hls_dir=hls_dir,
+        ) if enable_reports else None
+
+        numeric_validation_artifacts = emit_numeric_validation_report(
+            out_dir,
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
+            source_generated=(hls_dir is not None),
+            hls_ran=(hls_run is not None),
+            hls_ok=(hls_run.ok if hls_run is not None else None),
+        ) if enable_reports else None
+        generated_hls_explanation_artifacts = emit_generated_hls_explanation_reports(
+            out_dir,
+            raw_config=raw,
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
+            top_name=top_name,
+            hls_dir=hls_dir,
+            build_stages=build_stages,
+            runtime_sequence=runtime_sequence,
+            memory_plan=memory_plan,
+            communication_plan=communication_plan,
+            numeric_validation_artifacts=numeric_validation_artifacts,
+        ) if enable_reports else None
+        paper_verification_artifacts = emit_paper_verification_artifacts(
+            out_dir,
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
+            source_generated=(hls_dir is not None),
+            numeric_validation_json=(
+                numeric_validation_artifacts.get("numeric_validation_json")
+                if numeric_validation_artifacts is not None
+                else None
+            ),
+            hls_ran=(hls_run is not None),
+            hls_ok=(hls_run.ok if hls_run is not None else None),
+            build_stages=build_stages,
+        ) if enable_reports else None
+        feature_truth_artifacts = _write_feature_truth_reports(
+            out_dir,
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
+            build_stages=build_stages,
+            hls_dir=hls_dir,
+            hls_run=hls_run,
+            runtime_package=runtime_package,
+            numeric_validation_artifacts=numeric_validation_artifacts,
+            paper_verification_artifacts=paper_verification_artifacts,
+            vivado_bd_contract_artifacts=vivado_bd_contract_artifacts,
+        ) if enable_reports else None
+
 
         if emit_manifest:
             self._emit_manifest(
@@ -231,6 +1267,14 @@ class Compiler:
                 hls_artifact_metadata=hls_artifact_metadata,
                 hls_ii_comparison=hls_ii_comparison,
                 runtime_package=runtime_package,
+                build_stages=build_stages,
+                runtime_sequence=runtime_sequence,
+                resolved_config_artifacts=resolved_config_artifacts,
+                numeric_validation_artifacts=numeric_validation_artifacts,
+                generated_hls_explanation_artifacts=generated_hls_explanation_artifacts,
+                paper_verification_artifacts=paper_verification_artifacts,
+                vivado_bd_contract_artifacts=vivado_bd_contract_artifacts,
+                feature_truth_artifacts=feature_truth_artifacts,
                 out_dir=out_dir,
                 top_name=top_name,
                 weights_mode=weights_mode,
@@ -344,9 +1388,13 @@ class Compiler:
         top_name = str(_cfg_get(raw, "pipeline.outputs.top_kernel_name", "deeplearn"))
         verbose = bool(_cfg_get(raw, "debug.verbose", False))
         emit_manifest = bool(_cfg_get(raw, "project.reproducibility.emit_manifest", True))
-        enable_hls = bool(_cfg_get(raw, "backends.hls.enabled", True))
-        enable_host = bool(_cfg_get(raw, "backends.host_cpp.enabled", True))
+        build_stages = _resolve_build_stages(raw)
+        enable_hls = bool(build_stages.get("cpp", False))
+        enable_host = bool(build_stages.get("host_cpp", False))
+        enable_reports = bool(build_stages.get("reports", True))
+        enable_runtime_package = bool(build_stages.get("runtime_package", True))
         act_kind, act_alpha, act_except_last = self._read_activation_insert_cfg(raw)
+        self._reject_unsupported_training_weight_storage(raw)
         weights_mode = self._resolve_hls_weights_mode(raw)
 
         g = self._import_and_prepare_graph(
@@ -359,7 +1407,26 @@ class Compiler:
         descriptors = analyze_graph(g)
         compile_plan = make_compile_plan(self.cfg, descriptors)
         memory_plan = make_memory_plan(g, descriptors, compile_plan)
+        self._annotate_memory_movement_semantics(compile_plan, memory_plan, raw)
         communication_plan = make_communication_plan(self.cfg, memory_plan)
+        runtime_sequence = _resolve_runtime_sequence(
+            raw,
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
+            memory_semantics_mode=str(memory_plan.notes.get("memory_semantics_mode", weights_mode)),
+        )
+        resolved_config_artifacts = _emit_resolved_config_reports(
+            out_dir,
+            raw,
+            build_stages=build_stages,
+            runtime_sequence=runtime_sequence,
+            memory_plan=memory_plan,
+            communication_plan=communication_plan,
+            weights_mode=weights_mode,
+        )
+        _write_runtime_sequence_report(out_dir, runtime_sequence)
+        training_movement_artifacts = _write_training_movement_reports(out_dir, raw)
+        training_optimizer_loss_artifacts = _write_training_optimizer_loss_reports(out_dir, raw)
+        training_movement_artifacts.update(training_optimizer_loss_artifacts)
         capability_report = self._validate_architecture(
             out_dir,
             compile_plan,
@@ -371,6 +1438,14 @@ class Compiler:
             out_dir,
             descriptors,
             compile_plan,
+        )
+        execution_semantics_artifacts = _write_execution_semantics_reports(
+            out_dir,
+            raw,
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
+            memory_plan=memory_plan,
+            communication_plan=communication_plan,
+            prediction_artifacts=prediction_artifacts,
         )
 
         training_plan = build_training_plan(
@@ -390,29 +1465,40 @@ class Compiler:
         training_weight_storage = str(getattr(training_plan, "weight_storage", "") or "").strip().lower()
         training_weights_mode = str(getattr(training_plan, "weights_mode", "") or "").strip().lower()
         hls_weights_mode = str(weights_mode or "").strip().lower()
-        unsupported_training_weight_modes = {
-            "ddr",
-            "dma_ddr",
-            "uram",
+        training_semantics = str(memory_plan.notes.get("memory_semantics_mode", "") or "").strip().lower()
+        unsupported_training_storage = set()
+        unsupported_training_modes = {
             "runtime",
             "runtime_external",
             "external",
             "external_ddr",
+            "dma_ddr",
+        }
+        bram_training_runtime_supported = training_semantics in {
+            "bram_static",
+            "bram_import_full",
+            "bram_import_export_full",
         }
         if (
-            training_weight_storage in unsupported_training_weight_modes
-            or training_weights_mode in unsupported_training_weight_modes
-            or hls_weights_mode in unsupported_training_weight_modes
+            training_weight_storage in unsupported_training_storage
+            or training_weights_mode in unsupported_training_storage
+            or (hls_weights_mode in unsupported_training_storage and not bram_training_runtime_supported)
+            or training_weights_mode in unsupported_training_modes
         ):
             raise ValueError(
                 "Training runtime/external weight storage is not implemented in generated HLS yet: "
                 f"weight_storage={training_weight_storage!r}, "
                 f"weights_mode={training_weights_mode!r}, "
-                f"hls_weights_mode={hls_weights_mode!r}. "
-                "Use embedded/bram training weights for now, or implement the training "
-                "weights_mem/m_axi load-update-store backend before enabling DDR/URAM "
+                f"hls_weights_mode={hls_weights_mode!r}, "
+                f"memory_semantics_mode={training_semantics!r}. "
+                "Use BRAM/URAM training weights for now, or implement the training "
+                "DDR tiled import-update-export backend before enabling DDR "
                 "training weight storage."
             )
+
+        # Training BRAM import/export uses explicit runtime command modes in
+        # top_train_cpp. Keep the legacy backend selector for testbench/runtime
+        # payload generation, but do not classify it as unsupported external DDR.
 
         emit_training_artifacts(out_dir, training_plan)
 
@@ -440,9 +1526,10 @@ class Compiler:
             compile_plan=compile_plan,
             memory_plan=memory_plan,
             communication_plan=communication_plan,
+            build_stages=build_stages,
         ) if enable_hls else None
         host_dir: Optional[Path] = self._emit_hostcpp(out_dir, g, top_name=top_name) if enable_host else None
-        hls_run = self._maybe_run_vitis_hls(hls_dir) if enable_hls and hls_dir is not None else None
+        hls_run = self._maybe_run_vitis_hls(hls_dir, build_stages=build_stages) if enable_hls and hls_dir is not None else None
         hls_calibration_result = run_hls_calibration(
             out_dir=out_dir,
             raw_cfg=raw,
@@ -450,7 +1537,7 @@ class Compiler:
             hls_report_dir=(hls_dir if hls_dir is not None else out_dir),
             clock_mhz=float(getattr(compile_plan, "clock_mhz", _cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0))),
             verbose=verbose,
-        )
+        ) if enable_reports else None
 
         training_compare_result = None
         if hls_run is not None and hls_dir is not None:
@@ -469,22 +1556,31 @@ class Compiler:
                 )
                 print("\n" + training_compare_result.summary_txt.read_text(encoding="utf-8") + "\n")
 
-        hls_schedule_summary = self._emit_hls_schedule_summary(out_dir)
-        hls_artifact_metadata = emit_hls_artifact_metadata(
-            out_dir,
-            compile_plan,
-            schedule_summary=hls_schedule_summary,
-        )
-        hls_ii_comparison = write_requested_achieved_ii_summary(
-            out_dir,
-            compile_plan,
-        )
+        if enable_reports:
+            hls_schedule_summary = self._emit_hls_schedule_summary(out_dir)
+            hls_artifact_metadata = emit_hls_artifact_metadata(
+                out_dir,
+                compile_plan,
+                schedule_summary=hls_schedule_summary,
+            )
+            hls_ii_comparison = write_requested_achieved_ii_summary(
+                out_dir,
+                compile_plan,
+            )
+        else:
+            hls_schedule_summary = None
+            hls_artifact_metadata = None
+            hls_ii_comparison = None
         runtime_package = emit_runtime_package(
             out_dir,
             board=str(_cfg_get(raw, "targets.board", _cfg_get(raw, "project.board", "")) or ""),
             pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
             top_name=top_name,
-            weights_mode=weights_mode,
+            weights_mode=memory_plan.notes.get("memory_semantics_mode", weights_mode),
+            communication_plan=communication_plan,
+            memory_plan=memory_plan,
+            build_stages=build_stages,
+            runtime_sequence=runtime_sequence,
             hls_artifacts=self._hls_artifacts_manifest_payload(
                 out_dir=out_dir,
                 hls_run=hls_run,
@@ -492,7 +1588,105 @@ class Compiler:
                 hls_artifact_metadata=hls_artifact_metadata,
                 hls_ii_comparison=hls_ii_comparison,
             ),
-        )
+        ) if enable_runtime_package else None
+        vivado_bd_contract_artifacts = _write_vivado_bd_contract_reports(
+            out_dir,
+            raw,
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
+            build_stages=build_stages,
+            memory_plan=memory_plan,
+            communication_plan=communication_plan,
+            hls_dir=hls_dir,
+        ) if enable_reports else None
+
+        _gradient_export_cfg = _cfg_get(raw, "data_movement.gradients.export", {}) or {}
+        _gradient_export_requested = isinstance(_gradient_export_cfg, dict) and str(_gradient_export_cfg.get("interface", "")).lower().replace("-", "_") == "m_axi" and str(_gradient_export_cfg.get("policy", "")).lower().replace("-", "_") in {"full", "tiled"}
+        _gradient_export_artifacts = {
+            "requested": bool(_gradient_export_requested),
+            "policy": (str(_gradient_export_cfg.get("policy", "none")).lower().replace("-", "_") if isinstance(_gradient_export_cfg, dict) else "none"),
+            "status": ("covered_by_training_gradient_compare" if (_gradient_export_requested and training_compare_result is not None) else ("generated_not_captured_by_testbench" if _gradient_export_requested else "not_requested")),
+            "note": "Gradient export HLS mode is generated; dedicated gradients_mem capture is required for export-specific numeric proof." if _gradient_export_requested else "Gradient export was not requested.",
+        }
+        _optimizer_contract = _resolve_training_optimizer_loss_contract(raw)
+        _optimizer_type = str(_optimizer_contract.get("optimizer", {}).get("type", "sgd"))
+        _optimizer_state = _optimizer_contract.get("optimizer_state", {}) or {}
+        _optimizer_state_required = bool(_optimizer_state.get("required", False))
+        _optimizer_state_export = _optimizer_state.get("export", {}) if isinstance(_optimizer_state.get("export", {}), dict) else {}
+        _optimizer_state_requested = bool(_optimizer_state_required or _optimizer_state_export.get("supported", False))
+        _state_names = []
+        if _optimizer_type == "momentum":
+            _state_names = ["velocity"]
+        elif _optimizer_type == "adam":
+            _state_names = ["first_moment", "second_moment"]
+        _optimizer_state_artifacts = {
+            "requested": _optimizer_state_requested,
+            "optimizer": _optimizer_type,
+            "storage": _optimizer_state.get("storage", "none"),
+            "expected_tensors": _state_names,
+            "status": (
+                "generated_export_capture_supported"
+                if (_optimizer_state_requested and _optimizer_state_export.get("supported", False))
+                else ("generated_not_captured_by_testbench" if _optimizer_state_requested else "not_requested")
+            ),
+            "export_capture_mode": 9 if (_optimizer_state_requested and _optimizer_state_export.get("supported", False)) else None,
+            "note": (
+                "Persistent optimizer-state tensors are generated and export_optimizer_state mode 9 can write them to optimizer_state_mem; runtime/testbench must capture got/ref files for numeric proof."
+                if (_optimizer_state_requested and _optimizer_state_export.get("supported", False))
+                else (
+                    "Persistent optimizer-state tensors are generated in HLS; runtime/testbench capture must provide ref/got files for numeric proof."
+                    if _optimizer_state_requested
+                    else "Optimizer does not require persistent state."
+                )
+            ),
+            "comparisons": {},
+        }
+        numeric_validation_artifacts = emit_numeric_validation_report(
+            out_dir,
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
+            source_generated=(hls_dir is not None),
+            hls_ran=(hls_run is not None),
+            hls_ok=(hls_run.ok if hls_run is not None else None),
+            training_reference_result=training_reference_result,
+            training_compare_result=training_compare_result,
+            gradient_export_artifacts=_gradient_export_artifacts,
+            optimizer_state_artifacts=_optimizer_state_artifacts,
+        ) if enable_reports else None
+        generated_hls_explanation_artifacts = emit_generated_hls_explanation_reports(
+            out_dir,
+            raw_config=raw,
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
+            top_name=top_name,
+            hls_dir=hls_dir,
+            build_stages=build_stages,
+            runtime_sequence=runtime_sequence,
+            memory_plan=memory_plan,
+            communication_plan=communication_plan,
+            numeric_validation_artifacts=numeric_validation_artifacts,
+        ) if enable_reports else None
+        paper_verification_artifacts = emit_paper_verification_artifacts(
+            out_dir,
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
+            source_generated=(hls_dir is not None),
+            numeric_validation_json=(
+                numeric_validation_artifacts.get("numeric_validation_json")
+                if numeric_validation_artifacts is not None
+                else None
+            ),
+            hls_ran=(hls_run is not None),
+            hls_ok=(hls_run.ok if hls_run is not None else None),
+            build_stages=build_stages,
+        ) if enable_reports else None
+        feature_truth_artifacts = _write_feature_truth_reports(
+            out_dir,
+            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
+            build_stages=build_stages,
+            hls_dir=hls_dir,
+            hls_run=hls_run,
+            runtime_package=runtime_package,
+            numeric_validation_artifacts=numeric_validation_artifacts,
+            paper_verification_artifacts=paper_verification_artifacts,
+            vivado_bd_contract_artifacts=vivado_bd_contract_artifacts,
+        ) if enable_reports else None
 
         if emit_manifest:
             self._emit_manifest(
@@ -500,6 +1694,14 @@ class Compiler:
                 hls_artifact_metadata=hls_artifact_metadata,
                 hls_ii_comparison=hls_ii_comparison,
                 runtime_package=runtime_package,
+                build_stages=build_stages,
+                runtime_sequence=runtime_sequence,
+                resolved_config_artifacts=resolved_config_artifacts,
+                numeric_validation_artifacts=numeric_validation_artifacts,
+                generated_hls_explanation_artifacts=generated_hls_explanation_artifacts,
+                paper_verification_artifacts=paper_verification_artifacts,
+                vivado_bd_contract_artifacts=vivado_bd_contract_artifacts,
+                feature_truth_artifacts=feature_truth_artifacts,
                 out_dir=out_dir,
                 top_name=top_name,
                 weights_mode=weights_mode,
@@ -648,6 +1850,15 @@ class Compiler:
             timing_prediction=timing_prediction,
         )
 
+        compatibility_artifacts = emit_model_compatibility_reports(
+            reports_dir,
+            inspection,
+            raw_cfg=raw,
+        )
+        prediction_artifacts.update(
+            {key: str(value) for key, value in compatibility_artifacts.items()}
+        )
+
         board = str(
             _cfg_get(
                 raw,
@@ -766,26 +1977,10 @@ class Compiler:
             f" {mode} factor=",
         )
 
-    def _resolve_hls_weights_mode(self, raw: Dict[str, Any]) -> str:
-        """Resolve model-weight storage into the legacy HLS weight mode.
-
-        memory.storage.weights is model tensor placement.
-        data_movement.ps_pl.weights.mode is a legacy transport/mode knob.
-
-        BRAM -> embedded constants/local arrays.
-        URAM -> runtime-loaded local URAM cache.
-        DDR  -> runtime/external AXI weight memory.
-        """
-        storage = str(
-            _cfg_get(
-                raw,
-                "memory.storage.weights",
-                _cfg_get(raw, "memory.weight_storage", ""),
-            )
-            or ""
-        ).strip().lower().replace("-", "_")
-
-        storage_aliases = {
+    @staticmethod
+    def _normalise_weight_storage(value: Any) -> str:
+        raw_value = str(value or "").strip().lower().replace("-", "_")
+        aliases = {
             "embedded": "bram",
             "on_chip": "bram",
             "onchip": "bram",
@@ -800,23 +1995,460 @@ class Compiler:
             "external_ddr": "ddr",
             "dma_ddr": "ddr",
         }
-        storage = storage_aliases.get(storage, "")
+        return aliases.get(raw_value, raw_value)
 
-        legacy_mode = str(
-            _cfg_get(raw, "data_movement.weights.load.interface", _cfg_get(raw, "data_movement.ps_pl.weights.mode", "embedded")) or "embedded"
+    @staticmethod
+    def _normalise_movement_interface(value: Any) -> str:
+        raw_value = str(value or "").strip().lower().replace("-", "_")
+        aliases = {
+            "compile": "compile_time",
+            "compiletime": "compile_time",
+            "compiled": "compile_time",
+            "static": "compile_time",
+            "embedded": "compile_time",
+            "const": "compile_time",
+            "bram": "compile_time",
+            "uram": "compile_time",
+            "axi_dma": "axi_stream",
+            "axis": "axi_stream",
+            "stream": "axi_stream",
+            "streamed": "axi_stream",
+            "dma": "axi_stream",
+            "ddr": "m_axi",
+            "dma_ddr": "m_axi",
+            "external": "m_axi",
+            "external_ddr": "m_axi",
+            "m_axi": "m_axi",
+            "maxi": "m_axi",
+            "none": "none",
+            "off": "none",
+        }
+        return aliases.get(raw_value, raw_value)
+
+    @staticmethod
+    def _normalise_movement_policy(value: Any) -> str:
+        raw_value = str(value or "").strip().lower().replace("-", "_")
+        aliases = {
+            "static": "static",
+            "compile_time": "static",
+            "compiletime": "static",
+            "full": "full",
+            "preload": "full",
+            "preload_full": "full",
+            "import_full": "full",
+            "load_full": "full",
+            "tiled": "tiled",
+            "tile": "tiled",
+            "stream": "tiled",
+            "streaming": "tiled",
+            "none": "none",
+            "off": "none",
+        }
+        return aliases.get(raw_value, raw_value)
+
+    @staticmethod
+    def _normalise_transport(value: Any, interface: str) -> str:
+        raw_value = str(value or "").strip().lower().replace("-", "_")
+        aliases = {
+            "axi_dma": "dma",
+            "dma": "dma",
+            "ps": "ps_runtime",
+            "ps_ddr": "ps_runtime",
+            "runtime": "ps_runtime",
+            "host": "ps_runtime",
+            "none": "none",
+            "off": "none",
+        }
+        if raw_value:
+            return aliases.get(raw_value, raw_value)
+        if interface == "axi_stream":
+            return "dma"
+        if interface == "m_axi":
+            return "ps_runtime"
+        return "none"
+
+    @staticmethod
+    def _has_explicit_weight_data_movement(raw: Dict[str, Any]) -> bool:
+        """Return True when the user provided detailed weight import/export movement.
+
+        weights.mode is an intent shortcut.  Detailed data_movement entries remain
+        higher priority and must not be overwritten by the shortcut expansion.
+        Legacy data_movement.ps_pl.weights.mode is treated as a legacy/default
+        shortcut, so an explicit top-level weights.mode may override it.
+        """
+        explicit_paths = (
+            "data_movement.weights.import",
+            "data_movement.weights.load",
+            "data_movement.weights.export",
+            "data_movement.weights.store",
+        )
+        for path in explicit_paths:
+            value = _cfg_get(raw, path, None)
+            if isinstance(value, dict) and value:
+                return True
+        scalar_paths = (
+            "data_movement.weights.import.interface",
+            "data_movement.weights.load.interface",
+            "data_movement.weights.export.interface",
+            "data_movement.weights.store.interface",
+        )
+        return any(_cfg_get(raw, path, None) is not None for path in scalar_paths)
+
+    @staticmethod
+    def _normalise_user_weight_mode(value: Any) -> str:
+        mode = str(value or "").strip().lower().replace("-", "_")
+        aliases = {
+            "": "",
+            "static": "embedded",
+            "compile_time": "embedded",
+            "compiletime": "embedded",
+            "const": "embedded",
+            "on_chip": "embedded",
+            "onchip": "embedded",
+            "embedded": "embedded",
+            "runtime_import": "import",
+            "runtime_loaded": "import",
+            "load": "import",
+            "import": "import",
+            "load_store": "import_export",
+            "import_store": "import_export",
+            "import_export": "import_export",
+            "export_import": "import_export",
+            "ddr": "tiled",
+            "ddr_tiled": "tiled",
+            "tile": "tiled",
+            "tiled": "tiled",
+            "mutable_tiled": "tiled_mutable",
+            "ddr_tiled_mutable": "tiled_mutable",
+            "tiled_mutable": "tiled_mutable",
+        }
+        return aliases.get(mode, mode)
+
+    def _expand_user_weight_mode_to_movement(
+        self,
+        raw: Dict[str, Any],
+        *,
+        storage: str,
+    ) -> tuple[Dict[str, Any], Dict[str, Any], str | None]:
+        """Expand weights.mode / training.weight_initialization.mode to import/export cfg.
+
+        Returns (import_cfg, export_cfg, source_mode).  source_mode is the
+        normalized high-level mode that produced the expansion, or None when no
+        user-facing shortcut was present.
+        """
+        mode_value = _cfg_get(raw, "weights.mode", None)
+        source_path = "weights.mode"
+        if mode_value is None:
+            init_mode = _cfg_get(raw, "training.weight_initialization.mode", None)
+            if init_mode is not None:
+                init = str(init_mode or "").strip().lower().replace("-", "_")
+                init_aliases = {
+                    "compile_time": "embedded",
+                    "compiletime": "embedded",
+                    "static": "embedded",
+                    "embedded": "embedded",
+                    "const": "embedded",
+                    "import": "import",
+                    "runtime_import": "import",
+                    "load": "import",
+                }
+                if init in {"zero", "xavier", "he", "random", "random_seeded", "seeded_random"}:
+                    raise ValueError(
+                        "training.weight_initialization.mode={!r} is not implemented yet. "
+                        "Supported modes are compile_time and import.".format(init_mode)
+                    )
+                mode_value = init_aliases.get(init, init)
+                source_path = "training.weight_initialization.mode"
+        mode = self._normalise_user_weight_mode(mode_value)
+        if not mode:
+            return {}, {}, None
+
+        pipeline_mode = str(_cfg_get(raw, "pipeline.mode", "inference") or "inference").strip().lower()
+        if mode == "embedded":
+            if storage == "ddr":
+                raise ValueError(
+                    f"{source_path}=embedded is only valid with BRAM/URAM weight storage. "
+                    "DDR storage means tiled external-memory execution; use weights.mode=tiled."
+                )
+            return (
+                {"interface": "compile_time", "transport": "none", "policy": "static"},
+                {"interface": "none", "transport": "none", "policy": "none"},
+                mode,
+            )
+        if mode == "import":
+            if storage == "ddr":
+                raise ValueError(
+                    f"{source_path}=import is only valid with BRAM/URAM weight storage. "
+                    "Full import into local memory is not DDR storage; use BRAM/URAM or weights.mode=tiled."
+                )
+            return (
+                {"interface": "m_axi", "transport": "ps_runtime", "policy": "full"},
+                {"interface": "none", "transport": "none", "policy": "none"},
+                mode,
+            )
+        if mode == "import_export":
+            if storage == "ddr":
+                raise ValueError(
+                    f"{source_path}=import_export is only valid with BRAM/URAM weight storage. "
+                    "DDR mutable weights must use weights.mode=tiled_mutable."
+                )
+            return (
+                {"interface": "m_axi", "transport": "ps_runtime", "policy": "full"},
+                {"interface": "m_axi", "transport": "ps_runtime", "policy": "full"},
+                mode,
+            )
+        if mode == "tiled":
+            if storage != "ddr":
+                raise ValueError(
+                    f"{source_path}=tiled requires memory.storage.weights=ddr. "
+                    f"Got memory.storage.weights={storage!r}."
+                )
+            return (
+                {"interface": "m_axi", "transport": "ps_runtime", "policy": "tiled"},
+                {"interface": "none", "transport": "none", "policy": "none"},
+                mode,
+            )
+        if mode == "tiled_mutable":
+            if storage != "ddr":
+                raise ValueError(
+                    f"{source_path}=tiled_mutable requires memory.storage.weights=ddr. "
+                    f"Got memory.storage.weights={storage!r}."
+                )
+            if pipeline_mode != "training_on_device":
+                raise ValueError(
+                    f"{source_path}=tiled_mutable is a training weight mode. "
+                    f"Got pipeline.mode={pipeline_mode!r}."
+                )
+            return (
+                {"interface": "m_axi", "transport": "ps_runtime", "policy": "tiled"},
+                {"interface": "m_axi", "transport": "ps_runtime", "policy": "tiled"},
+                mode,
+            )
+        raise ValueError(
+            f"Unsupported {source_path}={mode_value!r}. Supported values are "
+            "embedded, import, import_export, tiled, and tiled_mutable."
+        )
+
+    def _reject_unsupported_training_weight_storage(self, raw: Dict[str, Any]) -> None:
+        pipeline_mode = str(_cfg_get(raw, "pipeline.mode", "") or "").strip().lower()
+        if pipeline_mode != "training_on_device":
+            return
+        training_weight_storage = str(
+            _cfg_get(
+                raw,
+                "training.storage.weights",
+                _cfg_get(raw, "memory.storage.weights", _cfg_get(raw, "memory.weight_storage", "bram")),
+            )
+            or "bram"
         ).strip().lower().replace("-", "_")
+        weight_storage = str(
+            _cfg_get(raw, "memory.storage.weights", _cfg_get(raw, "memory.weight_storage", training_weight_storage))
+            or training_weight_storage
+        ).strip().lower().replace("-", "_")
+        aliases = {"ultra": "uram", "ultra_ram": "uram", "external": "ddr", "external_ddr": "ddr", "dma_ddr": "ddr"}
+        training_weight_storage = aliases.get(training_weight_storage, training_weight_storage)
+        weight_storage = aliases.get(weight_storage, weight_storage)
+        # DDR training now maps to the tiled mutable backend for Dense/Conv graphs.
+        # Unsupported layer types are rejected by top_train_cpp so the compiler
+        # no longer rejects the storage choice before codegen.
+        if training_weight_storage == "uram" or weight_storage == "uram":
+            board_name = str(_cfg_get(raw, "targets.board", _cfg_get(raw, "project.board", "")) or "").strip()
+            if board_name:
+                try:
+                    board = get_board(board_name)
+                    if int(board.uram or 0) <= 0:
+                        raise ValueError(
+                            f"memory.storage.weights=uram requires URAM, but selected board {board_name!r} has 0 URAM blocks."
+                        )
+                except KeyError:
+                    pass
 
-        if storage == "uram":
-            return "uram"
-        if storage == "ddr":
-            return "ddr"
+    def _resolve_weight_movement_semantics(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        requested_storage = _cfg_get(
+            raw,
+            "memory.storage.weights",
+            _cfg_get(raw, "memory.weight_storage", None),
+        )
 
-        if legacy_mode in {"stream", "streamed"}:
-            return "stream"
-        if legacy_mode in {"ddr", "dma_ddr", "external", "external_ddr"}:
-            return "ddr"
-        return "embedded"
+        # Legacy configs sometimes specified only data_movement.ps_pl.weights.mode.
+        # Treat that as a legacy/default shortcut, not as detailed movement;
+        # top-level weights.mode is the newer user-facing intent and should win.
+        legacy_mode = None if _cfg_get(raw, "weights.mode", None) is not None else _cfg_get(raw, "data_movement.ps_pl.weights.mode", None)
+        storage = self._normalise_weight_storage(requested_storage or "bram")
 
+        explicit_weight_movement = self._has_explicit_weight_data_movement(raw)
+        expanded_user_mode: str | None = None
+        if explicit_weight_movement:
+            import_cfg = _cfg_get(raw, "data_movement.weights.import", None)
+            if not isinstance(import_cfg, dict):
+                import_cfg = _cfg_get(raw, "data_movement.weights.load", None)
+            if not isinstance(import_cfg, dict):
+                import_cfg = {}
+            export_cfg = _cfg_get(raw, "data_movement.weights.export", None)
+            if not isinstance(export_cfg, dict):
+                export_cfg = _cfg_get(raw, "data_movement.weights.store", None)
+            if not isinstance(export_cfg, dict):
+                export_cfg = {}
+        else:
+            import_cfg, export_cfg, expanded_user_mode = self._expand_user_weight_mode_to_movement(
+                raw,
+                storage=storage,
+            )
+
+        legacy_interface = _cfg_get(raw, "data_movement.weights.load.interface", legacy_mode)
+        import_interface = self._normalise_movement_interface(
+            import_cfg.get("interface", legacy_interface)
+            or ("m_axi" if storage == "ddr" else "compile_time")
+        )
+        import_policy = self._normalise_movement_policy(
+            import_cfg.get("policy", None)
+            or ("tiled" if storage == "ddr" else "static")
+        )
+        import_transport = self._normalise_transport(import_cfg.get("transport", None), import_interface)
+
+        export_interface = self._normalise_movement_interface(export_cfg.get("interface", "none"))
+        export_policy = self._normalise_movement_policy(export_cfg.get("policy", "none"))
+        export_transport = self._normalise_transport(export_cfg.get("transport", None), export_interface)
+
+        if storage not in {"bram", "uram", "ddr"}:
+            raise ValueError(
+                "memory.storage.weights must be one of bram, uram, or ddr; "
+                f"got {requested_storage!r}. Use data_movement.weights.import/export "
+                "for transfer behavior."
+            )
+
+        if storage == "bram":
+            if import_interface == "compile_time" and import_policy == "static":
+                resolved = "bram_static"
+                hls_mode = "embedded"
+                payload_required = False
+            elif import_interface == "m_axi" and import_policy == "full":
+                resolved = "bram_import_export_full" if export_interface == "m_axi" and export_policy == "full" else "bram_import_full"
+                hls_mode = "ddr"
+                payload_required = True
+            else:
+                raise ValueError(
+                    "BRAM weight storage supports import compile_time/static or m_axi/full. "
+                    f"Got import {import_interface}/{import_policy}."
+                )
+        elif storage == "uram":
+            if import_interface == "compile_time" and import_policy == "static":
+                resolved = "uram_static"
+                hls_mode = "embedded"
+                payload_required = False
+            elif import_interface == "m_axi" and import_policy == "full":
+                resolved = "uram_import_export_full" if export_interface == "m_axi" and export_policy == "full" else "uram_import_full"
+                hls_mode = "uram"
+                payload_required = True
+            else:
+                raise ValueError(
+                    "URAM weight storage supports import compile_time/static or m_axi/full. "
+                    f"Got import {import_interface}/{import_policy}."
+                )
+        else:
+            if import_interface == "m_axi" and import_policy == "tiled":
+                if export_interface not in {"none", "m_axi"} or (export_interface == "m_axi" and export_policy != "tiled"):
+                    raise ValueError(
+                        "DDR weight storage supports export none/none for inference or m_axi/tiled for future mutable training. "
+                        f"Got export {export_interface}/{export_policy}."
+                    )
+                resolved = "ddr_tiled_mutable" if export_interface == "m_axi" and export_policy == "tiled" else "ddr_tiled"
+                hls_mode = resolved
+                payload_required = True
+            else:
+                raise ValueError(
+                    "DDR weight storage means weights stay in DDR and must use m_axi/tiled import. "
+                    f"Got import {import_interface}/{import_policy}. Full import belongs to BRAM/URAM storage."
+                )
+
+        if storage != "ddr" and export_interface != "none" and not (export_interface == "m_axi" and export_policy == "full"):
+            raise ValueError(
+                "Weight export currently supports none/none or m_axi/full only for BRAM/URAM storage; "
+                f"got export {export_interface}/{export_policy}."
+            )
+
+        return {
+            "requested_weight_storage": str(requested_storage or storage),
+            "resolved_weight_storage": storage,
+            "resolved_weight_semantics": resolved,
+            "memory_semantics_mode": resolved,
+            "hls_weights_mode": hls_mode,
+            "runtime_weight_payload_required": payload_required,
+            "full_local_weight_replica": storage in {"bram", "uram"},
+            "tile_weight_buffer": storage == "ddr",
+            "scalable_external_weight_execution": storage == "ddr",
+            "weight_import_interface": import_interface,
+            "weight_import_transport": import_transport,
+            "weight_import_policy": import_policy,
+            "weight_export_interface": export_interface,
+            "weight_export_transport": export_transport,
+            "weight_export_policy": export_policy,
+            "user_weight_mode": expanded_user_mode,
+            "weight_movement_source": "data_movement" if explicit_weight_movement else ("weights.mode" if expanded_user_mode else "compiler_default"),
+            "runtime_commands_supported": [
+                *(["import_weights"] if payload_required else []),
+                "run_inference",
+                *(["export_weights"] if export_interface == "m_axi" and export_policy == "full" else []),
+            ],
+            "reload_before_each_compute": False,
+        }
+
+    def _resolve_activation_storage_semantics(self, raw: Dict[str, Any]) -> Dict[str, Any]:
+        requested = _cfg_get(raw, "memory.storage.activations", _cfg_get(raw, "memory.activation_storage", "bram"))
+        value = str(requested or "bram").strip().lower().replace("-", "_")
+        aliases = {
+            "block": "bram",
+            "block_ram": "bram",
+            "bram": "bram",
+            "ultra": "uram",
+            "ultra_ram": "uram",
+            "uram": "uram",
+        }
+        storage = aliases.get(value)
+        if storage not in {"bram", "uram"}:
+            raise ValueError(
+                "memory.storage.activations must be bram or uram for this backend; "
+                f"got {requested!r}."
+            )
+        board_name = str(_cfg_get(raw, "targets.board", _cfg_get(raw, "project.board", "")) or "").strip()
+        if storage == "uram" and board_name:
+            try:
+                board = get_board(board_name)
+                if int(board.uram or 0) <= 0:
+                    raise ValueError(
+                        f"memory.storage.activations=uram requires URAM, but selected board {board_name!r} has 0 URAM blocks."
+                    )
+            except KeyError:
+                # Unknown-board validation is handled by the board/backend path.
+                pass
+        return {
+            "requested_activation_storage": str(requested or storage),
+            "resolved_activation_storage": storage,
+            "activation_storage_semantics": f"activation_{storage}",
+            "activation_local_buffers": True,
+        }
+
+    def _resolve_hls_weights_mode(self, raw: Dict[str, Any]) -> str:
+        """Resolve storage + import/export movement into the existing HLS backend mode."""
+        return str(self._resolve_weight_movement_semantics(raw)["hls_weights_mode"])
+
+    def _annotate_memory_movement_semantics(self, compile_plan, memory_plan, raw: Dict[str, Any]) -> Dict[str, Any]:
+        semantics = self._resolve_weight_movement_semantics(raw)
+        activation_semantics = self._resolve_activation_storage_semantics(raw)
+        semantics.update(activation_semantics)
+        gradient_storage = str(_cfg_get(raw, "training.storage.gradients", _cfg_get(raw, "memory.storage.gradients", "bram")) or "bram").strip().lower().replace("-", "_")
+        gradient_aliases = {"block": "bram", "block_ram": "bram", "bram": "bram", "ultra": "uram", "ultra_ram": "uram", "uram": "uram"}
+        gradient_storage = gradient_aliases.get(gradient_storage, gradient_storage)
+        if gradient_storage not in {"bram", "uram"}:
+            raise ValueError(f"training.storage.gradients must be bram or uram for this backend; got {gradient_storage!r}.")
+        semantics.update({
+            "requested_gradient_storage": gradient_storage,
+            "resolved_gradient_storage": gradient_storage,
+            "gradient_storage_semantics": f"gradient_{gradient_storage}",
+        })
+        compile_plan.notes.update(semantics)
+        memory_plan.notes.update(semantics)
+        return semantics
 
     def _hls_weight_storage_impl(self, memory_plan=None) -> str:
         raw = self.cfg.raw
@@ -863,6 +2495,7 @@ class Compiler:
         compile_plan=None,
         memory_plan=None,
         communication_plan=None,
+        build_stages: Optional[Dict[str, bool]] = None,
     ) -> Path:
         from fpgai.backends.hls.codegen import emit_hls_stub
 
@@ -873,6 +2506,9 @@ class Compiler:
         training_cfg = (_cfg_get(raw, "training", {}) or {})
 
         intermediate_dump = bool(_cfg_get(raw, "benchmark.intermediate.enabled", False))
+        stages = build_stages or _resolve_build_stages(raw)
+        emit_hls_project = bool(stages.get("hls_project", True))
+        emit_testbench = bool(stages.get("testbench", True))
         if pipeline_mode == "training_on_device":
             intermediate_dump = bool(_cfg_get(raw, "training.debug.dump_intermediates", False))
 
@@ -982,6 +2618,7 @@ class Compiler:
                     compile_plan=compile_plan,
                     memory_plan=memory_plan,
                     communication_plan=communication_plan,
+                    raw_cfg=self.cfg.raw,
                 ),
             )
 
@@ -1100,29 +2737,31 @@ class Compiler:
                     if c is not None:
                         total_param_words += 2 * c
 
-            emit_tb_train_cpp(
-                src_dir,
-                graph=g,
-                top_name=top_name,
-                in_words=int(np.fromfile(input_bin, dtype=np.float32).size),
-                out_words=0,
-                weights_mode=weights_mode,
-                weight_words=total_param_words,
-                preload_weights=[],
-                training_cfg=training_cfg,
-            )
-
-            write_text(
-                hls_dir / "run_hls.tcl",
-                emit_csim_train_tcl(
+            if emit_testbench:
+                emit_tb_train_cpp(
+                    src_dir,
+                    graph=g,
                     top_name=top_name,
-                    part=part,
-                    input_bin_path=input_bin,
-                    target_bin_path=target_bin,
+                    in_words=int(np.fromfile(input_bin, dtype=np.float32).size),
+                    out_words=0,
                     weights_mode=weights_mode,
-                    intermediate_dump=intermediate_dump,
-                ),
-            )
+                    weight_words=total_param_words,
+                    preload_weights=[],
+                    training_cfg=training_cfg,
+                )
+
+            if emit_hls_project:
+                write_text(
+                    hls_dir / "run_hls.tcl",
+                    emit_csim_train_tcl(
+                        top_name=top_name,
+                        part=part,
+                        input_bin_path=input_bin,
+                        target_bin_path=target_bin,
+                        weights_mode=weights_mode,
+                        intermediate_dump=intermediate_dump,
+                    ),
+                )
         else:
             write_text(
                 src_dir / f"{top_name}.cpp",
@@ -1156,34 +2795,49 @@ class Compiler:
                 else 0
             )
 
-            emit_tb_cpp(
-                src_dir,
-                top_name=top_name,
-                in_words=in_words,
-                out_words=out_words,
-                weights_mode=weights_mode,
-                weight_words=runtime_weight_words,
-            
-                raw_cfg=self.cfg.raw,)
-
-            write_text(
-                hls_dir / "run_hls.tcl",
-                emit_csim_tcl(
+            if emit_testbench:
+                emit_tb_cpp(
+                    src_dir,
                     top_name=top_name,
-                    part=part,
-                    clk_period_ns=(1000.0 / clk_mhz),
-                    input_bin_path=input_bin,
-                    output_bin_path=str((out_dir / "output.bin").resolve()),
+                    in_words=in_words,
+                    out_words=out_words,
                     weights_mode=weights_mode,
-                    intermediate_dump=intermediate_dump,
-                ),
-            )
+                    weight_words=runtime_weight_words,
+                
+                    raw_cfg=self.cfg.raw,)
+
+            if emit_hls_project:
+                write_text(
+                    hls_dir / "run_hls.tcl",
+                    emit_csim_tcl(
+                        top_name=top_name,
+                        part=part,
+                        clk_period_ns=(1000.0 / clk_mhz),
+                        input_bin_path=input_bin,
+                        output_bin_path=str((out_dir / "output.bin").resolve()),
+                        weights_mode=weights_mode,
+                        intermediate_dump=intermediate_dump,
+                    ),
+                )
+
+        if not emit_hls_project:
+            # C++-only builds must not leave an HLS project driver behind.
+            # Some lower-level emit helpers may create a default run_hls.tcl as
+            # part of their legacy project scaffold; remove it after source
+            # emission so build.stages.hls_project=false has a strict artifact
+            # contract.
+            run_hls_tcl = hls_dir / "run_hls.tcl"
+            if run_hls_tcl.exists():
+                run_hls_tcl.unlink()
 
         return hls_dir
 
-    def _maybe_run_vitis_hls(self, hls_dir: Path):
+    def _maybe_run_vitis_hls(self, hls_dir: Path, *, build_stages: Optional[Dict[str, bool]] = None):
         raw = self.cfg.raw
-        run_enabled = bool(_cfg_get(raw, "toolchain.vitis_hls.enabled", False))
+        if build_stages is None:
+            run_enabled = bool(_cfg_get(raw, "toolchain.vitis_hls.enabled", False))
+        else:
+            run_enabled = bool(build_stages.get("hls_synthesis", False))
         if not run_enabled:
             return None
         vitis_exe = str(_cfg_get(raw, "backends.hls.vitis.exe", _cfg_get(raw, "toolchain.vitis_hls.exe", "vitis_hls")))
@@ -1440,8 +3094,10 @@ class Compiler:
         hls_run = kwargs.get("hls_run")
         training_plan = kwargs.get("training_plan")
 
-        hls_enabled = bool(_cfg_get(raw, "backends.hls.enabled", True))
-        host_cpp_enabled = bool(_cfg_get(raw, "backends.host_cpp.enabled", True))
+        build_stages = kwargs.get("build_stages") or _resolve_build_stages(raw)
+        hls_enabled = bool(build_stages.get("cpp", False))
+        hls_project_enabled = bool(build_stages.get("hls_project", False))
+        host_cpp_enabled = bool(build_stages.get("host_cpp", False))
 
         stages: List[Dict[str, Any]] = [
             self._pipeline_stage(
@@ -1530,12 +3186,24 @@ class Compiler:
 
         stages.append(
             self._pipeline_stage(
-                "generate_hls",
+                "generate_cpp",
                 "done" if hls_enabled else "skipped",
                 detail=(
-                    "HLS source artifacts requested."
+                    "Generated HLS-compatible C++ source/include artifacts."
                     if hls_enabled
-                    else "HLS backend disabled in config."
+                    else "C++ generation disabled by build stages."
+                ),
+            )
+        )
+
+        stages.append(
+            self._pipeline_stage(
+                "generate_hls_project",
+                "done" if hls_project_enabled else "skipped",
+                detail=(
+                    "HLS project/run script artifacts requested."
+                    if hls_project_enabled
+                    else "C++-only mode: HLS project/run script artifacts not requested."
                 ),
             )
         )
@@ -1589,9 +3257,25 @@ class Compiler:
 
         stages.append(
             self._pipeline_stage(
-                "vivado_bridge",
-                "not_requested",
-                detail="Vivado bridge is generated/run by the separate Vivado bridge flow, not by the main compile command.",
+                "vivado_project",
+                "not_requested" if not build_stages.get("vivado_project") else "requested_external_flow",
+                detail=(
+                    "Vivado project was requested in build stages; execution remains in the Vivado bridge flow."
+                    if build_stages.get("vivado_project")
+                    else "Vivado project is not requested by build stages."
+                ),
+            )
+        )
+
+        stages.append(
+            self._pipeline_stage(
+                "bitstream",
+                "not_requested" if not build_stages.get("bitstream") else "requested_external_flow",
+                detail=(
+                    "Bitstream was requested in build stages; execution remains in the Vivado bridge flow."
+                    if build_stages.get("bitstream")
+                    else "Bitstream is not requested by build stages."
+                ),
             )
         )
 
@@ -2320,6 +4004,11 @@ class Compiler:
 
         payload = {
             "format": "fpgai.hardware_knob_contract.v1",
+            "board_fit_status": "not_evaluated",
+            "board_fit_reason": (
+                "Capacity/resource feasibility is recorded as a contract placeholder here; "
+                "full board-fit enforcement is handled by the dedicated board-fit sprint/report."
+            ),
             "precedence": [
                 "manual_yaml_override",
                 "board_aware_policy_scaling",
@@ -2499,6 +4188,7 @@ class Compiler:
                         "backends.host_cpp.enabled",
                         True,
                     ),
+                    "build_stages": _cfg_get(self.cfg.raw, "build.stages", None),
                 },
                 "effective": {
                     "clock_mhz": kwargs["compile_plan"].clock_mhz,
@@ -2507,6 +4197,7 @@ class Compiler:
                     ),
                     "weights_mode": kwargs["weights_mode"],
                     "top_kernel_name": kwargs["top_name"],
+                    "build_stages": _build_stage_summary(kwargs.get("build_stages") or _resolve_build_stages(self.cfg.raw)),
                 },
             },
             "out_dir": str(out_dir),
@@ -2629,6 +4320,24 @@ class Compiler:
                 hls_artifact_metadata=kwargs.get("hls_artifact_metadata"),
                 hls_ii_comparison=kwargs.get("hls_ii_comparison"),
             ),
+            "build_stages": _build_stage_summary(kwargs.get("build_stages") or _resolve_build_stages(self.cfg.raw)),
+            "runtime_sequence": kwargs.get("runtime_sequence"),
+            "resolved_config_artifacts": kwargs.get("resolved_config_artifacts"),
+            "numeric_validation_artifacts": None if kwargs.get("numeric_validation_artifacts") is None else {
+                key: str(value) for key, value in kwargs.get("numeric_validation_artifacts", {}).items()
+            },
+            "generated_hls_explanation_artifacts": None if kwargs.get("generated_hls_explanation_artifacts") is None else {
+                key: str(value) for key, value in kwargs.get("generated_hls_explanation_artifacts", {}).items()
+            },
+            "paper_verification_artifacts": None if kwargs.get("paper_verification_artifacts") is None else {
+                key: str(value) for key, value in kwargs.get("paper_verification_artifacts", {}).items()
+            },
+            "vivado_bd_contract_artifacts": None if kwargs.get("vivado_bd_contract_artifacts") is None else {
+                key: str(value) for key, value in kwargs.get("vivado_bd_contract_artifacts", {}).items()
+            },
+            "feature_truth_artifacts": None if kwargs.get("feature_truth_artifacts") is None else {
+                key: str(value) for key, value in kwargs.get("feature_truth_artifacts", {}).items()
+            },
             "runtime_package": kwargs.get("runtime_package"),
             "pipeline_stages": self._build_pipeline_stages(**kwargs),
             "seconds": round(float(kwargs["seconds"]), 6),

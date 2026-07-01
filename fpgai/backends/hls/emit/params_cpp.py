@@ -601,6 +601,8 @@ def emit_params_cpp(
         "ddr",
         "dma_ddr",
         "uram",
+        "ddr_tiled",
+        "ddr_tiled_mutable",
     }:
         raise ValueError(
             f"Unsupported weights mode: {weights_mode!r}"
@@ -612,6 +614,8 @@ def emit_params_cpp(
         "ddr",
         "dma_ddr",
         "uram",
+        "ddr_tiled",
+        "ddr_tiled_mutable",
     }
 
     lines: List[str] = [
@@ -663,18 +667,21 @@ def emit_params_cpp(
             lines.append(f"// {op.op_type} layer {op.name!r}")
             lines.append(f"// Weight source: {weight_source}")
             lines.append(f"// Bias source: {bias_source}")
-            # Runtime arrays must be mutable and intentionally uninitialized.
-            # Vitis HLS rejects initialized global/static arrays when they are
-            # bound to URAM (HLS 214-221).  Keep the reference ONNX values in
-            # separate const *_init arrays used only by the testbench/preload
-            # helpers; the top function writes runtime data into W*/B* through
-            # AXI stream or DDR before inference.
-            lines.append(
-                f"{weight_type} W{parameter_index}[{int(weight_array.size)}];"
-            )
-            lines.append(
-                f"{bias_type} B{parameter_index}[{int(bias_array.size)}];"
-            )
+            # Runtime import-full modes allocate mutable local W/B arrays.
+            # DDR-tiled modes do not allocate a full local model; the top function
+            # reads weight tiles directly from weights_mem and uses *_init arrays
+            # only to build the runtime payload/testbench memory image.
+            if normalized_mode not in {"ddr_tiled", "ddr_tiled_mutable"}:
+                lines.append(
+                    f"{weight_type} W{parameter_index}[{int(weight_array.size)}];"
+                )
+                lines.append(
+                    f"{bias_type} B{parameter_index}[{int(bias_array.size)}];"
+                )
+            else:
+                lines.append(
+                    f"// DDR-tiled: no full local W{parameter_index}/B{parameter_index} arrays emitted."
+                )
             lines.append(
                 _format_array(
                     f"W{parameter_index}_init",

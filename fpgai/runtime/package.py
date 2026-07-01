@@ -59,12 +59,21 @@ _RUNTIME_WEIGHT_ARRAY_RE = re.compile(
 
 
 def _normalise_weights_mode(weights_mode: str | None) -> str:
-    mode = str(weights_mode or "").strip().lower()
+    mode = str(weights_mode or "").strip().lower().replace("-", "_")
     aliases = {
-        "bram": "embedded",
-        "embedded_bram": "embedded",
-        "onchip": "embedded",
-        "on_chip": "embedded",
+        "bram": "bram_static",
+        "embedded": "bram_static",
+        "embedded_bram": "bram_static",
+        "onchip": "bram_static",
+        "on_chip": "bram_static",
+        "static": "bram_static",
+        "const": "bram_static",
+        "ddr": "bram_import_full",
+        "dma_ddr": "bram_import_full",
+        "runtime": "bram_import_full",
+        "preload": "bram_import_full",
+        "direct": "bram_import_full",
+        "uram": "uram_import_full",
     }
     return aliases.get(mode, mode)
 
@@ -138,9 +147,17 @@ def _parse_runtime_weight_entries(root: Path) -> tuple[Path | None, list[dict[st
 
 def _runtime_weight_payload_required(weights_mode: str | None, entries: list[dict[str, Any]]) -> bool:
     mode = _normalise_weights_mode(weights_mode)
-    if mode in {"uram", "ddr", "runtime", "preload", "direct", "tile_cached"}:
+    if mode in {
+        "bram_import_full",
+        "bram_import_export_full",
+        "uram_import_full",
+        "uram_import_export_full",
+        "ddr_tiled",
+        "ddr_tiled_mutable",
+        "tile_cached",
+    }:
         return True
-    if mode in {"embedded", "none", "static", "const"}:
+    if mode in {"bram_static", "uram_static", "none", "static", "const"}:
         return False
 
     return bool(entries)
@@ -159,6 +176,9 @@ def _emit_runtime_weight_payload(
         "required": required,
         "present": False,
         "weights_mode": _normalise_weights_mode(weights_mode),
+        "import_required": required,
+        "export_supported": _normalise_weights_mode(weights_mode) in {"bram_import_export_full", "uram_import_export_full", "ddr_tiled_mutable"},
+        "reload_before_each_compute": False,
         "format": "packed32",
         "source": src.as_posix() if src is not None else None,
         "total_words": 0,
@@ -219,6 +239,203 @@ def _emit_runtime_weight_payload(
         },
     }
 
+
+def _runtime_io_movement_summary(communication_plan: Any | None) -> dict[str, Any]:
+    summary = {
+        "inputs": {
+            "import": {
+                "interface": "axi_stream",
+                "transport": "dma",
+                "policy": "full",
+                "resolved": "dma_stream_import_full",
+            }
+        },
+        "outputs": {
+            "export": {
+                "interface": "axi_stream",
+                "transport": "dma",
+                "policy": "full",
+                "resolved": "dma_stream_export_full",
+            }
+        },
+    }
+    edges = getattr(communication_plan, "edges", []) or []
+    for edge in edges:
+        notes = getattr(edge, "notes", {}) or {}
+        kind = str(notes.get("kind", "")).strip().lower()
+        interface = str(notes.get("interface") or "").strip().lower().replace("-", "_")
+        transport = str(notes.get("transport") or "").strip().lower().replace("-", "_")
+        policy = str(notes.get("policy") or "").strip().lower().replace("-", "_")
+        mode = str(notes.get("mode") or "").strip().lower().replace("-", "_")
+        if not interface:
+            if mode in {"ddr", "m_axi", "maxi"}:
+                interface = "m_axi"
+            elif mode in {"stream", "streamed", "axis", "axi_stream"}:
+                interface = "axi_stream"
+        if not transport:
+            transport = "ps_runtime" if interface == "m_axi" else ("dma" if interface == "axi_stream" else "none")
+        if not policy:
+            policy = "full"
+        if kind in {"input", "inputs", "activation_in"}:
+            if interface == "m_axi" and policy == "tiled":
+                resolved = "m_axi_import_tiled"
+            elif interface == "m_axi" and policy == "full":
+                resolved = "m_axi_import_full"
+            elif interface == "axi_stream" and policy == "tiled":
+                resolved = "dma_stream_import_tiled"
+            else:
+                resolved = "dma_stream_import_full"
+            summary["inputs"] = {"import": {"interface": interface or "axi_stream", "transport": transport, "policy": policy, "resolved": resolved}}
+        if kind in {"output", "outputs", "activation_out"}:
+            if interface == "m_axi" and policy == "tiled":
+                resolved = "m_axi_export_tiled"
+            elif interface == "m_axi" and policy == "full":
+                resolved = "m_axi_export_full"
+            elif interface == "axi_stream" and policy == "tiled":
+                resolved = "dma_stream_export_tiled"
+            else:
+                resolved = "dma_stream_export_full"
+            summary["outputs"] = {"export": {"interface": interface or "axi_stream", "transport": transport, "policy": policy, "resolved": resolved}}
+    return summary
+
+
+def _plan_notes(plan) -> dict[str, Any]:
+    if plan is None:
+        return {}
+    if hasattr(plan, "notes") and isinstance(getattr(plan, "notes"), dict):
+        return dict(getattr(plan, "notes"))
+    if isinstance(plan, dict):
+        notes = plan.get("notes", plan)
+        return dict(notes) if isinstance(notes, dict) else {}
+    return {}
+
+
+def _runtime_activation_storage_summary(memory_plan: Any | None) -> dict[str, Any]:
+    notes = _plan_notes(memory_plan)
+    resolved = str(notes.get("resolved_activation_storage") or "bram").strip().lower().replace("-", "_")
+    if resolved not in {"bram", "uram"}:
+        resolved = "bram"
+    return {
+        "storage": resolved,
+        "resolved": f"activation_{resolved}",
+        "local_buffers": True,
+    }
+
+
+def _emit_runtime_api(package_dir: Path, payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Emit a small, honest Python API scaffold for board/runtime integration.
+
+    The scaffold does not pretend to program hardware by itself. It exposes the
+    user-facing command names and validates that the runtime package contains the
+    required manifest/run-sequence metadata. Board-specific backends can import
+    and extend this file later.
+    """
+    runtime_weights = dict(payload.get("runtime_weights") or {})
+    sequence = dict(payload.get("runtime_sequence") or {})
+    commands = [str(item.get("command")) for item in sequence.get("sequence", []) if isinstance(item, dict)]
+    api_path = package_dir / "runtime_api.py"
+    api_path.write_text(
+        "\n".join(
+            [
+                '"""FPGAI generated runtime API scaffold.\n\nThis file is generated from package_manifest.json. It validates runtime commands\nand records buffer requirements, but board-specific DMA/MMIO execution is added\nby the PYNQ/KV260 runtime backend.\n"""',
+                "from __future__ import annotations",
+                "",
+                "import json",
+                "from pathlib import Path",
+                "from typing import Any",
+                "",
+                "PACKAGE_DIR = Path(__file__).resolve().parent",
+                "MANIFEST_PATH = PACKAGE_DIR / 'package_manifest.json'",
+                "RUN_SEQUENCE_PATH = PACKAGE_DIR / 'run_sequence.json'",
+                "",
+                "def load_manifest() -> dict[str, Any]:",
+                "    return json.loads(MANIFEST_PATH.read_text(encoding='utf-8'))",
+                "",
+                "def load_run_sequence() -> dict[str, Any]:",
+                "    if not RUN_SEQUENCE_PATH.exists():",
+                "        return {'sequence': []}",
+                "    return json.loads(RUN_SEQUENCE_PATH.read_text(encoding='utf-8'))",
+                "",
+                "def _unsupported_board_call(name: str) -> None:",
+                "    raise RuntimeError(f'{name} requires a board-specific runtime backend; this generated scaffold only records the API contract.')",
+                "",
+                "def import_weights(weights: bytes | None = None) -> None:",
+                "    manifest = load_manifest()",
+                "    required = bool(manifest.get('runtime_weights', {}).get('import_required'))",
+                "    if required and weights is None and not manifest.get('runtime_weights', {}).get('present'):",
+                "        raise ValueError('import_weights requires a weights payload or packaged weights/weights.bin.')",
+                "    _unsupported_board_call('import_weights')",
+                "",
+                "def run_inference(inputs: Any | None = None, *, repeat: int = 1) -> Any:",
+                "    if int(repeat) < 1:",
+                "        raise ValueError('repeat must be >= 1')",
+                "    _unsupported_board_call('run_inference')",
+                "",
+                "def run_training(inputs: Any | None = None, labels: Any | None = None, *, steps: int = 1) -> Any:",
+                "    if int(steps) < 1:",
+                "        raise ValueError('steps must be >= 1')",
+                "    _unsupported_board_call('run_training')",
+                "",
+                "def export_weights() -> bytes:",
+                "    manifest = load_manifest()",
+                "    if not bool(manifest.get('runtime_weights', {}).get('export_supported')):",
+                "        raise RuntimeError('export_weights was not generated/supported for this package.')",
+                "    _unsupported_board_call('export_weights')",
+                "",
+                "def export_gradients() -> bytes:",
+                "    _unsupported_board_call('export_gradients')",
+                "",
+                "def export_optimizer_state() -> bytes:",
+                "    _unsupported_board_call('export_optimizer_state')",
+                "",
+                "def reset_accumulators() -> None:",
+                "    _unsupported_board_call('reset_accumulators')",
+                "",
+                "def accumulate_gradients(inputs: Any | None = None, labels: Any | None = None, *, steps: int = 1) -> Any:",
+                "    if int(steps) < 1:",
+                "        raise ValueError('steps must be >= 1')",
+                "    _unsupported_board_call('accumulate_gradients')",
+                "",
+                "def apply_accumulated_gradients() -> Any:",
+                "    _unsupported_board_call('apply_accumulated_gradients')",
+                "",
+                "def run_sequence() -> list[Any]:",
+                "    results = []",
+                "    for item in load_run_sequence().get('sequence', []):",
+                "        command = item.get('command') if isinstance(item, dict) else str(item)",
+                "        args = item.get('args', {}) if isinstance(item, dict) else {}",
+                "        if command == 'import_weights':",
+                "            results.append(import_weights())",
+                "        elif command == 'run_inference':",
+                "            results.append(run_inference(repeat=int(args.get('repeat', 1))))",
+                "        elif command == 'run_training':",
+                "            results.append(run_training(steps=int(args.get('steps', 1))))",
+                "        elif command == 'export_weights':",
+                "            results.append(export_weights())",
+                "        elif command == 'export_gradients':",
+                "            results.append(export_gradients())",
+                "        elif command == 'export_optimizer_state':",
+                "            results.append(export_optimizer_state())",
+                "        elif command == 'reset_accumulators':",
+                "            results.append(reset_accumulators())",
+                "        elif command == 'accumulate_gradients':",
+                "            results.append(accumulate_gradients(steps=int(args.get('steps', 1))))",
+                "        elif command == 'apply_accumulated_gradients':",
+                "            results.append(apply_accumulated_gradients())",
+                "        else:",
+                "            raise ValueError(f'Unsupported runtime command: {command}')",
+                "    return results",
+                "",
+                f"GENERATED_COMMANDS = {commands!r}",
+                f"RUNTIME_WEIGHT_PAYLOAD_REQUIRED = {bool(runtime_weights.get('required'))!r}",
+                f"RUNTIME_WEIGHT_EXPORT_SUPPORTED = {bool(runtime_weights.get('export_supported'))!r}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return {"source": api_path.as_posix(), "package_path": "runtime_api.py", "bytes": api_path.stat().st_size, "present": True}
+
 def emit_runtime_package(
     out_dir: str | Path,
     *,
@@ -227,6 +444,10 @@ def emit_runtime_package(
     top_name: str | None = None,
     hls_artifacts: Mapping[str, Any] | None = None,
     weights_mode: str | None = None,
+    communication_plan: Any | None = None,
+    memory_plan: Any | None = None,
+    build_stages: Mapping[str, Any] | None = None,
+    runtime_sequence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create a self-describing runtime package from existing compile artifacts.
 
@@ -320,6 +541,16 @@ def emit_runtime_package(
     weight_payload = _emit_runtime_weight_payload(root, package_dir, weights_mode=weights_mode)
     files.update(weight_payload["files"])
 
+    runtime_sequence_payload = dict(runtime_sequence or {})
+    if runtime_sequence_payload:
+        run_sequence_path = package_dir / "run_sequence.json"
+        run_sequence_path.write_text(json.dumps(runtime_sequence_payload, indent=2, sort_keys=True), encoding="utf-8")
+        files["runtime_sequence"] = {
+            "path": "runtime_package/run_sequence.json",
+            "package_path": "run_sequence.json",
+            "present": True,
+        }
+
     payload: dict[str, Any] = {
         "schema_version": 1,
         "package_kind": "fpgai_runtime_package",
@@ -330,13 +561,38 @@ def emit_runtime_package(
         "pipeline_mode": pipeline_mode,
         "top_name": top_name,
         "hls_artifacts": dict(hls_artifacts or {}),
+        "build_stages": {str(k): bool(v) for k, v in dict(build_stages or {}).items()},
+        "runtime_sequence": runtime_sequence_payload,
         "hardware": hardware,
         "runtime_weights": weight_payload["summary"],
+        "runtime_io": _runtime_io_movement_summary(communication_plan),
+        "runtime_activation_storage": _runtime_activation_storage_summary(memory_plan),
         "files": files,
         "notes": [
             "Runtime package records and copies existing artifacts only.",
             "It does not run Vivado, deploy to hardware, or infer missing bitstream/XSA/HWH files.",
         ],
+    }
+
+    runtime_api = _emit_runtime_api(package_dir, payload)
+    files["runtime_api"] = runtime_api
+    payload["runtime_api"] = {
+        "path": "runtime_package/runtime_api.py",
+        "package_path": "runtime_api.py",
+        "present": True,
+        "functions": [
+            "import_weights",
+            "run_inference",
+            "run_training",
+            "export_weights",
+            "export_gradients",
+            "export_optimizer_state",
+            "reset_accumulators",
+            "accumulate_gradients",
+            "apply_accumulated_gradients",
+            "run_sequence",
+        ],
+        "truth_boundary": "Generated scaffold only; board-specific DMA/MMIO runtime backend is required for real FPGA execution.",
     }
 
     manifest_path = package_dir / "package_manifest.json"
@@ -359,6 +615,8 @@ def emit_runtime_package(
                 f"- deployable overlay present: `{hardware['deployable_overlay_present']}`",
                 f"- runtime weight payload required: `{weight_payload['summary']['required']}`",
                 f"- runtime weight payload present: `{weight_payload['summary']['present']}`",
+                f"- selected build stages: `{json.dumps(payload['build_stages'], sort_keys=True)}`",
+                f"- runtime sequence: `{json.dumps(runtime_sequence_payload.get('sequence', []), sort_keys=True)}`",
                 "",
                 "The package is truthful: missing hardware handoff files are recorded as missing.",
                 "Use the Vivado bridge flow to generate bitstream/XSA artifacts before board deployment.",

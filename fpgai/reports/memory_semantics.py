@@ -17,6 +17,9 @@ class MemorySemantics:
     has_uram_weight_bind: bool
     has_bram_weight_bind: bool
     has_tile_weight_buffer: bool
+    activation_storage: str
+    has_bram_activation_bind: bool
+    has_uram_activation_bind: bool
     note: str
 
     def to_dict(self) -> dict:
@@ -30,6 +33,9 @@ class MemorySemantics:
             "has_uram_weight_bind": self.has_uram_weight_bind,
             "has_bram_weight_bind": self.has_bram_weight_bind,
             "has_tile_weight_buffer": self.has_tile_weight_buffer,
+            "activation_storage": self.activation_storage,
+            "has_bram_activation_bind": self.has_bram_activation_bind,
+            "has_uram_activation_bind": self.has_uram_activation_bind,
             "note": self.note,
         }
 
@@ -68,8 +74,9 @@ def classify_generated_memory_semantics(run_dir: str | Path) -> MemorySemantics:
     has_weights_mem = "weights_mem" in cpp
     has_weights_m_axi = "m_axi port=weights_mem" in cpp
     has_runtime_payload = _runtime_payload(run)
+    has_export_command = "FPGAI_MODE_EXPORT_WEIGHTS" in cpp and "fpgai_store_ddr_vector" in cpp
 
-    # Current generated preload implementation uses these helpers.
+    # Current generated runtime import implementation uses these helpers.
     # Their presence means full preload/cache behavior, not scalable DDR tiling.
     has_preload_helper = (
         "fpgai_load_ddr_vector" in cpp
@@ -102,6 +109,14 @@ def classify_generated_memory_semantics(run_dir: str | Path) -> MemorySemantics:
         or re.search(r"#pragma\s+HLS\s+BIND_STORAGE\s+variable=B\d+\s+type=ram_\dp\s+impl=bram", cpp)
     )
 
+    has_uram_activation_bind = bool(
+        re.search(r"#pragma\s+HLS\s+BIND_STORAGE\s+variable=(?:layer_in|layer_\d+_out)\s+type=ram_\dp\s+impl=uram", cpp)
+    )
+    has_bram_activation_bind = bool(
+        re.search(r"#pragma\s+HLS\s+BIND_STORAGE\s+variable=(?:layer_in|layer_\d+_out)\s+type=ram_\dp\s+impl=bram", cpp)
+    )
+    activation_storage = "uram" if has_uram_activation_bind else ("bram" if has_bram_activation_bind else "unknown")
+
     # Strict detector for future real DDR-tiled implementation.
     # Generic names such as dense_out_in_tiled must not count.
     has_tile_weight_buffer = (
@@ -115,16 +130,22 @@ def classify_generated_memory_semantics(run_dir: str | Path) -> MemorySemantics:
 
     if has_weights_mem and has_weights_m_axi and has_runtime_payload:
         if has_preload_helper and has_uram_weight_bind:
-            mode = "uram_preload_full"
+            mode = "uram_import_export_full" if has_export_command else "uram_import_full"
             note = (
-                "Runtime weights are loaded through weights_mem into full local "
-                "URAM-bound W/B arrays. This is URAM-cached/preloaded, not DDR-tiled."
+                "Runtime can import weights through weights_mem into full local "
+                "URAM-bound W/B arrays. Export command is present."
+                if has_export_command
+                else "Runtime can import weights through weights_mem into full local "
+                "URAM-bound W/B arrays. Import is a runtime command/capability, not a reload-before-each-compute rule."
             )
         elif has_preload_helper:
-            mode = "ddr_preload_full"
+            mode = "bram_import_export_full" if has_export_command else "bram_import_full"
             note = (
-                "Runtime weights are loaded through weights_mem into full local W/B arrays. "
-                "This is not scalable DDR-tiled execution."
+                "Runtime can import/export weights through weights_mem into/from full local BRAM-bound W/B arrays. "
+                "The compute storage is on-chip, not DDR-tiled external execution."
+                if has_export_command
+                else "Runtime can import weights through weights_mem into full local BRAM-bound W/B arrays. "
+                "The compute storage is on-chip, not DDR-tiled external execution."
             )
         elif has_tile_weight_buffer and not has_full_weight_arrays:
             mode = "ddr_tiled"
@@ -141,14 +162,14 @@ def classify_generated_memory_semantics(run_dir: str | Path) -> MemorySemantics:
 
     elif not has_weights_mem and not has_runtime_payload:
         if has_uram_weight_bind:
-            mode = "uram_local"
+            mode = "uram_static"
             note = "Local URAM-bound weights without runtime weight payload."
         elif has_bram_weight_bind:
-            mode = "bram_local"
+            mode = "bram_static"
             note = "Local BRAM-bound weights without runtime weight payload."
         elif has_const_weight_arrays:
-            mode = "embedded_constants"
-            note = "Weights are compiled as local constants."
+            mode = "legacy_compile_time_constants"
+            note = "Weights are compiled as constants, but no exact BRAM/URAM binding was detected."
         else:
             mode = "invalid_or_ambiguous"
             note = "No runtime weights and no recognizable embedded/local weight source."
@@ -167,5 +188,8 @@ def classify_generated_memory_semantics(run_dir: str | Path) -> MemorySemantics:
         has_uram_weight_bind=has_uram_weight_bind,
         has_bram_weight_bind=has_bram_weight_bind,
         has_tile_weight_buffer=has_tile_weight_buffer,
+        activation_storage=activation_storage,
+        has_bram_activation_bind=has_bram_activation_bind,
+        has_uram_activation_bind=has_uram_activation_bind,
         note=note,
     )

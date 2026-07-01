@@ -60,11 +60,111 @@ class Policy:
 
 
 
-def _cfg_weight_load_interface(raw_cfg: Dict[str, Any], default: str = "embedded") -> str:
-    value = _cfg_get(raw_cfg, "data_movement.weights.load.interface", None)
+def _has_explicit_weight_data_movement(raw_cfg: Dict[str, Any]) -> bool:
+    for path in (
+        "data_movement.weights.import",
+        "data_movement.weights.load",
+        "data_movement.weights.export",
+        "data_movement.weights.store",
+    ):
+        value = _cfg_get(raw_cfg, path, None)
+        if isinstance(value, dict) and value:
+            return True
+    return any(
+        _cfg_get(raw_cfg, path, None) is not None
+        for path in (
+            "data_movement.weights.import.interface",
+            "data_movement.weights.load.interface",
+            "data_movement.weights.export.interface",
+            "data_movement.weights.store.interface",
+            "data_movement.ps_pl.weights.mode",
+        )
+    )
+
+
+def _normalise_user_weight_mode(value: Any) -> str:
+    mode = str(value or "").strip().lower().replace("-", "_")
+    aliases = {
+        "": "",
+        "static": "embedded",
+        "compile_time": "embedded",
+        "compiletime": "embedded",
+        "const": "embedded",
+        "embedded": "embedded",
+        "load": "import",
+        "runtime_import": "import",
+        "import": "import",
+        "load_store": "import_export",
+        "import_store": "import_export",
+        "import_export": "import_export",
+        "ddr": "tiled",
+        "ddr_tiled": "tiled",
+        "tile": "tiled",
+        "tiled": "tiled",
+        "mutable_tiled": "tiled_mutable",
+        "ddr_tiled_mutable": "tiled_mutable",
+        "tiled_mutable": "tiled_mutable",
+    }
+    return aliases.get(mode, mode)
+
+
+def _user_weight_mode(raw_cfg: Dict[str, Any]) -> str:
+    value = _cfg_get(raw_cfg, "weights.mode", None)
+    if value is None:
+        init_value = _cfg_get(raw_cfg, "training.weight_initialization.mode", None)
+        if init_value is not None:
+            init = str(init_value or "").strip().lower().replace("-", "_")
+            init_aliases = {
+                "compile_time": "embedded",
+                "compiletime": "embedded",
+                "static": "embedded",
+                "embedded": "embedded",
+                "const": "embedded",
+                "import": "import",
+                "runtime_import": "import",
+                "load": "import",
+            }
+            value = init_aliases.get(init, init)
+    return _normalise_user_weight_mode(value)
+
+
+def _cfg_weight_import_interface(raw_cfg: Dict[str, Any], default: str = "compile_time") -> str:
+    value = _cfg_get(raw_cfg, "data_movement.weights.import.interface", None)
+    if value is None:
+        value = _cfg_get(raw_cfg, "data_movement.weights.load.interface", None)
     if value is None:
         value = _cfg_get(raw_cfg, "data_movement.ps_pl.weights.mode", default)
-    return str(value or default).lower().replace("-", "_")
+    value = str(value or default).lower().replace("-", "_")
+    aliases = {
+        "embedded": "compile_time",
+        "static": "compile_time",
+        "const": "compile_time",
+        "ddr": "m_axi",
+        "external": "m_axi",
+        "external_ddr": "m_axi",
+        "dma_ddr": "m_axi",
+        "dma": "axi_stream",
+        "stream": "axi_stream",
+        "streamed": "axi_stream",
+        "axis": "axi_stream",
+    }
+    return aliases.get(value, value)
+
+
+def _cfg_weight_import_policy(raw_cfg: Dict[str, Any], storage: str) -> str:
+    value = _cfg_get(raw_cfg, "data_movement.weights.import.policy", None)
+    if value is None:
+        value = _cfg_get(raw_cfg, "data_movement.weights.load.policy", None)
+    if value is None:
+        value = "tiled" if storage == "ddr" else "static"
+    value = str(value or "").lower().replace("-", "_")
+    aliases = {"compile_time": "static", "preload": "full", "preload_full": "full", "import_full": "full", "tile": "tiled"}
+    return aliases.get(value, value)
+
+
+def _cfg_weight_load_interface(raw_cfg: Dict[str, Any], default: str = "embedded") -> str:
+    # Backward-compatible helper retained for older call sites/tests.
+    return _cfg_weight_import_interface(raw_cfg, "compile_time" if default == "embedded" else default)
 
 def _weight_region_preference_from_storage(raw_cfg, fallback):
     """Return weight-region preference implied by memory.weight_storage.
@@ -95,10 +195,42 @@ def _weight_region_preference_from_storage(raw_cfg, fallback):
         "external": "DDR",
         "external_ddr": "DDR",
         "dma_ddr": "DDR",
+        # stream is not a public storage location; keep legacy configs mapped
+        # to DDR preference only for old experiment compatibility.
         "stream": "DDR",
         "streaming": "DDR",
     }
 
+    first = aliases.get(requested)
+    if first is None:
+        return fallback
+
+    ordered = [first]
+    for region in ("BRAM", "URAM", "DDR"):
+        if region not in ordered:
+            ordered.append(region)
+    return ordered
+
+
+def _activation_region_preference_from_storage(raw_cfg, fallback):
+    """Return activation-region preference implied by memory.storage.activations.
+
+    Manual memory.storage.activations should affect generated activation buffer
+    bindings.  Keep the public surface intentionally small: BRAM or URAM.
+    """
+    requested = str(
+        _cfg_get(raw_cfg, "memory.storage.activations", _cfg_get(raw_cfg, "memory.activation_storage", ""))
+        or ""
+    ).strip().lower().replace("-", "_")
+
+    aliases = {
+        "bram": "BRAM",
+        "block": "BRAM",
+        "block_ram": "BRAM",
+        "uram": "URAM",
+        "ultra": "URAM",
+        "ultra_ram": "URAM",
+    }
     first = aliases.get(requested)
     if first is None:
         return fallback
@@ -467,7 +599,7 @@ def _override_policy_from_cfg(cfg, base: Policy) -> Policy:
         dense_in=base.dense_in,
         dense_out=base.dense_out,
         weight_region_preference=_list_cfg(raw, "memory.weight_region_preference", _weight_region_preference_from_storage(raw, base.weight_region_preference)),
-        activation_region_preference=_list_cfg(raw, "memory.activation_region_preference", base.activation_region_preference),
+        activation_region_preference=_list_cfg(raw, "memory.activation_region_preference", _activation_region_preference_from_storage(raw, base.activation_region_preference)),
         allow_double_buffer=_bool_cfg(raw, "memory.allow_double_buffer", base.allow_double_buffer),
         axi_word_bits=base.axi_word_bits,
         burst_len=base.burst_len,
@@ -485,33 +617,69 @@ def _override_policy_from_cfg(cfg, base: Policy) -> Policy:
 def _choose_weight_mode(desc: LayerDescriptor, raw_cfg: Dict[str, Any]) -> str:
     del desc
 
-    storage = str(
+    storage_raw = str(
         _cfg_get(
             raw_cfg,
             "memory.storage.weights",
-            _cfg_get(raw_cfg, "memory.weight_storage", ""),
+            _cfg_get(raw_cfg, "memory.weight_storage", "bram"),
         )
-        or ""
+        or "bram"
     ).lower().replace("-", "_")
+    storage_aliases = {
+        "embedded": "bram",
+        "on_chip": "bram",
+        "onchip": "bram",
+        "block": "bram",
+        "block_ram": "bram",
+        "bram": "bram",
+        "uram": "uram",
+        "ultra": "uram",
+        "ultra_ram": "uram",
+        "ddr": "ddr",
+        "external": "ddr",
+        "external_ddr": "ddr",
+        "dma_ddr": "ddr",
+    }
+    storage = storage_aliases.get(storage_raw, storage_raw)
+    mode = "" if _has_explicit_weight_data_movement(raw_cfg) else _user_weight_mode(raw_cfg)
+    if mode in {"embedded", ""}:
+        import_interface = _cfg_weight_import_interface(raw_cfg, "m_axi" if storage == "ddr" else "compile_time")
+        import_policy = _cfg_weight_import_policy(raw_cfg, storage)
+    elif mode == "import":
+        import_interface, import_policy = "m_axi", "full"
+    elif mode == "import_export":
+        import_interface, import_policy = "m_axi", "full"
+    elif mode in {"tiled", "tiled_mutable"}:
+        import_interface, import_policy = "m_axi", "tiled"
+    else:
+        import_interface = _cfg_weight_import_interface(raw_cfg, "m_axi" if storage == "ddr" else "compile_time")
+        import_policy = _cfg_weight_import_policy(raw_cfg, storage)
 
-    if storage in ("uram", "ultra", "ultra_ram"):
-        return "uram"
-    if storage in ("ddr", "dma_ddr", "external", "external_ddr"):
+    if storage == "bram":
+        if import_interface == "compile_time" and import_policy == "static":
+            return "embedded"
+        if import_interface == "m_axi" and import_policy == "full":
+            # Existing HLS runtime-weight wrapper uses weights_mode=ddr to expose
+            # weights_mem/m_axi, while memory.storage.weights=bram keeps the local
+            # runtime cache BRAM-bound.
+            return "ddr"
+        if import_interface == "axi_stream" and import_policy == "full":
+            return "stream"
+    if storage == "uram":
+        if import_interface == "m_axi" and import_policy == "full":
+            return "uram"
+        if import_interface == "compile_time" and import_policy == "static":
+            return "embedded"
+    if storage == "ddr":
         return "ddr"
 
-    requested = _cfg_weight_load_interface(raw_cfg, "embedded")
-    if requested in ("dma_ddr", "external", "external_ddr"):
-        requested = "ddr"
-    if requested in ("stream", "streaming", "streamed"):
-        requested = "stream"
-    if requested in ("embedded", "on_chip", "onchip", "bram"):
-        requested = "embedded"
-
-    if requested in ("stream", "ddr", "uram"):
-        return requested
-
+    # Legacy fallback for old data_movement.ps_pl.weights.mode configs.
+    requested = _cfg_weight_load_interface(raw_cfg, "compile_time")
+    if requested == "m_axi":
+        return "ddr"
+    if requested == "axi_stream":
+        return "stream"
     return "embedded"
-
 
 def _buffering_for(weights_mode: str, policy: Policy) -> str:
     if not policy.allow_double_buffer:
@@ -1092,7 +1260,7 @@ def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
                 _cfg_get(
                     raw,
                     "data_movement.ps_pl.weights.mode",
-                    _cfg_get(raw, "memory.weight_storage", "embedded"),
+                    _cfg_get(raw, "memory.storage.weights", _cfg_get(raw, "memory.weight_storage", "bram")),
                 )
             ).lower(),
             "memory_strategy": str(_cfg_get(raw, "memory.strategy", "policy_default")),
@@ -1100,7 +1268,7 @@ def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
                 _cfg_get(
                     raw,
                     "memory.weight_storage",
-                    _cfg_weight_load_interface(raw, "embedded"),
+                    _cfg_get(raw, "memory.storage.weights", "bram"),
                 )
             ).lower(),
             "precision_mode": default_precision["precision_mode"],

@@ -73,33 +73,39 @@ def _first_cfg_value(raw: Dict[str, Any], *paths: str, default: Any = None) -> A
 
 def _edge_cfg_paths(kind: str) -> tuple[str, ...]:
     kind_u = str(kind).lower()
-    if kind_u in {"input", "activation_in"}:
+    if kind_u in {"input", "inputs", "activation_in"}:
         return (
+            "data_movement.inputs.import",
             "data_movement.input.load",
             "data_movement.ps_pl.input",
         )
-    if kind_u in {"weight", "bias", "param", "parameter"}:
+    if kind_u in {"weight", "weights", "bias", "param", "parameter"}:
         return (
+            "data_movement.weights.import",
             "data_movement.weights.load",
             "data_movement.ps_pl.weights",
         )
-    if kind_u in {"target", "aux"}:
+    if kind_u in {"target", "targets", "label", "labels", "aux"}:
         return (
+            "data_movement.labels.import",
             "data_movement.aux.load",
             "data_movement.ps_pl.aux",
         )
-    if kind_u in {"output", "activation_out"}:
+    if kind_u in {"output", "outputs", "activation_out"}:
         return (
+            "data_movement.outputs.export",
             "data_movement.output.store",
             "data_movement.pl_ps.output",
         )
     if kind_u in {"loss"}:
         return (
+            "data_movement.loss.export",
             "data_movement.loss.store",
             "data_movement.pl_ps.loss",
         )
-    if kind_u in {"gradient", "updated_weight"}:
+    if kind_u in {"gradient", "gradients", "updated_weight"}:
         return (
+            "data_movement.gradients.export",
             "data_movement.gradients.store",
             "data_movement.pl_ps.gradients",
         )
@@ -134,18 +140,18 @@ def _edge_size_bytes(raw: Dict[str, Any], kind: str, default_words: int) -> int:
 
 def _edge_path(kind: str) -> str:
     kind_u = str(kind).lower()
-    if kind_u in {"input", "activation_in"}:
-        return "data_movement.ps_pl.input"
-    if kind_u in {"weight", "bias", "param", "parameter"}:
-        return "data_movement.ps_pl.weights"
-    if kind_u in {"target", "aux"}:
-        return "data_movement.ps_pl.aux"
-    if kind_u in {"output", "activation_out"}:
-        return "data_movement.pl_ps.output"
+    if kind_u in {"input", "inputs", "activation_in"}:
+        return "data_movement.inputs.import"
+    if kind_u in {"weight", "weights", "bias", "param", "parameter"}:
+        return "data_movement.weights.import"
+    if kind_u in {"target", "targets", "label", "labels", "aux"}:
+        return "data_movement.labels.import"
+    if kind_u in {"output", "outputs", "activation_out"}:
+        return "data_movement.outputs.export"
     if kind_u in {"loss"}:
-        return "data_movement.pl_ps.loss"
-    if kind_u in {"gradient", "updated_weight"}:
-        return "data_movement.pl_ps.gradients"
+        return "data_movement.loss.export"
+    if kind_u in {"gradient", "gradients", "updated_weight"}:
+        return "data_movement.gradients.export"
     return f"data_movement.tensor_edges.{kind_u}"
 
 
@@ -292,7 +298,15 @@ def _implemented_in_hls(kind: str, direction: str, codec: str, mode: str) -> boo
 def _default_mode_for(kind: str, region: str, edge_cfg: Dict[str, Any]) -> str:
     configured = edge_cfg.get("mode")
     if configured is not None:
-        return str(configured).strip().lower()
+        return str(configured).strip().lower().replace("-", "_")
+    interface = str(edge_cfg.get("interface", "") or "").strip().lower().replace("-", "_")
+    transport = str(edge_cfg.get("transport", "") or "").strip().lower().replace("-", "_")
+    if interface in {"axi_stream", "axis", "stream"} or transport in {"dma", "axi_dma"}:
+        return "stream"
+    if interface in {"m_axi", "maxi", "ddr"}:
+        return "ddr"
+    if interface in {"compile_time", "static", "embedded"}:
+        return "embedded"
 
     kind_u = str(kind).lower()
     region_u = str(region).upper()
@@ -363,6 +377,10 @@ def _make_edge(
             "kind": kind,
             "region": region,
             "mode": mode,
+            "interface": edge_cfg.get("interface"),
+            "transport": edge_cfg.get("transport"),
+            "policy": edge_cfg.get("policy"),
+            "direction_name": "export" if direction == "PL_TO_PS" else "import",
             "double_buffer": bool(double_buffer),
             "reason": placement_notes.get("reason"),
             "edge_config_path": _edge_path(kind),

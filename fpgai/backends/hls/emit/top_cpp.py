@@ -1639,6 +1639,456 @@ def _fpgai_runtime_weight_specs(graph):
     return specs
 
 
+def _fpgai_graph_has_conv_weights(graph) -> bool:
+    return any(getattr(op, "op_type", None) == "Conv" for op in getattr(graph, "ops", []) or [])
+
+
+def _fpgai_split_cpp_args(arg_text: str) -> list[str]:
+    args: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for ch in arg_text:
+        if ch in "([{<":
+            depth += 1
+        elif ch in ")]}>" and depth > 0:
+            depth -= 1
+        if ch == "," and depth == 0:
+            args.append("".join(current).strip())
+            current = []
+        else:
+            current.append(ch)
+    tail = "".join(current).strip()
+    if tail:
+        args.append(tail)
+    return args
+
+
+
+
+def _fpgai_ddr_weight_offsets_by_type(graph, op_type: str) -> list[tuple[int, int]]:
+    offsets: list[tuple[int, int]] = []
+    offset = 0
+    for _parameter_index, _precision_tag, weight_count, bias_count, spec_op_type, _op_name in _fpgai_runtime_weight_specs(graph):
+        weight_base = offset
+        bias_base = offset + weight_count
+        if spec_op_type == op_type:
+            offsets.append((weight_base, bias_base))
+        offset += weight_count + bias_count
+    return offsets
+
+def _fpgai_ddr_tiled_helper_cpp() -> str:
+    return """
+
+// FPGAI real DDR-tiled Dense helper.
+// Full weights live in weights_mem. Only input_tile, weight_tile, and acc_tile
+// are allocated on-chip during compute; no full local W/B replica is created.
+#ifndef FPGAI_DDR_BITS_HELPER
+#define FPGAI_DDR_BITS_HELPER
+template<typename T>
+static inline T fpgai_ddr_bits_to_value(unsigned int bits) {
+    union { unsigned int i; float f; } converter;
+    converter.i = bits;
+    return (T)converter.f;
+}
+#endif
+
+template<
+    int IN,
+    int OUT,
+    int TILE_IN,
+    int TILE_OUT,
+    typename IN_T,
+    typename OUT_T,
+    typename W_T,
+    typename B_T,
+    typename ACC_T,
+    int PIPELINE_II = 1,
+    int IN_UNROLL = 1,
+    int OUT_UNROLL = 1,
+    int IN_PARTITION = 1,
+    int OUT_PARTITION = 1,
+    int WEIGHT_PARTITION = 1
+>
+void dense_out_in_ddr_tiled(
+    const IN_T input[IN],
+    OUT_T output[OUT],
+    const ap_uint<32>* weights_mem,
+    int weight_base,
+    int bias_base
+) {
+#pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=input cyclic factor=IN_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=output cyclic factor=OUT_PARTITION dim=1
+
+    for (int out_base = 0; out_base < OUT; out_base += TILE_OUT) {
+        ACC_T acc_tile[TILE_OUT];
+#pragma HLS ARRAY_PARTITION variable=acc_tile complete dim=1
+
+        dense_ddr_init_output_tile:
+        for (int out_inner = 0; out_inner < TILE_OUT; ++out_inner) {
+#pragma HLS UNROLL factor=OUT_UNROLL
+            const int out_idx = out_base + out_inner;
+            acc_tile[out_inner] =
+                (out_idx < OUT)
+                ? (ACC_T)fpgai_ddr_bits_to_value<B_T>(weights_mem[bias_base + out_idx].to_uint())
+                : (ACC_T)0;
+        }
+
+        for (int in_base = 0; in_base < IN; in_base += TILE_IN) {
+            IN_T input_tile[TILE_IN];
+            W_T weight_tile[TILE_OUT][TILE_IN];
+#pragma HLS ARRAY_PARTITION variable=input_tile complete dim=1
+#pragma HLS ARRAY_PARTITION variable=weight_tile complete dim=1
+#pragma HLS ARRAY_PARTITION variable=weight_tile complete dim=2
+
+            dense_ddr_load_input_tile:
+            for (int in_inner = 0; in_inner < TILE_IN; ++in_inner) {
+#pragma HLS PIPELINE II=PIPELINE_II
+#pragma HLS UNROLL factor=IN_UNROLL
+                const int in_idx = in_base + in_inner;
+                input_tile[in_inner] = (in_idx < IN) ? input[in_idx] : (IN_T)0;
+            }
+
+            dense_ddr_load_weight_tile_out:
+            for (int out_inner = 0; out_inner < TILE_OUT; ++out_inner) {
+#pragma HLS UNROLL factor=OUT_UNROLL
+                const int out_idx = out_base + out_inner;
+
+                dense_ddr_load_weight_tile_in:
+                for (int in_inner = 0; in_inner < TILE_IN; ++in_inner) {
+#pragma HLS PIPELINE II=PIPELINE_II
+#pragma HLS UNROLL factor=IN_UNROLL
+                    const int in_idx = in_base + in_inner;
+                    weight_tile[out_inner][in_inner] =
+                        (out_idx < OUT && in_idx < IN)
+                        ? fpgai_ddr_bits_to_value<W_T>(weights_mem[weight_base + out_idx * IN + in_idx].to_uint())
+                        : (W_T)0;
+                }
+            }
+
+            dense_ddr_compute_tile_out:
+            for (int out_inner = 0; out_inner < TILE_OUT; ++out_inner) {
+#pragma HLS UNROLL factor=OUT_UNROLL
+                const int out_idx = out_base + out_inner;
+
+                dense_ddr_compute_tile_in:
+                for (int in_inner = 0; in_inner < TILE_IN; ++in_inner) {
+#pragma HLS PIPELINE II=PIPELINE_II
+#pragma HLS UNROLL factor=IN_UNROLL
+                    if (out_idx < OUT) {
+                        acc_tile[out_inner] +=
+                            (ACC_T)input_tile[in_inner] *
+                            (ACC_T)weight_tile[out_inner][in_inner];
+                    }
+                }
+            }
+        }
+
+        dense_ddr_store_output_tile:
+        for (int out_inner = 0; out_inner < TILE_OUT; ++out_inner) {
+#pragma HLS PIPELINE II=PIPELINE_II
+#pragma HLS UNROLL factor=OUT_UNROLL
+            const int out_idx = out_base + out_inner;
+            if (out_idx < OUT) {
+                output[out_idx] = (OUT_T)acc_tile[out_inner];
+            }
+        }
+    }
+}
+"""
+
+
+def _fpgai_rewrite_dense_calls_for_ddr_tiled(source: str, graph) -> str:
+    import re
+    call_re = re.compile(
+        r"dense_out_in(?P<tiled>_tiled)?\s*<(?P<template>[^>]*)>\s*\((?P<args>[^;]*)\)\s*;",
+        re.MULTILINE | re.DOTALL,
+    )
+    offsets = _fpgai_ddr_weight_offsets_by_type(graph, "Dense")
+
+    call_index = 0
+    used = False
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal call_index, used
+        args = _fpgai_split_cpp_args(match.group("args"))
+        if len(args) < 2:
+            return match.group(0)
+        template_parts = [part.strip() for part in match.group("template").split(",")]
+        if len(template_parts) < 2:
+            return match.group(0)
+        if match.group("tiled"):
+            new_template = ", ".join(template_parts)
+        else:
+            in_count = template_parts[0]
+            out_count = template_parts[1]
+            new_template = ", ".join([in_count, out_count, in_count, out_count, *template_parts[2:]])
+        weight_base, bias_base = offsets[call_index] if call_index < len(offsets) else (0, 0)
+        call_index += 1
+        used = True
+        return (
+            f"dense_out_in_ddr_tiled<{new_template}>("
+            f"{args[0]}, {args[1]}, weights_mem, {weight_base}, {bias_base});"
+        )
+
+    rewritten = call_re.sub(replace, source)
+    if used and "FPGAI real DDR-tiled Dense helper" not in rewritten:
+        if "#include <ap_int.h>" not in rewritten:
+            rewritten = rewritten.replace("#include <ap_axi_sdata.h>", "#include <ap_axi_sdata.h>\n#include <ap_int.h>")
+        signature = 'extern "C" void '
+        pos = rewritten.find(signature)
+        if pos >= 0:
+            rewritten = rewritten[:pos] + _fpgai_ddr_tiled_helper_cpp() + "\n" + rewritten[pos:]
+        else:
+            rewritten = _fpgai_ddr_tiled_helper_cpp() + "\n" + rewritten
+    return rewritten
+
+
+
+
+def _fpgai_conv_ddr_tiled_helper_cpp() -> str:
+    return r'''
+
+// FPGAI real DDR-tiled Conv helper.
+// Full Conv weights live in weights_mem. Only input_tile, conv_weight_tile,
+// and acc_tile are allocated on-chip during compute; no full local Conv W/B
+// replica is created.
+#ifndef FPGAI_DDR_BITS_HELPER
+#define FPGAI_DDR_BITS_HELPER
+template<typename T>
+static inline T fpgai_ddr_bits_to_value(unsigned int bits) {
+    union { unsigned int i; float f; } converter;
+    converter.i = bits;
+    return (T)converter.f;
+}
+#endif
+
+template<
+    int IN_H,
+    int IN_W,
+    int IN_C,
+    int OUT_H,
+    int OUT_W,
+    int OUT_C,
+    int K,
+    int STRIDE,
+    int PAD,
+    int TILE_OC,
+    int TILE_OH,
+    int TILE_OW,
+    int TILE_IC,
+    typename IN_T,
+    typename OUT_T,
+    typename W_T,
+    typename B_T,
+    typename ACC_T,
+    int PIPELINE_II = 1,
+    int OC_UNROLL = 1,
+    int IC_UNROLL = 1,
+    int INPUT_PARTITION = 1,
+    int OUTPUT_PARTITION = 1,
+    int WEIGHT_PARTITION = 1
+>
+void conv2d_ddr_tiled(
+    const IN_T input[IN_H * IN_W * IN_C],
+    OUT_T output[OUT_H * OUT_W * OUT_C],
+    const ap_uint<32>* weights_mem,
+    int weight_base,
+    int bias_base
+) {
+#pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=input cyclic factor=INPUT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=output cyclic factor=OUTPUT_PARTITION dim=1
+
+    for (int oc_base = 0; oc_base < OUT_C; oc_base += TILE_OC) {
+        for (int oh_base = 0; oh_base < OUT_H; oh_base += TILE_OH) {
+            for (int ow_base = 0; ow_base < OUT_W; ow_base += TILE_OW) {
+                ACC_T acc_tile[TILE_OC][TILE_OH][TILE_OW];
+                IN_T input_tile[TILE_IC][TILE_OH * STRIDE + K][TILE_OW * STRIDE + K];
+                W_T conv_weight_tile[TILE_OC][TILE_IC][K][K];
+#pragma HLS ARRAY_PARTITION variable=acc_tile complete dim=1
+#pragma HLS ARRAY_PARTITION variable=input_tile complete dim=1
+#pragma HLS ARRAY_PARTITION variable=conv_weight_tile complete dim=1
+#pragma HLS ARRAY_PARTITION variable=conv_weight_tile complete dim=2
+
+                conv_ddr_init_acc_oc:
+                for (int oc_inner = 0; oc_inner < TILE_OC; ++oc_inner) {
+#pragma HLS UNROLL factor=OC_UNROLL
+                    const int oc = oc_base + oc_inner;
+                    conv_ddr_init_acc_oh:
+                    for (int oh_inner = 0; oh_inner < TILE_OH; ++oh_inner) {
+                        conv_ddr_init_acc_ow:
+                        for (int ow_inner = 0; ow_inner < TILE_OW; ++ow_inner) {
+#pragma HLS PIPELINE II=PIPELINE_II
+                            const int oh = oh_base + oh_inner;
+                            const int ow = ow_base + ow_inner;
+                            acc_tile[oc_inner][oh_inner][ow_inner] =
+                                (oc < OUT_C && oh < OUT_H && ow < OUT_W)
+                                ? (ACC_T)fpgai_ddr_bits_to_value<B_T>(weights_mem[bias_base + oc].to_uint())
+                                : (ACC_T)0;
+                        }
+                    }
+                }
+
+                for (int ic_base = 0; ic_base < IN_C; ic_base += TILE_IC) {
+                    conv_ddr_load_input_ic:
+                    for (int ic_inner = 0; ic_inner < TILE_IC; ++ic_inner) {
+#pragma HLS UNROLL factor=IC_UNROLL
+                        const int ic = ic_base + ic_inner;
+                        conv_ddr_load_input_h:
+                        for (int tile_ih = 0; tile_ih < TILE_OH * STRIDE + K; ++tile_ih) {
+                            conv_ddr_load_input_w:
+                            for (int tile_iw = 0; tile_iw < TILE_OW * STRIDE + K; ++tile_iw) {
+#pragma HLS PIPELINE II=PIPELINE_II
+                                const int ih = oh_base * STRIDE + tile_ih - PAD;
+                                const int iw = ow_base * STRIDE + tile_iw - PAD;
+                                input_tile[ic_inner][tile_ih][tile_iw] =
+                                    (ic < IN_C && ih >= 0 && ih < IN_H && iw >= 0 && iw < IN_W)
+                                    ? input[(ic * IN_H + ih) * IN_W + iw]
+                                    : (IN_T)0;
+                            }
+                        }
+                    }
+
+                    conv_ddr_load_weight_oc:
+                    for (int oc_inner = 0; oc_inner < TILE_OC; ++oc_inner) {
+#pragma HLS UNROLL factor=OC_UNROLL
+                        const int oc = oc_base + oc_inner;
+                        conv_ddr_load_weight_ic:
+                        for (int ic_inner = 0; ic_inner < TILE_IC; ++ic_inner) {
+#pragma HLS UNROLL factor=IC_UNROLL
+                            const int ic = ic_base + ic_inner;
+                            conv_ddr_load_weight_kh:
+                            for (int kh = 0; kh < K; ++kh) {
+                                conv_ddr_load_weight_kw:
+                                for (int kw = 0; kw < K; ++kw) {
+#pragma HLS PIPELINE II=PIPELINE_II
+                                    const int weight_index = ((oc * IN_C + ic) * K + kh) * K + kw;
+                                    conv_weight_tile[oc_inner][ic_inner][kh][kw] =
+                                        (oc < OUT_C && ic < IN_C)
+                                        ? fpgai_ddr_bits_to_value<W_T>(weights_mem[weight_base + weight_index].to_uint())
+                                        : (W_T)0;
+                                }
+                            }
+                        }
+                    }
+
+                    conv_ddr_compute_oc:
+                    for (int oc_inner = 0; oc_inner < TILE_OC; ++oc_inner) {
+#pragma HLS UNROLL factor=OC_UNROLL
+                        const int oc = oc_base + oc_inner;
+                        conv_ddr_compute_oh:
+                        for (int oh_inner = 0; oh_inner < TILE_OH; ++oh_inner) {
+                            const int oh = oh_base + oh_inner;
+                            conv_ddr_compute_ow:
+                            for (int ow_inner = 0; ow_inner < TILE_OW; ++ow_inner) {
+                                const int ow = ow_base + ow_inner;
+                                conv_ddr_compute_ic:
+                                for (int ic_inner = 0; ic_inner < TILE_IC; ++ic_inner) {
+#pragma HLS PIPELINE II=PIPELINE_II
+#pragma HLS UNROLL factor=IC_UNROLL
+                                    if (oc < OUT_C && oh < OUT_H && ow < OUT_W) {
+                                        conv_ddr_compute_kh:
+                                        for (int kh = 0; kh < K; ++kh) {
+                                            conv_ddr_compute_kw:
+                                            for (int kw = 0; kw < K; ++kw) {
+                                                const int tile_ih = oh_inner * STRIDE + kh;
+                                                const int tile_iw = ow_inner * STRIDE + kw;
+                                                acc_tile[oc_inner][oh_inner][ow_inner] +=
+                                                    (ACC_T)input_tile[ic_inner][tile_ih][tile_iw] *
+                                                    (ACC_T)conv_weight_tile[oc_inner][ic_inner][kh][kw];
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                conv_ddr_store_output_oc:
+                for (int oc_inner = 0; oc_inner < TILE_OC; ++oc_inner) {
+#pragma HLS UNROLL factor=OC_UNROLL
+                    const int oc = oc_base + oc_inner;
+                    conv_ddr_store_output_oh:
+                    for (int oh_inner = 0; oh_inner < TILE_OH; ++oh_inner) {
+                        const int oh = oh_base + oh_inner;
+                        conv_ddr_store_output_ow:
+                        for (int ow_inner = 0; ow_inner < TILE_OW; ++ow_inner) {
+#pragma HLS PIPELINE II=PIPELINE_II
+                            const int ow = ow_base + ow_inner;
+                            if (oc < OUT_C && oh < OUT_H && ow < OUT_W) {
+                                output[(oc * OUT_H + oh) * OUT_W + ow] =
+                                    (OUT_T)acc_tile[oc_inner][oh_inner][ow_inner];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+'''
+
+
+def _fpgai_conv_ddr_tile_template(template: str) -> str:
+    parts = [part.strip() for part in template.split(",")]
+    if len(parts) < 14:
+        return template
+    out_h = parts[3]
+    out_w = parts[4]
+    out_c = parts[5]
+    in_c = parts[2]
+    return ", ".join([*parts[:9], out_c, out_h, out_w, in_c, *parts[9:]])
+
+
+def _fpgai_rewrite_conv_calls_for_ddr_tiled(source: str, graph) -> str:
+    import re
+    call_re = re.compile(
+        r"conv2d(?P<tiled>_tiled)?\s*<(?P<template>[^>]*)>\s*\((?P<args>[^;]*)\)\s*;",
+        re.MULTILINE | re.DOTALL,
+    )
+    offsets = _fpgai_ddr_weight_offsets_by_type(graph, "Conv")
+    call_index = 0
+    used = False
+
+    def replace(match: re.Match[str]) -> str:
+        nonlocal call_index, used
+        args = _fpgai_split_cpp_args(match.group("args"))
+        if len(args) < 2:
+            return match.group(0)
+        template = match.group("template") if match.group("tiled") else _fpgai_conv_ddr_tile_template(match.group("template"))
+        weight_base, bias_base = offsets[call_index] if call_index < len(offsets) else (0, 0)
+        call_index += 1
+        used = True
+        return (
+            f"conv2d_ddr_tiled<{template}>("
+            f"{args[0]}, {args[1]}, weights_mem, {weight_base}, {bias_base});"
+        )
+
+    rewritten = call_re.sub(replace, source)
+    if used and "FPGAI real DDR-tiled Conv helper" not in rewritten:
+        if "#include <ap_int.h>" not in rewritten:
+            rewritten = rewritten.replace("#include <ap_axi_sdata.h>", "#include <ap_axi_sdata.h>\n#include <ap_int.h>")
+        signature = 'extern "C" void '
+        pos = rewritten.find(signature)
+        if pos >= 0:
+            rewritten = rewritten[:pos] + _fpgai_conv_ddr_tiled_helper_cpp() + "\n" + rewritten[pos:]
+        else:
+            rewritten = _fpgai_conv_ddr_tiled_helper_cpp() + "\n" + rewritten
+    return rewritten
+
+def _fpgai_insert_ddr_tiled_pragmas(source: str) -> str:
+    marker = "#pragma HLS INTERFACE s_axilite port=return bundle=control\n"
+    replacement = (
+        "#pragma HLS INTERFACE m_axi port=weights_mem offset=slave bundle=gmem_weights\n"
+        "#pragma HLS INTERFACE s_axilite port=weights_mem bundle=control\n"
+        "#pragma HLS INTERFACE s_axilite port=return bundle=control\n"
+    )
+    if marker not in source:
+        raise ValueError("Could not insert DDR-tiled weights_mem pragmas")
+    return source.replace(marker, replacement, 1)
+
 def _fpgai_runtime_recover_graph_top(args, kwargs):
     graph = kwargs.get("graph")
     top_name = kwargs.get("top_name")
@@ -1679,6 +2129,16 @@ static void fpgai_load_ddr_vector(const ap_uint<32>* weights_mem, int& offset, T
     for (int i = 0; i < N; ++i) {
 #pragma HLS PIPELINE II=1
         out[i] = bits_to_value<T>(weights_mem[offset + i].to_uint());
+    }
+    offset += N;
+}
+
+template<typename T, int N>
+static void fpgai_store_ddr_vector(ap_uint<32>* weights_mem, int& offset, const T in[N]) {
+#pragma HLS INLINE off
+    for (int i = 0; i < N; ++i) {
+#pragma HLS PIPELINE II=1
+        weights_mem[offset + i] = value_to_bits<T>(in[i]);
     }
     offset += N;
 }
@@ -1728,12 +2188,21 @@ def _fpgai_rewrite_runtime_signature(source: str, *, top_name: str, mode: str) -
             "    int mode\n"
             ") {"
         )
-    else:
+    elif mode == "ddr_tiled":
         runtime_signature = (
             f'extern "C" void {top_name}(\n'
             "    hls::stream<axis_t>& in_stream,\n"
             "    hls::stream<axis_t>& out_stream,\n"
             "    const ap_uint<32>* weights_mem\n"
+            ") {"
+        )
+    else:
+        runtime_signature = (
+            f'extern "C" void {top_name}(\n'
+            "    hls::stream<axis_t>& in_stream,\n"
+            "    hls::stream<axis_t>& out_stream,\n"
+            "    ap_uint<32>* weights_mem,\n"
+            "    int mode\n"
             ") {"
         )
 
@@ -1742,8 +2211,11 @@ def _fpgai_rewrite_runtime_signature(source: str, *, top_name: str, mode: str) -
     return source.replace(original_signature, runtime_signature, 1)
 
 
-def _fpgai_runtime_load_block(graph, *, mode: str) -> str:
+def _fpgai_runtime_load_block(graph, *, mode: str, resolved_semantics: str | None = None) -> str:
     specs = _fpgai_runtime_weight_specs(graph)
+    resolved = str(resolved_semantics or "").strip().lower()
+    export_enabled = resolved in {"bram_import_export_full", "uram_import_export_full"}
+    storage_impl = "uram" if mode == "uram" or resolved.startswith("uram_import") else "bram"
     lines = []
     if mode in {"stream", "streamed"}:
         lines.extend(
@@ -1769,34 +2241,73 @@ def _fpgai_runtime_load_block(graph, *, mode: str) -> str:
             ]
         )
     else:
-        if mode == "uram":
-            lines.extend(
-                [
-                    "    // Runtime-loaded URAM weight storage.",
-                    "    // Weights are loaded through weights_mem, then stored in mutable URAM-bound arrays.",
-                ]
-            )
-            for parameter_index, precision_tag, weight_count, bias_count, op_type, op_name in specs:
-                lines.append(f"    // {op_type} {op_name}: bind W{parameter_index}[{weight_count}], B{parameter_index}[{bias_count}] to URAM")
-                lines.append(f"#pragma HLS BIND_STORAGE variable=W{parameter_index} type=ram_2p impl=uram")
-                lines.append(f"#pragma HLS BIND_STORAGE variable=B{parameter_index} type=ram_2p impl=uram")
+        lines.extend([
+            "    // FPGAI runtime weight command modes.",
+            "    // mode 0: run inference with the already imported local weights.",
+            "    // mode 1: import_weights copies the full runtime payload from weights_mem into local storage and returns.",
+            "    // mode 2: export_weights copies current local weights back to weights_mem and returns when export is supported.",
+            "    static const int FPGAI_MODE_RUN_INFERENCE = 0;",
+            "    static const int FPGAI_MODE_IMPORT_WEIGHTS = 1;",
+            "    static const int FPGAI_MODE_EXPORT_WEIGHTS = 2;",
+        ])
+        if storage_impl == "uram":
+            lines.extend([
+                "    // Runtime-imported URAM weight storage.",
+                "    // Weights are imported through weights_mem only when mode == FPGAI_MODE_IMPORT_WEIGHTS.",
+            ])
         else:
-            lines.append("    // Runtime DDR weight load.")
-        lines.append("    int fpgai_weight_offset = 0;")
+            lines.extend([
+                "    // Runtime-imported BRAM weight storage.",
+                "    // Weights are imported through weights_mem only when mode == FPGAI_MODE_IMPORT_WEIGHTS.",
+            ])
         for parameter_index, precision_tag, weight_count, bias_count, op_type, op_name in specs:
-            lines.append(f"    // {op_type} {op_name}: W{parameter_index}[{weight_count}], B{parameter_index}[{bias_count}]")
+            lines.append(f"    // {op_type} {op_name}: local runtime W{parameter_index}[{weight_count}], B{parameter_index}[{bias_count}] in {storage_impl.upper()}")
+            lines.append(f"    static {precision_tag}_wgt_t W{parameter_index}[{weight_count}];")
+            lines.append(f"#pragma HLS BIND_STORAGE variable=W{parameter_index} type=ram_2p impl={storage_impl}")
+            lines.append(f"    static {precision_tag}_bias_t B{parameter_index}[{bias_count}];")
+            lines.append(f"#pragma HLS BIND_STORAGE variable=B{parameter_index} type=ram_2p impl={storage_impl}")
+        lines.append("    if (mode == FPGAI_MODE_IMPORT_WEIGHTS) {")
+        lines.append("        int fpgai_weight_offset = 0;")
+        for parameter_index, precision_tag, weight_count, bias_count, op_type, op_name in specs:
+            lines.append(f"        // import {op_type} {op_name}: W{parameter_index}[{weight_count}], B{parameter_index}[{bias_count}]")
             lines.append(
-                f"    fpgai_load_ddr_vector<{precision_tag}_wgt_t, {weight_count}>(weights_mem, fpgai_weight_offset, W{parameter_index});"
+                f"        fpgai_load_ddr_vector<{precision_tag}_wgt_t, {weight_count}>(weights_mem, fpgai_weight_offset, W{parameter_index});"
             )
             lines.append(
-                f"    fpgai_load_ddr_vector<{precision_tag}_bias_t, {bias_count}>(weights_mem, fpgai_weight_offset, B{parameter_index});"
+                f"        fpgai_load_ddr_vector<{precision_tag}_bias_t, {bias_count}>(weights_mem, fpgai_weight_offset, B{parameter_index});"
             )
-        lines.append("")
+        lines.extend([
+            "        return;",
+            "    }",
+            "",
+        ])
+        if export_enabled:
+            lines.append("    if (mode == FPGAI_MODE_EXPORT_WEIGHTS) {")
+            lines.append("        int fpgai_weight_offset = 0;")
+            for parameter_index, precision_tag, weight_count, bias_count, op_type, op_name in specs:
+                lines.append(f"        // export {op_type} {op_name}: W{parameter_index}[{weight_count}], B{parameter_index}[{bias_count}]")
+                lines.append(
+                    f"        fpgai_store_ddr_vector<{precision_tag}_wgt_t, {weight_count}>(weights_mem, fpgai_weight_offset, W{parameter_index});"
+                )
+                lines.append(
+                    f"        fpgai_store_ddr_vector<{precision_tag}_bias_t, {bias_count}>(weights_mem, fpgai_weight_offset, B{parameter_index});"
+                )
+            lines.extend([
+                "        return;",
+                "    }",
+                "",
+            ])
+        lines.extend([
+            "    if (mode != FPGAI_MODE_RUN_INFERENCE) {",
+            "        return;",
+            "    }",
+            "",
+        ])
     return "\n".join(lines)
 
 
-def _fpgai_insert_runtime_load_block(source: str, graph, *, mode: str) -> str:
-    block = _fpgai_runtime_load_block(graph, mode=mode)
+def _fpgai_insert_runtime_load_block(source: str, graph, *, mode: str, resolved_semantics: str | None = None) -> str:
+    block = _fpgai_runtime_load_block(graph, mode=mode, resolved_semantics=resolved_semantics)
     if mode in {"stream", "streamed"}:
         pragma_marker = "#pragma HLS INTERFACE s_axilite port=return bundle=control\n"
         replacement = (
@@ -1811,6 +2322,7 @@ def _fpgai_insert_runtime_load_block(source: str, graph, *, mode: str) -> str:
         replacement = (
             "#pragma HLS INTERFACE m_axi port=weights_mem offset=slave bundle=gmem_weights\n"
             "#pragma HLS INTERFACE s_axilite port=weights_mem bundle=control\n"
+            "#pragma HLS INTERFACE s_axilite port=mode bundle=control\n"
             "#pragma HLS INTERFACE s_axilite port=return bundle=control\n\n"
             + block
             + "\n"
@@ -1823,24 +2335,42 @@ def _fpgai_insert_runtime_load_block(source: str, graph, *, mode: str) -> str:
 
 def emit_top_cpp(*args, **kwargs):
     requested_mode = _fpgai_runtime_weight_mode(kwargs.get("weights_mode", "embedded"))
-    if requested_mode not in {"stream", "streamed", "ddr", "dma_ddr", "uram"}:
+    if requested_mode not in {"stream", "streamed", "ddr", "dma_ddr", "uram", "ddr_tiled"}:
         return _fpgai_runtime_weight_previous_emit_top_cpp(*args, **kwargs)
 
     graph, top_name = _fpgai_runtime_recover_graph_top(args, kwargs)
     if graph is None or top_name is None:
         raise ValueError("Runtime weight top emission requires graph and top_name")
 
+    if requested_mode == "ddr_tiled":
+        updateed_kwargs = dict(kwargs)
+        updateed_kwargs["weights_mode"] = "embedded"
+        source = _fpgai_runtime_weight_previous_emit_top_cpp(*args, **updateed_kwargs)
+        source = _fpgai_rewrite_runtime_signature(source, top_name=top_name, mode=requested_mode)
+        source = _fpgai_insert_ddr_tiled_pragmas(source)
+        source = _fpgai_rewrite_conv_calls_for_ddr_tiled(source, graph)
+        source = _fpgai_rewrite_dense_calls_for_ddr_tiled(source, graph)
+        planning_comment = (
+            "// Requested weights mode: ddr_tiled\n"
+            "// DDR-tiled Dense/Conv inference keeps full weights in weights_mem and materializes only tile-sized buffers on-chip.\n"
+        )
+        return planning_comment + source
+
     updateed_kwargs = dict(kwargs)
     updateed_kwargs["weights_mode"] = "embedded"
     source = _fpgai_runtime_weight_previous_emit_top_cpp(*args, **updateed_kwargs)
     source = _fpgai_insert_runtime_helpers(source)
     source = _fpgai_rewrite_runtime_signature(source, top_name=top_name, mode=requested_mode)
-    source = _fpgai_insert_runtime_load_block(source, graph, mode=requested_mode)
+    notes = {}
+    notes.update(_fpgai_notes_dict(kwargs.get("compile_plan")))
+    notes.update(_fpgai_notes_dict(kwargs.get("memory_plan")))
+    resolved_semantics = str(notes.get("resolved_weight_semantics", notes.get("memory_semantics_mode", ""))).strip().lower()
+    source = _fpgai_insert_runtime_load_block(source, graph, mode=requested_mode, resolved_semantics=resolved_semantics)
 
     planning_comment = (
         f"// Requested weights mode: {requested_mode}\n"
         "// Non-embedded weight modes are represented in the memory/compile plan; "
-        "generated standalone HLS C simulation keeps embedded constants for reproducibility.\n"
+        "generated HLS exposes explicit import/export command modes instead of reloading before every compute.\n"
     )
     return planning_comment + source
 
@@ -1914,3 +2444,650 @@ def emit_top_cpp(*args, **kwargs):
     if "FPGAI communication tensor-edge plan" in source:
         return source
     return macros + source
+
+# FPGAI static-weight storage wrapper.
+# Compile-time/static BRAM and URAM modes must materialize an exact on-chip
+# storage location, not only global const arrays that Vitis may map to LUTROM
+# or registers.  Keep the generated parameter constants in fpgai_params.cpp,
+# then copy them once into function-scope static arrays bound to BRAM/URAM.
+_fpgai_static_weight_previous_emit_top_cpp = emit_top_cpp
+
+
+def _fpgai_notes_dict(value):
+    notes = getattr(value, "notes", None)
+    if isinstance(notes, dict):
+        return notes
+    if isinstance(value, dict):
+        maybe = value.get("notes", {})
+        return maybe if isinstance(maybe, dict) else {}
+    return {}
+
+
+def _fpgai_static_weight_impl_from_kwargs(kwargs) -> str | None:
+    memory_plan = kwargs.get("memory_plan")
+    compile_plan = kwargs.get("compile_plan")
+    notes = {}
+    notes.update(_fpgai_notes_dict(compile_plan))
+    notes.update(_fpgai_notes_dict(memory_plan))
+    mode = str(notes.get("resolved_weight_semantics", notes.get("memory_semantics_mode", ""))).strip().lower()
+    if mode == "bram_static":
+        return "bram"
+    if mode == "uram_static":
+        return "uram"
+    return None
+
+
+def _fpgai_static_weight_init_block(graph, *, impl: str) -> str:
+    specs = _fpgai_runtime_weight_specs(graph)
+    if not specs:
+        return ""
+
+    lines = [
+        f"    // FPGAI {impl}_static weight storage.",
+        "    // Initial values are compile-time generated constants in fpgai_params.cpp.",
+        f"    // The top function imports them once into local static {impl.upper()} arrays, then reuses them across runs.",
+        "    static bool fpgai_static_weights_initialized = false;",
+    ]
+
+    for parameter_index, precision_tag, weight_count, bias_count, op_type, op_name in specs:
+        lines.append(f"    // {op_type} {op_name}: local static W{parameter_index}[{weight_count}], B{parameter_index}[{bias_count}]")
+        lines.append(f"    static {precision_tag}_wgt_t W{parameter_index}[{weight_count}];")
+        lines.append(f"#pragma HLS BIND_STORAGE variable=W{parameter_index} type=ram_2p impl={impl}")
+        lines.append(f"    static {precision_tag}_bias_t B{parameter_index}[{bias_count}];")
+        lines.append(f"#pragma HLS BIND_STORAGE variable=B{parameter_index} type=ram_2p impl={impl}")
+
+    lines.extend([
+        "    if (!fpgai_static_weights_initialized) {",
+    ])
+
+    for parameter_index, precision_tag, weight_count, bias_count, op_type, op_name in specs:
+        lines.append(f"        for (int i = 0; i < {weight_count}; ++i) {{")
+        lines.append("#pragma HLS PIPELINE II=1")
+        lines.append(f"            W{parameter_index}[i] = fpgai::W{parameter_index}[i];")
+        lines.append("        }")
+        lines.append(f"        for (int i = 0; i < {bias_count}; ++i) {{")
+        lines.append("#pragma HLS PIPELINE II=1")
+        lines.append(f"            B{parameter_index}[i] = fpgai::B{parameter_index}[i];")
+        lines.append("        }")
+
+    lines.extend([
+        "        fpgai_static_weights_initialized = true;",
+        "    }",
+        "",
+    ])
+    return "\n".join(lines)
+
+
+def _fpgai_insert_static_weight_block(source: str, graph, *, impl: str) -> str:
+    if f"FPGAI {impl}_static weight storage" in source:
+        return source
+    marker = "#pragma HLS INTERFACE s_axilite port=return bundle=control\n\n"
+    block = _fpgai_static_weight_init_block(graph, impl=impl)
+    if not block:
+        return source
+    if marker not in source:
+        raise ValueError("Could not insert static BRAM/URAM weight initialization block")
+    return source.replace(marker, marker + block, 1)
+
+
+def emit_top_cpp(*args, **kwargs):
+    impl = _fpgai_static_weight_impl_from_kwargs(kwargs)
+    source = _fpgai_static_weight_previous_emit_top_cpp(*args, **kwargs)
+    if impl is None:
+        return source
+
+    requested_mode = _fpgai_runtime_weight_mode(kwargs.get("weights_mode", "embedded"))
+    if requested_mode != "embedded":
+        return source
+
+    graph, _top_name = _fpgai_runtime_recover_graph_top(args, kwargs)
+    if graph is None:
+        raise ValueError("Static BRAM/URAM weight top emission requires graph")
+
+    return _fpgai_insert_static_weight_block(source, graph, impl=impl)
+
+# FPGAI input/output m_axi full movement wrapper.
+# This keeps the existing AXI-stream/DMA path as the default, and rewrites the
+# top interface only when the communication plan explicitly requests full
+# m_axi import/export for network input/output arrays.
+_fpgai_m_axi_io_previous_emit_top_cpp = emit_top_cpp
+
+
+def _fpgai_edge_notes(communication_plan, kind: str) -> dict:
+    kind = str(kind).lower()
+    edges = getattr(communication_plan, "edges", []) or []
+    for edge in edges:
+        notes = getattr(edge, "notes", {}) or {}
+        edge_kind = str(notes.get("kind", "")).lower()
+        if edge_kind == kind or (kind == "input" and edge_kind in {"inputs", "activation_in"}) or (kind == "output" and edge_kind in {"outputs", "activation_out"}):
+            return dict(notes)
+    return {}
+
+
+def _fpgai_cfg_get(raw, path: str, default=None):
+    if not isinstance(raw, dict):
+        return default
+    current = raw
+    for part in path.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return default
+        current = current[part]
+    return current
+
+
+def _fpgai_io_movement_kind(kwargs, kind: str) -> str:
+    communication_plan = kwargs.get("communication_plan")
+    notes = _fpgai_edge_notes(communication_plan, kind)
+    interface = str(notes.get("interface") or "").strip().lower().replace("-", "_")
+    transport = str(notes.get("transport") or "").strip().lower().replace("-", "_")
+    policy = str(notes.get("policy") or "").strip().lower().replace("-", "_")
+
+    raw = kwargs.get("raw_cfg") or {}
+    if kind == "input":
+        prefix = "data_movement.inputs.import"
+        legacy_prefix = "data_movement.input.load"
+    else:
+        prefix = "data_movement.outputs.export"
+        legacy_prefix = "data_movement.output.store"
+
+    interface = interface or str(_fpgai_cfg_get(raw, f"{prefix}.interface", _fpgai_cfg_get(raw, f"{legacy_prefix}.interface", "")) or "").strip().lower().replace("-", "_")
+    transport = transport or str(_fpgai_cfg_get(raw, f"{prefix}.transport", _fpgai_cfg_get(raw, f"{legacy_prefix}.transport", "")) or "").strip().lower().replace("-", "_")
+    policy = policy or str(_fpgai_cfg_get(raw, f"{prefix}.policy", _fpgai_cfg_get(raw, f"{legacy_prefix}.policy", "")) or "").strip().lower().replace("-", "_")
+
+    if interface in {"m_axi", "maxi", "ddr"} and (policy in {"", "full"}):
+        return "m_axi_full"
+    if interface in {"m_axi", "maxi", "ddr"} and policy == "tiled":
+        return "m_axi_tiled"
+    if interface in {"axi_stream", "axis", "stream"} or transport in {"dma", "axi_dma"}:
+        if policy == "tiled":
+            return "axi_stream_tiled"
+        return "axi_stream_full"
+    return "axi_stream_full"
+
+
+def _fpgai_ensure_ap_int(source: str) -> str:
+    if "#include <ap_int.h>" in source:
+        return source
+    if "#include <ap_axi_sdata.h>" in source:
+        return source.replace("#include <ap_axi_sdata.h>", "#include <ap_axi_sdata.h>\n#include <ap_int.h>", 1)
+    return "#include <ap_int.h>\n" + source
+
+
+def _fpgai_rewrite_signature_for_m_axi_io(source: str, *, input_m_axi: bool, output_m_axi: bool) -> str:
+    if input_m_axi:
+        source = source.replace("hls::stream<axis_t>& in_stream", "const ap_uint<32>* input_mem", 1)
+        source = source.replace(
+            "#pragma HLS INTERFACE axis port=in_stream\n",
+            "#pragma HLS INTERFACE m_axi port=input_mem offset=slave bundle=gmem_input\n"
+            "#pragma HLS INTERFACE s_axilite port=input_mem bundle=control\n",
+            1,
+        )
+    if output_m_axi:
+        source = source.replace("hls::stream<axis_t>& out_stream", "ap_uint<32>* output_mem", 1)
+        source = source.replace(
+            "#pragma HLS INTERFACE axis port=out_stream\n",
+            "#pragma HLS INTERFACE m_axi port=output_mem offset=slave bundle=gmem_output\n"
+            "#pragma HLS INTERFACE s_axilite port=output_mem bundle=control\n",
+            1,
+        )
+    return source
+
+
+def _fpgai_rewrite_input_stream_to_m_axi(source: str) -> str:
+    import re
+
+    decl = re.search(r"    (?P<typ>\w+) (?P<buf>layer_in)\[(?P<size>\d+)\];", source)
+    if not decl:
+        raise ValueError("Could not find input buffer declaration for m_axi input movement")
+    typ = decl.group("typ")
+    buf = decl.group("buf")
+    size = decl.group("size")
+
+    pattern = re.compile(
+        r"    static const int FPGAI_ACT_BITS = (?P<bits>\d+);\n"
+        r"    static const int FPGAI_ACT_PER_AXIS = (?P<per>\d+);\n"
+        r"    for \(int base = 0; base < (?P<size>\d+); base \+= FPGAI_ACT_PER_AXIS\) \{\n"
+        r"#pragma HLS PIPELINE II=1\n"
+        r"        axis_t packet = in_stream\.read\(\);\n"
+        r"        for \(int lane = 0; lane < FPGAI_ACT_PER_AXIS; \+\+lane\) \{\n"
+        r"#pragma HLS UNROLL\n"
+        r"            int index = base \+ lane;\n"
+        r"            if \(index < (?P=size)\) \{\n"
+        r"                .*?\n"
+        r"            \}\n"
+        r"        \}\n"
+        r"    \}\n",
+        re.DOTALL,
+    )
+    replacement = (
+        f"    static const int FPGAI_ACT_BITS = {32};\n"
+        f"    static const int FPGAI_ACT_PER_AXIS = 1;\n"
+        f"    // m_axi full input import: input_mem -> {buf}.\n"
+        f"    for (int index = 0; index < {size}; ++index) {{\n"
+        "#pragma HLS PIPELINE II=1\n"
+        f"        {buf}[index] = bits_to_value<{typ}>(input_mem[index].to_uint());\n"
+        "    }\n"
+    )
+    new_source, count = pattern.subn(replacement, source, count=1)
+    if count != 1:
+        raise ValueError("Could not rewrite AXI stream input loop for m_axi input movement")
+    return new_source
+
+
+def _fpgai_rewrite_input_stream_to_m_axi_tiled(source: str) -> str:
+    import re
+
+    decl = re.search(r"    (?P<typ>\w+) (?P<buf>layer_in)\[(?P<size>\d+)\];", source)
+    if not decl:
+        raise ValueError("Could not find input buffer declaration for m_axi tiled input movement")
+    typ = decl.group("typ")
+    buf = decl.group("buf")
+    size = int(decl.group("size"))
+    tile = min(64, max(1, size))
+
+    pattern = re.compile(
+        r"    static const int FPGAI_ACT_BITS = (?P<bits>\d+);\n"
+        r"    static const int FPGAI_ACT_PER_AXIS = (?P<per>\d+);\n"
+        r"    for \(int base = 0; base < (?P<size>\d+); base \+= FPGAI_ACT_PER_AXIS\) \{\n"
+        r"#pragma HLS PIPELINE II=1\n"
+        r"        axis_t packet = in_stream\.read\(\);\n"
+        r"        for \(int lane = 0; lane < FPGAI_ACT_PER_AXIS; \+\+lane\) \{\n"
+        r"#pragma HLS UNROLL\n"
+        r"            int index = base \+ lane;\n"
+        r"            if \(index < (?P=size)\) \{\n"
+        r"                .*?\n"
+        r"            \}\n"
+        r"        \}\n"
+        r"    \}\n",
+        re.DOTALL,
+    )
+    replacement = (
+        "    static const int FPGAI_ACT_BITS = 32;\n"
+        "    static const int FPGAI_ACT_PER_AXIS = 1;\n"
+        f"    static const int FPGAI_INPUT_TILE_SIZE = {tile};\n"
+        f"    {typ} input_tile[FPGAI_INPUT_TILE_SIZE];\n"
+        "#pragma HLS BIND_STORAGE variable=input_tile type=ram_1p impl=bram\n"
+        f"    // m_axi tiled input import: input_mem -> input_tile -> {buf}.\n"
+        f"    for (int tile_base = 0; tile_base < {size}; tile_base += FPGAI_INPUT_TILE_SIZE) {{\n"
+        f"        int tile_count = ((tile_base + FPGAI_INPUT_TILE_SIZE) <= {size}) ? FPGAI_INPUT_TILE_SIZE : ({size} - tile_base);\n"
+        "        for (int lane = 0; lane < FPGAI_INPUT_TILE_SIZE; ++lane) {\n"
+        "#pragma HLS PIPELINE II=1\n"
+        "            if (lane < tile_count) {\n"
+        f"                input_tile[lane] = bits_to_value<{typ}>(input_mem[tile_base + lane].to_uint());\n"
+        "            }\n"
+        "        }\n"
+        "        for (int lane = 0; lane < FPGAI_INPUT_TILE_SIZE; ++lane) {\n"
+        "#pragma HLS PIPELINE II=1\n"
+        "            if (lane < tile_count) {\n"
+        f"                {buf}[tile_base + lane] = input_tile[lane];\n"
+        "            }\n"
+        "        }\n"
+        "    }\n"
+    )
+    new_source, count = pattern.subn(replacement, source, count=1)
+    if count != 1:
+        raise ValueError("Could not rewrite AXI stream input loop for m_axi tiled input movement")
+    return new_source
+
+
+def _fpgai_rewrite_output_stream_to_m_axi(source: str) -> str:
+    import re
+
+    pattern = re.compile(
+        r"    for \(int base = 0; base < (?P<size>\d+); base \+= FPGAI_ACT_PER_AXIS\) \{\n"
+        r"#pragma HLS PIPELINE II=1\n"
+        r"        axis_t packet;\n"
+        r"        packet\.data = 0;\n"
+        r"        packet\.keep = -1;\n"
+        r"        packet\.strb = -1;\n"
+        r"        for \(int lane = 0; lane < FPGAI_ACT_PER_AXIS; \+\+lane\) \{\n"
+        r"#pragma HLS UNROLL\n"
+        r"            int index = base \+ lane;\n"
+        r"            if \(index < (?P=size)\) \{\n"
+        r"                fpgai_pack_axis_value<(?P<typ>\w+), FPGAI_ACT_BITS>\(packet, (?P<buf>\w+)\[index\], lane\);\n"
+        r"            \}\n"
+        r"        \}\n"
+        r"        packet\.last = \(base \+ FPGAI_ACT_PER_AXIS >= (?P=size)\) \? 1 : 0;\n"
+        r"        out_stream\.write\(packet\);\n"
+        r"    \}\n",
+        re.DOTALL,
+    )
+
+    def replace(match):
+        size = match.group("size")
+        typ = match.group("typ")
+        buf = match.group("buf")
+        return (
+            f"    // m_axi full output export: {buf} -> output_mem.\n"
+            f"    for (int index = 0; index < {size}; ++index) {{\n"
+            "#pragma HLS PIPELINE II=1\n"
+            f"        output_mem[index] = value_to_bits<{typ}>({buf}[index]);\n"
+            "    }\n"
+        )
+
+    new_source, count = pattern.subn(replace, source, count=1)
+    if count != 1:
+        raise ValueError("Could not rewrite AXI stream output loop for m_axi output movement")
+    return new_source
+
+
+def _fpgai_rewrite_output_stream_to_m_axi_tiled(source: str) -> str:
+    import re
+
+    pattern = re.compile(
+        r"    for \(int base = 0; base < (?P<size>\d+); base \+= FPGAI_ACT_PER_AXIS\) \{\n"
+        r"#pragma HLS PIPELINE II=1\n"
+        r"        axis_t packet;\n"
+        r"        packet\.data = 0;\n"
+        r"        packet\.keep = -1;\n"
+        r"        packet\.strb = -1;\n"
+        r"        for \(int lane = 0; lane < FPGAI_ACT_PER_AXIS; \+\+lane\) \{\n"
+        r"#pragma HLS UNROLL\n"
+        r"            int index = base \+ lane;\n"
+        r"            if \(index < (?P=size)\) \{\n"
+        r"                fpgai_pack_axis_value<(?P<typ>\w+), FPGAI_ACT_BITS>\(packet, (?P<buf>\w+)\[index\], lane\);\n"
+        r"            \}\n"
+        r"        \}\n"
+        r"        packet\.last = \(base \+ FPGAI_ACT_PER_AXIS >= (?P=size)\) \? 1 : 0;\n"
+        r"        out_stream\.write\(packet\);\n"
+        r"    \}\n",
+        re.DOTALL,
+    )
+
+    def replace(match):
+        size = int(match.group("size"))
+        typ = match.group("typ")
+        buf = match.group("buf")
+        tile = min(64, max(1, size))
+        return (
+            f"    static const int FPGAI_OUTPUT_TILE_SIZE = {tile};\n"
+            f"    {typ} output_tile[FPGAI_OUTPUT_TILE_SIZE];\n"
+            "#pragma HLS BIND_STORAGE variable=output_tile type=ram_1p impl=bram\n"
+            f"    // m_axi tiled output export: {buf} -> output_tile -> output_mem.\n"
+            f"    for (int tile_base = 0; tile_base < {size}; tile_base += FPGAI_OUTPUT_TILE_SIZE) {{\n"
+            f"        int tile_count = ((tile_base + FPGAI_OUTPUT_TILE_SIZE) <= {size}) ? FPGAI_OUTPUT_TILE_SIZE : ({size} - tile_base);\n"
+            "        for (int lane = 0; lane < FPGAI_OUTPUT_TILE_SIZE; ++lane) {\n"
+            "#pragma HLS PIPELINE II=1\n"
+            "            if (lane < tile_count) {\n"
+            f"                output_tile[lane] = {buf}[tile_base + lane];\n"
+            "            }\n"
+            "        }\n"
+            "        for (int lane = 0; lane < FPGAI_OUTPUT_TILE_SIZE; ++lane) {\n"
+            "#pragma HLS PIPELINE II=1\n"
+            "            if (lane < tile_count) {\n"
+            f"                output_mem[tile_base + lane] = value_to_bits<{typ}>(output_tile[lane]);\n"
+            "            }\n"
+            "        }\n"
+            "    }\n"
+        )
+
+    new_source, count = pattern.subn(replace, source, count=1)
+    if count != 1:
+        raise ValueError("Could not rewrite AXI stream output loop for m_axi tiled output movement")
+    return new_source
+
+
+
+
+def _fpgai_rewrite_input_stream_to_axis_tiled(source: str) -> str:
+    import re
+
+    decl = re.search(r"    (?P<typ>\w+) (?P<buf>layer_in)\[(?P<size>\d+)\];", source)
+    if not decl:
+        raise ValueError("Could not find input buffer declaration for AXI-stream tiled input movement")
+    typ = decl.group("typ")
+    buf = decl.group("buf")
+    size = int(decl.group("size"))
+    tile = min(64, max(1, size))
+
+    pattern = re.compile(
+        r"    static const int FPGAI_ACT_BITS = (?P<bits>\d+);\n"
+        r"    static const int FPGAI_ACT_PER_AXIS = (?P<per>\d+);\n"
+        r"    for \(int base = 0; base < (?P<size>\d+); base \+= FPGAI_ACT_PER_AXIS\) \{\n"
+        r"#pragma HLS PIPELINE II=1\n"
+        r"        axis_t packet = in_stream\.read\(\);\n"
+        r"        for \(int lane = 0; lane < FPGAI_ACT_PER_AXIS; \+\+lane\) \{\n"
+        r"#pragma HLS UNROLL\n"
+        r"            int index = base \+ lane;\n"
+        r"            if \(index < (?P=size)\) \{\n"
+        r"                .*?\n"
+        r"            \}\n"
+        r"        \}\n"
+        r"    \}\n",
+        re.DOTALL,
+    )
+    replacement = (
+        f"    static const int FPGAI_ACT_BITS = 32;\n"
+        f"    static const int FPGAI_ACT_PER_AXIS = 1;\n"
+        f"    static const int FPGAI_AXIS_INPUT_TILE_SIZE = {tile};\n"
+        f"    {typ} input_tile[FPGAI_AXIS_INPUT_TILE_SIZE];\n"
+        "#pragma HLS BIND_STORAGE variable=input_tile type=ram_1p impl=bram\n"
+        f"    // AXI-stream tiled input import: in_stream -> input_tile -> {buf}.\n"
+        f"    for (int tile_base = 0; tile_base < {size}; tile_base += FPGAI_AXIS_INPUT_TILE_SIZE) {{\n"
+        f"        int tile_count = ((tile_base + FPGAI_AXIS_INPUT_TILE_SIZE) <= {size}) ? FPGAI_AXIS_INPUT_TILE_SIZE : ({size} - tile_base);\n"
+        "        for (int lane = 0; lane < FPGAI_AXIS_INPUT_TILE_SIZE; ++lane) {\n"
+        "#pragma HLS PIPELINE II=1\n"
+        "            if (lane < tile_count) {\n"
+        "                axis_t packet = in_stream.read();\n"
+        f"                input_tile[lane] = fpgai_unpack_axis_value<{typ}, FPGAI_ACT_BITS>(packet, 0);\n"
+        "            }\n"
+        "        }\n"
+        "        for (int lane = 0; lane < FPGAI_AXIS_INPUT_TILE_SIZE; ++lane) {\n"
+        "#pragma HLS PIPELINE II=1\n"
+        "            if (lane < tile_count) {\n"
+        f"                {buf}[tile_base + lane] = input_tile[lane];\n"
+        "            }\n"
+        "        }\n"
+        "    }\n"
+    )
+    new_source, count = pattern.subn(replacement, source, count=1)
+    if count != 1:
+        raise ValueError("Could not rewrite AXI stream input loop for AXI-stream tiled input movement")
+    return new_source
+
+
+def _fpgai_rewrite_output_stream_to_axis_tiled(source: str) -> str:
+    import re
+
+    pattern = re.compile(
+        r"    for \(int base = 0; base < (?P<size>\d+); base \+= FPGAI_ACT_PER_AXIS\) \{\n"
+        r"#pragma HLS PIPELINE II=1\n"
+        r"        axis_t packet;\n"
+        r"        packet\.data = 0;\n"
+        r"        packet\.keep = -1;\n"
+        r"        packet\.strb = -1;\n"
+        r"        for \(int lane = 0; lane < FPGAI_ACT_PER_AXIS; \+\+lane\) \{\n"
+        r"#pragma HLS UNROLL\n"
+        r"            int index = base \+ lane;\n"
+        r"            if \(index < (?P=size)\) \{\n"
+        r"                fpgai_pack_axis_value<(?P<typ>\w+), FPGAI_ACT_BITS>\(packet, (?P<buf>\w+)\[index\], lane\);\n"
+        r"            \}\n"
+        r"        \}\n"
+        r"        packet\.last = \(base \+ FPGAI_ACT_PER_AXIS >= (?P=size)\) \? 1 : 0;\n"
+        r"        out_stream\.write\(packet\);\n"
+        r"    \}\n",
+        re.DOTALL,
+    )
+
+    def replace(match):
+        size = int(match.group("size"))
+        typ = match.group("typ")
+        buf = match.group("buf")
+        tile = min(64, max(1, size))
+        return (
+            f"    static const int FPGAI_AXIS_OUTPUT_TILE_SIZE = {tile};\n"
+            f"    {typ} output_tile[FPGAI_AXIS_OUTPUT_TILE_SIZE];\n"
+            "#pragma HLS BIND_STORAGE variable=output_tile type=ram_1p impl=bram\n"
+            f"    // AXI-stream tiled output export: {buf} -> output_tile -> out_stream.\n"
+            f"    for (int tile_base = 0; tile_base < {size}; tile_base += FPGAI_AXIS_OUTPUT_TILE_SIZE) {{\n"
+            f"        int tile_count = ((tile_base + FPGAI_AXIS_OUTPUT_TILE_SIZE) <= {size}) ? FPGAI_AXIS_OUTPUT_TILE_SIZE : ({size} - tile_base);\n"
+            "        for (int lane = 0; lane < FPGAI_AXIS_OUTPUT_TILE_SIZE; ++lane) {\n"
+            "#pragma HLS PIPELINE II=1\n"
+            "            if (lane < tile_count) {\n"
+            f"                output_tile[lane] = {buf}[tile_base + lane];\n"
+            "            }\n"
+            "        }\n"
+            "        for (int lane = 0; lane < FPGAI_AXIS_OUTPUT_TILE_SIZE; ++lane) {\n"
+            "#pragma HLS PIPELINE II=1\n"
+            "            if (lane < tile_count) {\n"
+            "                axis_t packet;\n"
+            "                packet.data = 0;\n"
+            "                packet.keep = -1;\n"
+            "                packet.strb = -1;\n"
+            f"                fpgai_pack_axis_value<{typ}, FPGAI_ACT_BITS>(packet, output_tile[lane], 0);\n"
+            f"                packet.last = ((tile_base + lane + 1) >= {size}) ? 1 : 0;\n"
+            "                out_stream.write(packet);\n"
+            "            }\n"
+            "        }\n"
+            "    }\n"
+        )
+
+    new_source, count = pattern.subn(replace, source, count=1)
+    if count != 1:
+        raise ValueError("Could not rewrite AXI stream output loop for AXI-stream tiled output movement")
+    return new_source
+
+
+def _fpgai_apply_axis_tiled_io(source: str, *, input_kind: str, output_kind: str) -> str:
+    if input_kind != "axi_stream_tiled" and output_kind != "axi_stream_tiled":
+        return source
+    if "FPGAI AXI-stream tiled input/output movement" in source:
+        return source
+    if input_kind == "axi_stream_tiled":
+        source = _fpgai_rewrite_input_stream_to_axis_tiled(source)
+    if output_kind == "axi_stream_tiled":
+        source = _fpgai_rewrite_output_stream_to_axis_tiled(source)
+    return "// FPGAI AXI-stream tiled input/output movement.\n" + source
+
+def _fpgai_apply_m_axi_io(source: str, *, input_kind: str, output_kind: str) -> str:
+    input_m_axi = input_kind in {"m_axi_full", "m_axi_tiled"}
+    output_m_axi = output_kind in {"m_axi_full", "m_axi_tiled"}
+    if not input_m_axi and not output_m_axi:
+        return source
+    if "FPGAI m_axi input/output movement" in source:
+        return source
+    source = _fpgai_ensure_ap_int(source)
+    source = _fpgai_rewrite_signature_for_m_axi_io(source, input_m_axi=input_m_axi, output_m_axi=output_m_axi)
+    if input_kind == "m_axi_full":
+        source = _fpgai_rewrite_input_stream_to_m_axi(source)
+    elif input_kind == "m_axi_tiled":
+        source = _fpgai_rewrite_input_stream_to_m_axi_tiled(source)
+    if output_kind == "m_axi_full":
+        source = _fpgai_rewrite_output_stream_to_m_axi(source)
+    elif output_kind == "m_axi_tiled":
+        source = _fpgai_rewrite_output_stream_to_m_axi_tiled(source)
+    return "// FPGAI m_axi input/output movement.\n" + source
+
+
+def emit_top_cpp(*args, **kwargs):
+    input_kind = _fpgai_io_movement_kind(kwargs, "input")
+    output_kind = _fpgai_io_movement_kind(kwargs, "output")
+
+    source = _fpgai_m_axi_io_previous_emit_top_cpp(*args, **kwargs)
+    source = _fpgai_apply_m_axi_io(source, input_kind=input_kind, output_kind=output_kind)
+    return _fpgai_apply_axis_tiled_io(source, input_kind=input_kind, output_kind=output_kind)
+
+
+# FPGAI activation storage wrapper.
+# Public activation storage is intentionally limited to BRAM/URAM.  This
+# wrapper rewrites local activation buffer storage pragmas generated by the
+# normal top emitter so that memory.storage.activations affects real HLS
+# BIND_STORAGE artifacts.
+_fpgai_activation_storage_previous_emit_top_cpp = emit_top_cpp
+
+
+def _fpgai_activation_storage_impl(kwargs) -> str | None:
+    raw = kwargs.get("raw_cfg") or {}
+    memory_plan = kwargs.get("memory_plan")
+    notes = _fpgai_notes_dict(memory_plan)
+    value = str(notes.get("resolved_activation_storage", "") or "").strip().lower().replace("-", "_")
+    if not value:
+        value = str(_fpgai_cfg_get(raw, "memory.storage.activations", _fpgai_cfg_get(raw, "memory.activation_storage", "")) or "").strip().lower().replace("-", "_")
+    aliases = {"block": "bram", "block_ram": "bram", "bram": "bram", "ultra": "uram", "ultra_ram": "uram", "uram": "uram"}
+    return aliases.get(value)
+
+
+def _fpgai_apply_activation_storage(source: str, impl: str | None) -> str:
+    if impl not in {"bram", "uram"}:
+        return source
+    if f"FPGAI activation storage: {impl}" in source:
+        return source
+    import re
+    pattern = re.compile(
+        r"#pragma HLS BIND_STORAGE variable=(?P<name>layer_in|layer_\d+_out) type=ram_(?P<ports>\dp) impl=(?:bram|uram)"
+    )
+    source, count = pattern.subn(
+        lambda m: f"#pragma HLS BIND_STORAGE variable={m.group('name')} type=ram_{m.group('ports')} impl={impl}",
+        source,
+    )
+    if count == 0:
+        # Keep this strict: if a user asked for activation storage, generated
+        # source must contain real activation buffer binding sites.
+        raise ValueError("Could not find activation buffer BIND_STORAGE pragmas to apply memory.storage.activations")
+    return f"// FPGAI activation storage: {impl} local activation buffers.\n" + source
+
+
+def emit_top_cpp(*args, **kwargs):
+    source = _fpgai_activation_storage_previous_emit_top_cpp(*args, **kwargs)
+    return _fpgai_apply_activation_storage(source, _fpgai_activation_storage_impl(kwargs))
+
+# FPGAI readability wrapper.
+# Keeps existing generation path intact and prepends an honest resolved-decision
+# summary for researcher/contributor inspection when codegen.readability asks for it.
+_fpgai_readability_previous_emit_top_cpp = emit_top_cpp
+
+
+def _fpgai_readability_value(kwargs) -> str:
+    raw = kwargs.get("raw_cfg") or {}
+    value = str(_fpgai_cfg_get(raw, "codegen.readability", "high") or "high").strip().lower().replace("-", "_")
+    return value if value in {"compact", "normal", "high", "debug"} else "high"
+
+
+def _fpgai_plan_note(kwargs, key: str, default=""):
+    for plan_key in ("memory_plan", "communication_plan", "compile_plan"):
+        plan = kwargs.get(plan_key)
+        notes = getattr(plan, "notes", None)
+        if isinstance(notes, dict) and key in notes:
+            return notes.get(key)
+    return default
+
+
+def _fpgai_readability_banner(kwargs, *, kind: str) -> str:
+    level = _fpgai_readability_value(kwargs)
+    if level == "compact":
+        return ""
+    raw = kwargs.get("raw_cfg") or {}
+    weights_mode = str(kwargs.get("weights_mode", ""))
+    memory_mode = str(_fpgai_plan_note(kwargs, "memory_semantics_mode", weights_mode))
+    activation_storage = str(_fpgai_plan_note(kwargs, "resolved_activation_storage", _fpgai_cfg_get(raw, "memory.storage.activations", "bram")))
+    pipeline_mode = str(_fpgai_cfg_get(raw, "pipeline.mode", "inference"))
+    if level == "normal":
+        return (
+            "// FPGAI generated HLS top: "
+            f"pipeline={pipeline_mode}, weights_mode={weights_mode}, memory_semantics={memory_mode}.\n"
+        )
+    input_kind = _fpgai_io_movement_kind(kwargs, "input") if kind == "inference" else "training_default"
+    output_kind = _fpgai_io_movement_kind(kwargs, "output") if kind == "inference" else "training_default"
+    return "\n".join([
+        "// ============================================================",
+        "// FPGAI generated HLS top",
+        f"// Pipeline mode: {pipeline_mode}",
+        f"// Codegen readability: {level}",
+        f"// Weight mode: {weights_mode}",
+        f"// Weight semantics: {memory_mode}",
+        f"// Runtime import/export is command-driven; reload before each compute: false",
+        f"// Activation storage: {activation_storage}",
+        f"// Input movement: {input_kind}",
+        f"// Output movement: {output_kind}",
+        "// Sections: includes/types, runtime constants, storage, import/export helpers, compute helpers, top dispatch.",
+        "// ============================================================",
+        "",
+    ])
+
+
+def emit_top_cpp(*args, **kwargs):
+    source = _fpgai_readability_previous_emit_top_cpp(*args, **kwargs)
+    banner = _fpgai_readability_banner(kwargs, kind="inference")
+    if banner and "FPGAI generated HLS top" not in source[:512]:
+        return banner + source
+    return source

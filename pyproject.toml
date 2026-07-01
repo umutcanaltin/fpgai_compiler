@@ -72,5 +72,12 @@ ignore = [
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
-  "integration: tests requiring an external FPGA toolchain such as Vitis HLS",
+  "unit: fast tests for pure resolver/config/layer logic",
+  "codegen: tests that inspect generated source or HLS interface contracts",
+  "validation: numeric validation tests comparing generated artifacts with references",
+  "integration: tests that exercise full compiler/user workflows without requiring external FPGA tools",
+  "hls: tests requiring Vitis HLS or generated HLS execution",
+  "vivado: tests requiring Vivado project/implementation tools",
+  "fpga: tests requiring physical FPGA board execution",
+  "slow: long-running tests excluded from quick local smoke runs",
 ]

@@ -145,11 +145,27 @@ def emit_tb_train_cpp(
         f'std::string("{_cpp_string_literal(normalized_mode)}") == "streamed" || '
         f'std::string("{_cpp_string_literal(normalized_mode)}") == "ddr" || '
         f'std::string("{_cpp_string_literal(normalized_mode)}") == "dma_ddr" || '
-        f'std::string("{_cpp_string_literal(normalized_mode)}") == "external_ddr")'
+        f'std::string("{_cpp_string_literal(normalized_mode)}") == "external_ddr" || std::string("{_cpp_string_literal(normalized_mode)}") == "ddr_tiled" || std::string("{_cpp_string_literal(normalized_mode)}") == "ddr_tiled_mutable")'
     )
+    m_axi_weight_runtime = normalized_mode in {"ddr", "dma_ddr", "external_ddr", "ddr_tiled", "ddr_tiled_mutable"}
+    extern_weights_arg = "    ap_uint<32>* weights_mem,\n" if m_axi_weight_runtime else ""
+    call_weights_arg = "weights_mem.data(), " if m_axi_weight_runtime else ""
+    weight_mem_decl = f"    std::vector<ap_uint<32> > weights_mem({int(weight_words)});\n" if m_axi_weight_runtime else ""
+    weight_mem_pack = """        for (size_t i = 0; i < preload.size(); ++i) {
+            union { float f; unsigned int i; } u;
+            u.f = preload[i];
+            weights_mem[i] = u.i;
+        }
+""" if m_axi_weight_runtime else ""
+    aux_preload_push = "" if m_axi_weight_runtime else """        for (size_t i = 0; i < preload.size(); ++i) {
+            push_f32(aux_stream, preload[i], i + 1 == preload.size());
+        }
+"""
+
 
     tb_text = f"""\
 #include <ap_axi_sdata.h>
+#include <ap_int.h>
 #include <hls_stream.h>
 
 #include <cstdio>
@@ -171,7 +187,7 @@ extern "C" void {top_name}(
     hls::stream<axis_t>& in,
     hls::stream<axis_t>& out,
     hls::stream<axis_t>& aux,
-    int mode
+{extern_weights_arg}    int mode
 );
 
 static std::string join_path(const std::string& dir, const char* name) {{
@@ -321,7 +337,7 @@ int main(int argc, char** argv) {{
     hls::stream<axis_t> in_stream;
     hls::stream<axis_t> out_stream;
     hls::stream<axis_t> aux_stream;
-
+{weight_mem_decl}
     if ({runtime_mode_expr}) {{
         std::vector<float> preload;
         std::string preload_s(preload_path ? preload_path : "");
@@ -341,14 +357,11 @@ int main(int argc, char** argv) {{
             );
             std::exit(4);
         }}
-        for (size_t i = 0; i < preload.size(); ++i) {{
-            push_f32(aux_stream, preload[i], i + 1 == preload.size());
-        }}
-        {top_name}(in_stream, out_stream, aux_stream, 0);
+{weight_mem_pack}{aux_preload_push}        {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}0);
         printf("[TB-TRAIN] Preloaded runtime weights (%zu floats)\\n", preload.size());
     }}
 
-    {top_name}(in_stream, out_stream, aux_stream, 1);
+    {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}1);
     std::vector<float> weights_before = drain_exact(out_stream, {int(weight_words)}, "weights_before");
     write_bin_both(out_dir, "weights_before.bin", weights_before);
 
@@ -372,7 +385,7 @@ int main(int argc, char** argv) {{
         for (int r = 0; r < n_records; ++r) {{
             push_record(in_stream, input_data, input_words_per_record, r);
             push_record(aux_stream, target_data, target_words_per_record, r);
-            {top_name}(in_stream, out_stream, aux_stream, 6);
+            {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}6);
             std::vector<float> loss_words = drain_exact(out_stream, 1, "loss_eval");
             total_loss += loss_words[0];
         }}
@@ -392,16 +405,16 @@ int main(int argc, char** argv) {{
     if ({str(accumulated_batch).lower()}) {{
         printf("[TB-TRAIN] native_accumulated_batch=true optimizer_location=hls_top_accumulated_optimizer\\n");
         for (int step = 0; step < {int(train_steps)}; ++step) {{
-            {top_name}(in_stream, out_stream, aux_stream, 5);
+            {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}5);
             for (int b = 0; b < {int(batch_size)}; ++b) {{
                 int rec = step * {int(batch_size)} + b;
                 push_record(in_stream, input_data, input_words_per_record, rec);
                 push_record(aux_stream, target_data, target_words_per_record, rec);
-                {top_name}(in_stream, out_stream, aux_stream, 3);
+                {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}3);
                 last_grads = drain_exact(out_stream, {int(weight_words)}, "accum_grads");
                 total_train_calls += 1;
             }}
-            {top_name}(in_stream, out_stream, aux_stream, 4);
+            {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}4);
             last_grads = drain_exact(out_stream, {int(weight_words)}, "avg_grads");
             optimizer_update_calls += 1;
             if (convergence_smoke) {{
@@ -416,7 +429,7 @@ int main(int argc, char** argv) {{
                 int rec = step * {int(batch_size)} + b;
                 push_record(in_stream, input_data, input_words_per_record, rec);
                 push_record(aux_stream, target_data, target_words_per_record, rec);
-                {top_name}(in_stream, out_stream, aux_stream, 2);
+                {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}2);
                 last_grads = drain_exact(out_stream, {int(weight_words)}, "grads");
                 total_train_calls += 1;
                 optimizer_update_calls += 1;
@@ -429,7 +442,7 @@ int main(int argc, char** argv) {{
     }}
     write_bin_both(out_dir, "grads.bin", last_grads);
 
-    {top_name}(in_stream, out_stream, aux_stream, 1);
+    {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}1);
     std::vector<float> weights_after = drain_exact(out_stream, {int(weight_words)}, "weights_after");
     write_bin_both(out_dir, "weights_after.bin", weights_after);
 

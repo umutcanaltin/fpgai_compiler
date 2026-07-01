@@ -110,7 +110,7 @@ const op0_bias_t B0_init[1] = { 0.5 };
         board="kv260",
         pipeline_mode="inference",
         top_name="deeplearn",
-        weights_mode="uram",
+        weights_mode="uram_import_full",
     )
 
     assert result["runtime_weight_payload_required"] is True
@@ -170,7 +170,7 @@ const op0_bias_t B0[1] = { 0.5 };
         board="kv260",
         pipeline_mode="inference",
         top_name="deeplearn",
-        weights_mode="embedded",
+        weights_mode="bram_static",
     )
 
     assert result["runtime_weight_payload_required"] is False
@@ -187,3 +187,149 @@ const op0_bias_t B0[1] = { 0.5 };
     assert manifest["runtime_weights"]["total_words"] == 0
     assert "weights_bin" not in manifest["files"]
     assert "weight_layout" not in manifest["files"]
+
+
+def test_runtime_package_ddr_tiled_requires_weight_payload(tmp_path: Path) -> None:
+    import json
+
+    from fpgai.runtime.package import emit_runtime_package
+
+    src = tmp_path / "hls/src"
+    src.mkdir(parents=True)
+    (src / "fpgai_params.cpp").write_text(
+        """
+#include "fpgai_params.h"
+namespace fpgai {
+const op0_wgt_t W0_init[4] = { 1, 2, 3, 4 };
+const op0_bias_t B0_init[2] = { 0, 0 };
+}
+"""
+    )
+
+    emit_runtime_package(tmp_path, weights_mode="ddr_tiled")
+    manifest = json.loads((tmp_path / "runtime_package/package_manifest.json").read_text())
+    runtime_weights = manifest["runtime_weights"]
+
+    assert runtime_weights["weights_mode"] == "ddr_tiled"
+    assert runtime_weights["required"] is True
+    assert runtime_weights["present"] is True
+    assert runtime_weights["import_required"] is True
+    assert runtime_weights["export_supported"] is False
+    assert runtime_weights["reload_before_each_compute"] is False
+    assert runtime_weights["total_words"] == 6
+
+
+def test_runtime_package_bram_import_export_marks_export_supported(tmp_path: Path) -> None:
+    import json
+
+    src = tmp_path / "hls/src"
+    src.mkdir(parents=True)
+    (src / "fpgai_params.cpp").write_text(
+        """
+#include "fpgai_params.h"
+namespace fpgai {
+const op0_wgt_t W0_init[2] = { 1.0, 2.0 };
+const op0_bias_t B0_init[1] = { 0.0 };
+}
+""",
+        encoding="utf-8",
+    )
+
+    emit_runtime_package(tmp_path, weights_mode="bram_import_export_full")
+    manifest = json.loads((tmp_path / "runtime_package/package_manifest.json").read_text(encoding="utf-8"))
+    runtime_weights = manifest["runtime_weights"]
+
+    assert runtime_weights["weights_mode"] == "bram_import_export_full"
+    assert runtime_weights["required"] is True
+    assert runtime_weights["import_required"] is True
+    assert runtime_weights["export_supported"] is True
+    assert runtime_weights["reload_before_each_compute"] is False
+    assert runtime_weights["total_words"] == 3
+
+
+def test_emit_runtime_package_records_m_axi_input_output_movement(tmp_path: Path) -> None:
+    from fpgai.engine.models import CommunicationEdge, CommunicationPlan
+
+    out_dir = tmp_path / "build"
+    out_dir.mkdir()
+
+    communication_plan = CommunicationPlan(
+        edges=[
+            CommunicationEdge(
+                tensor_name="x",
+                direction="PS_TO_PL",
+                notes={"kind": "input", "interface": "m_axi", "transport": "ps_runtime", "policy": "full"},
+            ),
+            CommunicationEdge(
+                tensor_name="y",
+                direction="PL_TO_PS",
+                notes={"kind": "output", "interface": "m_axi", "transport": "ps_runtime", "policy": "full"},
+            ),
+        ]
+    )
+
+    emit_runtime_package(
+        out_dir,
+        board="kv260",
+        pipeline_mode="inference",
+        top_name="deeplearn",
+        communication_plan=communication_plan,
+    )
+
+    data = json.loads((out_dir / "runtime_package" / "package_manifest.json").read_text(encoding="utf-8"))
+    assert data["runtime_io"]["inputs"]["import"]["resolved"] == "m_axi_import_full"
+    assert data["runtime_io"]["outputs"]["export"]["resolved"] == "m_axi_export_full"
+    assert data["runtime_io"]["inputs"]["import"]["transport"] == "ps_runtime"
+
+
+
+def test_emit_runtime_package_records_m_axi_tiled_input_output_movement(tmp_path: Path) -> None:
+    from fpgai.engine.models import CommunicationEdge, CommunicationPlan
+
+    out_dir = tmp_path / "build_tiled"
+    out_dir.mkdir()
+
+    communication_plan = CommunicationPlan(
+        edges=[
+            CommunicationEdge(
+                tensor_name="x",
+                direction="PS_TO_PL",
+                notes={"kind": "input", "interface": "m_axi", "transport": "ps_runtime", "policy": "tiled"},
+            ),
+            CommunicationEdge(
+                tensor_name="y",
+                direction="PL_TO_PS",
+                notes={"kind": "output", "interface": "m_axi", "transport": "ps_runtime", "policy": "tiled"},
+            ),
+        ]
+    )
+
+    emit_runtime_package(
+        out_dir,
+        board="kv260",
+        pipeline_mode="inference",
+        top_name="deeplearn",
+        communication_plan=communication_plan,
+    )
+
+    data = json.loads((out_dir / "runtime_package" / "package_manifest.json").read_text(encoding="utf-8"))
+    assert data["runtime_io"]["inputs"]["import"]["resolved"] == "m_axi_import_tiled"
+    assert data["runtime_io"]["outputs"]["export"]["resolved"] == "m_axi_export_tiled"
+    assert data["runtime_io"]["inputs"]["import"]["policy"] == "tiled"
+
+def test_runtime_package_records_activation_storage(tmp_path: Path) -> None:
+    import json
+    from types import SimpleNamespace
+    from fpgai.runtime.package import emit_runtime_package
+
+    emit_runtime_package(
+        tmp_path,
+        weights_mode="bram_static",
+        memory_plan=SimpleNamespace(notes={"resolved_activation_storage": "uram"}),
+    )
+    manifest = json.loads((tmp_path / "runtime_package/package_manifest.json").read_text())
+    assert manifest["runtime_activation_storage"] == {
+        "storage": "uram",
+        "resolved": "activation_uram",
+        "local_buffers": True,
+    }

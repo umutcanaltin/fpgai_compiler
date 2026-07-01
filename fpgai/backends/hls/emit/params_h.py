@@ -368,6 +368,8 @@ def emit_params_h(
         "ddr",
         "dma_ddr",
         "uram",
+        "ddr_tiled",
+        "ddr_tiled_mutable",
     }:
         raise ValueError(
             f"Unsupported weights mode: {weights_mode!r}"
@@ -379,6 +381,8 @@ def emit_params_h(
         "ddr",
         "dma_ddr",
         "uram",
+        "ddr_tiled",
+        "ddr_tiled_mutable",
     }
 
     if mutable_runtime_parameters:
@@ -415,15 +419,21 @@ def emit_params_h(
                 f"{op.op_type} bias size could not be resolved for op {op.name!r}"
             )
 
-        qualifier = "extern" if mutable_runtime_parameters else "extern const"
+        if normalized_mode not in {"ddr_tiled", "ddr_tiled_mutable"}:
+            qualifier = "extern" if mutable_runtime_parameters else "extern const"
 
-        lines.append(
-            f"{qualifier} {precision_tag}_wgt_t W{parameter_index}[{weight_count}];"
-        )
-        lines.append(
-            f"{qualifier} {precision_tag}_bias_t B{parameter_index}[{bias_count}];"
-        )
-        lines.append("")
+            lines.append(
+                f"{qualifier} {precision_tag}_wgt_t W{parameter_index}[{weight_count}];"
+            )
+            lines.append(
+                f"{qualifier} {precision_tag}_bias_t B{parameter_index}[{bias_count}];"
+            )
+            lines.append("")
+        else:
+            lines.append(
+                f"// DDR-tiled runtime parameters for W{parameter_index}/B{parameter_index} live in weights_mem; no full local W/B declarations."
+            )
+            lines.append("")
 
         parameter_index += 1
 
