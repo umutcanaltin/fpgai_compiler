@@ -157,7 +157,16 @@ def emit_types_h(
     pipeline_style = str(plan_notes.get("parallel_pipeline_style", _deep_get(raw_cfg, "optimization.parallel.pipeline_style", "balanced"))).lower()
 
     pipe_ii = 1 if pipeline_style != "conservative" else 2
+    requested_pipe_ii = plan_notes.get("pipeline_ii_requested")
+    if requested_pipe_ii is not None and not isinstance(requested_pipe_ii, bool):
+        try:
+            pipe_ii = int(requested_pipe_ii)
+        except Exception:
+            pass
+    pipe_ii = _macro_int(raw_cfg, "optimization.pipeline.ii", pipe_ii)
+    pipe_ii = _macro_int(raw_cfg, "optimization.pipeline_ii", pipe_ii)
     pipe_ii = _macro_int(raw_cfg, "hls.pipeline_ii", pipe_ii)
+    pipe_ii = max(1, int(pipe_ii))
 
     dense_out_unroll = max(1, _macro_int(raw_cfg, "hls.dense.out_unroll", pe))
     dense_in_unroll = max(1, _macro_int(raw_cfg, "hls.dense.in_unroll", simd))

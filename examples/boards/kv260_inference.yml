@@ -1,0 +1,64 @@
+version: 1
+project:
+  name: example_kv260_inference
+  out_dir: build/examples/kv260_inference
+  clean: true
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+model:
+  format: onnx
+  path: models/mlp.onnx
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+weights:
+  mode: embedded
+memory:
+  weight_storage: bram
+  activation_storage: bram
+data_movement:
+  inputs:
+    interface: m_axi
+    transport: ps_runtime
+  outputs:
+    interface: m_axi
+    transport: ps_runtime
+runtime:
+  sequence:
+  - run_inference
+build:
+  stages:
+    cpp: true
+    testbench: true
+    hls_project: false
+    hls_synthesis: false
+    vivado_project: false
+    vivado_implementation: false
+    bitstream: false
+    runtime_package: true
+    reports: true
+operators:
+  supported:
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true

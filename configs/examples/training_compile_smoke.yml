@@ -1,15 +1,12 @@
 version: 1
-
 project:
   name: fpgai_train
   out_dir: build/fpgai_example_dense
   clean: true
-
 pipeline:
   mode: training_on_device
   outputs:
     top_kernel_name: deeplearn
-
 training:
   debug:
     dump_intermediates: false
@@ -18,14 +15,6 @@ training:
     learning_rate: 0.005
   loss:
     type: mse
-  execution:
-    batch_size: 1
-    epochs: 1
-  storage:
-    weights: bram
-    activations: bram
-    gradients: bram
-    optimizer_state: bram
   cache:
     store_forward_activations: true
     store_pre_activations: true
@@ -40,39 +29,38 @@ training:
     include_update: true
     include_buffers: true
   phase_overrides: {}
-
+  batch:
+    size: 1
+    epochs: 1
 targets:
   platform:
     board: kv260
     part: xck26-sfvc784-2LV-c
     clocks:
-      - name: pl_clk0
-        target_mhz: 200
-
+    - name: pl_clk0
+      target_mhz: 200
 operators:
   supported:
-    - Dense
-    - Conv
-    - MaxPool
-    - AvgPool
-    - Add
-    - Relu
-    - LeakyRelu
-    - Sigmoid
-    - Softmax
-    - BatchNormalization
-    - Flatten
-    - Reshape
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
   defaults:
     activation_insert:
       kind: none
       alpha: 0.1
       except_last: true
-
 model:
   format: onnx
   path: models/cnn_mnist.onnx
-
 numerics:
   defaults:
     activation:
@@ -108,7 +96,6 @@ numerics:
       type: ap_fixed
       total_bits: 32
       int_bits: 16
-
 analysis:
   quantization_report:
     enabled: true
@@ -123,14 +110,12 @@ analysis:
       baseline_cpu_latency_ms: 1.0
   precision_sweep:
     enabled: false
-
 data_movement:
   ps_pl:
     compression:
       enabled: true
     weights:
       mode: embedded
-
 backends:
   hls:
     enabled: true
@@ -140,17 +125,14 @@ backends:
       exe: vitis_hls
   host_cpp:
     enabled: true
-
 debug:
   verbose: false
-
 toolchain:
   vitis_hls:
     enabled: true
     root: /tools/Xilinx/Vitis_HLS/2023.2
     settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
     install_dir: /tools/Xilinx/Vitis_HLS/2023.2
-
 benchmark:
   enabled: true
   fail_on_mismatch: true
@@ -159,18 +141,16 @@ benchmark:
     atol: 0.25
     rtol: 0.25
     max_abs_error: 0.25
-    mean_abs_error: 0.10
+    mean_abs_error: 0.1
     rmse: 0.12
     require_argmax_match: false
-    min_cosine_similarity: 0.90
+    min_cosine_similarity: 0.9
   intermediate:
     enabled: true
     fail_on_layer_mismatch: false
     stop_on_first_bad_layer: false
-
 memory:
-  storage:
-    weights: bram
-    activations: bram
-    gradients: bram
-    optimizer_state: bram
+  weight_storage: bram
+  activation_storage: bram
+  gradient_storage: bram
+  optimizer_state_storage: bram

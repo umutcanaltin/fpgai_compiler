@@ -15,9 +15,222 @@ _KNOB_NAMES = [
     "tiling",
     "weight_storage",
     "activation_storage",
+    "gradient_storage",
+    "optimizer_state_storage",
     "data_movement",
+    "runtime_sequence",
+    "build_stages",
+    "board_fit",
     "training",
 ]
+
+_WEIGHTED_CATEGORIES = {"linear", "convolution", "normalization"}
+
+
+def _cfg_has(raw_cfg: Mapping[str, Any] | None, path: str) -> bool:
+    cur: Any = raw_cfg or {}
+    for part in path.split("."):
+        if isinstance(cur, Mapping) and part in cur:
+            cur = cur[part]
+        else:
+            return False
+    return True
+
+
+def _cfg_get(raw_cfg: Mapping[str, Any] | None, path: str, default: Any = None) -> Any:
+    cur: Any = raw_cfg or {}
+    for part in path.split("."):
+        if isinstance(cur, Mapping) and part in cur:
+            cur = cur[part]
+        else:
+            return default
+    return cur
+
+
+def _manual_sources(raw_cfg: Mapping[str, Any] | None) -> Dict[str, bool]:
+    return {
+        "precision": any(_cfg_has(raw_cfg, p) for p in ("precision", "numerics", "numerics.quantization")),
+        "pipelining": any(_cfg_has(raw_cfg, p) for p in ("optimization.pipeline", "pipelining")),
+        "parallelization": any(_cfg_has(raw_cfg, p) for p in ("optimization.parallel", "parallelization")),
+        "tiling": any(_cfg_has(raw_cfg, p) for p in ("optimization.tiling", "tiling", "data_movement.input.load.policy")),
+        "weight_storage": _cfg_has(raw_cfg, "memory.weight_storage") or _cfg_has(raw_cfg, "training.storage.weights"),
+        "activation_storage": _cfg_has(raw_cfg, "memory.activation_storage") or _cfg_has(raw_cfg, "training.storage.activations"),
+        "gradient_storage": _cfg_has(raw_cfg, "training.storage.gradients") or _cfg_has(raw_cfg, "memory.gradient_storage"),
+        "optimizer_state_storage": _cfg_has(raw_cfg, "training.storage.optimizer_state"),
+        "data_movement": _cfg_has(raw_cfg, "data_movement"),
+        "runtime_sequence": _cfg_has(raw_cfg, "runtime.sequence"),
+        "build_stages": _cfg_has(raw_cfg, "build.stages"),
+        "board_fit": _cfg_has(raw_cfg, "targets.platform.board") or _cfg_has(raw_cfg, "targets.board") or _cfg_has(raw_cfg, "project.board"),
+        "training": _cfg_has(raw_cfg, "training"),
+    }
+
+
+def _status_payload(status: str, *, source: str, reason: str = "", evidence: Iterable[str] = ()) -> Dict[str, Any]:
+    return {
+        "status": status,
+        "source": source,
+        "reason": reason,
+        "evidence": list(evidence),
+    }
+
+
+def _per_layer_knob_contract(operator: Mapping[str, Any], *, raw_cfg: Mapping[str, Any] | None, pipeline_mode: str) -> Dict[str, Any]:
+    op_type = str(operator.get("op_type", "Unknown"))
+    category = str(operator.get("category", "unsupported"))
+    has_weights = bool(operator.get("has_weights", False))
+    pipeline_support = operator.get("pipeline_support", {}) or {}
+    supported = bool(pipeline_support.get("supported", False))
+    source_flags = _manual_sources(raw_cfg)
+
+    def src(knob: str) -> str:
+        return "manual_yaml" if source_flags.get(knob) else "compiler_default_or_policy"
+
+    if not supported:
+        return {
+            knob: _status_payload(
+                "rejected",
+                source=src(knob),
+                reason=str(pipeline_support.get("detail", "Layer backend is unsupported in active pipeline.")),
+                evidence=["model_compatibility.unsupported_operators", "layer_backend_status.unsupported_reason"],
+            )
+            for knob in _KNOB_NAMES
+        }
+
+    knobs: Dict[str, Dict[str, Any]] = {}
+    knobs["precision"] = _status_payload(
+        "applied",
+        source=src("precision"),
+        evidence=["precision_layout.json", "generated HLS fp_t / quantized type selection", "layer_backend_status.dimensions.precision"],
+    )
+    knobs["pipelining"] = _status_payload(
+        "applied",
+        source=src("pipelining"),
+        evidence=["hardware_knob_contract.optimization.pipeline", "generated HLS PIPELINE/II markers where loops exist"],
+    )
+    if category in {"reshape"}:
+        knobs["parallelization"] = _status_payload(
+            "not_applicable",
+            source=src("parallelization"),
+            reason="Reshape/flatten has no arithmetic loop parallelism beyond copy/layout handling.",
+            evidence=["layer category reshape"],
+        )
+    else:
+        knobs["parallelization"] = _status_payload(
+            "applied",
+            source=src("parallelization"),
+            evidence=["hardware_knob_contract.optimization.parallel", "UNROLL/ARRAY_PARTITION evidence when requested and valid"],
+        )
+
+    tiling_requested = source_flags.get("tiling")
+    if tiling_requested:
+        knobs["tiling"] = _status_payload(
+            "applied",
+            source=src("tiling"),
+            evidence=["hardware_knob_contract.optimization.tiling", "tile constants/loops or explicit shape-limited rejection"],
+        )
+    elif category in {"activation", "pooling", "elementwise", "linear", "convolution"}:
+        knobs["tiling"] = _status_payload(
+            "not_requested",
+            source=src("tiling"),
+            reason="No user tiling request was resolved for this layer, so tiled code must be absent.",
+            evidence=["generated C++ absence rule", "layer_knob_contract.resource_latency_hygiene"],
+        )
+    else:
+        knobs["tiling"] = _status_payload(
+            "not_applicable",
+            source=src("tiling"),
+            reason="Layer category does not require tensor tiling in the current backend.",
+            evidence=["layer category"],
+        )
+
+    if has_weights:
+        knobs["weight_storage"] = _status_payload(
+            "applied",
+            source=src("weight_storage"),
+            evidence=["memory_plan parameter placement", "hardware_design_decisions.memory_summary", "generated HLS weight storage/import path"],
+        )
+    else:
+        knobs["weight_storage"] = _status_payload(
+            "not_applicable",
+            source=src("weight_storage"),
+            reason=f"{op_type} has no parameter/weight tensor.",
+            evidence=["layer_registry.has_weights=false"],
+        )
+
+    knobs["activation_storage"] = _status_payload(
+        "applied",
+        source=src("activation_storage"),
+        evidence=["memory_plan activation placement", "hardware_design_decisions.memory_summary"],
+    )
+
+    if pipeline_mode == "training_on_device":
+        knobs["gradient_storage"] = _status_payload(
+            "applied" if has_weights or category in {"linear", "convolution", "normalization"} else "not_applicable",
+            source=src("gradient_storage"),
+            reason="Layer has no persistent parameter gradient." if not has_weights else "",
+            evidence=["training storage plan", "numeric_validation.gradient paths"],
+        )
+        optimizer = str(_cfg_get(raw_cfg, "training.optimizer.type", "sgd")).lower()
+        if optimizer in {"momentum", "adam"}:
+            knobs["optimizer_state_storage"] = _status_payload(
+                "applied" if has_weights else "not_applicable",
+                source=src("optimizer_state_storage"),
+                reason="Optimizer state is only allocated for trainable parameter tensors." if not has_weights else "",
+                evidence=["training_reference.optimizer_state_*", "numeric_validation.optimizer_state_validation"],
+            )
+        else:
+            knobs["optimizer_state_storage"] = _status_payload(
+                "not_applicable",
+                source=src("optimizer_state_storage"),
+                reason="SGD has no persistent optimizer-state tensor.",
+                evidence=["numeric_validation.optimizer_state_validation.status=not_applicable"],
+            )
+        knobs["training"] = _status_payload(
+            "applied",
+            source=src("training"),
+            evidence=["training_plan", "training_reference", "generated training path"],
+        )
+    else:
+        knobs["gradient_storage"] = _status_payload(
+            "not_applicable",
+            source=src("gradient_storage"),
+            reason="Inference mode does not allocate gradient tensors.",
+            evidence=["pipeline_mode=inference"],
+        )
+        knobs["optimizer_state_storage"] = _status_payload(
+            "not_applicable",
+            source=src("optimizer_state_storage"),
+            reason="Inference mode does not allocate optimizer state.",
+            evidence=["pipeline_mode=inference"],
+        )
+        knobs["training"] = _status_payload(
+            "not_applicable",
+            source=src("training"),
+            reason="Active pipeline is inference.",
+            evidence=["pipeline_mode=inference"],
+        )
+
+    knobs["data_movement"] = _status_payload(
+        "applied" if source_flags.get("data_movement") else "compiler_default",
+        source=src("data_movement"),
+        evidence=["communication_plan.edges", "generated interfaces", "runtime_package buffer/execution plans"],
+    )
+    knobs["runtime_sequence"] = _status_payload(
+        "applied" if source_flags.get("runtime_sequence") else "compiler_default",
+        source=src("runtime_sequence"),
+        evidence=["reports/runtime_sequence.json", "runtime_package/run_sequence.json", "generated mode constants only when requested"],
+    )
+    knobs["build_stages"] = _status_payload(
+        "applied" if source_flags.get("build_stages") else "compiler_default",
+        source=src("build_stages"),
+        evidence=["manifest.build_stages", "stage-specific artifacts omitted when disabled"],
+    )
+    knobs["board_fit"] = _status_payload(
+        "applied",
+        source=src("board_fit"),
+        evidence=["reports/board_fit.json", "Vivado implementation/bitstream gating"],
+    )
+    return knobs
 
 
 def _json_default(value: Any) -> Any:
@@ -115,19 +328,45 @@ def build_layer_knob_contract(
     *,
     raw_cfg: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
+    """Build a per-layer, per-knob traceability contract.
+
+    Sprint M rule: every relevant YAML knob must be applied to generated
+    artifacts, be not-applicable for a clear tensor/layer reason, remain a
+    compiler default when not requested, or reject clearly. This report is not
+    a numeric/HLS proof by itself; it is the source/report contract that keeps
+    knob decisions from being silently ignored.
+    """
+    pipeline_mode = str(compatibility.get("pipeline_mode", "inference"))
     layer_rows = []
-    all_apply_or_reject = True
+    violations: list[dict[str, Any]] = []
+    manual_sources = _manual_sources(raw_cfg)
+
+    acceptable = {
+        "applied",
+        "not_applicable",
+        "not_requested",
+        "compiler_default",
+        "rejected",
+    }
 
     for operator in compatibility.get("operators", []) or []:
         if not isinstance(operator, Mapping):
             continue
-        knob_support = operator.get("knob_support", {}) or {}
-        knob_rows = {}
-        for knob in _KNOB_NAMES:
-            status = str(knob_support.get(knob, "not_reported"))
-            knob_rows[knob] = status
-            if status == "not_reported":
-                all_apply_or_reject = False
+        knob_payload = _per_layer_knob_contract(
+            operator,
+            raw_cfg=raw_cfg,
+            pipeline_mode=pipeline_mode,
+        )
+        for knob, payload in knob_payload.items():
+            status = str((payload or {}).get("status", "not_reported"))
+            if status not in acceptable:
+                violations.append({
+                    "layer": operator.get("name"),
+                    "op_type": operator.get("op_type"),
+                    "knob": knob,
+                    "status": status,
+                    "reason": "Knob did not resolve to applied/not_applicable/not_requested/compiler_default/rejected.",
+                })
         layer_rows.append(
             {
                 "index": operator.get("index"),
@@ -135,19 +374,119 @@ def build_layer_knob_contract(
                 "op_type": operator.get("op_type"),
                 "has_weights": operator.get("has_weights"),
                 "category": operator.get("category"),
-                "knobs": knob_rows,
+                "pipeline_support": operator.get("pipeline_support"),
+                "knobs": knob_payload,
             }
         )
 
     return {
         "artifact_kind": "layer_knob_contract",
-        "schema_version": 1,
+        "schema_version": 2,
         "model_path": compatibility.get("model_path"),
-        "pipeline_mode": compatibility.get("pipeline_mode"),
-        "contract_rule": "Every knob must apply to generated artifacts, be not-applicable for a clear tensor reason, or reject clearly.",
-        "all_layers_have_knob_contract": all_apply_or_reject,
+        "pipeline_mode": pipeline_mode,
+        "contract_rule": "Every knob must apply to generated artifacts, be not-applicable for a clear tensor reason, remain an explicit compiler default when not requested, or reject clearly.",
+        "resource_latency_hygiene": "Unrequested import/export/runtime/tiling/stream paths must be absent from generated C++ and Vivado/runtime artifacts.",
+        "precedence": [
+            "manual_yaml_override",
+            "policy_default",
+            "compiler_default",
+        ],
+        "manual_yaml_sources": manual_sources,
+        "all_layers_have_knob_contract": bool(layer_rows) and not violations,
+        "violations": violations,
         "knobs": list(_KNOB_NAMES),
         "layers": layer_rows,
+    }
+
+_LAYER_BACKEND_DIMENSIONS = [
+    "shape_inference",
+    "hls_codegen",
+    "memory_planning",
+    "precision",
+    "numeric_validation",
+    "training_forward",
+    "training_backward",
+]
+
+
+def build_layer_backend_status(
+    compatibility: Mapping[str, Any],
+    *,
+    raw_cfg: Mapping[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Create an auditable layer-backend status report.
+
+    This report is intentionally stricter than the older compatibility table: a
+    layer is treated as fully supported only when the registry says the active
+    pipeline is supported and every backend dimension has an explicit status.
+    Unknown operators remain unsupported and must not be silently accepted.
+    """
+    pipeline_mode = str(compatibility.get("pipeline_mode", "inference"))
+    is_training = pipeline_mode == "training_on_device"
+    rows = []
+    unsupported = []
+    partial = []
+
+    for operator in compatibility.get("operators", []) or []:
+        if not isinstance(operator, Mapping):
+            continue
+        op_type = str(operator.get("op_type", "Unknown"))
+        pipeline_support = operator.get("pipeline_support", {}) or {}
+        inference_support = operator.get("inference_support", {}) or {}
+        training_support = operator.get("training_support", {}) or {}
+        category = str(operator.get("category", "unsupported"))
+        supported = bool(pipeline_support.get("supported", False))
+        status = str(pipeline_support.get("status", "unsupported"))
+
+        dims: Dict[str, str] = {
+            "shape_inference": "implemented" if supported else "unsupported",
+            "hls_codegen": "implemented" if supported else "unsupported",
+            "memory_planning": "implemented" if supported else "unsupported",
+            "precision": "implemented" if supported else "unsupported",
+            "numeric_validation": "available" if supported else "unavailable",
+            "training_forward": "implemented" if is_training and bool(training_support.get("supported")) else ("not_applicable" if not is_training else "unsupported"),
+            "training_backward": "implemented" if is_training and bool(training_support.get("supported")) else ("not_applicable" if not is_training else "unsupported"),
+        }
+
+        backend_status = "implemented" if supported and status == "supported" else status
+        if not supported:
+            unsupported.append(op_type)
+            backend_status = "unsupported"
+        elif status != "supported":
+            partial.append(op_type)
+            backend_status = "limited"
+
+        rows.append({
+            "index": operator.get("index"),
+            "name": operator.get("name"),
+            "op_type": op_type,
+            "category": category,
+            "backend_status": backend_status,
+            "inference_status": str(inference_support.get("status", "unsupported")),
+            "training_status": str(training_support.get("status", "unsupported")),
+            "active_pipeline_status": status,
+            "supported_in_active_pipeline": supported,
+            "dimensions": dims,
+            "unsupported_reason": None if supported else str(pipeline_support.get("detail", "No backend support is registered.")),
+            "codegen_rule": "Only emit this layer kernel when the model graph uses this operator.",
+        })
+
+    all_supported = not unsupported and not partial and bool(rows)
+    return {
+        "artifact_kind": "layer_backend_status",
+        "schema_version": 1,
+        "model_path": compatibility.get("model_path"),
+        "pipeline_mode": pipeline_mode,
+        "policy": {
+            "all_layers_required": True,
+            "unsupported_layers_block_compile": True,
+            "unused_layer_kernels_must_be_absent": True,
+            "training_requires_backward_support": True,
+        },
+        "all_encountered_layers_supported": all_supported,
+        "unsupported_layers": sorted(set(unsupported)),
+        "limited_layers": sorted(set(partial)),
+        "layers": rows,
     }
 
 
@@ -201,8 +540,43 @@ def _knob_contract_markdown(payload: Mapping[str, Any]) -> str:
         ])
         knobs = layer.get("knobs", {}) or {}
         for knob in _KNOB_NAMES:
-            lines.append(f"- `{knob}`: `{knobs.get(knob)}`")
+            payload = knobs.get(knob) or {}
+            if isinstance(payload, Mapping):
+                evidence = ", ".join(str(x) for x in payload.get("evidence", []) or [])
+                reason = payload.get("reason") or ""
+                lines.append(
+                    f"- `{knob}`: `{payload.get('status')}` source=`{payload.get('source')}` reason=`{reason}` evidence=`{evidence}`"
+                )
+            else:
+                lines.append(f"- `{knob}`: `{payload}`")
         lines.append("")
+    return "\n".join(lines)
+
+
+def _layer_backend_status_markdown(payload: Mapping[str, Any]) -> str:
+    lines = [
+        "# FPGAI Layer Backend Status",
+        "",
+        f"- Model: `{payload.get('model_path')}`",
+        f"- Pipeline mode: `{payload.get('pipeline_mode')}`",
+        f"- All encountered layers supported: `{payload.get('all_encountered_layers_supported')}`",
+        f"- Unsupported layers: `{payload.get('unsupported_layers')}`",
+        f"- Limited layers: `{payload.get('limited_layers')}`",
+        "",
+        "This report is the layer-backend truth table. A layer may only be claimed as supported when the active pipeline has shape inference, memory planning, HLS codegen, precision handling, and validation readiness recorded here.",
+        "",
+        "## Layers",
+        "",
+        "| # | Name | Type | Backend status | Inference | Training | Reason |",
+        "|---:|---|---|---|---|---|---|",
+    ]
+    for layer in payload.get("layers", []) or []:
+        lines.append(
+            f"| {layer.get('index')} | `{layer.get('name')}` | `{layer.get('op_type')}` | "
+            f"`{layer.get('backend_status')}` | `{layer.get('inference_status')}` | "
+            f"`{layer.get('training_status')}` | {layer.get('unsupported_reason') or ''} |"
+        )
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -217,15 +591,20 @@ def emit_model_compatibility_reports(
 
     compatibility = build_model_compatibility_report(inspection, raw_cfg=raw_cfg)
     knob_contract = build_layer_knob_contract(compatibility, raw_cfg=raw_cfg)
+    backend_status = build_layer_backend_status(compatibility, raw_cfg=raw_cfg)
 
     compatibility_json = _write_json(reports_dir / "model_compatibility.json", compatibility)
     compatibility_md = _write_text(reports_dir / "model_compatibility.md", _compatibility_markdown(compatibility))
     knob_json = _write_json(reports_dir / "layer_knob_contract.json", knob_contract)
     knob_md = _write_text(reports_dir / "layer_knob_contract.md", _knob_contract_markdown(knob_contract))
+    backend_json = _write_json(reports_dir / "layer_backend_status.json", backend_status)
+    backend_md = _write_text(reports_dir / "layer_backend_status.md", _layer_backend_status_markdown(backend_status))
 
     return {
         "model_compatibility_json": compatibility_json,
         "model_compatibility_md": compatibility_md,
         "layer_knob_contract_json": knob_json,
         "layer_knob_contract_md": knob_md,
+        "layer_backend_status_json": backend_json,
+        "layer_backend_status_md": backend_md,
     }

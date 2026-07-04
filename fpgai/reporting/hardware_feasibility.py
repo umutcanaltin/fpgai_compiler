@@ -224,7 +224,18 @@ def classify_board_fit(
         if used is not None:
             any_value = True
 
-        if used is not None and limit not in (None, 0):
+        if used is not None and limit == 0 and key != "target_clock_mhz":
+            ratio = None
+            if used > 0:
+                status = "over_limit"
+                any_over = True
+                if max_ratio < float("inf"):
+                    max_ratio = float("inf")
+                    limiting_dimension = key
+            else:
+                status = "fits"
+
+        elif used is not None and limit not in (None, 0):
             ratio = float(used) / float(limit)
             if ratio > max_ratio:
                 max_ratio = ratio
@@ -433,6 +444,208 @@ def extract_board_fit_resources(
     return {k: v for k, v in resources.items() if v not in (None, "")}
 
 
+
+def _cfg_get_nested(raw: Dict[str, Any] | None, path: str, default: Any = None) -> Any:
+    cur: Any = raw or {}
+    for part in path.split('.'):
+        if not isinstance(cur, dict) or part not in cur:
+            return default
+        cur = cur[part]
+    return cur
+
+
+def _storage_values(raw_config: Dict[str, Any] | None) -> list[str]:
+    raw = raw_config or {}
+    values: list[str] = []
+    for path in (
+        'memory.weight_storage',
+        'memory.activation_storage',
+        'memory.gradient_storage',
+        'memory.optimizer_state_storage',
+        'memory.storage.weights',
+        'memory.storage.activations',
+        'memory.storage.gradients',
+        'memory.storage.optimizer_state',
+        'training.weight_storage',
+        'training.gradient_storage',
+        'training.optimizer_state_storage',
+    ):
+        val = _cfg_get_nested(raw, path, None)
+        if val not in (None, ''):
+            values.append(str(val).strip().lower().replace('-', '_'))
+    return values
+
+
+def _runtime_commands(raw_config: Dict[str, Any] | None) -> set[str]:
+    raw = raw_config or {}
+    seq = _cfg_get_nested(raw, 'runtime.sequence', [])
+    out: set[str] = set()
+    if not isinstance(seq, list):
+        return out
+    for entry in seq:
+        if isinstance(entry, str):
+            out.add(entry.strip().lower().replace('-', '_'))
+        elif isinstance(entry, dict):
+            for key in entry.keys():
+                out.add(str(key).strip().lower().replace('-', '_'))
+    return out
+
+
+def _movement_requested(raw_config: Dict[str, Any] | None) -> Dict[str, Any]:
+    raw = raw_config or {}
+    dm = raw.get('data_movement', {}) if isinstance(raw.get('data_movement', {}), dict) else {}
+    runtime_commands = _runtime_commands(raw)
+    requires_dma = False
+    axi_stream_ports = 0
+    m_axi_bundles = 0
+    ddr_required = False
+    reasons: list[str] = []
+
+    def visit(obj: Any, prefix: str = '') -> None:
+        nonlocal requires_dma, axi_stream_ports, m_axi_bundles, ddr_required
+        if isinstance(obj, dict):
+            iface = str(obj.get('interface', '') or '').strip().lower().replace('-', '_')
+            transport = str(obj.get('transport', '') or '').strip().lower().replace('-', '_')
+            storage = str(obj.get('storage', '') or '').strip().lower().replace('-', '_')
+            mode = str(obj.get('mode', '') or '').strip().lower().replace('-', '_')
+            if iface == 'axi_stream' or transport == 'dma':
+                requires_dma = True
+                axi_stream_ports += 1
+                reasons.append(f'{prefix or "data_movement"}: requested AXI-stream/DMA movement')
+            if iface == 'm_axi' or storage == 'ddr' or 'ddr' in mode:
+                m_axi_bundles += 1
+                ddr_required = True
+                reasons.append(f'{prefix or "data_movement"}: requested m_axi/DDR movement')
+            for key, val in obj.items():
+                visit(val, f'{prefix}.{key}' if prefix else str(key))
+        elif isinstance(obj, list):
+            for idx, val in enumerate(obj):
+                visit(val, f'{prefix}[{idx}]')
+
+    visit(dm, 'data_movement')
+
+    weights_mode = str(_cfg_get_nested(raw, 'weights.mode', _cfg_get_nested(raw, 'data_movement.ps_pl.weights.mode', '')) or '').strip().lower().replace('-', '_')
+    if weights_mode in {'import', 'import_export', 'tiled', 'tiled_mutable'}:
+        m_axi_bundles += 1
+        ddr_required = ddr_required or weights_mode in {'tiled', 'tiled_mutable'}
+        reasons.append(f'weights.mode={weights_mode} requires runtime/external weight movement')
+    if 'export_gradients' in runtime_commands:
+        m_axi_bundles += 1
+        reasons.append('runtime.sequence requests export_gradients')
+    if 'export_optimizer_state' in runtime_commands:
+        m_axi_bundles += 1
+        reasons.append('runtime.sequence requests export_optimizer_state')
+    if 'import_weights' in runtime_commands:
+        m_axi_bundles += 1
+        reasons.append('runtime.sequence requests import_weights')
+    if 'export_weights' in runtime_commands:
+        m_axi_bundles += 1
+        reasons.append('runtime.sequence requests export_weights')
+
+    # Count one DMA IP for a bidirectional AXI-stream pair. Keep this tied only
+    # to explicit movement requests so embedded inference does not pay for DMA.
+    dma_count = 1 if requires_dma else 0
+    return {
+        'dma_count': dma_count,
+        'axi_stream_ports': axi_stream_ports,
+        'm_axi_bundles': m_axi_bundles,
+        'ddr_required': ddr_required,
+        'reasons': reasons,
+    }
+
+
+def derive_board_fit_requirements(raw_config: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """Derive compiler-side board requirements from resolved/user YAML.
+
+    This intentionally counts only requested storage/movement/runtime paths. If
+    the user did not request export/import/DMA, the requirement is absent so the
+    board-fit report does not penalize unused hardware paths.
+    """
+    storage = _storage_values(raw_config)
+    movement = _movement_requested(raw_config)
+    resources: Dict[str, Any] = {}
+    checks: list[Dict[str, Any]] = []
+    if 'uram' in storage:
+        resources['uram'] = max(_to_int(resources.get('uram')) or 0, 1)
+        checks.append({
+            'name': 'uram_storage_requested',
+            'required': True,
+            'reason': 'At least one selected storage class uses URAM.',
+        })
+    if any(v == 'ddr' for v in storage) or movement.get('ddr_required'):
+        resources['ddr_bytes'] = max(_to_int(resources.get('ddr_bytes')) or 0, 1)
+        checks.append({
+            'name': 'ddr_required',
+            'required': True,
+            'reason': 'Selected storage or movement uses external DDR/m_axi.',
+        })
+    interface_requirements = {
+        'dma_count': int(movement.get('dma_count') or 0),
+        'axi_stream_ports': int(movement.get('axi_stream_ports') or 0),
+        'm_axi_bundles': int(movement.get('m_axi_bundles') or 0),
+        'ddr_required': bool(movement.get('ddr_required')),
+        'reasons': list(movement.get('reasons') or []),
+    }
+    return {
+        'resources': resources,
+        'storage_values': storage,
+        'interface_requirements': interface_requirements,
+        'checks': checks,
+    }
+
+
+def _merge_requirement_resources(base: Dict[str, Any], derived: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(base)
+    for key, value in (derived.get('resources') or {}).items():
+        current = _to_int(out.get(key))
+        incoming = _to_int(value)
+        if incoming is None:
+            continue
+        if current is None:
+            out[key] = incoming
+        else:
+            out[key] = max(current, incoming)
+    return out
+
+
+def _classify_interface_requirements(requirements: Dict[str, Any], board: str | None, part: str | None = None) -> Dict[str, Any]:
+    limits = _limits_for(board, part)
+    iface = requirements.get('interface_requirements') or {}
+    checks: Dict[str, Dict[str, Any]] = {}
+    failures: list[str] = []
+
+    def one(name: str, used_key: str, limit_key: str) -> None:
+        used = int(iface.get(used_key) or 0)
+        limit = limits.get(limit_key)
+        if used <= 0:
+            status = 'not_required'
+        elif limit is None:
+            status = 'unknown'
+        elif used > int(limit):
+            status = 'over_limit'
+            failures.append(name)
+        else:
+            status = 'fits'
+        checks[name] = {'required': used, 'available': limit, 'status': status}
+
+    one('axi_dma_count', 'dma_count', 'max_axi_dma')
+    one('axi_stream_ports', 'axi_stream_ports', 'max_axi_stream_ports')
+    one('m_axi_bundles', 'm_axi_bundles', 'max_m_axi_bundles')
+    ddr_required = bool(iface.get('ddr_required'))
+    supports_ddr = bool(limits.get('supports_ddr', True))
+    if not ddr_required:
+        ddr_status = 'not_required'
+    elif not supports_ddr:
+        ddr_status = 'over_limit'
+        failures.append('ddr_interface')
+    else:
+        ddr_status = 'fits'
+    checks['ddr_interface'] = {'required': ddr_required, 'available': supports_ddr, 'status': ddr_status}
+    status = 'over_limit' if failures else 'fits'
+    if any(v.get('status') == 'unknown' for v in checks.values()) and status == 'fits':
+        status = 'unknown'
+    return {'status': status, 'checks': checks, 'failures': failures, 'reasons': list(iface.get('reasons') or [])}
+
 def _suggest_yaml_actions(fit: Dict[str, Any]) -> list[str]:
     limiting = str(fit.get("limiting_dimension") or fit.get("limiting_resource") or "")
     status = str(fit.get("status") or "unknown")
@@ -527,6 +740,29 @@ def board_fit_markdown(payload: Dict[str, Any]) -> str:
             f"| {key} | {row.get('used', '')} | {row.get('available', '')} | {util_s} | {row.get('status', 'unknown')} |"
         )
 
+    interface_fit = payload.get("interface_fit", {}) if isinstance(payload.get("interface_fit"), dict) else {}
+    interface_checks = interface_fit.get("checks", {}) if isinstance(interface_fit.get("checks"), dict) else {}
+    lines.extend([
+        "",
+        "## Interface requirements",
+        "",
+        "| check | required | available | status |",
+        "|---|---:|---:|---|",
+    ])
+    for key in ("axi_dma_count", "axi_stream_ports", "m_axi_bundles", "ddr_interface"):
+        row = interface_checks.get(key, {}) if isinstance(interface_checks, dict) else {}
+        lines.append(f"| {key} | {row.get('required', '')} | {row.get('available', '')} | {row.get('status', 'unknown')} |")
+
+    gating = payload.get("build_stage_gating", {}) if isinstance(payload.get("build_stage_gating"), dict) else {}
+    lines.extend([
+        "",
+        "## Stage gating",
+        "",
+    ])
+    for stage in ("vivado_project", "vivado_implementation", "bitstream"):
+        row = gating.get(stage, {}) if isinstance(gating, dict) else {}
+        lines.append(f"- {stage}: requested=`{row.get('requested')}` allowed=`{row.get('allowed')}`")
+
     lines.extend([
         "",
         "## Guidance",
@@ -557,6 +793,8 @@ def emit_board_fit_report(
     part: str | None = None,
     target_clock_mhz: Any = None,
     source: str = "prediction",
+    raw_config: Dict[str, Any] | None = None,
+    build_stages: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Write reports/board_fit.json and reports/board_fit.md."""
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -566,14 +804,37 @@ def emit_board_fit_report(
         timing_data=timing_data,
         target_clock_mhz=target_clock_mhz,
     )
+    derived_requirements = derive_board_fit_requirements(raw_config)
+    normalized_resources = _merge_requirement_resources(normalized_resources, derived_requirements)
     fit = classify_board_fit(normalized_resources, board=board, part=part)
+    interface_fit = _classify_interface_requirements(derived_requirements, board=board, part=part)
+    if interface_fit.get("status") == "over_limit" and fit.get("status") != "over_limit":
+        fit = dict(fit)
+        fit["status"] = "over_limit"
+        fit["limiting_resource"] = fit.get("limiting_resource") or "interfaces"
+        fit["limiting_dimension"] = fit.get("limiting_dimension") or "interfaces"
+        fit["vivado_allowed"] = False
+    stages = build_stages or {}
+    vivado_implementation_allowed = bool(fit.get("vivado_allowed"))
+    bitstream_allowed = bool(fit.get("vivado_allowed"))
 
     payload = {
         "format": "fpgai.board_fit.v1",
         "source": source,
         "board": board,
         "part": part,
+        "status": fit.get("status"),
+        "limiting_dimension": fit.get("limiting_dimension") or fit.get("limiting_resource"),
+        "vivado_implementation_allowed": vivado_implementation_allowed,
+        "bitstream_allowed": bitstream_allowed,
+        "build_stage_gating": {
+            "vivado_project": {"requested": bool(stages.get("vivado_project")), "allowed": True},
+            "vivado_implementation": {"requested": bool(stages.get("vivado_implementation")), "allowed": vivado_implementation_allowed},
+            "bitstream": {"requested": bool(stages.get("bitstream")), "allowed": bitstream_allowed},
+        },
         "normalized_resources": normalized_resources,
+        "derived_requirements": derived_requirements,
+        "interface_fit": interface_fit,
         "fit": fit,
         "suggested_yaml_actions": _suggest_yaml_actions(fit),
         "truth_boundary": {
@@ -581,6 +842,7 @@ def emit_board_fit_report(
             "requires_hls_for_synthesis_truth": True,
             "requires_vivado_for_implementation_truth": True,
             "requires_board_runtime_for_deployment_truth": True,
+            "unrequested_paths_not_counted": True,
         },
     }
 
@@ -598,6 +860,8 @@ def emit_board_fit_report(
         "status": fit.get("status"),
         "limiting_dimension": fit.get("limiting_dimension"),
         "vivado_allowed": fit.get("vivado_allowed"),
+        "vivado_implementation_allowed": vivado_implementation_allowed,
+        "bitstream_allowed": bitstream_allowed,
     }
 
 

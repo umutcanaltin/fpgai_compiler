@@ -110,10 +110,17 @@ def _knobs(
 
 _LAYER_METADATA: Mapping[str, Dict[str, Any]] = {
     "Dense": {"category": "linear", "has_weights": True},
-    "Conv": {"category": "convolution", "has_weights": True, "notes": ("Convolution shape coverage is backend-limited.",)},
+    "Linear": {"category": "linear", "has_weights": True, "alias_of": "Dense"},
+    "Conv": {"category": "convolution", "has_weights": True, "notes": ("Convolution shape/group validation must reject unsupported shapes before HLS.",)},
+    "Conv2D": {"category": "convolution", "has_weights": True, "alias_of": "Conv"},
+    "DepthwiseConv2D": {"category": "convolution", "has_weights": True, "alias_of": "Conv", "notes": ("DepthwiseConv2D must lower to grouped Conv semantics or reject if groups/depth multiplier are unsupported.",)},
+    "PointwiseConv2D": {"category": "convolution", "has_weights": True, "alias_of": "Conv", "notes": ("PointwiseConv2D lowers to 1x1 Conv semantics.",)},
     "MaxPool": {"category": "pooling", "has_weights": False, "tiling": "applies_to_activation_tiles_only"},
     "AvgPool": {"category": "pooling", "has_weights": False, "tiling": "applies_to_activation_tiles_only"},
+    "AveragePool": {"category": "pooling", "has_weights": False, "tiling": "applies_to_activation_tiles_only", "alias_of": "AvgPool"},
+    "GlobalAveragePool": {"category": "pooling", "has_weights": False, "tiling": "applies_to_activation_tiles_only"},
     "BatchNormalization": {"category": "normalization", "has_weights": True, "notes": ("BatchNorm parameters are treated as parameter tensors for memory/import/export contracts.",)},
+    "BatchNorm": {"category": "normalization", "has_weights": True, "alias_of": "BatchNormalization", "notes": ("Alias of BatchNormalization.",)},
     "Relu": {"category": "activation", "has_weights": False, "tiling": "applies_to_activation_tiles_only"},
     "LeakyRelu": {"category": "activation", "has_weights": False, "tiling": "applies_to_activation_tiles_only"},
     "Sigmoid": {"category": "activation", "has_weights": False, "tiling": "applies_to_activation_tiles_only"},
@@ -121,9 +128,6 @@ _LAYER_METADATA: Mapping[str, Dict[str, Any]] = {
     "Flatten": {"category": "reshape", "has_weights": False, "tiling": "not_required_or_linear_copy_only"},
     "Reshape": {"category": "reshape", "has_weights": False, "tiling": "not_required_or_linear_copy_only"},
     "Add": {"category": "elementwise", "has_weights": False, "tiling": "limited_by_sequential_graph_backend", "notes": ("General branched Add requires graph scheduling support.",)},
-    "DepthwiseConv2D": {"category": "convolution", "has_weights": True, "notes": ("Registry placeholder; HLS emitter support must be implemented before compile claims.",)},
-    "PointwiseConv2D": {"category": "convolution", "has_weights": True, "notes": ("Registry placeholder; HLS emitter support must be implemented before compile claims.",)},
-    "GlobalAveragePool": {"category": "pooling", "has_weights": False, "tiling": "applies_to_activation_tiles_only"},
 }
 
 

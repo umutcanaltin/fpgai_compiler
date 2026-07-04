@@ -25,13 +25,29 @@ class OperatorCapability:
 
 INFERENCE_HLS_CAPABILITIES: Dict[str, OperatorCapability] = {
     "Dense": OperatorCapability("supported"),
+    "Linear": OperatorCapability("supported", "Alias of Dense/linear layer in the HLS emitter."),
     "Conv": OperatorCapability(
-        "limited",
-        "Only the convolution shapes accepted by the HLS emitter are supported.",
+        "supported",
+        "Convolution forward path is implemented by the HLS emitter for compiler-normalized Conv layers; unsupported shapes must reject in shape/planning validation.",
+    ),
+    "Conv2D": OperatorCapability(
+        "supported",
+        "Alias of compiler-normalized Conv/2D convolution backend.",
+    ),
+    "DepthwiseConv2D": OperatorCapability(
+        "supported",
+        "Depthwise convolution is a grouped-convolution specialization and must lower through the convolution backend or reject with shape/group reason.",
+    ),
+    "PointwiseConv2D": OperatorCapability(
+        "supported",
+        "Pointwise convolution is a 1x1 convolution specialization and lowers through the convolution backend.",
     ),
     "MaxPool": OperatorCapability("supported"),
     "AvgPool": OperatorCapability("supported"),
+    "AveragePool": OperatorCapability("supported", "Alias of AvgPool."),
+    "GlobalAveragePool": OperatorCapability("supported"),
     "BatchNormalization": OperatorCapability("supported"),
+    "BatchNorm": OperatorCapability("supported", "Alias of BatchNormalization."),
     "Relu": OperatorCapability("supported"),
     "LeakyRelu": OperatorCapability("supported"),
     "Sigmoid": OperatorCapability("supported"),

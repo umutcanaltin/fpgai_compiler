@@ -1,0 +1,24 @@
+name: paper_precision_sweep
+description: Reference sweep template for precision/resource/accuracy tradeoffs. Materialize these design points into compiler YAML before running.
+defaults:
+  base_config: examples/inference/mnist_mlp_embedded.yml
+  output_root: paper_experiments/precision_sweep
+design_points:
+  - name: fx8_3
+    numerics:
+      defaults:
+        activation: {type: ap_fixed, total_bits: 8, int_bits: 3}
+        weight: {type: ap_fixed, total_bits: 8, int_bits: 3}
+        bias: {type: ap_fixed, total_bits: 16, int_bits: 6}
+        accum: {type: ap_fixed, total_bits: 24, int_bits: 8}
+  - name: fx16_6
+    numerics:
+      defaults:
+        activation: {type: ap_fixed, total_bits: 16, int_bits: 6}
+        weight: {type: ap_fixed, total_bits: 16, int_bits: 6}
+        bias: {type: ap_fixed, total_bits: 24, int_bits: 8}
+        accum: {type: ap_fixed, total_bits: 32, int_bits: 10}
+materialize_configs:
+  enabled: true
+  parameter_mappings:
+    numerics: {path: numerics.defaults, create: true}

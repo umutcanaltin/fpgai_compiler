@@ -13,14 +13,6 @@ training:
     learning_rate: 0.01
   loss:
     type: mse
-  execution:
-    batch_size: 1
-    epochs: 1
-  storage:
-    weights: bram
-    activations: bram
-    gradients: bram
-    optimizer_state: bram
   cache:
     store_forward_activations: true
     store_pre_activations: true
@@ -35,6 +27,9 @@ training:
     include_update: true
     include_buffers: true
   phase_overrides: {}
+  batch:
+    size: 1
+    epochs: 1
 targets:
   platform:
     board: kv260
@@ -209,8 +204,7 @@ benchmark:
     fail_on_layer_mismatch: false
     stop_on_first_bad_layer: false
 memory:
-  storage:
-    weights: bram
-    activations: bram
-    gradients: bram
-    optimizer_state: bram
+  weight_storage: bram
+  activation_storage: bram
+  gradient_storage: bram
+  optimizer_state_storage: bram

@@ -47,8 +47,13 @@ class TrainingOpCaps:
 
 OP_TRAINING_CAPS: Dict[str, TrainingOpCaps] = {
     "Dense": TrainingOpCaps(True, True, True, True),
+    "Linear": TrainingOpCaps(True, True, True, True),
     "Conv": TrainingOpCaps(True, True, True, True),
+    "Conv2D": TrainingOpCaps(True, True, True, True),
+    "DepthwiseConv2D": TrainingOpCaps(True, True, True, True),
+    "PointwiseConv2D": TrainingOpCaps(True, True, True, True),
     "BatchNormalization": TrainingOpCaps(True, True, True, True),
+    "BatchNorm": TrainingOpCaps(True, True, True, True),
     "Relu": TrainingOpCaps(True, True, False, False),
     "LeakyRelu": TrainingOpCaps(True, True, False, False),
     "Sigmoid": TrainingOpCaps(True, True, False, False),
@@ -56,6 +61,8 @@ OP_TRAINING_CAPS: Dict[str, TrainingOpCaps] = {
     "Add": TrainingOpCaps(True, True, False, False),
     "MaxPool": TrainingOpCaps(True, True, False, False),
     "AvgPool": TrainingOpCaps(True, True, False, False),
+    "AveragePool": TrainingOpCaps(True, True, False, False),
+    "GlobalAveragePool": TrainingOpCaps(True, True, False, False),
     "Flatten": TrainingOpCaps(True, True, False, False),
     "Reshape": TrainingOpCaps(True, True, False, False),
 }
@@ -185,10 +192,10 @@ def _resolve_storage_policy(raw_cfg: Dict[str, Any], compile_plan=None, memory_p
     weight_pref = notes.get("weight_region_preference") or ["BRAM"]
     act_pref = notes.get("activation_region_preference") or ["BRAM"]
 
-    weight_storage = str(_cfg_get(raw_cfg, "training.storage.weights", weight_pref[0])).lower()
-    activation_storage = str(_cfg_get(raw_cfg, "training.storage.activations", act_pref[0])).lower()
-    gradient_storage = str(_cfg_get(raw_cfg, "training.storage.gradients", activation_storage)).lower()
-    optimizer_state_storage = str(_cfg_get(raw_cfg, "training.storage.optimizer_state", weight_storage)).lower()
+    weight_storage = str(_cfg_get(raw_cfg, "memory.weight_storage", _cfg_get(raw_cfg, "training.storage.weights", weight_pref[0]))).lower()
+    activation_storage = str(_cfg_get(raw_cfg, "memory.activation_storage", _cfg_get(raw_cfg, "training.storage.activations", act_pref[0]))).lower()
+    gradient_storage = str(_cfg_get(raw_cfg, "memory.gradient_storage", _cfg_get(raw_cfg, "training.storage.gradients", activation_storage))).lower()
+    optimizer_state_storage = str(_cfg_get(raw_cfg, "memory.optimizer_state_storage", _cfg_get(raw_cfg, "training.storage.optimizer_state", weight_storage))).lower()
 
     return {
         "weights_mode": weights_mode,
@@ -243,8 +250,8 @@ def build_training_plan(graph, raw_cfg: Dict[str, Any], compile_plan=None, memor
     optimizer_type = str(_cfg_get(raw_cfg, "training.optimizer.type", "sgd")).lower()
     learning_rate = float(_cfg_get(raw_cfg, "training.optimizer.learning_rate", 0.01))
     loss_type = str(_cfg_get(raw_cfg, "training.loss.type", "mse")).lower()
-    batch_size = int(_cfg_get(raw_cfg, "training.execution.batch_size", 1))
-    epochs = int(_cfg_get(raw_cfg, "training.execution.epochs", 1))
+    batch_size = int(_cfg_get(raw_cfg, "training.batch.size", _cfg_get(raw_cfg, "training.execution.batch_size", 1)))
+    epochs = int(_cfg_get(raw_cfg, "training.batch.epochs", _cfg_get(raw_cfg, "training.execution.epochs", 1)))
 
     storage = _resolve_storage_policy(raw_cfg, compile_plan=compile_plan, memory_plan=memory_plan)
     movement_policy = _resolve_movement_policy(raw_cfg, communication_plan=communication_plan)

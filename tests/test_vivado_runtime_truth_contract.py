@@ -114,3 +114,190 @@ def test_vivado_bd_contract_for_m_axi_training_ports_and_runtime_api(tmp_path: P
     feature = json.loads((out_dir / "reports" / "feature_contract.json").read_text(encoding="utf-8"))
     assert feature["runtime_packaged"] is True
     assert any(item["feature"] == "vivado_bd_wiring" for item in feature["features"])
+
+
+def _vivado_project_only(raw: dict) -> None:
+    raw.setdefault("build", {})["existing_hls_ip"] = True
+    raw.setdefault("build", {})["stages"] = {
+        "cpp": True,
+        "testbench": True,
+        "hls_project": False,
+        "hls_synthesis": False,
+        "vivado_project": True,
+        "vivado_implementation": False,
+        "bitstream": False,
+        "runtime_package": True,
+        "reports": True,
+    }
+    raw.setdefault("toolchain", {}).setdefault("vitis_hls", {})["enabled"] = False
+
+
+def test_vivado_project_stage_emits_direct_tcl_and_validation_report(tmp_path: Path) -> None:
+    pytest.importorskip("onnx")
+    raw = copy.deepcopy(_load_inference_config())
+    raw.setdefault("project", {})["out_dir"] = str(tmp_path / "vivado_direct_inference")
+    raw.setdefault("weights", {})["mode"] = "embedded"
+    raw.setdefault("runtime", {})["sequence"] = ["run_inference"]
+    _vivado_project_only(raw)
+
+    result = _compile_raw(raw, tmp_path)
+    out_dir = Path(result.out_dir)
+    vivado_dir = out_dir / "vivado"
+
+    assert (vivado_dir / "project.tcl").exists()
+    assert (vivado_dir / "bd.tcl").exists()
+    assert (vivado_dir / "run_vivado.tcl").exists()
+    assert not (out_dir / "hls/run_hls.tcl").exists()
+
+    bd_source = (vivado_dir / "bd.tcl").read_text(encoding="utf-8")
+    assert "zynq_ultra_ps_e" in bd_source
+    assert "axi_ctrl_interconnect" in bd_source
+    assert "s_axi_control" in bd_source
+    assert "axi_dma_0" not in bd_source
+    assert "gradients_mem" not in bd_source
+    assert "optimizer_state_mem" not in bd_source
+
+    validation = json.loads((out_dir / "reports/vivado_bd_validation.json").read_text(encoding="utf-8"))
+    assert validation["format"] == "fpgai.vivado_bd_validation.v1"
+    assert validation["status"] == "passed"
+    assert validation["vivado_project_requested"] is True
+    assert validation["checks"]["ps_block"] is True
+    assert validation["checks"]["axi_lite_control_path"] is True
+    assert validation["checks"]["axi_dma_required"] is False
+    assert validation["checks"]["axi_dma_present"] is False
+
+    manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["vivado_handoff_artifacts"]["vivado_project_tcl"].endswith("vivado/project.tcl")
+
+
+def test_vivado_cpp_only_mode_omits_direct_tcl_but_writes_not_requested_validation(tmp_path: Path) -> None:
+    pytest.importorskip("onnx")
+    raw = copy.deepcopy(_load_inference_config())
+    raw.setdefault("project", {})["out_dir"] = str(tmp_path / "vivado_not_requested")
+    raw.setdefault("runtime", {})["sequence"] = ["run_inference"]
+    _cpp_only(raw)
+
+    result = _compile_raw(raw, tmp_path)
+    out_dir = Path(result.out_dir)
+    assert not (out_dir / "vivado/project.tcl").exists()
+    assert not (out_dir / "vivado/bd.tcl").exists()
+    assert not (out_dir / "vivado/run_vivado.tcl").exists()
+    validation = json.loads((out_dir / "reports/vivado_bd_validation.json").read_text(encoding="utf-8"))
+    assert validation["status"] == "not_requested"
+    assert validation["vivado_project_requested"] is False
+
+
+def _vivado_implementation_only(raw: dict) -> None:
+    raw.setdefault("build", {})["existing_hls_ip"] = True
+    raw.setdefault("build", {})["stages"] = {
+        "cpp": True,
+        "testbench": True,
+        "hls_project": False,
+        "hls_synthesis": False,
+        "vivado_project": True,
+        "vivado_implementation": True,
+        "bitstream": False,
+        "runtime_package": True,
+        "reports": True,
+    }
+    raw.setdefault("toolchain", {}).setdefault("vitis_hls", {})["enabled"] = False
+    raw.setdefault("toolchain", {}).setdefault("vivado", {})["executable"] = "__fpgai_missing_vivado__"
+
+
+def _vivado_bitstream_requested(raw: dict) -> None:
+    raw.setdefault("build", {})["existing_hls_ip"] = True
+    raw.setdefault("build", {})["stages"] = {
+        "cpp": True,
+        "testbench": True,
+        "hls_project": False,
+        "hls_synthesis": False,
+        "vivado_project": True,
+        "vivado_implementation": True,
+        "bitstream": True,
+        "runtime_package": True,
+        "reports": True,
+    }
+    raw.setdefault("toolchain", {}).setdefault("vitis_hls", {})["enabled"] = False
+    raw.setdefault("toolchain", {}).setdefault("vivado", {})["executable"] = "__fpgai_missing_vivado__"
+
+
+def test_vivado_implementation_stage_reports_missing_tool_without_fake_success(tmp_path: Path) -> None:
+    pytest.importorskip("onnx")
+    raw = copy.deepcopy(_load_inference_config())
+    raw.setdefault("project", {})["out_dir"] = str(tmp_path / "vivado_impl_truth")
+    raw.setdefault("weights", {})["mode"] = "embedded"
+    raw.setdefault("runtime", {})["sequence"] = ["run_inference"]
+    _vivado_implementation_only(raw)
+
+    result = _compile_raw(raw, tmp_path)
+    out_dir = Path(result.out_dir)
+
+    validation = json.loads((out_dir / "reports/vivado_validation_report.json").read_text(encoding="utf-8"))
+    impl = json.loads((out_dir / "reports/vivado_implementation_report.json").read_text(encoding="utf-8"))
+    bit = json.loads((out_dir / "reports/bitstream_report.json").read_text(encoding="utf-8"))
+
+    assert validation["format"] == "fpgai.vivado_validation_report.v1"
+    assert validation["status"] == "tool_missing"
+    assert validation["claimed_success"] is False
+    assert impl["format"] == "fpgai.vivado_implementation_report.v1"
+    assert impl["requested"] is True
+    assert impl["status"] == "tool_missing"
+    assert impl["claimed_success"] is False
+    assert bit["format"] == "fpgai.bitstream_report.v1"
+    assert bit["requested"] is False
+    assert bit["status"] == "not_requested"
+    assert bit["claimed_success"] is False
+
+    manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["vivado_truth_artifacts"]["vivado_implementation_report_json"].endswith("vivado_implementation_report.json")
+
+
+def test_bitstream_stage_reports_missing_artifact_without_fake_success(tmp_path: Path) -> None:
+    pytest.importorskip("onnx")
+    raw = copy.deepcopy(_load_inference_config())
+    raw.setdefault("project", {})["out_dir"] = str(tmp_path / "vivado_bitstream_truth")
+    raw.setdefault("weights", {})["mode"] = "embedded"
+    raw.setdefault("runtime", {})["sequence"] = ["run_inference"]
+    _vivado_bitstream_requested(raw)
+
+    result = _compile_raw(raw, tmp_path)
+    out_dir = Path(result.out_dir)
+    bit = json.loads((out_dir / "reports/bitstream_report.json").read_text(encoding="utf-8"))
+    impl = json.loads((out_dir / "reports/vivado_implementation_report.json").read_text(encoding="utf-8"))
+
+    assert impl["status"] == "tool_missing"
+    assert impl["claimed_success"] is False
+    assert bit["requested"] is True
+    assert bit["status"] == "tool_missing"
+    assert bit["claimed_success"] is False
+    assert bit["artifact"] is None
+    assert "implementation has not passed" in bit["reason"]
+
+
+def test_vivado_impl_and_bitstream_blocked_when_board_fit_fails(tmp_path: Path) -> None:
+    pytest.importorskip("onnx")
+    raw = copy.deepcopy(_load_inference_config())
+    raw.setdefault("project", {})["out_dir"] = str(tmp_path / "vivado_board_fit_blocked")
+    raw.setdefault("targets", {}).setdefault("platform", {})["board"] = "pynq_z2"
+    raw.setdefault("targets", {}).setdefault("platform", {})["part"] = "xc7z020clg400-1"
+    raw.setdefault("memory", {}).setdefault("storage", {})["weights"] = "uram"
+    raw.setdefault("weights", {})["mode"] = "embedded"
+    raw.setdefault("runtime", {})["sequence"] = ["run_inference"]
+    _vivado_bitstream_requested(raw)
+
+    result = _compile_raw(raw, tmp_path)
+    out_dir = Path(result.out_dir)
+    board_fit = json.loads((out_dir / "reports/board_fit.json").read_text(encoding="utf-8"))
+    impl = json.loads((out_dir / "reports/vivado_implementation_report.json").read_text(encoding="utf-8"))
+    bit = json.loads((out_dir / "reports/bitstream_report.json").read_text(encoding="utf-8"))
+
+    assert board_fit["status"] == "over_limit"
+    assert board_fit["fit"]["resources"]["uram"]["status"] == "over_limit"
+    assert board_fit["vivado_implementation_allowed"] is False
+    assert board_fit["bitstream_allowed"] is False
+    assert impl["status"] == "blocked_by_board_fit"
+    assert impl["claimed_success"] is False
+    assert impl["board_fit_status"] == "over_limit"
+    assert bit["status"] == "blocked_by_board_fit"
+    assert bit["claimed_success"] is False
+    assert bit["board_fit_status"] == "over_limit"

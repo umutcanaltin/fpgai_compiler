@@ -1,0 +1,1582 @@
+{
+  "artifact_kind": "repo_yaml_schema_audit",
+  "blocking_failure": false,
+  "files": [
+    {
+      "deprecated_aliases": [
+        {
+          "path": "data_movement.ps_pl.weights.mode",
+          "reason": "Weight mode is a user-facing weights.* decision, not a nested PS/PL alias.",
+          "replacement": "weights.mode"
+        },
+        {
+          "path": "optimization.parallel_policy",
+          "reason": "Policy names should be grouped with other parallel controls.",
+          "replacement": "optimization.parallel.policy"
+        }
+      ],
+      "path": "configs/examples/default_compile.yml",
+      "status_counts": {
+        "canonical": 36,
+        "deprecated_alias": 2,
+        "legacy_or_internal": 111,
+        "section_container": 11
+      },
+      "summary": {
+        "canonical_paths_used": 36,
+        "deprecated_aliases_used": 2,
+        "statuses": {
+          "canonical": 36,
+          "deprecated_alias": 2,
+          "legacy_or_internal": 111,
+          "section_container": 11
+        },
+        "total_paths": 160,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [
+        {
+          "path": "data_movement.ps_pl.weights.mode",
+          "reason": "Weight mode is a user-facing weights.* decision, not a nested PS/PL alias.",
+          "replacement": "weights.mode"
+        }
+      ],
+      "path": "configs/examples/inference_compile.yml",
+      "status_counts": {
+        "canonical": 29,
+        "deprecated_alias": 1,
+        "legacy_or_internal": 85,
+        "section_container": 9
+      },
+      "summary": {
+        "canonical_paths_used": 29,
+        "deprecated_aliases_used": 1,
+        "statuses": {
+          "canonical": 29,
+          "deprecated_alias": 1,
+          "legacy_or_internal": 85,
+          "section_container": 9
+        },
+        "total_paths": 124,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [
+        {
+          "path": "data_movement.pl_ps.output",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.outputs"
+        },
+        {
+          "path": "data_movement.pl_ps.output.compression",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.outputs.compression"
+        },
+        {
+          "path": "data_movement.pl_ps.output.compression.enabled",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.outputs.compression.enabled"
+        },
+        {
+          "path": "data_movement.pl_ps.output.mode",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.outputs.mode"
+        },
+        {
+          "path": "data_movement.pl_ps.output.precision",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.outputs.precision"
+        },
+        {
+          "path": "data_movement.pl_ps.output.precision.int_bits",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.outputs.precision.int_bits"
+        },
+        {
+          "path": "data_movement.pl_ps.output.precision.total_bits",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.outputs.precision.total_bits"
+        },
+        {
+          "path": "data_movement.pl_ps.output.precision.type",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.outputs.precision.type"
+        },
+        {
+          "path": "data_movement.pl_ps.output.size_bytes",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.outputs.size_bytes"
+        },
+        {
+          "path": "data_movement.ps_pl.input",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.inputs"
+        },
+        {
+          "path": "data_movement.ps_pl.input.compression",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.inputs.compression"
+        },
+        {
+          "path": "data_movement.ps_pl.input.compression.codec",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.inputs.compression.codec"
+        },
+        {
+          "path": "data_movement.ps_pl.input.compression.enabled",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.inputs.compression.enabled"
+        },
+        {
+          "path": "data_movement.ps_pl.input.mode",
+          "reason": "Sprint P direct input movement style is canonical; mode aliases should map to interface/transport.",
+          "replacement": "data_movement.inputs.interface"
+        },
+        {
+          "path": "data_movement.ps_pl.input.precision",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.inputs.precision"
+        },
+        {
+          "path": "data_movement.ps_pl.input.precision.int_bits",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.inputs.precision.int_bits"
+        },
+        {
+          "path": "data_movement.ps_pl.input.precision.total_bits",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.inputs.precision.total_bits"
+        },
+        {
+          "path": "data_movement.ps_pl.input.precision.type",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.inputs.precision.type"
+        },
+        {
+          "path": "data_movement.ps_pl.input.size_bytes",
+          "reason": "Sprint P direct movement style is canonical.",
+          "replacement": "data_movement.inputs.size_bytes"
+        },
+        {
+          "path": "data_movement.ps_pl.weights.mode",
+          "reason": "Weight mode is a user-facing weights.* decision, not a nested PS/PL alias.",
+          "replacement": "weights.mode"
+        }
+      ],
+      "path": "configs/examples/quick_compile.yml",
+      "status_counts": {
+        "canonical": 47,
+        "deprecated_alias": 20,
+        "legacy_or_internal": 92,
+        "section_container": 10
+      },
+      "summary": {
+        "canonical_paths_used": 47,
+        "deprecated_aliases_used": 20,
+        "statuses": {
+          "canonical": 47,
+          "deprecated_alias": 20,
+          "legacy_or_internal": 92,
+          "section_container": 10
+        },
+        "total_paths": 169,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [
+        {
+          "path": "data_movement.ps_pl.weights.mode",
+          "reason": "Weight mode is a user-facing weights.* decision, not a nested PS/PL alias.",
+          "replacement": "weights.mode"
+        }
+      ],
+      "path": "configs/examples/training_compile_smoke.yml",
+      "status_counts": {
+        "canonical": 29,
+        "deprecated_alias": 1,
+        "legacy_or_internal": 103,
+        "section_container": 9
+      },
+      "summary": {
+        "canonical_paths_used": 29,
+        "deprecated_aliases_used": 1,
+        "statuses": {
+          "canonical": 29,
+          "deprecated_alias": 1,
+          "legacy_or_internal": 103,
+          "section_container": 9
+        },
+        "total_paths": 142,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/experiments/arxiv_paper.yml",
+      "status_counts": {
+        "canonical": 1,
+        "paper_artifact_spec": 22
+      },
+      "summary": {
+        "canonical_paths_used": 1,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 1,
+          "paper_artifact_spec": 22
+        },
+        "total_paths": 23,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [
+        {
+          "path": "data_movement.ps_pl.weights.mode",
+          "reason": "Weight mode is a user-facing weights.* decision, not a nested PS/PL alias.",
+          "replacement": "weights.mode"
+        }
+      ],
+      "path": "configs/suite/cnn_avgpool.yml",
+      "status_counts": {
+        "canonical": 17,
+        "deprecated_alias": 1,
+        "legacy_or_internal": 54,
+        "section_container": 7
+      },
+      "summary": {
+        "canonical_paths_used": 17,
+        "deprecated_aliases_used": 1,
+        "statuses": {
+          "canonical": 17,
+          "deprecated_alias": 1,
+          "legacy_or_internal": 54,
+          "section_container": 7
+        },
+        "total_paths": 79,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [
+        {
+          "path": "data_movement.ps_pl.weights.mode",
+          "reason": "Weight mode is a user-facing weights.* decision, not a nested PS/PL alias.",
+          "replacement": "weights.mode"
+        }
+      ],
+      "path": "configs/suite/cnn_mnist.yml",
+      "status_counts": {
+        "canonical": 17,
+        "deprecated_alias": 1,
+        "legacy_or_internal": 54,
+        "section_container": 7
+      },
+      "summary": {
+        "canonical_paths_used": 17,
+        "deprecated_aliases_used": 1,
+        "statuses": {
+          "canonical": 17,
+          "deprecated_alias": 1,
+          "legacy_or_internal": 54,
+          "section_container": 7
+        },
+        "total_paths": 79,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [
+        {
+          "path": "data_movement.ps_pl.weights.mode",
+          "reason": "Weight mode is a user-facing weights.* decision, not a nested PS/PL alias.",
+          "replacement": "weights.mode"
+        }
+      ],
+      "path": "configs/suite/cnn_no_pool.yml",
+      "status_counts": {
+        "canonical": 17,
+        "deprecated_alias": 1,
+        "legacy_or_internal": 54,
+        "section_container": 7
+      },
+      "summary": {
+        "canonical_paths_used": 17,
+        "deprecated_aliases_used": 1,
+        "statuses": {
+          "canonical": 17,
+          "deprecated_alias": 1,
+          "legacy_or_internal": 54,
+          "section_container": 7
+        },
+        "total_paths": 79,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [
+        {
+          "path": "data_movement.ps_pl.weights.mode",
+          "reason": "Weight mode is a user-facing weights.* decision, not a nested PS/PL alias.",
+          "replacement": "weights.mode"
+        }
+      ],
+      "path": "configs/suite/mlp_leakyrelu.yml",
+      "status_counts": {
+        "canonical": 17,
+        "deprecated_alias": 1,
+        "legacy_or_internal": 54,
+        "section_container": 7
+      },
+      "summary": {
+        "canonical_paths_used": 17,
+        "deprecated_aliases_used": 1,
+        "statuses": {
+          "canonical": 17,
+          "deprecated_alias": 1,
+          "legacy_or_internal": 54,
+          "section_container": 7
+        },
+        "total_paths": 79,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [
+        {
+          "path": "data_movement.ps_pl.weights.mode",
+          "reason": "Weight mode is a user-facing weights.* decision, not a nested PS/PL alias.",
+          "replacement": "weights.mode"
+        }
+      ],
+      "path": "configs/suite/mlp_mnist.yml",
+      "status_counts": {
+        "canonical": 17,
+        "deprecated_alias": 1,
+        "legacy_or_internal": 54,
+        "section_container": 7
+      },
+      "summary": {
+        "canonical_paths_used": 17,
+        "deprecated_aliases_used": 1,
+        "statuses": {
+          "canonical": 17,
+          "deprecated_alias": 1,
+          "legacy_or_internal": 54,
+          "section_container": 7
+        },
+        "total_paths": 79,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [
+        {
+          "path": "data_movement.ps_pl.weights.mode",
+          "reason": "Weight mode is a user-facing weights.* decision, not a nested PS/PL alias.",
+          "replacement": "weights.mode"
+        }
+      ],
+      "path": "configs/suite/mlp_sigmoid.yml",
+      "status_counts": {
+        "canonical": 17,
+        "deprecated_alias": 1,
+        "legacy_or_internal": 54,
+        "section_container": 7
+      },
+      "summary": {
+        "canonical_paths_used": 17,
+        "deprecated_aliases_used": 1,
+        "statuses": {
+          "canonical": 17,
+          "deprecated_alias": 1,
+          "legacy_or_internal": 54,
+          "section_container": 7
+        },
+        "total_paths": 79,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/communication_ablation.yml",
+      "status_counts": {
+        "sweep_template": 12
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 12
+        },
+        "total_paths": 12,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/ddr_memory_strategy.yml",
+      "status_counts": {
+        "sweep_template": 17
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 17
+        },
+        "total_paths": 17,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/full_factor_pipeline.yml",
+      "status_counts": {
+        "sweep_template": 70
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 70
+        },
+        "total_paths": 70,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/full_factor_pipeline_stratified36.yml",
+      "status_counts": {
+        "sweep_template": 70
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 70
+        },
+        "total_paths": 70,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/hardware_knob_validation.yml",
+      "status_counts": {
+        "sweep_template": 127
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 127
+        },
+        "total_paths": 127,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/inference_policy.yml",
+      "status_counts": {
+        "sweep_template": 18
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 18
+        },
+        "total_paths": 18,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/inference_precision.yml",
+      "status_counts": {
+        "sweep_template": 20
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 20
+        },
+        "total_paths": 20,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/memory_binding_strategy.yml",
+      "status_counts": {
+        "sweep_template": 17
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 17
+        },
+        "total_paths": 17,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/memory_strategy.yml",
+      "status_counts": {
+        "sweep_template": 20
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 20
+        },
+        "total_paths": 20,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/model_suite.yml",
+      "status_counts": {
+        "sweep_template": 9
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 9
+        },
+        "total_paths": 9,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/parallelism_feasible_envelope.yml",
+      "status_counts": {
+        "sweep_template": 122
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 122
+        },
+        "total_paths": 122,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/parallelism_policy.yml",
+      "status_counts": {
+        "sweep_template": 35
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 35
+        },
+        "total_paths": 35,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/pipeline_policy.yml",
+      "status_counts": {
+        "sweep_template": 69
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 69
+        },
+        "total_paths": 69,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/pipeline_policy_strength.yml",
+      "status_counts": {
+        "sweep_template": 70
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 70
+        },
+        "total_paths": 70,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/precision_selection.yml",
+      "status_counts": {
+        "sweep_template": 21
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 21
+        },
+        "total_paths": 21,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/training_accelerator.yml",
+      "status_counts": {
+        "sweep_template": 58
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 58
+        },
+        "total_paths": 58,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/training_accumulated_batch.yml",
+      "status_counts": {
+        "sweep_template": 66
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 66
+        },
+        "total_paths": 66,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/training_batch_multistep.yml",
+      "status_counts": {
+        "sweep_template": 62
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 62
+        },
+        "total_paths": 62,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/training_convergence.yml",
+      "status_counts": {
+        "sweep_template": 11
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 11
+        },
+        "total_paths": 11,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/training_multi_epoch_convergence.yml",
+      "status_counts": {
+        "sweep_template": 74
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 74
+        },
+        "total_paths": 74,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/training_native_accumulated_batch.yml",
+      "status_counts": {
+        "sweep_template": 66
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 66
+        },
+        "total_paths": 66,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "configs/sweeps/vivado_bridge.yml",
+      "status_counts": {
+        "paper_artifact_spec": 12
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "paper_artifact_spec": 12
+        },
+        "total_paths": 12,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/boards/kr260_training.yml",
+      "status_counts": {
+        "canonical": 69,
+        "legacy_or_internal": 7,
+        "section_container": 11
+      },
+      "summary": {
+        "canonical_paths_used": 69,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 69,
+          "legacy_or_internal": 7,
+          "section_container": 11
+        },
+        "total_paths": 87,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/boards/kv260_inference.yml",
+      "status_counts": {
+        "canonical": 33,
+        "legacy_or_internal": 7,
+        "section_container": 9
+      },
+      "summary": {
+        "canonical_paths_used": 33,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 33,
+          "legacy_or_internal": 7,
+          "section_container": 9
+        },
+        "total_paths": 49,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/boards/pynq_z2_inference.yml",
+      "status_counts": {
+        "canonical": 33,
+        "legacy_or_internal": 7,
+        "section_container": 9
+      },
+      "summary": {
+        "canonical_paths_used": 33,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 33,
+          "legacy_or_internal": 7,
+          "section_container": 9
+        },
+        "total_paths": 49,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/build/cpp_only.yml",
+      "status_counts": {
+        "canonical": 33,
+        "legacy_or_internal": 7,
+        "section_container": 9
+      },
+      "summary": {
+        "canonical_paths_used": 33,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 33,
+          "legacy_or_internal": 7,
+          "section_container": 9
+        },
+        "total_paths": 49,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/build/hls_project.yml",
+      "status_counts": {
+        "canonical": 33,
+        "legacy_or_internal": 7,
+        "section_container": 9
+      },
+      "summary": {
+        "canonical_paths_used": 33,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 33,
+          "legacy_or_internal": 7,
+          "section_container": 9
+        },
+        "total_paths": 49,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/build/hls_synthesis.yml",
+      "status_counts": {
+        "canonical": 51,
+        "legacy_or_internal": 7,
+        "section_container": 11
+      },
+      "summary": {
+        "canonical_paths_used": 51,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 51,
+          "legacy_or_internal": 7,
+          "section_container": 11
+        },
+        "total_paths": 69,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/build/vivado_bitstream.yml",
+      "status_counts": {
+        "canonical": 52,
+        "legacy_or_internal": 7,
+        "section_container": 11
+      },
+      "summary": {
+        "canonical_paths_used": 52,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 52,
+          "legacy_or_internal": 7,
+          "section_container": 11
+        },
+        "total_paths": 70,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/build/vivado_project.yml",
+      "status_counts": {
+        "canonical": 38,
+        "legacy_or_internal": 7,
+        "section_container": 9
+      },
+      "summary": {
+        "canonical_paths_used": 38,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 38,
+          "legacy_or_internal": 7,
+          "section_container": 9
+        },
+        "total_paths": 54,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/inference/cnn_m_axi_input.yml",
+      "status_counts": {
+        "canonical": 48,
+        "legacy_or_internal": 7,
+        "section_container": 10
+      },
+      "summary": {
+        "canonical_paths_used": 48,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 48,
+          "legacy_or_internal": 7,
+          "section_container": 10
+        },
+        "total_paths": 65,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/inference/cnn_stream_input.yml",
+      "status_counts": {
+        "canonical": 48,
+        "legacy_or_internal": 7,
+        "section_container": 10
+      },
+      "summary": {
+        "canonical_paths_used": 48,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 48,
+          "legacy_or_internal": 7,
+          "section_container": 10
+        },
+        "total_paths": 65,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/inference/mnist_mlp_embedded.yml",
+      "status_counts": {
+        "canonical": 48,
+        "legacy_or_internal": 7,
+        "section_container": 10
+      },
+      "summary": {
+        "canonical_paths_used": 48,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 48,
+          "legacy_or_internal": 7,
+          "section_container": 10
+        },
+        "total_paths": 65,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/inference/mnist_mlp_import_weights.yml",
+      "status_counts": {
+        "canonical": 57,
+        "legacy_or_internal": 7,
+        "section_container": 10
+      },
+      "summary": {
+        "canonical_paths_used": 57,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 57,
+          "legacy_or_internal": 7,
+          "section_container": 10
+        },
+        "total_paths": 74,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/paper/memory_strategy_sweep.yml",
+      "status_counts": {
+        "sweep_template": 12
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 12
+        },
+        "total_paths": 12,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/paper/pipeline_parallel_sweep.yml",
+      "status_counts": {
+        "sweep_template": 12
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 12
+        },
+        "total_paths": 12,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/paper/precision_sweep.yml",
+      "status_counts": {
+        "sweep_template": 12
+      },
+      "summary": {
+        "canonical_paths_used": 0,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "sweep_template": 12
+        },
+        "total_paths": 12,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/reference/full_options_reference.yml",
+      "status_counts": {
+        "canonical": 111,
+        "section_container": 12
+      },
+      "summary": {
+        "canonical_paths_used": 111,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 111,
+          "section_container": 12
+        },
+        "total_paths": 123,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/training/batch_accumulation.yml",
+      "status_counts": {
+        "canonical": 70,
+        "legacy_or_internal": 7,
+        "section_container": 11
+      },
+      "summary": {
+        "canonical_paths_used": 70,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 70,
+          "legacy_or_internal": 7,
+          "section_container": 11
+        },
+        "total_paths": 88,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/training/mnist_mlp_cross_entropy.yml",
+      "status_counts": {
+        "canonical": 69,
+        "legacy_or_internal": 7,
+        "section_container": 11
+      },
+      "summary": {
+        "canonical_paths_used": 69,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 69,
+          "legacy_or_internal": 7,
+          "section_container": 11
+        },
+        "total_paths": 87,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/training/mnist_mlp_training_adam.yml",
+      "status_counts": {
+        "canonical": 78,
+        "legacy_or_internal": 7,
+        "section_container": 11
+      },
+      "summary": {
+        "canonical_paths_used": 78,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 78,
+          "legacy_or_internal": 7,
+          "section_container": 11
+        },
+        "total_paths": 96,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/training/mnist_mlp_training_momentum.yml",
+      "status_counts": {
+        "canonical": 75,
+        "legacy_or_internal": 7,
+        "section_container": 11
+      },
+      "summary": {
+        "canonical_paths_used": 75,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 75,
+          "legacy_or_internal": 7,
+          "section_container": 11
+        },
+        "total_paths": 93,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/training/mnist_mlp_training_sgd.yml",
+      "status_counts": {
+        "canonical": 69,
+        "legacy_or_internal": 7,
+        "section_container": 11
+      },
+      "summary": {
+        "canonical_paths_used": 69,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 69,
+          "legacy_or_internal": 7,
+          "section_container": 11
+        },
+        "total_paths": 87,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/training/tiled_training_axi_stream.yml",
+      "status_counts": {
+        "canonical": 73,
+        "legacy_or_internal": 7,
+        "section_container": 11
+      },
+      "summary": {
+        "canonical_paths_used": 73,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 73,
+          "legacy_or_internal": 7,
+          "section_container": 11
+        },
+        "total_paths": 91,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    },
+    {
+      "deprecated_aliases": [],
+      "path": "examples/training/tiled_training_m_axi.yml",
+      "status_counts": {
+        "canonical": 73,
+        "legacy_or_internal": 7,
+        "section_container": 11
+      },
+      "summary": {
+        "canonical_paths_used": 73,
+        "deprecated_aliases_used": 0,
+        "statuses": {
+          "canonical": 73,
+          "legacy_or_internal": 7,
+          "section_container": 11
+        },
+        "total_paths": 91,
+        "unknown_or_unclassified_paths": 0
+      },
+      "unknown_or_unclassified": []
+    }
+  ],
+  "files_with_deprecated_aliases": [
+    "configs/examples/default_compile.yml",
+    "configs/examples/inference_compile.yml",
+    "configs/examples/quick_compile.yml",
+    "configs/examples/training_compile_smoke.yml",
+    "configs/suite/cnn_avgpool.yml",
+    "configs/suite/cnn_mnist.yml",
+    "configs/suite/cnn_no_pool.yml",
+    "configs/suite/mlp_leakyrelu.yml",
+    "configs/suite/mlp_mnist.yml",
+    "configs/suite/mlp_sigmoid.yml"
+  ],
+  "files_with_unknown_or_unclassified_keys": [],
+  "migration_queue": [
+    {
+      "files": 10,
+      "mapping": "data_movement.ps_pl.weights.mode -> weights.mode"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.pl_ps.output -> data_movement.outputs"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.pl_ps.output.compression -> data_movement.outputs.compression"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.pl_ps.output.compression.enabled -> data_movement.outputs.compression.enabled"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.pl_ps.output.mode -> data_movement.outputs.mode"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.pl_ps.output.precision -> data_movement.outputs.precision"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.pl_ps.output.precision.int_bits -> data_movement.outputs.precision.int_bits"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.pl_ps.output.precision.total_bits -> data_movement.outputs.precision.total_bits"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.pl_ps.output.precision.type -> data_movement.outputs.precision.type"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.pl_ps.output.size_bytes -> data_movement.outputs.size_bytes"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.ps_pl.input -> data_movement.inputs"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.ps_pl.input.compression -> data_movement.inputs.compression"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.ps_pl.input.compression.codec -> data_movement.inputs.compression.codec"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.ps_pl.input.compression.enabled -> data_movement.inputs.compression.enabled"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.ps_pl.input.mode -> data_movement.inputs.interface"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.ps_pl.input.precision -> data_movement.inputs.precision"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.ps_pl.input.precision.int_bits -> data_movement.inputs.precision.int_bits"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.ps_pl.input.precision.total_bits -> data_movement.inputs.precision.total_bits"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.ps_pl.input.precision.type -> data_movement.inputs.precision.type"
+    },
+    {
+      "files": 1,
+      "mapping": "data_movement.ps_pl.input.size_bytes -> data_movement.inputs.size_bytes"
+    },
+    {
+      "files": 1,
+      "mapping": "optimization.parallel_policy -> optimization.parallel.policy"
+    }
+  ],
+  "most_common_paths": [
+    {
+      "files": 31,
+      "path": "version"
+    },
+    {
+      "files": 30,
+      "path": "data_movement"
+    },
+    {
+      "files": 30,
+      "path": "model"
+    },
+    {
+      "files": 30,
+      "path": "model.format"
+    },
+    {
+      "files": 30,
+      "path": "model.path"
+    },
+    {
+      "files": 30,
+      "path": "pipeline"
+    },
+    {
+      "files": 30,
+      "path": "pipeline.mode"
+    },
+    {
+      "files": 30,
+      "path": "pipeline.outputs"
+    },
+    {
+      "files": 30,
+      "path": "pipeline.outputs.top_kernel_name"
+    },
+    {
+      "files": 30,
+      "path": "project"
+    },
+    {
+      "files": 30,
+      "path": "project.clean"
+    },
+    {
+      "files": 30,
+      "path": "project.name"
+    },
+    {
+      "files": 30,
+      "path": "project.out_dir"
+    },
+    {
+      "files": 30,
+      "path": "targets"
+    },
+    {
+      "files": 30,
+      "path": "targets.platform"
+    },
+    {
+      "files": 30,
+      "path": "targets.platform.board"
+    },
+    {
+      "files": 30,
+      "path": "targets.platform.clocks"
+    },
+    {
+      "files": 30,
+      "path": "targets.platform.part"
+    },
+    {
+      "files": 29,
+      "path": "operators"
+    },
+    {
+      "files": 29,
+      "path": "operators.defaults"
+    },
+    {
+      "files": 29,
+      "path": "operators.defaults.activation_insert"
+    },
+    {
+      "files": 29,
+      "path": "operators.defaults.activation_insert.alpha"
+    },
+    {
+      "files": 29,
+      "path": "operators.defaults.activation_insert.except_last"
+    },
+    {
+      "files": 29,
+      "path": "operators.defaults.activation_insert.kind"
+    },
+    {
+      "files": 29,
+      "path": "operators.supported"
+    },
+    {
+      "files": 24,
+      "path": "defaults"
+    },
+    {
+      "files": 24,
+      "path": "memory"
+    },
+    {
+      "files": 24,
+      "path": "memory.activation_storage"
+    },
+    {
+      "files": 24,
+      "path": "memory.weight_storage"
+    },
+    {
+      "files": 24,
+      "path": "name"
+    },
+    {
+      "files": 21,
+      "path": "command_template"
+    },
+    {
+      "files": 21,
+      "path": "defaults.board"
+    },
+    {
+      "files": 21,
+      "path": "defaults.config_path"
+    },
+    {
+      "files": 21,
+      "path": "materialize_configs"
+    },
+    {
+      "files": 21,
+      "path": "materialize_configs.enabled"
+    },
+    {
+      "files": 20,
+      "path": "build"
+    },
+    {
+      "files": 20,
+      "path": "build.stages"
+    },
+    {
+      "files": 20,
+      "path": "build.stages.bitstream"
+    },
+    {
+      "files": 20,
+      "path": "build.stages.cpp"
+    },
+    {
+      "files": 20,
+      "path": "build.stages.hls_project"
+    },
+    {
+      "files": 20,
+      "path": "build.stages.hls_synthesis"
+    },
+    {
+      "files": 20,
+      "path": "build.stages.reports"
+    },
+    {
+      "files": 20,
+      "path": "build.stages.runtime_package"
+    },
+    {
+      "files": 20,
+      "path": "build.stages.testbench"
+    },
+    {
+      "files": 20,
+      "path": "build.stages.vivado_implementation"
+    },
+    {
+      "files": 20,
+      "path": "build.stages.vivado_project"
+    },
+    {
+      "files": 20,
+      "path": "data_movement.inputs"
+    },
+    {
+      "files": 20,
+      "path": "data_movement.inputs.interface"
+    },
+    {
+      "files": 20,
+      "path": "data_movement.inputs.transport"
+    },
+    {
+      "files": 20,
+      "path": "data_movement.outputs"
+    }
+  ],
+  "passed": true,
+  "policy": {
+    "future_w_scope": "Unknown-key rejection and legacy alias removal happen in later YAML cleanup sprints.",
+    "priority_order": "manual YAML override > policy default > compiler default",
+    "scope": "W0-lite repo-level audit of configs/ and examples/ YAML files."
+  },
+  "schema_version": 2,
+  "status": "audit_only",
+  "summary": {
+    "aggregate_statuses": {
+      "canonical": 1405,
+      "deprecated_alias": 30,
+      "legacy_or_internal": 848,
+      "paper_artifact_spec": 34,
+      "section_container": 288,
+      "sweep_template": 1070
+    },
+    "files_scanned": 56,
+    "files_with_deprecated_aliases": 10,
+    "files_with_unknown_or_unclassified_keys": 0,
+    "unreadable_files": 0
+  },
+  "unreadable": []
+}

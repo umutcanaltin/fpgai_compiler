@@ -9,6 +9,7 @@ artifacts exist elsewhere.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -91,6 +92,250 @@ def _source_evidence(source: str) -> dict[str, Any]:
     return {"checks": checks, "present": sorted([k for k, v in checks.items() if v])}
 
 
+def _sequence_commands(runtime_sequence: Any) -> set[str]:
+    seq = runtime_sequence
+    if isinstance(seq, dict):
+        seq = seq.get("sequence", [])
+    commands: set[str] = set()
+    if not isinstance(seq, list):
+        return commands
+    for item in seq:
+        if isinstance(item, str):
+            commands.add(item)
+        elif isinstance(item, dict):
+            for key in item.keys():
+                commands.add(str(key))
+    return commands
+
+
+def _requested_source_features(
+    *,
+    raw_config: dict[str, Any] | None,
+    pipeline_mode: str,
+    runtime_sequence: Any,
+    source: str,
+) -> dict[str, bool]:
+    commands = _sequence_commands(runtime_sequence)
+    raw = raw_config or {}
+    weights_mode = str(_get(raw.get("weights", {}), "mode", "") or "").strip().lower().replace("-", "_")
+    training = raw.get("training", {}) if isinstance(raw.get("training", {}), dict) else {}
+    data_movement = raw.get("data_movement", {}) if isinstance(raw.get("data_movement", {}), dict) else {}
+    gradients_dm = data_movement.get("gradients", {}) if isinstance(data_movement.get("gradients", {}), dict) else {}
+    optimizer_dm = data_movement.get("optimizer_state", {}) if isinstance(data_movement.get("optimizer_state", {}), dict) else {}
+    optimizer = training.get("optimizer", {}) if isinstance(training.get("optimizer", {}), dict) else {}
+    loss = training.get("loss", {}) if isinstance(training.get("loss", {}), dict) else {}
+
+    import_weights = (
+        "import_weights" in commands
+        or weights_mode in {
+            "import",
+            "import_export",
+            "bram_import_full",
+            "bram_import_export_full",
+            "uram_import_full",
+            "uram_import_export_full",
+            "ddr_tiled",
+            "ddr_tiled_mutable",
+            "tiled",
+            "tiled_mutable",
+        }
+    )
+    export_weights = (
+        "export_weights" in commands
+        or weights_mode in {
+            "import_export",
+            "bram_import_export_full",
+            "uram_import_export_full",
+            "ddr_tiled_mutable",
+            "tiled_mutable",
+        }
+    )
+
+    # A plain embedded inference top does not need a runtime mode switch.  Requiring
+    # FPGAI_MODE_RUN_INFERENCE for that case would push unnecessary mode plumbing
+    # into the generated C++, which is exactly what this report is meant to prevent.
+    run_inference_mode = pipeline_mode != "training_on_device" and (import_weights or export_weights)
+
+    return {
+        "top_function": True,
+        "run_inference_mode": run_inference_mode,
+        "run_training_mode": pipeline_mode == "training_on_device",
+        "import_weights_mode": import_weights,
+        "export_weights_mode": export_weights,
+        "export_gradients_mode": "export_gradients" in commands or bool(gradients_dm.get("export")),
+        "export_optimizer_state_mode": "export_optimizer_state" in commands or bool(optimizer_dm.get("export")),
+        "momentum_optimizer": str(optimizer.get("type", "")).lower() == "momentum",
+        "adam_optimizer": str(optimizer.get("type", "")).lower() == "adam",
+        "cross_entropy_loss": str(loss.get("type", "")).lower() == "cross_entropy" or "cross_entropy" in source,
+    }
+
+
+def _readability_level(raw_config: dict[str, Any] | None) -> str:
+    raw = raw_config or {}
+    codegen = raw.get("codegen", {}) if isinstance(raw.get("codegen", {}), dict) else {}
+    level = str(codegen.get("readability", "high") or "high").strip().lower().replace("-", "_")
+    return level if level in {"compact", "normal", "high", "debug"} else "high"
+
+
+def _source_feature_presence(source: str) -> dict[str, bool]:
+    def has_exact_mode(name: str) -> bool:
+        # Do not let FPGAI_MODE_EXPORT_WEIGHTS_STREAM count as the regular
+        # export_weights mode.  The readability/resource hygiene check is about
+        # whether the user-requested PS/PL runtime mode is materialized.
+        return re.search(rf"\b{name}\b(?!_)", source) is not None
+
+    return {
+        "top_function": "void deeplearn(" in source,
+        "run_inference_mode": has_exact_mode("FPGAI_MODE_RUN_INFERENCE"),
+        "run_training_mode": has_exact_mode("FPGAI_MODE_RUN_TRAINING"),
+        "import_weights_mode": has_exact_mode("FPGAI_MODE_IMPORT_WEIGHTS"),
+        "export_weights_mode": has_exact_mode("FPGAI_MODE_EXPORT_WEIGHTS"),
+        "export_gradients_mode": has_exact_mode("FPGAI_MODE_EXPORT_GRADIENTS"),
+        "export_optimizer_state_mode": has_exact_mode("FPGAI_MODE_EXPORT_OPTIMIZER_STATE"),
+        "momentum_optimizer": "FPGAI Momentum optimizer update kernel" in source or "FPGAI_MOMENTUM_" in source,
+        "adam_optimizer": "FPGAI Adam optimizer update kernel" in source or "FPGAI_ADAM_" in source,
+        "cross_entropy_loss": "FPGAI cross_entropy loss kernel" in source or "softmax_denom" in source,
+    }
+
+
+def _emit_cpp_readability_and_validation_reports(
+    reports: Path,
+    *,
+    raw_config: dict[str, Any] | None,
+    pipeline_mode: str,
+    runtime_sequence: Any,
+    source: str,
+    source_path: Path,
+) -> dict[str, Path]:
+    requested = _requested_source_features(
+        raw_config=raw_config,
+        pipeline_mode=pipeline_mode,
+        runtime_sequence=runtime_sequence,
+        source=source,
+    )
+    present = _source_feature_presence(source)
+    level = _readability_level(raw_config)
+    placeholder_tokens = [
+        "TODO",
+        "FIXME",
+        "not implemented",
+        "planning-only",
+        "placeholder",
+        "future work",
+    ]
+    lowered_source = source.lower()
+    placeholders = [token for token in placeholder_tokens if token.lower() in lowered_source]
+    comments = [line for line in source.splitlines() if line.strip().startswith("//")]
+    section_markers = [line.strip() for line in comments if "====" in line or "----" in line or "FPGAI generated" in line or "Sections:" in line]
+
+    required_missing = sorted(name for name, wanted in requested.items() if wanted and not present.get(name, False))
+    unrequested_present = sorted(
+        name for name, wanted in requested.items()
+        if not wanted and present.get(name, False) and name not in {"top_function"}
+    )
+    min_comments = {"compact": 0, "normal": 1, "high": 5, "debug": 5}.get(level, 5)
+    readability_checks = {
+        "top_source_present": bool(source),
+        "top_function_present": present["top_function"],
+        "readability_level_resolved": level in {"compact", "normal", "high", "debug"},
+        "comment_density_matches_level": len(comments) >= min_comments,
+        "section_summary_present": level == "compact" or bool(section_markers),
+        "no_placeholder_markers": not placeholders,
+        "unrequested_runtime_features_absent": not unrequested_present,
+        "requested_runtime_features_present": not required_missing,
+    }
+    readability_status = "passed" if all(readability_checks.values()) else "failed"
+    readability_payload: dict[str, Any] = {
+        "schema_version": 1,
+        "artifact_kind": "generated_cpp_readability",
+        "status": readability_status,
+        "source": str(source_path),
+        "readability_level": level,
+        "comment_line_count": len(comments),
+        "section_markers": section_markers[:40],
+        "checks": readability_checks,
+        "placeholder_markers": placeholders,
+        "requested_features": requested,
+        "present_features": present,
+        "unrequested_present_features": unrequested_present,
+        "required_missing_features": required_missing,
+        "resource_hygiene_rule": "Unrequested import/export/runtime paths must be absent from generated C++ so they cannot affect readability, latency, or HLS resources.",
+    }
+
+    validation_checks = {
+        "source_structurally_present": bool(source),
+        "top_function_present": present["top_function"],
+        "requested_features_present": not required_missing,
+        "unrequested_features_absent": not unrequested_present,
+        "no_placeholder_markers": not placeholders,
+    }
+    validation_status = "passed" if all(validation_checks.values()) else "failed"
+    validation_payload: dict[str, Any] = {
+        "schema_version": 1,
+        "artifact_kind": "generated_cpp_validation",
+        "status": validation_status,
+        "validation_scope": "static_generated_source_contract",
+        "tool_status": "not_applicable",
+        "source": str(source_path),
+        "checks": validation_checks,
+        "requested_features": requested,
+        "present_features": present,
+        "unrequested_present_features": unrequested_present,
+        "required_missing_features": required_missing,
+        "note": "This report validates generated-source structure only. HLS CSim/synthesis, Vivado, and FPGA execution remain separate validation stages.",
+    }
+
+    readability_json = reports / "generated_cpp_readability.json"
+    readability_md = reports / "generated_cpp_readability.md"
+    validation_json = reports / "generated_cpp_validation.json"
+    validation_md = reports / "generated_cpp_validation.md"
+
+    readability_json.write_text(json.dumps(readability_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    readability_md.write_text(
+        "\n".join([
+            "# Generated C++ readability report",
+            "",
+            f"Status: `{readability_status}`",
+            f"Readability level: `{level}`",
+            f"Comment lines: `{len(comments)}`",
+            "",
+            "## Checks",
+            *[f"- {name}: `{str(value).lower()}`" for name, value in readability_checks.items()],
+            "",
+            "## Requested features",
+            *[f"- {name}: `{str(value).lower()}` present=`{str(present.get(name, False)).lower()}`" for name, value in sorted(requested.items())],
+            "",
+            "## Resource hygiene",
+            f"- Unrequested generated features: `{', '.join(unrequested_present) if unrequested_present else 'none'}`",
+            f"- Missing requested features: `{', '.join(required_missing) if required_missing else 'none'}`",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    validation_json.write_text(json.dumps(validation_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    validation_md.write_text(
+        "\n".join([
+            "# Generated C++ validation report",
+            "",
+            f"Status: `{validation_status}`",
+            "Scope: `static_generated_source_contract`",
+            "Tool status: `not_applicable`",
+            "",
+            "## Checks",
+            *[f"- {name}: `{str(value).lower()}`" for name, value in validation_checks.items()],
+            "",
+            "## Truth boundary",
+            "This report does not claim HLS synthesis, Vivado implementation, or FPGA execution success.",
+        ]) + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "generated_cpp_readability_json": readability_json,
+        "generated_cpp_readability_md": readability_md,
+        "generated_cpp_validation_json": validation_json,
+        "generated_cpp_validation_md": validation_md,
+    }
+
+
 def emit_generated_hls_explanation_reports(
     out_dir: str | Path,
     *,
@@ -114,6 +359,14 @@ def emit_generated_hls_explanation_reports(
     params_path = hls / "include" / "fpgai_params.h"
     tb_path = hls / "src" / "tb.cpp"
     source = _read_text(source_path)
+    cpp_quality_artifacts = _emit_cpp_readability_and_validation_reports(
+        reports,
+        raw_config=raw_config,
+        pipeline_mode=pipeline_mode,
+        runtime_sequence=runtime_sequence,
+        source=source,
+        source_path=source_path,
+    )
 
     generated_files = {
         "top_source": str(source_path),
@@ -252,4 +505,5 @@ def emit_generated_hls_explanation_reports(
         "hardware_design_decisions_json": decisions_json,
         "hardware_design_decisions_md": decisions_md,
         "codegen_review_checklist_md": checklist_md,
+        **cpp_quality_artifacts,
     }

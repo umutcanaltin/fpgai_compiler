@@ -56,6 +56,15 @@ class BoardInfo:
     supports_hls_ip_export: bool = True
     supports_vivado_synth: bool = True
     supports_vivado_impl: bool = True
+
+    # Conservative PS/PL interface guide rails used by board-fit checks.
+    # These are compiler-side availability checks, not a substitute for Vivado DRC.
+    max_axi_dma: Optional[int] = None
+    max_axi_stream_ports: Optional[int] = None
+    max_m_axi_bundles: Optional[int] = None
+    ps_pl_memory_ports: Optional[int] = None
+    supports_ddr: bool = True
+
     notes: str = ""
 
     def to_dict(self) -> Dict[str, object]:
@@ -84,6 +93,15 @@ class BoardInfo:
             out["safe_clock_mhz"] = float(self.safe_clock_mhz)
         if self.max_clock_mhz is not None:
             out["max_clock_mhz"] = float(self.max_clock_mhz)
+        if self.max_axi_dma is not None:
+            out["max_axi_dma"] = int(self.max_axi_dma)
+        if self.max_axi_stream_ports is not None:
+            out["max_axi_stream_ports"] = int(self.max_axi_stream_ports)
+        if self.max_m_axi_bundles is not None:
+            out["max_m_axi_bundles"] = int(self.max_m_axi_bundles)
+        if self.ps_pl_memory_ports is not None:
+            out["ps_pl_memory_ports"] = int(self.ps_pl_memory_ports)
+        out["supports_ddr"] = bool(self.supports_ddr)
         return out
 
 
@@ -108,6 +126,11 @@ _BOARDS: Dict[str, BoardInfo] = {
         dsp=220,
         ddr_bytes=512 * 1024 * 1024,
         ddr_note="PYNQ-Z2 board DDR capacity. Usable PL allocation depends on runtime/system reservation.",
+        max_axi_dma=2,
+        max_axi_stream_ports=4,
+        max_m_axi_bundles=4,
+        ps_pl_memory_ports=4,
+        supports_ddr=True,
         notes=(
             "Supported Vivado bridge target using Zynq-7000 PS7 and PYNQ "
             "bit/.hwh overlay path."
@@ -131,6 +154,11 @@ _BOARDS: Dict[str, BoardInfo] = {
         dsp=1248,
         ddr_bytes=4 * _GIB,
         ddr_note="Kria K26/KV260 DDR capacity. Usable PL allocation depends on Linux/CMA/runtime configuration.",
+        max_axi_dma=4,
+        max_axi_stream_ports=8,
+        max_m_axi_bundles=8,
+        ps_pl_memory_ports=6,
+        supports_ddr=True,
         notes="Supported Vivado bridge target using ZynqMP PS and Kria XSA handoff path.",
     ),
     "kr260": BoardInfo(
@@ -151,6 +179,11 @@ _BOARDS: Dict[str, BoardInfo] = {
         dsp=1248,
         ddr_bytes=4 * _GIB,
         ddr_note="Kria K26/KR260 DDR capacity. Usable PL allocation depends on Linux/CMA/runtime configuration.",
+        max_axi_dma=4,
+        max_axi_stream_ports=8,
+        max_m_axi_bundles=8,
+        ps_pl_memory_ports=6,
+        supports_ddr=True,
         notes="Supported Vivado bridge target using ZynqMP PS and Kria XSA handoff path.",
     ),
 }

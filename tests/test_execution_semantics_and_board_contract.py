@@ -193,3 +193,56 @@ def test_native_batch_accumulation_generates_hls_modes_and_runtime_commands(tmp_
     assert "def reset_accumulators" in api
     assert "def accumulate_gradients" in api
     assert "def apply_accumulated_gradients" in api
+
+
+def test_batch_accumulation_numeric_validation_emits_reference_and_missing_capture_status(tmp_path: Path) -> None:
+    raw = copy.deepcopy(_load_training_config())
+    raw.setdefault("project", {})["out_dir"] = str(tmp_path / "training_native_accum_numeric")
+    raw.setdefault("pipeline", {})["mode"] = "training_on_device"
+    raw.setdefault("training", {})["batch_size"] = 2
+    raw["training"]["gradient_accumulation"] = {"steps": 2, "mode": "native", "policy": "average"}
+    raw.setdefault("runtime", {})["sequence"] = [
+        "reset_accumulators",
+        {"accumulate_gradients": {"steps": 2}},
+        "apply_accumulated_gradients",
+    ]
+    _cpp_only(raw)
+
+    result = _compile_raw(raw, tmp_path)
+    out_dir = Path(result.out_dir)
+    numeric = json.loads((out_dir / "reports/numeric_validation.json").read_text(encoding="utf-8"))
+    batch = numeric["batch_accumulation"]
+
+    assert batch["requested"] is True
+    assert batch["active"] is True
+    assert batch["status"] == "artifact_missing"
+    assert batch["passed"] is False
+    assert batch["batch_size"] == 2
+    assert batch["accumulation_steps"] == 2
+    assert batch["accumulation_policy"] == "average"
+    assert batch["optimizer_apply_count"] == 1
+    assert batch["required_runtime_commands"]["reset_accumulators"] is True
+    assert batch["required_runtime_commands"]["accumulate_gradients"] is True
+    assert batch["required_runtime_commands"]["apply_accumulated_gradients"] is True
+    assert (out_dir / "training_reference/accumulated_grads_ref.bin").exists()
+    assert (out_dir / "training_reference/weights_after_accum_ref.bin").exists()
+    assert batch["comparisons"]["accumulated_gradients"]["status"] == "artifact_missing"
+
+
+def test_batch_accumulation_numeric_validation_not_requested_for_plain_training(tmp_path: Path) -> None:
+    raw = copy.deepcopy(_load_training_config())
+    raw.setdefault("project", {})["out_dir"] = str(tmp_path / "training_no_accum_numeric")
+    raw.setdefault("pipeline", {})["mode"] = "training_on_device"
+    raw.setdefault("runtime", {})["sequence"] = ["run_training"]
+    raw.setdefault("training", {})["batch_size"] = 1
+    raw["training"]["gradient_accumulation"] = {"steps": 1, "mode": "none"}
+    _cpp_only(raw)
+
+    result = _compile_raw(raw, tmp_path)
+    out_dir = Path(result.out_dir)
+    numeric = json.loads((out_dir / "reports/numeric_validation.json").read_text(encoding="utf-8"))
+    batch = numeric["batch_accumulation"]
+
+    assert batch["requested"] is False
+    assert batch["status"] == "not_requested"
+    assert not (out_dir / "training_reference/accumulated_grads_ref.bin").exists()

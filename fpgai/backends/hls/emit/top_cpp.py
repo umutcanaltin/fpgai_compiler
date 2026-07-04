@@ -2245,11 +2245,14 @@ def _fpgai_runtime_load_block(graph, *, mode: str, resolved_semantics: str | Non
             "    // FPGAI runtime weight command modes.",
             "    // mode 0: run inference with the already imported local weights.",
             "    // mode 1: import_weights copies the full runtime payload from weights_mem into local storage and returns.",
-            "    // mode 2: export_weights copies current local weights back to weights_mem and returns when export is supported.",
             "    static const int FPGAI_MODE_RUN_INFERENCE = 0;",
             "    static const int FPGAI_MODE_IMPORT_WEIGHTS = 1;",
-            "    static const int FPGAI_MODE_EXPORT_WEIGHTS = 2;",
         ])
+        if export_enabled:
+            lines.extend([
+                "    // mode 2: export_weights copies current local weights back to weights_mem.",
+                "    static const int FPGAI_MODE_EXPORT_WEIGHTS = 2;",
+            ])
         if storage_impl == "uram":
             lines.extend([
                 "    // Runtime-imported URAM weight storage.",
@@ -2585,14 +2588,37 @@ def _fpgai_io_movement_kind(kwargs, kind: str) -> str:
     raw = kwargs.get("raw_cfg") or {}
     if kind == "input":
         prefix = "data_movement.inputs.import"
+        direct_prefix = "data_movement.inputs"
         legacy_prefix = "data_movement.input.load"
     else:
         prefix = "data_movement.outputs.export"
+        direct_prefix = "data_movement.outputs"
         legacy_prefix = "data_movement.output.store"
 
-    interface = interface or str(_fpgai_cfg_get(raw, f"{prefix}.interface", _fpgai_cfg_get(raw, f"{legacy_prefix}.interface", "")) or "").strip().lower().replace("-", "_")
-    transport = transport or str(_fpgai_cfg_get(raw, f"{prefix}.transport", _fpgai_cfg_get(raw, f"{legacy_prefix}.transport", "")) or "").strip().lower().replace("-", "_")
-    policy = policy or str(_fpgai_cfg_get(raw, f"{prefix}.policy", _fpgai_cfg_get(raw, f"{legacy_prefix}.policy", "")) or "").strip().lower().replace("-", "_")
+    interface = interface or str(
+        _fpgai_cfg_get(
+            raw,
+            f"{prefix}.interface",
+            _fpgai_cfg_get(raw, f"{direct_prefix}.interface", _fpgai_cfg_get(raw, f"{legacy_prefix}.interface", "")),
+        )
+        or ""
+    ).strip().lower().replace("-", "_")
+    transport = transport or str(
+        _fpgai_cfg_get(
+            raw,
+            f"{prefix}.transport",
+            _fpgai_cfg_get(raw, f"{direct_prefix}.transport", _fpgai_cfg_get(raw, f"{legacy_prefix}.transport", "")),
+        )
+        or ""
+    ).strip().lower().replace("-", "_")
+    policy = policy or str(
+        _fpgai_cfg_get(
+            raw,
+            f"{prefix}.policy",
+            _fpgai_cfg_get(raw, f"{direct_prefix}.policy", _fpgai_cfg_get(raw, f"{legacy_prefix}.policy", "")),
+        )
+        or ""
+    ).strip().lower().replace("-", "_")
 
     if interface in {"m_axi", "maxi", "ddr"} and (policy in {"", "full"}):
         return "m_axi_full"
@@ -2603,6 +2629,28 @@ def _fpgai_io_movement_kind(kwargs, kind: str) -> str:
             return "axi_stream_tiled"
         return "axi_stream_full"
     return "axi_stream_full"
+
+
+def _fpgai_io_tile_size(kwargs, kind: str) -> int | None:
+    communication_plan = kwargs.get("communication_plan")
+    notes = _fpgai_edge_notes(communication_plan, kind)
+    value = notes.get("tile_size")
+    raw = kwargs.get("raw_cfg") or {}
+    if kind == "input":
+        prefixes = ("data_movement.inputs.import", "data_movement.inputs", "data_movement.input.load")
+    else:
+        prefixes = ("data_movement.outputs.export", "data_movement.outputs", "data_movement.output.store")
+    for prefix in prefixes:
+        if value is None:
+            value = _fpgai_cfg_get(raw, f"{prefix}.tile_size", None)
+        tiled = _fpgai_cfg_get(raw, f"{prefix}.tiled", None)
+        if value is None and isinstance(tiled, dict):
+            value = tiled.get("tile_size", tiled.get("size", tiled.get("words")))
+    try:
+        parsed = int(value)
+    except Exception:
+        return None
+    return parsed if parsed > 0 else None
 
 
 def _fpgai_ensure_ap_int(source: str) -> str:
@@ -2674,7 +2722,7 @@ def _fpgai_rewrite_input_stream_to_m_axi(source: str) -> str:
     return new_source
 
 
-def _fpgai_rewrite_input_stream_to_m_axi_tiled(source: str) -> str:
+def _fpgai_rewrite_input_stream_to_m_axi_tiled(source: str, *, requested_tile_size: int | None = None) -> str:
     import re
 
     decl = re.search(r"    (?P<typ>\w+) (?P<buf>layer_in)\[(?P<size>\d+)\];", source)
@@ -2683,7 +2731,7 @@ def _fpgai_rewrite_input_stream_to_m_axi_tiled(source: str) -> str:
     typ = decl.group("typ")
     buf = decl.group("buf")
     size = int(decl.group("size"))
-    tile = min(64, max(1, size))
+    tile = min(int(requested_tile_size or 64), max(1, size))
 
     pattern = re.compile(
         r"    static const int FPGAI_ACT_BITS = (?P<bits>\d+);\n"
@@ -2771,7 +2819,7 @@ def _fpgai_rewrite_output_stream_to_m_axi(source: str) -> str:
     return new_source
 
 
-def _fpgai_rewrite_output_stream_to_m_axi_tiled(source: str) -> str:
+def _fpgai_rewrite_output_stream_to_m_axi_tiled(source: str, *, requested_tile_size: int | None = None) -> str:
     import re
 
     pattern = re.compile(
@@ -2798,7 +2846,7 @@ def _fpgai_rewrite_output_stream_to_m_axi_tiled(source: str) -> str:
         size = int(match.group("size"))
         typ = match.group("typ")
         buf = match.group("buf")
-        tile = min(64, max(1, size))
+        tile = min(int(requested_tile_size or 64), max(1, size))
         return (
             f"    static const int FPGAI_OUTPUT_TILE_SIZE = {tile};\n"
             f"    {typ} output_tile[FPGAI_OUTPUT_TILE_SIZE];\n"
@@ -2829,7 +2877,7 @@ def _fpgai_rewrite_output_stream_to_m_axi_tiled(source: str) -> str:
 
 
 
-def _fpgai_rewrite_input_stream_to_axis_tiled(source: str) -> str:
+def _fpgai_rewrite_input_stream_to_axis_tiled(source: str, *, requested_tile_size: int | None = None) -> str:
     import re
 
     decl = re.search(r"    (?P<typ>\w+) (?P<buf>layer_in)\[(?P<size>\d+)\];", source)
@@ -2838,7 +2886,7 @@ def _fpgai_rewrite_input_stream_to_axis_tiled(source: str) -> str:
     typ = decl.group("typ")
     buf = decl.group("buf")
     size = int(decl.group("size"))
-    tile = min(64, max(1, size))
+    tile = min(int(requested_tile_size or 64), max(1, size))
 
     pattern = re.compile(
         r"    static const int FPGAI_ACT_BITS = (?P<bits>\d+);\n"
@@ -2886,7 +2934,7 @@ def _fpgai_rewrite_input_stream_to_axis_tiled(source: str) -> str:
     return new_source
 
 
-def _fpgai_rewrite_output_stream_to_axis_tiled(source: str) -> str:
+def _fpgai_rewrite_output_stream_to_axis_tiled(source: str, *, requested_tile_size: int | None = None) -> str:
     import re
 
     pattern = re.compile(
@@ -2913,7 +2961,7 @@ def _fpgai_rewrite_output_stream_to_axis_tiled(source: str) -> str:
         size = int(match.group("size"))
         typ = match.group("typ")
         buf = match.group("buf")
-        tile = min(64, max(1, size))
+        tile = min(int(requested_tile_size or 64), max(1, size))
         return (
             f"    static const int FPGAI_AXIS_OUTPUT_TILE_SIZE = {tile};\n"
             f"    {typ} output_tile[FPGAI_AXIS_OUTPUT_TILE_SIZE];\n"
@@ -2948,18 +2996,18 @@ def _fpgai_rewrite_output_stream_to_axis_tiled(source: str) -> str:
     return new_source
 
 
-def _fpgai_apply_axis_tiled_io(source: str, *, input_kind: str, output_kind: str) -> str:
+def _fpgai_apply_axis_tiled_io(source: str, *, input_kind: str, output_kind: str, input_tile_size: int | None = None, output_tile_size: int | None = None) -> str:
     if input_kind != "axi_stream_tiled" and output_kind != "axi_stream_tiled":
         return source
     if "FPGAI AXI-stream tiled input/output movement" in source:
         return source
     if input_kind == "axi_stream_tiled":
-        source = _fpgai_rewrite_input_stream_to_axis_tiled(source)
+        source = _fpgai_rewrite_input_stream_to_axis_tiled(source, requested_tile_size=input_tile_size)
     if output_kind == "axi_stream_tiled":
-        source = _fpgai_rewrite_output_stream_to_axis_tiled(source)
+        source = _fpgai_rewrite_output_stream_to_axis_tiled(source, requested_tile_size=output_tile_size)
     return "// FPGAI AXI-stream tiled input/output movement.\n" + source
 
-def _fpgai_apply_m_axi_io(source: str, *, input_kind: str, output_kind: str) -> str:
+def _fpgai_apply_m_axi_io(source: str, *, input_kind: str, output_kind: str, input_tile_size: int | None = None, output_tile_size: int | None = None) -> str:
     input_m_axi = input_kind in {"m_axi_full", "m_axi_tiled"}
     output_m_axi = output_kind in {"m_axi_full", "m_axi_tiled"}
     if not input_m_axi and not output_m_axi:
@@ -2971,21 +3019,35 @@ def _fpgai_apply_m_axi_io(source: str, *, input_kind: str, output_kind: str) -> 
     if input_kind == "m_axi_full":
         source = _fpgai_rewrite_input_stream_to_m_axi(source)
     elif input_kind == "m_axi_tiled":
-        source = _fpgai_rewrite_input_stream_to_m_axi_tiled(source)
+        source = _fpgai_rewrite_input_stream_to_m_axi_tiled(source, requested_tile_size=input_tile_size)
     if output_kind == "m_axi_full":
         source = _fpgai_rewrite_output_stream_to_m_axi(source)
     elif output_kind == "m_axi_tiled":
-        source = _fpgai_rewrite_output_stream_to_m_axi_tiled(source)
+        source = _fpgai_rewrite_output_stream_to_m_axi_tiled(source, requested_tile_size=output_tile_size)
     return "// FPGAI m_axi input/output movement.\n" + source
 
 
 def emit_top_cpp(*args, **kwargs):
     input_kind = _fpgai_io_movement_kind(kwargs, "input")
     output_kind = _fpgai_io_movement_kind(kwargs, "output")
+    input_tile_size = _fpgai_io_tile_size(kwargs, "input")
+    output_tile_size = _fpgai_io_tile_size(kwargs, "output")
 
     source = _fpgai_m_axi_io_previous_emit_top_cpp(*args, **kwargs)
-    source = _fpgai_apply_m_axi_io(source, input_kind=input_kind, output_kind=output_kind)
-    return _fpgai_apply_axis_tiled_io(source, input_kind=input_kind, output_kind=output_kind)
+    source = _fpgai_apply_m_axi_io(
+        source,
+        input_kind=input_kind,
+        output_kind=output_kind,
+        input_tile_size=input_tile_size,
+        output_tile_size=output_tile_size,
+    )
+    return _fpgai_apply_axis_tiled_io(
+        source,
+        input_kind=input_kind,
+        output_kind=output_kind,
+        input_tile_size=input_tile_size,
+        output_tile_size=output_tile_size,
+    )
 
 
 # FPGAI activation storage wrapper.

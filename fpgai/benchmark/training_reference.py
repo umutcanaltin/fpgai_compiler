@@ -29,11 +29,34 @@ class TrainingReferenceResult:
     loss_before: float
     loss_after: float
     layerwise_dir: Path
+    optimizer_type: str = "sgd"
+    optimizer_bias_correction: bool = False
+    optimizer_state_before_flat_path: Path | None = None
+    optimizer_state_after_flat_path: Path | None = None
+    loss_type: str = "mse"
+    logits_ref_path: Path | None = None
+    softmax_ref_path: Path | None = None
+    cross_entropy_loss_ref_json: Path | None = None
+    dlogits_ref_path: Path | None = None
+    tiled_inputs_ref_path: Path | None = None
+    tiled_labels_ref_path: Path | None = None
+    tiled_outputs_ref_path: Path | None = None
+    tiled_gradients_ref_path: Path | None = None
+    tiled_weights_after_ref_path: Path | None = None
 
 
 def _write_f32(path: Path, array: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     np.asarray(array, dtype=np.float32).reshape(-1).tofile(path)
+
+
+def _training_tiled_io_requested(raw_cfg: Dict[str, Any]) -> bool:
+    movement = (raw_cfg.get("data_movement", {}) or {}) if isinstance(raw_cfg, dict) else {}
+    for tensor, direction in (("inputs", "import"), ("labels", "import"), ("outputs", "export")):
+        spec = ((movement.get(tensor, {}) or {}).get(direction, {}) or {})
+        if str(spec.get("policy", "")).strip().lower() == "tiled" and str(spec.get("interface", "")).strip().lower() in {"m_axi", "axi_stream"}:
+            return True
+    return False
 
 
 def _softmax(x: np.ndarray) -> np.ndarray:
@@ -1191,6 +1214,30 @@ def _mse_loss_and_grad(
     return loss, gradient.astype(np.float32)
 
 
+
+
+def _cross_entropy_loss_and_grad(
+    logits: np.ndarray,
+    target: np.ndarray,
+):
+    logits = logits.astype(np.float32).reshape(-1)
+    target = target.astype(np.float32).reshape(-1)
+    if target.size != logits.size:
+        raise RuntimeError(
+            "cross_entropy target size must match logits size: "
+            f"target={target.size}, logits={logits.size}"
+        )
+    shifted = logits - np.max(logits)
+    exp_values = np.exp(shifted).astype(np.float32)
+    denom = float(np.sum(exp_values))
+    if denom <= 0.0:
+        probabilities = np.zeros_like(logits, dtype=np.float32)
+    else:
+        probabilities = (exp_values / denom).astype(np.float32)
+    loss = float(-np.sum(target * np.log(probabilities + np.float32(1.0e-7))))
+    gradient = (probabilities - target).astype(np.float32)
+    return loss, gradient, probabilities
+
 def _is_final_softmax_mse_case(
     graph,
     raw_config: Dict[str, Any],
@@ -1255,6 +1302,12 @@ def run_training_reference_step(
         training_config.get("optimizer", {})
         or {}
     )
+    loss_config = (
+        training_config.get("loss", {})
+        or {}
+    )
+    loss_type = str(loss_config.get("type", "mse")).strip().lower().replace("-", "_")
+    tiled_io_requested = _training_tiled_io_requested(raw_cfg)
 
     learning_rate = float(
         optimizer_config.get(
@@ -1262,6 +1315,21 @@ def run_training_reference_step(
             0.01,
         )
     )
+    optimizer_type = str(optimizer_config.get("type", "sgd")).lower().replace("-", "_")
+    momentum = float(optimizer_config.get("momentum", 0.9))
+    beta1 = float(optimizer_config.get("beta1", 0.9))
+    beta2 = float(optimizer_config.get("beta2", 0.999))
+    epsilon = float(optimizer_config.get("epsilon", 1.0e-8))
+    bias_correction = bool(optimizer_config.get("bias_correction", False))
+
+    tiled_inputs_ref_path = reference_dir / "tiled_inputs_ref.bin" if tiled_io_requested else None
+    tiled_labels_ref_path = reference_dir / "tiled_labels_ref.bin" if tiled_io_requested else None
+    tiled_outputs_ref_path = reference_dir / "tiled_outputs_ref.bin" if tiled_io_requested else None
+    tiled_gradients_ref_path = reference_dir / "tiled_gradients_ref.bin" if tiled_io_requested else None
+    tiled_weights_after_ref_path = reference_dir / "tiled_weights_after_ref.bin" if tiled_io_requested else None
+    if tiled_io_requested:
+        _write_f32(tiled_inputs_ref_path, x_input.astype(np.float32))
+        _write_f32(tiled_labels_ref_path, target.astype(np.float32))
 
     bypass_final_softmax_backward = (
         _is_final_softmax_mse_case(
@@ -1388,13 +1456,44 @@ def run_training_reference_step(
     )
 
     prediction = values[graph.outputs[0]]
+    if tiled_io_requested and tiled_outputs_ref_path is not None:
+        _write_f32(tiled_outputs_ref_path, prediction.astype(np.float32))
 
-    loss_before, output_gradient = (
-        _mse_loss_and_grad(
+    logits_ref_path = None
+    softmax_ref_path = None
+    cross_entropy_loss_ref_json = None
+    dlogits_ref_path = None
+    if loss_type in {"cross_entropy", "ce"}:
+        loss_before, output_gradient, softmax_ref = _cross_entropy_loss_and_grad(
             prediction,
             target.astype(np.float32),
         )
-    )
+        logits_ref_path = reference_dir / "logits_ref.bin"
+        softmax_ref_path = reference_dir / "softmax_ref.bin"
+        cross_entropy_loss_ref_json = reference_dir / "cross_entropy_loss_ref.json"
+        dlogits_ref_path = reference_dir / "dlogits_ref.bin"
+        _write_f32(logits_ref_path, prediction)
+        _write_f32(softmax_ref_path, softmax_ref)
+        _write_f32(dlogits_ref_path, output_gradient)
+        cross_entropy_loss_ref_json.write_text(
+            json.dumps({
+                "loss_type": "cross_entropy",
+                "loss": loss_before,
+                "softmax_stable": True,
+                "num_logits": int(np.asarray(prediction).size),
+                "logits_ref_bin": str(logits_ref_path),
+                "softmax_ref_bin": str(softmax_ref_path),
+                "dlogits_ref_bin": str(dlogits_ref_path),
+            }, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    else:
+        loss_before, output_gradient = (
+            _mse_loss_and_grad(
+                prediction,
+                target.astype(np.float32),
+            )
+        )
 
     gradients_by_tensor: Dict[
         str,
@@ -1704,6 +1803,35 @@ def run_training_reference_step(
             dtype=np.float32,
         )
 
+    optimizer_state_before_chunks: List[np.ndarray] = []
+    optimizer_state_after_chunks: List[np.ndarray] = []
+
+    def _apply_optimizer_update(value: np.ndarray, gradient: np.ndarray) -> np.ndarray:
+        value_flat = value.reshape(-1).astype(np.float32)
+        grad_flat = gradient.reshape(-1).astype(np.float32)
+        if optimizer_type == "momentum":
+            velocity_before = np.zeros_like(grad_flat, dtype=np.float32)
+            velocity_after = (momentum * velocity_before - learning_rate * grad_flat).astype(np.float32)
+            optimizer_state_before_chunks.append(velocity_before)
+            optimizer_state_after_chunks.append(velocity_after)
+            return (value_flat + velocity_after).reshape(value.shape).astype(np.float32)
+        if optimizer_type == "adam":
+            first_before = np.zeros_like(grad_flat, dtype=np.float32)
+            second_before = np.zeros_like(grad_flat, dtype=np.float32)
+            first_after = (beta1 * first_before + (1.0 - beta1) * grad_flat).astype(np.float32)
+            second_after = (beta2 * second_before + (1.0 - beta2) * grad_flat * grad_flat).astype(np.float32)
+            optimizer_state_before_chunks.extend([first_before, second_before])
+            optimizer_state_after_chunks.extend([first_after, second_after])
+            if bias_correction:
+                first_used = (first_after / max(1.0e-12, 1.0 - beta1)).astype(np.float32)
+                second_used = (second_after / max(1.0e-12, 1.0 - beta2)).astype(np.float32)
+            else:
+                first_used = first_after
+                second_used = second_after
+            updated = value_flat - learning_rate * first_used / (np.sqrt(second_used + epsilon).astype(np.float32))
+            return updated.reshape(value.shape).astype(np.float32)
+        return (value_flat - learning_rate * grad_flat).reshape(value.shape).astype(np.float32)
+
     for kind, name in trainable_order:
         parameters = parameter_state[name]
         first_gradient, second_gradient = (
@@ -1711,38 +1839,19 @@ def run_training_reference_step(
         )
 
         if kind in ("dense", "conv"):
-            parameters["W"] = (
-                parameters["W"].reshape(-1)
-                - learning_rate
-                * first_gradient.reshape(-1)
-            ).reshape(
-                parameters["W"].shape
-            ).astype(np.float32)
-
-            parameters["B"] = (
-                parameters["B"].reshape(-1)
-                - learning_rate
-                * second_gradient.reshape(-1)
-            ).reshape(
-                parameters["B"].shape
-            ).astype(np.float32)
+            parameters["W"] = _apply_optimizer_update(parameters["W"], first_gradient)
+            parameters["B"] = _apply_optimizer_update(parameters["B"], second_gradient)
 
         else:
-            parameters["gamma"] = (
-                parameters["gamma"].reshape(-1)
-                - learning_rate
-                * first_gradient.reshape(-1)
-            ).reshape(
-                parameters["gamma"].shape
-            ).astype(np.float32)
+            parameters["gamma"] = _apply_optimizer_update(parameters["gamma"], first_gradient)
+            parameters["beta"] = _apply_optimizer_update(parameters["beta"], second_gradient)
 
-            parameters["beta"] = (
-                parameters["beta"].reshape(-1)
-                - learning_rate
-                * second_gradient.reshape(-1)
-            ).reshape(
-                parameters["beta"].shape
-            ).astype(np.float32)
+    if optimizer_state_before_chunks:
+        optimizer_state_before_flat = np.concatenate(optimizer_state_before_chunks).astype(np.float32)
+        optimizer_state_after_flat = np.concatenate(optimizer_state_after_chunks).astype(np.float32)
+    else:
+        optimizer_state_before_flat = np.zeros((0,), dtype=np.float32)
+        optimizer_state_after_flat = np.zeros((0,), dtype=np.float32)
 
     weights_after_chunks: List[np.ndarray] = []
 
@@ -1789,10 +1898,16 @@ def run_training_reference_step(
         graph.outputs[0]
     ]
 
-    loss_after, _ = _mse_loss_and_grad(
-        prediction_after,
-        target.astype(np.float32),
-    )
+    if loss_type in {"cross_entropy", "ce"}:
+        loss_after, _, _ = _cross_entropy_loss_and_grad(
+            prediction_after,
+            target.astype(np.float32),
+        )
+    else:
+        loss_after, _ = _mse_loss_and_grad(
+            prediction_after,
+            target.astype(np.float32),
+        )
 
     gradients_path = (
         reference_dir / "grads_ref.bin"
@@ -1804,6 +1919,14 @@ def run_training_reference_step(
     weights_after_path = (
         reference_dir
         / "weights_after_ref.bin"
+    )
+    optimizer_state_before_path = (
+        reference_dir
+        / "optimizer_state_before_ref.bin"
+    )
+    optimizer_state_after_path = (
+        reference_dir
+        / "optimizer_state_after_ref.bin"
     )
     summary_json = reference_dir / "summary.json"
     summary_txt = reference_dir / "summary.txt"
@@ -1820,6 +1943,20 @@ def run_training_reference_step(
         weights_after_path,
         weights_after_flat,
     )
+    if tiled_io_requested:
+        if tiled_gradients_ref_path is not None:
+            _write_f32(tiled_gradients_ref_path, gradients_flat)
+        if tiled_weights_after_ref_path is not None:
+            _write_f32(tiled_weights_after_ref_path, weights_after_flat)
+    if optimizer_type in {"momentum", "adam"}:
+        _write_f32(
+            optimizer_state_before_path,
+            optimizer_state_before_flat,
+        )
+        _write_f32(
+            optimizer_state_after_path,
+            optimizer_state_after_flat,
+        )
 
     payload = {
         "loss_before": loss_before,
@@ -1834,6 +1971,34 @@ def run_training_reference_step(
         "bypass_final_softmax_backward": bool(
             bypass_final_softmax_backward
         ),
+        "loss": {
+            "type": "cross_entropy" if loss_type in {"cross_entropy", "ce"} else loss_type,
+            "softmax_stable": bool(loss_type in {"cross_entropy", "ce"}),
+            "logits_ref_bin": str(logits_ref_path) if logits_ref_path is not None else None,
+            "softmax_ref_bin": str(softmax_ref_path) if softmax_ref_path is not None else None,
+            "cross_entropy_loss_ref_json": str(cross_entropy_loss_ref_json) if cross_entropy_loss_ref_json is not None else None,
+            "dlogits_ref_bin": str(dlogits_ref_path) if dlogits_ref_path is not None else None,
+        },
+        "tiled_io": {
+            "requested": bool(tiled_io_requested),
+            "inputs_ref_bin": str(tiled_inputs_ref_path) if tiled_inputs_ref_path is not None else None,
+            "labels_ref_bin": str(tiled_labels_ref_path) if tiled_labels_ref_path is not None else None,
+            "outputs_ref_bin": str(tiled_outputs_ref_path) if tiled_outputs_ref_path is not None else None,
+            "gradients_ref_bin": str(tiled_gradients_ref_path) if tiled_gradients_ref_path is not None else None,
+            "weights_after_ref_bin": str(tiled_weights_after_ref_path) if tiled_weights_after_ref_path is not None else None,
+        },
+        "optimizer": {
+            "type": optimizer_type,
+            "learning_rate": learning_rate,
+            "momentum": momentum if optimizer_type == "momentum" else None,
+            "beta1": beta1 if optimizer_type == "adam" else None,
+            "beta2": beta2 if optimizer_type == "adam" else None,
+            "epsilon": epsilon if optimizer_type == "adam" else None,
+            "bias_correction": bias_correction if optimizer_type == "adam" else False,
+            "state_words": int(optimizer_state_after_flat.size),
+            "state_before_ref_bin": str(optimizer_state_before_path) if optimizer_type in {"momentum", "adam"} else None,
+            "state_after_ref_bin": str(optimizer_state_after_path) if optimizer_type in {"momentum", "adam"} else None,
+        },
     }
 
     summary_json.write_text(
@@ -1849,6 +2014,10 @@ def run_training_reference_step(
                 f"loss_after  : {loss_after}",
                 f"grad_words  : {int(gradients_flat.size)}",
                 f"param_words : {int(weights_before_flat.size)}",
+                f"optimizer   : {optimizer_type}",
+                f"loss        : {loss_type}",
+                f"tiled_io    : {bool(tiled_io_requested)}",
+                f"optimizer_state_words : {int(optimizer_state_after_flat.size)}",
                 f"layerwise   : {layerwise_dir}",
                 (
                     "bypass_final_softmax_backward : "
@@ -1870,4 +2039,13 @@ def run_training_reference_step(
         loss_before=loss_before,
         loss_after=loss_after,
         layerwise_dir=layerwise_dir,
+        optimizer_type=optimizer_type,
+        optimizer_bias_correction=bias_correction if optimizer_type == "adam" else False,
+        optimizer_state_before_flat_path=(optimizer_state_before_path if optimizer_type in {"momentum", "adam"} else None),
+        optimizer_state_after_flat_path=(optimizer_state_after_path if optimizer_type in {"momentum", "adam"} else None),
+        loss_type=("cross_entropy" if loss_type in {"cross_entropy", "ce"} else loss_type),
+        logits_ref_path=logits_ref_path,
+        softmax_ref_path=softmax_ref_path,
+        cross_entropy_loss_ref_json=cross_entropy_loss_ref_json,
+        dlogits_ref_path=dlogits_ref_path,
     )

@@ -1,0 +1,16 @@
+name: paper_pipeline_parallel_sweep
+description: Reference sweep template for pipeline II, PE, SIMD, and partition-factor effects.
+defaults:
+  base_config: examples/inference/mnist_mlp_embedded.yml
+  output_root: paper_experiments/pipeline_parallel_sweep
+design_points:
+  - name: baseline_ii1_pe1_simd1
+    optimization: {pipeline: {ii: 1, style: balanced}, parallel: {pe: 1, simd: 1, partition_factor: 1}}
+  - name: pe4_simd2_partition4
+    optimization: {pipeline: {ii: 1, style: aggressive}, parallel: {pe: 4, simd: 2, partition_factor: 4}}
+  - name: ii2_pe4_simd2
+    optimization: {pipeline: {ii: 2, style: balanced}, parallel: {pe: 4, simd: 2, partition_factor: 4}}
+materialize_configs:
+  enabled: true
+  parameter_mappings:
+    optimization: {path: optimization, create: true}

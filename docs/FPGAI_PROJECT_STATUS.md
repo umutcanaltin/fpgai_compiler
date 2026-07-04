@@ -1984,3 +1984,500 @@ Implemented real generated HLS support for `training.loss.type: cross_entropy`. 
 - Runtime API scaffold exposes `export_optimizer_state()`.
 - `numeric_validation.json` now distinguishes generated export-capture support from missing runtime/testbench comparison files.
 - Remaining debt: board/testbench capture must write `optimizer_state_after.bin` and compare it to `optimizer_state_after_ref.bin` for paper-safe optimizer-state correctness.
+
+## Sprint 29T+ optimizer-state capture validation update
+
+- Added runtime-package optimizer-state capture metadata and API helper support.
+- Runtime package now copies `optimizer_state_after.bin` and `training_reference/optimizer_state_after_ref.bin` when present.
+- Generated `runtime_api.py` now exposes `capture_optimizer_state(payload, out_path=...)` and `export_optimizer_state(board_payload=..., capture_path=...)` so board/runtime backends can persist mode-9 optimizer-state payloads into `optimizer_state_after.bin`.
+- `numeric_validation.json` now auto-discovers captured optimizer-state files and compares packed Momentum/Adam state when both ref/got files exist.
+- Remaining debt: board-specific PYNQ/KV260 runtime must call HLS mode 9 through DMA/MMIO and pass the returned bytes to `export_optimizer_state(board_payload=...)` during real FPGA execution.
+## Sprint 29R+ gradient export capture validation
+
+- Added runtime/API capture path for `gradients_after.bin` / `gradients_export.bin`.
+- Numeric validation now compares dedicated gradient-export payloads against `training_reference/grads_ref.bin` when both exist.
+- Clean compile preserves externally captured gradient export validation files.
+- Remaining debt: board/CSim backend must call `FPGAI_MODE_EXPORT_GRADIENTS` and write the captured payload automatically.
+
+
+## Sprint 29R/29T CSim automatic capture update
+
+- Training CSim testbench now detects `data_movement.gradients.export` with `m_axi` and calls generated mode `FPGAI_MODE_EXPORT_GRADIENTS = 8` after training.
+- The testbench writes dedicated gradient-export capture files: `gradients_after.bin` and `gradients_export.bin`.
+- Training CSim testbench now detects Momentum/Adam optimizer-state export with `m_axi` and calls generated mode `FPGAI_MODE_EXPORT_OPTIMIZER_STATE = 9` after training.
+- The testbench writes `optimizer_state_after.bin` so numeric validation can compare captured optimizer state when a Python reference is available.
+- This closes the CSim capture gap for generated export modes; remaining debt is board runtime capture through DMA/MMIO on PYNQ/KV260/KR260.
+
+## Sprint B implementation pass — PYNQ/KV260 runtime buffer allocation and binding
+
+Implemented generated runtime buffer metadata and fake-board-testable PYNQ/KV260 buffer allocation support.
+
+Current generated runtime package now emits:
+
+- `runtime_package/buffer_plan.json`
+- `runtime_package/runtime_execution_plan.json`
+- `runtime_package/board_runtime.py` allocation helpers
+- `runtime_package/runtime_api.py` allocation/binding helpers
+
+Generated runtime support added:
+
+- `allocate_buffers_from_plan(...)` in `board_runtime.py`
+- `allocate_runtime_buffers(...)` in `runtime_api.py`
+- `bind_allocated_buffers(...)` in `runtime_api.py`
+- `bind_backend(..., buffers=...)` buffer handoff
+- sync-before/sync-after execution-plan handling for generated runtime commands
+- fake `allocate_fn` injection for non-board unit tests
+- PYNQ `allocate()` use only when allocation is requested without injection
+
+Buffer plan currently covers the main runtime PS/PL exchange buffers:
+
+- `input`
+- `output`
+- `weights` when runtime import/export is required
+- `labels` for training packages
+- `gradients_mem` for mode-8 gradient export
+- `optimizer_state_mem` for mode-9 optimizer-state export
+
+Truth boundary:
+
+- The generated runtime package can now allocate, bind, and synchronize PYNQ/KV260-style buffers from compiler-generated metadata.
+- This is still not a real FPGA execution claim. Real board validation still requires Vivado handoff artifacts, a deployed overlay, board-specific buffer addresses/interfaces, and captured execution reports.
+
+Validation:
+
+```bash
+python -m pytest -q \
+  tests/test_training_memory_storage_contract.py \
+  tests/test_memory_storage_effect.py \
+  tests/test_runtime_package.py \
+  tests/test_memory_semantics_classifier.py \
+  tests/test_build_stages.py \
+  tests/test_layer_registry_and_compatibility.py \
+  tests/test_training_movement_gradient_export.py \
+  tests/test_training_optimizer_loss_contract.py \
+  tests/test_execution_semantics_and_board_contract.py \
+  tests/test_vivado_runtime_truth_contract.py \
+  tests/test_generated_hls_explanation_and_numeric.py
+```
+
+Result in this patch workspace:
+
+```text
+77 passed, 35 skipped
+```
+
+## Sprint C implementation pass — runtime execution reports
+
+Implemented generated runtime execution reporting in the existing runtime package generator.
+
+Current generated runtime package now writes these files when `runtime_api.run_sequence()` is executed:
+
+- `runtime_package/runtime_execution_report.json`
+- `runtime_package/runtime_execution_report.md`
+
+Generated runtime report support added:
+
+- command-by-command runtime sequence logging
+- mode-number logging from `runtime_execution_plan.json`
+- sync-before and sync-after buffer logging
+- capture-file logging for gradient and optimizer-state exports
+- backend metadata logging, including backend type, board, top/IP name, and bound buffers
+- per-command latency measurement with `time.perf_counter()`
+- strict failure behavior that writes the report before re-raising the runtime error
+- non-strict failure behavior with `run_sequence(strict=False, return_report=True)` for inspection/debug flows
+- `run_sequence(return_report=True)` to return the full report object while still writing JSON/Markdown artifacts
+
+Truth boundary:
+
+- The generated runtime package now produces auditable runtime execution reports for board/fake-board runtime calls.
+- This is still not a claim that real FPGA execution passed. Real board validation still requires Vivado handoff artifacts, deployed bitstream/overlay, real board buffer binding, and Sprint T FPGA execution capture.
+
+Code quality note:
+
+- Sprint C stayed in the existing runtime package path (`fpgai/runtime/package.py`) and extended generated `runtime_api.py` rather than adding detached scripts.
+- Tests import and execute the generated runtime API, so the generated Python source is syntax-checked and behavior-checked.
+
+Validation in this patch workspace:
+
+```text
+79 passed, 35 skipped
+```
+
+## Sprint C++ implementation pass — generated C++ readability and resource hygiene
+
+Implemented generated C++ quality reporting and source-level semantic checks in the existing HLS explanation/reporting path.
+
+New reports emitted under `reports/`:
+
+- `generated_cpp_readability.json`
+- `generated_cpp_readability.md`
+- `generated_cpp_validation.json`
+- `generated_cpp_validation.md`
+
+Implemented checks:
+
+- generated top source exists
+- top function is present
+- requested runtime/source features are present
+- unrequested runtime/source features are absent
+- placeholder/future-work markers are not present in generated C++
+- readability level is resolved and reflected in comment density/section summaries
+- generated C++ validation status is honest and limited to static generated-source contract validation
+
+Important resource/latency hygiene rule added:
+
+- If the user does not request an import/export/runtime feature, the generated C++ must not contain that unused mode/path/comment. This keeps generated HLS source explainable and avoids unnecessary latency/resource risk from inactive branches leaking into synthesis.
+
+Concrete generator fixes:
+
+- Inference runtime weight import without export no longer emits `FPGAI_MODE_EXPORT_WEIGHTS`.
+- Training runtime weight import without export no longer emits `FPGAI_MODE_EXPORT_WEIGHTS`.
+- Existing gradient and optimizer-state export generation remains command/config driven and is now checked by reports/tests.
+
+Truth boundary:
+
+- Generated C++ is now structurally explainable, readability-checked, and tested against selected YAML decisions.
+- This is not yet a claim that every generated source is HLS-synthesized or board-validated. HLS/Vivado/FPGA validation remains in later sprints.
+
+Validation in this patch workspace:
+
+```text
+79 passed, 38 skipped
+```
+
+## Sprint D implementation pass — direct Vivado BD Tcl handoff generation
+
+Implemented direct compiler-integrated Vivado handoff generation using the existing Vivado bridge/build-stage path.
+
+Generated when `build.stages.vivado_project=true`:
+
+- `vivado/project.tcl`
+- `vivado/bd.tcl`
+- `vivado/run_vivado.tcl`
+- `reports/vivado_bd_validation.json`
+- `reports/vivado_bd_validation.md`
+
+Implemented behavior:
+
+- `cpp`/reports-only builds do not emit Vivado Tcl files.
+- Vivado Tcl is emitted only when the resolved build stages request `vivado_project`.
+- Generated Tcl is board-aware:
+  - PYNQ-Z2 uses `processing_system7`.
+  - KV260/KR260 use `zynq_ultra_ps_e`.
+- Generated BD Tcl always includes the required PS block, HLS IP lookup/instance path, and AXI-Lite control interconnect path.
+- AXI DMA is emitted only when generated HLS source exposes AXI-stream ports.
+- m_axi memory interconnect is emitted only when generated HLS source exposes m_axi ports.
+- Unrequested gradient/optimizer-state paths are not written into the Vivado Tcl.
+- `vivado_bd_validation.json` records structural checks and the truth boundary.
+
+Truth boundary:
+
+- Sprint D validates Tcl generation and static block-design structure only.
+- It is not a claim that Vivado synthesis, implementation, bitstream generation, or FPGA execution passed.
+- Sprint E must add Vivado execution/import truth handling, and Sprint T must add real board execution validation.
+
+Validation in this patch workspace:
+
+```text
+focused Vivado/build/runtime tests passed
+```
+
+### Sprint D fix — DMA generation must follow requested data movement
+
+Fixed after integration testing showed embedded inference Vivado BD Tcl still emitted `axi_dma_0` because the bridge treated any generated AXI-stream-looking source port as a DMA requirement.
+
+Correct rule:
+
+- AXI DMA is generated only when the resolved/user data movement requests `axi_stream` or `transport: dma`.
+- Generated source port names alone are not enough to instantiate DMA, because unused DMA costs resources and can misrepresent the user-selected runtime/movement plan.
+- Runtime sequence command parsing now recognizes string commands and single-key command dictionaries, not only dictionaries with an explicit `command` key.
+
+Truth boundary remains unchanged: Sprint D is structural Vivado Tcl generation/validation only, not Vivado implementation or bitstream proof.
+
+## Sprint E implementation pass — Vivado implementation / bitstream truth reports
+
+Implemented honest Vivado execution/import truth reporting in the existing Vivado bridge path.
+
+Generated reports:
+
+- `reports/vivado_validation_report.json`
+- `reports/vivado_validation_report.md`
+- `reports/vivado_implementation_report.json`
+- `reports/vivado_implementation_report.md`
+- `reports/bitstream_report.json`
+- `reports/bitstream_report.md`
+
+Implemented behavior:
+
+- CPP-only or Vivado-not-requested builds report `not_requested` instead of creating fake Vivado success.
+- Vivado project validation reports `tool_missing` when the configured Vivado executable is unavailable.
+- Vivado implementation reports `tool_missing` when Vivado is unavailable and `artifact_missing` when implementation was requested but no real implementation artifact/report exists.
+- Bitstream reports `not_requested`, `tool_missing`, or `artifact_missing` unless a real `.bit`/`.xsa` artifact exists and Vivado implementation is already passed.
+- Reports include `claimed_success: false` unless real Vivado/artifact evidence is present.
+- Manifest now records `vivado_truth_artifacts` so downstream paper/claim audit code can trace the verification level.
+
+Truth boundary:
+
+- Sprint E does not run Vivado by itself and does not claim implementation or bitstream success without actual tool/artifact evidence.
+- Board-fit capacity enforcement is still Sprint F.
+- Real FPGA execution validation is still Sprint T.
+
+## Sprint F update — Board-fit enforcement
+
+Sprint F adds real compiler-side board-fit enforcement using the existing Vivado board registry and hardware feasibility reporter.
+
+Implemented:
+
+- `reports/board_fit.json` and `reports/board_fit.md` now expose top-level deployment status, limiting dimension, and stage gating.
+- Board-fit now derives requested storage/interface requirements from YAML instead of only reading estimator totals.
+- URAM-backed storage is rejected for PYNQ-Z2 because the board profile has zero URAM.
+- DMA, AXI-stream, m_axi, DDR, gradient export, optimizer-state export, and weight import/export requirements are counted only when requested by YAML/runtime sequence.
+- Vivado implementation and bitstream reports now return `blocked_by_board_fit` when board-fit does not allow the selected board/stage.
+- Vivado project Tcl generation remains allowed for structural handoff/debug even when implementation/bitstream are blocked.
+
+Truth boundary:
+
+- Board-fit enforcement is based on selected board profiles, estimator/imported resource data, and resolved YAML movement/storage requirements.
+- It blocks invalid implementation/bitstream claims, but it is not a replacement for calibrated HLS/Vivado timing/resource reports or real board execution.
+
+## Sprint G update — HLS synthesis truth and estimate-vs-HLS reports
+
+Sprint G adds real HLS synthesis artifact import and estimate-vs-HLS truth reporting in the compiler/report flow.
+
+Generated reports:
+
+- `reports/hls_synthesis_report.json`
+- `reports/hls_synthesis_report.md`
+- `reports/estimate_vs_hls.json`
+- `reports/estimate_vs_hls.md`
+
+Implemented behavior:
+
+- CPP-only and non-synthesis builds report `not_requested` and do not claim HLS success.
+- HLS synthesis requests with a missing Vitis/Vivado HLS executable report `tool_missing` instead of crashing or pretending success.
+- Missing csynth artifacts report `artifact_missing`.
+- Real `*_csynth.xml`, `csynth.xml`, `*_csynth.rpt`, or `csynth.rpt` artifacts are parsed when present.
+- Parsed values include LUT, FF, DSP, BRAM18, URAM when available, latency cycles, and latency milliseconds.
+- `estimate_vs_hls.json` compares design-space estimates against parsed HLS values and sets `paper_safe: true` only when a real parsed HLS report exists.
+- Manifest now records `hls_truth_artifacts` for downstream paper/claim audit traceability.
+
+Truth boundary:
+
+- Sprint G proves FPGAI can import and compare real HLS synthesis artifacts when they exist.
+- It does not claim the estimator is calibrated or accurate across all models. Calibration still requires larger HLS/Vivado sweeps.
+- It does not claim Vivado implementation, bitstream generation, or real FPGA execution.
+
+## Sprint H update — Batch / gradient accumulation numeric validation foundation
+
+Sprint H extends the existing numeric validation report instead of adding a detached checker.
+
+Implemented:
+
+- `reports/numeric_validation.json` now includes a `batch_accumulation` section.
+- `reports/numeric_validation.md` records the batch-accumulation validation status.
+- Native accumulation requests are detected from `training.batch_size`, `training.gradient_accumulation`, and `runtime.sequence`.
+- Runtime commands are traced for `reset_accumulators`, `accumulate_gradients`, and `apply_accumulated_gradients`.
+- The report records `batch_size`, `accumulation_steps`, accumulation policy, optimizer apply count, and required runtime-command coverage.
+- For repeated-microbatch average accumulation, the Python reference gradient is materialized as `training_reference/accumulated_grads_ref.bin` and weights-after reference as `training_reference/weights_after_accum_ref.bin`.
+- Missing HLS/runtime accumulated-gradient captures are reported as `artifact_missing`, never as a pass.
+- Plain training without accumulation reports `batch_accumulation.status = not_requested` and does not emit unused accumulated reference files.
+
+Truth boundary:
+
+- Sprint H establishes traceable batch-accumulation numeric-validation artifacts and honest missing-capture reporting.
+- A paper-safe accumulated-training correctness claim still requires captured HLS/runtime accumulated gradients and weights-after artifacts to compare against the generated Python reference.
+- Full optimizer-specific accumulated updates for Momentum/Adam and loss-specific validation continue in Sprint I/J.
+
+## Sprint I update — Optimizer-state numeric correctness foundation
+
+Sprint I strengthens optimizer numeric validation for persistent Momentum/Adam state while keeping the existing compiler/report flow.
+
+Implemented:
+
+- Python training reference now records optimizer metadata in `training_reference/summary.json`.
+- Momentum reference state is materialized as zero `velocity_before` and `velocity_after = momentum * velocity_before - learning_rate * gradient`.
+- Adam reference state is materialized as zero first/second moments before the step and updated first/second moments after the step.
+- Reference files are emitted when the optimizer has persistent state:
+  - `training_reference/optimizer_state_before_ref.bin`
+  - `training_reference/optimizer_state_after_ref.bin`
+- Adam `bias_correction` is explicit in the reference and numeric report. The reference applies bias correction only when requested by YAML.
+- `reports/numeric_validation.json.training.reference` now records optimizer type, bias-correction setting, and optimizer-state reference files.
+- `reports/numeric_validation.json.optimizer_state_validation` now reports `artifact_missing` when a reference exists but no HLS/runtime optimizer-state capture exists.
+- SGD optimizer state reports `not_applicable` instead of pretending a persistent state tensor exists.
+- Existing preserved runtime/CSim capture handling now includes optimizer-state before/after reference and captured files.
+
+Truth boundary:
+
+- Momentum/Adam optimizer-state references are now generated and compared when captured artifacts exist.
+- Missing optimizer-state captures are reported honestly as missing evidence, not as a pass.
+- A paper-safe Momentum/Adam optimizer correctness claim still requires matching captured HLS/runtime optimizer-state and weights-after artifacts.
+
+## Sprint J update — Cross-entropy numeric-validation foundation
+
+Sprint J strengthens the cross-entropy training path by adding Python reference artifacts and explicit numeric-validation truth reporting.
+
+Implemented:
+
+- Python training reference now respects `training.loss.type` for `cross_entropy`.
+- Stable-softmax cross-entropy reference is generated from the model output logits/proxy logits.
+- Cross-entropy reference artifacts are emitted when requested:
+  - `training_reference/logits_ref.bin`
+  - `training_reference/softmax_ref.bin`
+  - `training_reference/cross_entropy_loss_ref.json`
+  - `training_reference/dlogits_ref.bin`
+- `reports/numeric_validation.json.training.reference` now records loss type and cross-entropy reference artifact paths.
+- `reports/numeric_validation.json.loss_validation` reports cross-entropy validation status, reference availability, stable-softmax metadata, and capture comparisons.
+- MSE training reports `loss_validation.status = not_requested` and does not claim cross-entropy evidence.
+- Missing HLS/runtime dlogits/softmax captures are reported as `artifact_missing`, never as a pass.
+
+Truth boundary:
+
+- Cross-entropy reference artifacts and validation status are now tracked by the normal numeric-validation report.
+- A paper-safe cross-entropy correctness claim still requires matching captured HLS/runtime loss-gradient evidence, gradients, and weights-after artifacts.
+
+## Sprint K update — Training tiled-I/O compute-fused validation foundation
+
+Sprint K strengthens training tiled I/O by connecting tiled movement requests to Python reference artifacts and numeric-validation truth reporting.
+
+Implemented:
+
+- Training tiled-I/O requests are detected from `data_movement.inputs.import`, `data_movement.labels.import`, and `data_movement.outputs.export` when `policy: tiled` is selected with `m_axi` or `axi_stream`.
+- Python training reference now emits tiled reference artifacts only when tiled training I/O is requested:
+  - `training_reference/tiled_inputs_ref.bin`
+  - `training_reference/tiled_labels_ref.bin`
+  - `training_reference/tiled_outputs_ref.bin`
+  - `training_reference/tiled_gradients_ref.bin`
+  - `training_reference/tiled_weights_after_ref.bin`
+- `reports/numeric_validation.json.training.reference` records tiled reference paths.
+- `reports/numeric_validation.json.training_tiled_io` records interface type, tile sizes, input/label/output tiled status, AXI-stream TLAST requirement, reference availability, capture availability, and comparison results.
+- Missing HLS/runtime tiled output/gradient/weights-after captures are reported as `artifact_missing`, never as a pass.
+- Plain training without tiled I/O reports `training_tiled_io.status = not_requested` and does not emit tiled reference artifacts.
+
+Truth boundary:
+
+- Sprint K establishes structural/numeric traceability for training tiled I/O and honest missing-capture reporting.
+- A paper-safe tiled-training correctness claim still requires captured HLS/runtime tiled outputs, gradients, and weights-after artifacts to compare against the Python tiled reference.
+
+## Sprint L update — Layer backend status and full-priority layer support contract
+
+Sprint L strengthens the layer backend contract so FPGAI treats layers as first-class compiler artifacts, not informal compatibility notes.
+
+Implemented:
+
+- Priority layer registry now includes the user-requested layer family:
+  - Dense / Linear
+  - Conv / Conv2D
+  - DepthwiseConv2D
+  - PointwiseConv2D
+  - ReLU / LeakyReLU
+  - MaxPool
+  - AvgPool / AveragePool
+  - Flatten / Reshape
+  - Softmax
+  - BatchNormalization / BatchNorm
+  - Add / residual-style elementwise Add
+  - GlobalAveragePool
+- Inference and training capability tables now include the priority aliases and specialization layers instead of leaving them as placeholder/unknown registry entries.
+- `reports/layer_backend_status.json` and `reports/layer_backend_status.md` are emitted next to `model_compatibility` and `layer_knob_contract`.
+- The new layer backend status report records, per encountered layer:
+  - active pipeline support
+  - inference status
+  - training status
+  - shape inference status
+  - HLS codegen status
+  - memory-planning status
+  - precision status
+  - numeric-validation readiness
+  - training forward/backward status where applicable
+  - unsupported reason if any
+- Unknown operators remain unsupported and must not be silently accepted.
+- The report policy records that all layers are required, unsupported layers block compile, unused layer kernels must be absent, and training requires backward support.
+
+Truth boundary:
+
+- Sprint L adds an auditable layer-backend status system and expands the priority layer support contract.
+- Unsupported unknown operators still reject/report clearly.
+- This sprint does not claim every knob is fully validated across every layer; that remains Sprint M.
+
+## Sprint M update — Per-layer knob application contract
+
+Sprint M strengthens `layer_knob_contract` from a coarse registry table into a per-layer, per-knob traceability report.
+
+Implemented:
+
+- `reports/layer_knob_contract.json` schema version 2 records each important knob for every encountered layer.
+- Each knob now resolves to one of:
+  - `applied`
+  - `not_applicable`
+  - `not_requested`
+  - `compiler_default`
+  - `rejected`
+- The report records evidence and reasons for every knob/layer decision.
+- Manual YAML sources are tracked for:
+  - precision
+  - pipelining
+  - parallelization
+  - tiling
+  - weight storage
+  - activation storage
+  - gradient storage
+  - optimizer-state storage
+  - data movement
+  - runtime sequence
+  - build stages
+  - board fit
+  - training
+- Weight-storage knobs are `applied` only for layers with trainable/parameter tensors and `not_applicable` for activation-only layers such as ReLU/MaxPool.
+- Gradient/optimizer-state storage knobs are only relevant in training mode and report `not_applicable` in inference mode.
+- Unknown/unsupported operators mark every knob as `rejected` with the backend reason instead of silently accepting unsupported combinations.
+- The contract explicitly records the resource/latency hygiene rule: unrequested import/export/runtime/tiling/stream paths must be absent from generated C++ and Vivado/runtime artifacts.
+
+Truth boundary:
+
+- Sprint M proves YAML knob decisions are tracked per layer and reported as applied, not applicable, defaulted, or rejected.
+- It does not yet prove HLS resource/latency deltas for every knob. Precision-effect and parallel/pipeline/tiling HLS-effect validation remain Sprint N/O.
+
+## Sprint N update — Precision effect validation
+
+Sprint N adds a first-class precision-effect report that verifies precision is not only a YAML/report value but is materialized in generated HLS artifacts.
+
+Implemented:
+
+- `reports/precision_effect.json`
+- `reports/precision_effect.md`
+- `manifest.json.precision_effect_artifacts`
+- Generated-source evidence scans for `hls/include/fpgai_types.h` and generated top sources.
+- Manual precision YAML sources are recorded from `numerics.precision_mode`, `numerics.defaults.*`, `numerics.layers`, and precision-sweep selection.
+- The report records resolved activation/weight/bias/accumulator bits from `precision_layout.json`.
+- The report verifies generated `ap_fixed<...>` typedef evidence agrees with the resolved precision layout.
+- The report separates:
+  - generated precision materialization
+  - optional quantization/numeric metrics
+  - optional precision sweep evidence
+  - HLS-backed paper-safe resource/timing claims
+- `paper_safe_hls_claim` remains false unless `estimate_vs_hls.status == compared` from parsed real HLS artifacts.
+
+Truth boundary:
+
+- Sprint N proves precision decisions affect generated type/layout artifacts and are traceable in reports.
+- It does not claim real HLS resource/timing precision effects unless Sprint G HLS truth reports contain a real estimate-vs-HLS comparison.
+- Parallelization/pipelining HLS-effect validation remains Sprint O.
+
+## Sprint O update — Parallelization and pipelining effect validation
+
+Sprint O adds a first-class report for source-level parallelization and pipelining materialization.
+
+Implemented:
+
+- `reports/parallel_pipeline_effect.json`
+- `reports/parallel_pipeline_effect.md`
+- `manifest.json.parallel_pipeline_effect_artifacts`
+- Manual YAML source tracking for `hls.pipeline_ii`, `hls.dense.*`, `hls.conv.*`, `hls.activation.*`, `optimization.parallel.*`, `parallelization`, and `pipelining`.
+- Generated-source evidence scans for `FPGAI_PIPELINE_II`, dense/conv unroll macros, `#pragma HLS PIPELINE`, `#pragma HLS UNROLL`, and `#pragma HLS ARRAY_PARTITION`.
+- Per-knob statuses: `applied`, `not_requested`, `compiler_default`, or `rejected`.
+- HLS-backed paper-safe claims remain false unless real Sprint G estimate-vs-HLS comparison evidence exists.
+
+Truth boundary:
+
+- Sprint O proves parallelization and pipelining decisions are materialized in generated HLS source and are traceable in reports.
+- It does not claim real latency/resource improvement unless parsed HLS reports exist and `estimate_vs_hls.status == compared`.

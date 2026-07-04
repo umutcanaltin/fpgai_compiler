@@ -2432,10 +2432,9 @@ def _fpgai_insert_training_storage_bindings(source: str, *, compile_plan=None, m
         "  static const int FPGAI_MODE_RUN_TRAINING = 2;",
     ]
     if runtime_import:
-        pragma_lines.extend([
-            "  static const int FPGAI_MODE_IMPORT_WEIGHTS = 3;",
-            "  static const int FPGAI_MODE_EXPORT_WEIGHTS = 4;",
-        ])
+        pragma_lines.append("  static const int FPGAI_MODE_IMPORT_WEIGHTS = 3;")
+        if runtime_export:
+            pragma_lines.append("  static const int FPGAI_MODE_EXPORT_WEIGHTS = 4;")
     pragma_lines.append(f"  // FPGAI training weight storage: {impl}_mutable.")
     for w_name, b_name, _w_size, _b_name2, _b_size in specs:
         pragma_lines.append(f"#pragma HLS BIND_STORAGE variable={w_name} type=ram_2p impl={impl}")
@@ -2741,12 +2740,13 @@ def _fpgai_training_raw_get(raw: Any, path: str, default: Any = None) -> Any:
 
 def _fpgai_training_movement(raw: Any, tensor: str, direction: str) -> dict:
     cfg = _fpgai_training_raw_get(raw, f"data_movement.{tensor}.{direction}", {}) or {}
-    if not isinstance(cfg, dict):
-        cfg = {}
+    if not isinstance(cfg, dict) or not any(k in cfg for k in {"interface", "transport", "policy", "tiled"}):
+        direct = _fpgai_training_raw_get(raw, f"data_movement.{tensor}", {}) or {}
+        cfg = direct if isinstance(direct, dict) else {}
     return {
         "interface": str(cfg.get("interface", "")).strip().lower().replace('-', '_'),
         "transport": str(cfg.get("transport", "")).strip().lower().replace('-', '_'),
-        "policy": str(cfg.get("policy", "")).strip().lower().replace('-', '_'),
+        "policy": str(cfg.get("policy", "tiled" if bool(cfg.get("tiled", False)) else "")).strip().lower().replace('-', '_'),
     }
 
 

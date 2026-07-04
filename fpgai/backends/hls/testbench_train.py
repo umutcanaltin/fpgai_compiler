@@ -48,6 +48,7 @@ def emit_tb_train_cpp(
     preload_weights: List[float],
     training_cfg: dict,
     output_dir: Optional[str] = None,
+    raw_cfg: Optional[dict] = None,
 ) -> None:
     """Emit the Vitis HLS C-simulation testbench for training.
 
@@ -162,6 +163,60 @@ def emit_tb_train_cpp(
         }
 """
 
+    raw_for_movement = raw_cfg or {}
+
+    def _movement_requested(kind: str, direction: str, *, interface: str = "m_axi") -> bool:
+        movement = _cfg_lookup(raw_for_movement, f"data_movement.{kind}.{direction}", default={})
+        if not isinstance(movement, dict):
+            return False
+        iface = str(movement.get("interface", "")).strip().lower()
+        policy = str(movement.get("policy", "")).strip().lower()
+        return iface == interface and policy in {"full", "tiled"}
+
+    gradient_export_requested = _movement_requested("gradients", "export")
+    optimizer_state_export_requested = _movement_requested("optimizer_state", "export")
+    optimizer_type = str(_cfg_lookup(raw_for_movement, "training.optimizer.type", default=_cfg_lookup(training_cfg, "optimizer.type", default="sgd"))).strip().lower().replace("-", "_")
+    optimizer_state_words = int(weight_words) if optimizer_type == "momentum" else (2 * int(weight_words) if optimizer_type == "adam" else 0)
+    if not optimizer_state_export_requested or optimizer_state_words <= 0:
+        optimizer_state_export_requested = False
+        optimizer_state_words = 0
+
+    gradient_mem_extern_arg = "    ap_uint<32>* gradients_mem,\n" if gradient_export_requested else ""
+    optimizer_state_mem_extern_arg = "    ap_uint<32>* optimizer_state_mem,\n" if optimizer_state_export_requested else ""
+    gradient_mem_decl = f"    std::vector<ap_uint<32> > gradients_mem({int(weight_words)});\n" if gradient_export_requested else ""
+    optimizer_state_mem_decl = f"    std::vector<ap_uint<32> > optimizer_state_mem({optimizer_state_words});\n" if optimizer_state_export_requested else ""
+    gradient_mem_call_arg = "gradients_mem.data(), " if gradient_export_requested else ""
+    optimizer_state_mem_call_arg = "optimizer_state_mem.data(), " if optimizer_state_export_requested else ""
+
+    gradient_capture_block = ""
+    if gradient_export_requested:
+        gradient_capture_block = (
+            "\n"
+            "    // FPGAI CSim automatic gradient-export capture.\n"
+            "    // Calls generated mode 8 after training and writes dedicated capture files.\n"
+            "    {\n"
+            f"        {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}gradients_mem.data(), {optimizer_state_mem_call_arg}8);\n"
+            f"        std::vector<float> gradients_after = unpack_words_to_f32(gradients_mem, {int(weight_words)});\n"
+            "        write_bin_both(out_dir, \"gradients_after.bin\", gradients_after);\n"
+            "        write_bin_both(out_dir, \"gradients_export.bin\", gradients_after);\n"
+            "        printf(\"[TB-TRAIN] Wrote %s (%zu floats) from FPGAI_MODE_EXPORT_GRADIENTS\\n\", join_path(out_dir, \"gradients_after.bin\").c_str(), gradients_after.size());\n"
+            "    }\n"
+        )
+
+    optimizer_state_capture_block = ""
+    if optimizer_state_export_requested:
+        optimizer_state_capture_block = (
+            "\n"
+            "    // FPGAI CSim automatic optimizer-state export capture.\n"
+            "    // Calls generated mode 9 after training and writes optimizer_state_after.bin.\n"
+            "    {\n"
+            f"        {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}{gradient_mem_call_arg}optimizer_state_mem.data(), 9);\n"
+            f"        std::vector<float> optimizer_state_after = unpack_words_to_f32(optimizer_state_mem, {optimizer_state_words});\n"
+            "        write_bin_both(out_dir, \"optimizer_state_after.bin\", optimizer_state_after);\n"
+            "        printf(\"[TB-TRAIN] Wrote %s (%zu floats) from FPGAI_MODE_EXPORT_OPTIMIZER_STATE\\n\", join_path(out_dir, \"optimizer_state_after.bin\").c_str(), optimizer_state_after.size());\n"
+            "    }\n"
+        )
+
 
     tb_text = f"""\
 #include <ap_axi_sdata.h>
@@ -187,7 +242,7 @@ extern "C" void {top_name}(
     hls::stream<axis_t>& in,
     hls::stream<axis_t>& out,
     hls::stream<axis_t>& aux,
-{extern_weights_arg}    int mode
+{extern_weights_arg}{gradient_mem_extern_arg}{optimizer_state_mem_extern_arg}    int mode
 );
 
 static std::string join_path(const std::string& dir, const char* name) {{
@@ -265,6 +320,17 @@ static void write_bin_both(const std::string& out_dir, const char* name, const s
     if (!(out_dir.empty() || out_dir == ".")) {{
         write_one_bin(std::string(name), data);
     }}
+}}
+
+static std::vector<float> unpack_words_to_f32(const std::vector<ap_uint<32> >& words, int expected_words) {{
+    std::vector<float> out;
+    out.reserve((size_t)expected_words);
+    for (int i = 0; i < expected_words; ++i) {{
+        union {{ unsigned int i; float f; }} u;
+        u.i = words[(size_t)i].to_uint();
+        out.push_back(u.f);
+    }}
+    return out;
 }}
 
 static std::vector<float> drain_exact(
@@ -357,11 +423,11 @@ int main(int argc, char** argv) {{
             );
             std::exit(4);
         }}
-{weight_mem_pack}{aux_preload_push}        {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}0);
+{weight_mem_pack}{aux_preload_push}        {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}{gradient_mem_call_arg}{optimizer_state_mem_call_arg}0);
         printf("[TB-TRAIN] Preloaded runtime weights (%zu floats)\\n", preload.size());
     }}
 
-    {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}1);
+    {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}{gradient_mem_call_arg}{optimizer_state_mem_call_arg}1);
     std::vector<float> weights_before = drain_exact(out_stream, {int(weight_words)}, "weights_before");
     write_bin_both(out_dir, "weights_before.bin", weights_before);
 
@@ -385,7 +451,7 @@ int main(int argc, char** argv) {{
         for (int r = 0; r < n_records; ++r) {{
             push_record(in_stream, input_data, input_words_per_record, r);
             push_record(aux_stream, target_data, target_words_per_record, r);
-            {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}6);
+            {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}{gradient_mem_call_arg}{optimizer_state_mem_call_arg}6);
             std::vector<float> loss_words = drain_exact(out_stream, 1, "loss_eval");
             total_loss += loss_words[0];
         }}
@@ -405,16 +471,16 @@ int main(int argc, char** argv) {{
     if ({str(accumulated_batch).lower()}) {{
         printf("[TB-TRAIN] native_accumulated_batch=true optimizer_location=hls_top_accumulated_optimizer\\n");
         for (int step = 0; step < {int(train_steps)}; ++step) {{
-            {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}5);
+            {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}{gradient_mem_call_arg}{optimizer_state_mem_call_arg}5);
             for (int b = 0; b < {int(batch_size)}; ++b) {{
                 int rec = step * {int(batch_size)} + b;
                 push_record(in_stream, input_data, input_words_per_record, rec);
                 push_record(aux_stream, target_data, target_words_per_record, rec);
-                {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}3);
+                {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}{gradient_mem_call_arg}{optimizer_state_mem_call_arg}3);
                 last_grads = drain_exact(out_stream, {int(weight_words)}, "accum_grads");
                 total_train_calls += 1;
             }}
-            {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}4);
+            {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}{gradient_mem_call_arg}{optimizer_state_mem_call_arg}4);
             last_grads = drain_exact(out_stream, {int(weight_words)}, "avg_grads");
             optimizer_update_calls += 1;
             if (convergence_smoke) {{
@@ -429,7 +495,7 @@ int main(int argc, char** argv) {{
                 int rec = step * {int(batch_size)} + b;
                 push_record(in_stream, input_data, input_words_per_record, rec);
                 push_record(aux_stream, target_data, target_words_per_record, rec);
-                {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}2);
+                {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}{gradient_mem_call_arg}{optimizer_state_mem_call_arg}2);
                 last_grads = drain_exact(out_stream, {int(weight_words)}, "grads");
                 total_train_calls += 1;
                 optimizer_update_calls += 1;
@@ -442,7 +508,7 @@ int main(int argc, char** argv) {{
     }}
     write_bin_both(out_dir, "grads.bin", last_grads);
 
-    {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}1);
+    {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}{gradient_mem_call_arg}{optimizer_state_mem_call_arg}1);
     std::vector<float> weights_after = drain_exact(out_stream, {int(weight_words)}, "weights_after");
     write_bin_both(out_dir, "weights_after.bin", weights_after);
 

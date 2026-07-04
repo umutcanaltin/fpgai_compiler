@@ -1,0 +1,91 @@
+version: 1
+project:
+  name: example_mnist_mlp_import_weights
+  out_dir: build/examples/mnist_mlp_import_weights
+  clean: true
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+model:
+  format: onnx
+  path: models/mlp.onnx
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+weights:
+  mode: import_export
+memory:
+  weight_storage: bram
+  activation_storage: bram
+  gradient_storage: bram
+  optimizer_state_storage: bram
+data_movement:
+  inputs:
+    interface: m_axi
+    transport: ps_runtime
+    tiled:
+      enabled: false
+  outputs:
+    interface: m_axi
+    transport: ps_runtime
+    tiled:
+      enabled: false
+  weights:
+    load:
+      interface: m_axi
+      transport: ps_runtime
+      policy: full
+    export:
+      interface: m_axi
+      transport: ps_runtime
+      policy: full
+runtime:
+  sequence:
+  - import_weights
+  - run_inference
+  - export_weights
+optimization:
+  pipeline:
+    style: balanced
+    ii: 1
+  parallel:
+    pe: 1
+    simd: 1
+    unroll_factor: 1
+    partition_factor: 1
+    array_partition_mode: none
+build:
+  stages:
+    cpp: true
+    testbench: true
+    hls_project: false
+    hls_synthesis: false
+    vivado_project: false
+    vivado_implementation: false
+    bitstream: false
+    runtime_package: true
+    reports: true
+operators:
+  supported:
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true

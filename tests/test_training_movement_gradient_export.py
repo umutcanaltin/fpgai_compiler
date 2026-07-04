@@ -70,6 +70,24 @@ def test_training_m_axi_tiled_inputs_labels_outputs_generate_ports_and_reports(t
     assert (ref_dir / "weights_before_ref.bin").exists()
     assert (ref_dir / "grads_ref.bin").exists()
     assert (ref_dir / "weights_after_ref.bin").exists()
+    assert (ref_dir / "tiled_inputs_ref.bin").exists()
+    assert (ref_dir / "tiled_labels_ref.bin").exists()
+    assert (ref_dir / "tiled_outputs_ref.bin").exists()
+    assert (ref_dir / "tiled_gradients_ref.bin").exists()
+    assert (ref_dir / "tiled_weights_after_ref.bin").exists()
+
+    numeric = json.loads((out_dir / "reports/numeric_validation.json").read_text(encoding="utf-8"))
+    tiled = numeric["training_tiled_io"]
+    assert tiled["requested"] is True
+    assert tiled["interface"] == "m_axi"
+    assert tiled["input_tiled"] is True
+    assert tiled["labels_tiled"] is True
+    assert tiled["output_tiled"] is True
+    assert tiled["compute_fused"] is True
+    assert tiled["reference_available"] is True
+    assert tiled["captures_available"] is False
+    assert tiled["status"] == "artifact_missing"
+    assert tiled["passed"] is False
 
 
 def test_training_gradient_export_full_generates_m_axi_port_command_and_runtime_support(tmp_path: Path) -> None:
@@ -163,3 +181,42 @@ def test_training_axi_stream_tiled_inputs_labels_outputs_generate_real_tile_read
     report = json.loads((out_dir / "reports/stream_tiled_io.json").read_text(encoding="utf-8"))
     assert report["inputs"]["import"]["status"] == "generated_interface_supported"
     assert report["outputs"]["export"]["status"] == "generated_interface_supported"
+
+    numeric = json.loads((out_dir / "reports/numeric_validation.json").read_text(encoding="utf-8"))
+    tiled = numeric["training_tiled_io"]
+    assert tiled["requested"] is True
+    assert tiled["interface"] == "axi_stream"
+    assert tiled["axi_stream"]["tlast_required"] is True
+    assert tiled["reference_available"] is True
+    assert tiled["status"] == "artifact_missing"
+
+
+
+def test_normal_training_omits_tiled_io_markers_and_reports_not_requested(tmp_path: Path) -> None:
+    raw = copy.deepcopy(_load_training_config())
+    raw.setdefault("project", {})["out_dir"] = str(tmp_path / "training_no_tiled_io")
+    raw.setdefault("pipeline", {})["mode"] = "training_on_device"
+    # Force plain movement so stale defaults cannot request tiled training I/O.
+    dm = raw.setdefault("data_movement", {})
+    dm.setdefault("inputs", {})["import"] = {"interface": "none", "policy": "none"}
+    dm.setdefault("labels", {})["import"] = {"interface": "none", "policy": "none"}
+    dm.setdefault("outputs", {})["export"] = {"interface": "none", "policy": "none"}
+
+    result = _compile_raw(raw, tmp_path)
+    out_dir = Path(result.out_dir)
+    source = (out_dir / "hls/src/deeplearn.cpp").read_text(encoding="utf-8")
+    assert "FPGAI training tiled input import" not in source
+    assert "FPGAI training tiled label import" not in source
+    assert "FPGAI training tiled output export" not in source
+    assert "FPGAI training AXI-stream tiled input import" not in source
+    assert "FPGAI training AXI-stream tiled label import" not in source
+    assert "FPGAI training AXI-stream tiled output export" not in source
+
+    ref_dir = out_dir / "training_reference"
+    assert not (ref_dir / "tiled_inputs_ref.bin").exists()
+    assert not (ref_dir / "tiled_labels_ref.bin").exists()
+    assert not (ref_dir / "tiled_outputs_ref.bin").exists()
+
+    numeric = json.loads((out_dir / "reports/numeric_validation.json").read_text(encoding="utf-8"))
+    assert numeric["training_tiled_io"]["requested"] is False
+    assert numeric["training_tiled_io"]["status"] == "not_requested"

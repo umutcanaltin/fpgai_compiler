@@ -76,6 +76,7 @@ def _edge_cfg_paths(kind: str) -> tuple[str, ...]:
     if kind_u in {"input", "inputs", "activation_in"}:
         return (
             "data_movement.inputs.import",
+            "data_movement.inputs",
             "data_movement.input.load",
             "data_movement.ps_pl.input",
         )
@@ -83,17 +84,20 @@ def _edge_cfg_paths(kind: str) -> tuple[str, ...]:
         return (
             "data_movement.weights.import",
             "data_movement.weights.load",
+            "data_movement.weights",
             "data_movement.ps_pl.weights",
         )
     if kind_u in {"target", "targets", "label", "labels", "aux"}:
         return (
             "data_movement.labels.import",
+            "data_movement.labels",
             "data_movement.aux.load",
             "data_movement.ps_pl.aux",
         )
     if kind_u in {"output", "outputs", "activation_out"}:
         return (
             "data_movement.outputs.export",
+            "data_movement.outputs",
             "data_movement.output.store",
             "data_movement.pl_ps.output",
         )
@@ -107,9 +111,41 @@ def _edge_cfg_paths(kind: str) -> tuple[str, ...]:
         return (
             "data_movement.gradients.export",
             "data_movement.gradients.store",
+            "data_movement.gradients",
             "data_movement.pl_ps.gradients",
         )
+    if kind_u in {"optimizer_state", "optimizer", "optimizer_states"}:
+        return (
+            "data_movement.optimizer_state.export",
+            "data_movement.optimizer_state.store",
+            "data_movement.optimizer_state",
+            "data_movement.pl_ps.optimizer_state",
+        )
     return (f"data_movement.tensor_edges.{kind_u}",)
+
+
+
+
+def _edge_tiling(edge_cfg: Dict[str, Any]) -> tuple[bool, int | None]:
+    policy = str(edge_cfg.get("policy") or "").strip().lower().replace("-", "_")
+    tiled = edge_cfg.get("tiled")
+    enabled = policy == "tiled"
+    tile_size = edge_cfg.get("tile_size", edge_cfg.get("tile_words"))
+    if isinstance(tiled, Mapping):
+        if "enabled" in tiled:
+            enabled = _bool_cfg({"tiled": tiled}, "tiled.enabled", enabled)
+        elif any(k in tiled for k in {"tile_size", "size", "words"}):
+            enabled = True
+        tile_size = tiled.get("tile_size", tiled.get("size", tiled.get("words", tile_size)))
+    elif tiled is not None:
+        if isinstance(tiled, bool):
+            enabled = tiled
+        elif isinstance(tiled, str):
+            enabled = tiled.strip().lower() in {"1", "true", "yes", "on", "enabled", "tiled"}
+        else:
+            enabled = bool(tiled)
+    parsed_tile = _positive_int(tile_size, 64 if enabled else 0)
+    return bool(enabled), (parsed_tile if enabled else None)
 
 
 def _edge_size_bytes(raw: Dict[str, Any], kind: str, default_words: int) -> int:
@@ -333,6 +369,9 @@ def _make_edge(
     default_burst_len: int,
 ) -> CommunicationEdge:
     edge_cfg = _edge_cfg(raw, kind)
+    tiled_enabled, tile_size = _edge_tiling(edge_cfg)
+    if tiled_enabled and not edge_cfg.get("policy"):
+        edge_cfg = {**edge_cfg, "policy": "tiled"}
     mode = _default_mode_for(kind, region, edge_cfg)
     direction = _edge_direction(kind, region, mode)
     precision_bits = _precision_bits_for(kind, placement_notes, edge_cfg)
@@ -380,6 +419,8 @@ def _make_edge(
             "interface": edge_cfg.get("interface"),
             "transport": edge_cfg.get("transport"),
             "policy": edge_cfg.get("policy"),
+            "tiled": bool(tiled_enabled),
+            "tile_size": tile_size,
             "direction_name": "export" if direction == "PL_TO_PS" else "import",
             "double_buffer": bool(double_buffer),
             "reason": placement_notes.get("reason"),

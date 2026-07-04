@@ -1,0 +1,779 @@
+# R2B Python Deep Usage Audit
+
+## Summary
+- fpgai_python_files: 220
+- source_orphan_candidates: 4
+- devtool_orphan_candidates: 0
+- reporting_orphan_candidates: 0
+- manual_review_cli_or_script: 54
+- duplicate_function_names: 163
+- duplicate_class_names: 6
+
+## source_orphan_candidate
+- `fpgai/backends/hls/emit/run_hls_tcl.py` (51 lines)
+- `fpgai/backends/hls/project.py` (50 lines)
+- `fpgai/runtime/api.py` (39 lines)
+- `fpgai/runtime/protocol.py` (17 lines)
+
+## devtool_orphan_candidate
+- none
+
+## reporting_orphan_candidate
+- none
+
+## manual_review_cli_or_script
+- `fpgai/analysis/output_check.py` (419 lines)
+- `fpgai/devtools/audit_knob_materialization.py` (256 lines)
+- `fpgai/devtools/build_hls_csynth_table.py` (295 lines)
+- `fpgai/devtools/build_hls_paper_subset_table.py` (133 lines)
+- `fpgai/devtools/build_paper_artifact_index.py` (311 lines)
+- `fpgai/devtools/build_paper_figures.py` (234 lines)
+- `fpgai/devtools/build_paper_numeric_results.py` (492 lines)
+- `fpgai/devtools/build_paper_stage1_tables.py` (273 lines)
+- `fpgai/devtools/build_paper_tables.py` (448 lines)
+- `fpgai/devtools/canonical_hls_source_audit.py` (194 lines)
+- `fpgai/devtools/collect_paper_prediction_codegen.py` (259 lines)
+- `fpgai/devtools/diagnose_training_csim.py` (54 lines)
+- `fpgai/devtools/end_to_end_audit.py` (388 lines)
+- `fpgai/devtools/generate_paper_configs.py` (260 lines)
+- `fpgai/devtools/hls_source_effect_audit.py` (151 lines)
+- `fpgai/devtools/paper_experiment_matrix.py` (266 lines)
+- `fpgai/devtools/probe_config_schema.py` (25 lines)
+- `fpgai/devtools/run_paper_prediction_codegen.py` (292 lines)
+- `fpgai/experiments/model_generation.py` (73 lines)
+- `fpgai/experiments/model_suite.py` (319 lines)
+- `fpgai/reporting/analyze_experiments.py` (59 lines)
+- `fpgai/reporting/claim_traceability.py` (269 lines)
+- `fpgai/reporting/communication_ablation.py` (286 lines)
+- `fpgai/reporting/compare_experiments.py` (37 lines)
+- `fpgai/reporting/compare_hardware_knobs.py` (172 lines)
+- `fpgai/reporting/estimator_accuracy.py` (394 lines)
+- `fpgai/reporting/hardware_knob_tables.py` (301 lines)
+- `fpgai/reporting/hls_calibration_samples.py` (347 lines)
+- `fpgai/reporting/hls_calibration_summary.py` (249 lines)
+- `fpgai/reporting/hls_calibration_validation.py` (56 lines)
+- `fpgai/reporting/inspect_pipeline_policy_artifacts.py` (63 lines)
+- `fpgai/reporting/memory_binding_artifacts.py` (100 lines)
+- `fpgai/reporting/paper_artifacts.py` (475 lines)
+- `fpgai/reporting/paper_training_precision.py` (252 lines)
+- `fpgai/reporting/paper_training_table.py` (298 lines)
+- `fpgai/reporting/parallel_policy_artifacts.py` (251 lines)
+- `fpgai/reporting/plot_policy_results.py` (289 lines)
+- `fpgai/reporting/plot_training_loss_curves.py` (75 lines)
+- `fpgai/reporting/policy_summary.py` (98 lines)
+- `fpgai/reporting/safe_clock_recommendations.py` (197 lines)
+- `fpgai/reporting/training_accelerator_artifacts.py` (205 lines)
+- `fpgai/reporting/training_accumulated_batch_artifacts.py` (218 lines)
+- `fpgai/reporting/training_batch_multistep_artifacts.py` (140 lines)
+- `fpgai/reporting/training_convergence.py` (361 lines)
+- `fpgai/reporting/training_multi_epoch_convergence_artifacts.py` (246 lines)
+- `fpgai/reporting/training_native_accumulated_batch_artifacts.py` (108 lines)
+- `fpgai/reporting/vivado_bridge_artifacts.py` (401 lines)
+- `fpgai/reporting/vivado_impl_artifacts.py` (448 lines)
+- `fpgai/runtime/binary_io.py` (94 lines)
+- `fpgai/runtime/bitstream.py` (36 lines)
+- `fpgai/runtime/hostcpp.py` (32 lines)
+- `fpgai/runtime/kv260.py` (34 lines)
+- `fpgai/validation/onnx_compare.py` (291 lines)
+- `fpgai/validation/verify_flow.py` (187 lines)
+
+## Duplicate function names
+- `__getattr__`
+  - `fpgai/__init__.py`
+  - `fpgai/engine/__init__.py`
+- `__init__`
+  - `fpgai/compiler/architecture_capabilities.py`
+  - `fpgai/compiler/compiler.py`
+  - `fpgai/config/loader.py`
+  - `fpgai/engine/legacy_engine.py`
+  - `fpgai/experiments/config_materializer.py`
+  - `fpgai/experiments/model_generation.py`
+  - `fpgai/experiments/model_suite.py`
+  - `fpgai/experiments/result_store.py`
+  - `fpgai/experiments/sweep_runner.py`
+  - `fpgai/ir/graph.py`
+- `_add`
+  - `fpgai/compiler/architecture_capabilities.py`
+  - `fpgai/devtools/contract_source_audit.py`
+- `_architecture_section`
+  - `fpgai/backends/hls/emit/top_cpp.py`
+  - `fpgai/backends/hls/emit/top_train_cpp.py`
+- `_artifact_coverage`
+  - `fpgai/devtools/build_paper_figures.py`
+  - `fpgai/devtools/build_paper_tables.py`
+- `_artifact_status`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+  - `fpgai/runtime/package.py`
+- `_as_dict`
+  - `fpgai/engine/communication.py`
+  - `fpgai/reporting/data_movement.py`
+- `_as_float`
+  - `fpgai/devtools/build_paper_numeric_results.py`
+  - `fpgai/experiments/analysis.py`
+  - `fpgai/experiments/comparison.py`
+- `_as_int`
+  - `fpgai/backends/hls/testbench_train.py`
+  - `fpgai/devtools/build_paper_numeric_results.py`
+  - `fpgai/validation/results.py`
+- `_banked_bram18`
+  - `fpgai/analysis/architecture_resource_model.py`
+  - `fpgai/analysis/resource_estimator.py`
+- `_bool_cfg`
+  - `fpgai/engine/communication.py`
+  - `fpgai/engine/planner.py`
+- `_build_stages`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+- `_candidate_defaults`
+  - `fpgai/analysis/design_space_report.py`
+  - `fpgai/analysis/precision_sweep.py`
+- `_case_audit`
+  - `fpgai/devtools/canonical_hls_source_audit.py`
+  - `fpgai/devtools/hls_source_effect_audit.py`
+- `_ceil_div`
+  - `fpgai/analysis/architecture_resource_model.py`
+  - `fpgai/analysis/architecture_schedule_model.py`
+  - `fpgai/analysis/hls_architecture.py`
+  - `fpgai/analysis/performance_estimator.py`
+  - `fpgai/analysis/resource_estimator.py`
+  - `fpgai/analysis/tiling_analysis.py`
+  - `fpgai/analysis/tiling_resource_model.py`
+- `_cfg_lookup`
+  - `fpgai/backends/hls/testbench_train.py`
+  - `fpgai/validation/numeric.py`
+- `_cfg_weight_load_interface`
+  - `fpgai/engine/planner.py`
+  - `fpgai/engine/training.py`
+- `_claim_build_backend`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+- `_claim_estimates`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+- `_claim_knobs`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+- `_claim_movement`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+- `_claim_training`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+- `_claim_vivado`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+- `_collect_files`
+  - `fpgai/analysis/hls_artifact_metadata.py`
+  - `fpgai/devtools/audit_knob_materialization.py`
+- `_compare`
+  - `fpgai/devtools/audit_knob_materialization.py`
+  - `fpgai/reporting/hls_truth.py`
+- `_comparison_row`
+  - `fpgai/analysis/hls_estimate_compare.py`
+  - `fpgai/reporting/hls_truth.py`
+- `_conv_dimensions`
+  - `fpgai/analysis/hls_architecture.py`
+  - `fpgai/analysis/tiling_analysis.py`
+- `_dense_dimensions`
+  - `fpgai/analysis/hls_architecture.py`
+  - `fpgai/analysis/tiling_analysis.py`
+  - `fpgai/backends/hls/emit/params_cpp.py`
+- `_design_dirs`
+  - `fpgai/reporting/parallel_policy_artifacts.py`
+  - `fpgai/reporting/vivado_bridge_artifacts.py`
+- `_dig`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+- `_dimensions`
+  - `fpgai/analysis/architecture_schedule_model.py`
+  - `fpgai/analysis/hls_architecture.py`
+  - `fpgai/analysis/performance_estimator.py`
+- `_emit_run_cpp`
+  - `fpgai/backends/hostcpp/emit_host_model.py`
+  - `fpgai/backends/hostcpp/emit_host_train.py`
+- `_emit_runtime_h`
+  - `fpgai/backends/hostcpp/emit_host_model.py`
+  - `fpgai/backends/hostcpp/emit_host_train.py`
+- `_exists`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+  - `fpgai/validation/numeric.py`
+- `_explicit_calibration`
+  - `fpgai/analysis/performance_estimator.py`
+  - `fpgai/analysis/resource_estimator.py`
+- `_find_designs`
+  - `fpgai/reporting/training_multi_epoch_convergence_artifacts.py`
+  - `fpgai/reporting/training_native_accumulated_batch_artifacts.py`
+- `_first_existing`
+  - `fpgai/reporting/vivado_bridge_artifacts.py`
+  - `fpgai/runtime/package.py`
+  - `fpgai/validation/numeric.py`
+- `_float`
+  - `fpgai/devtools/build_hls_csynth_table.py`
+  - `fpgai/devtools/build_paper_stage1_tables.py`
+  - `fpgai/reporting/vivado_bridge_artifacts.py`
+- `_fmt`
+  - `fpgai/devtools/build_hls_csynth_table.py`
+  - `fpgai/devtools/build_paper_stage1_tables.py`
+  - `fpgai/experiments/comparison.py`
+  - `fpgai/experiments/report_writer.py`
+  - `fpgai/reporting/training_accelerator_artifacts.py`
+- `_get`
+  - `fpgai/reporting/hls_explanation.py`
+  - `fpgai/reporting/parallel_pipeline_effect.py`
+- `_get_path`
+  - `fpgai/analysis/hls_calibration_runner.py`
+  - `fpgai/experiments/config_materializer.py`
+- `_has_explicit_weight_data_movement`
+  - `fpgai/engine/compiler.py`
+  - `fpgai/engine/planner.py`
+- `_infer_board`
+  - `fpgai/devtools/build_paper_artifact_index.py`
+  - `fpgai/devtools/build_paper_numeric_results.py`
+- `_infer_group`
+  - `fpgai/devtools/build_paper_artifact_index.py`
+  - `fpgai/devtools/build_paper_numeric_results.py`
+- `_infer_mode`
+  - `fpgai/devtools/build_paper_artifact_index.py`
+  - `fpgai/devtools/build_paper_numeric_results.py`
+- `_input_elements`
+  - `fpgai/analysis/architecture_schedule_model.py`
+  - `fpgai/analysis/performance_estimator.py`
+- `_insert_tiles_into_template`
+  - `fpgai/backends/hls/emit/conv_tiling_codegen.py`
+  - `fpgai/backends/hls/emit/dense_tiling_codegen.py`
+- `_is_final_softmax_mse_case`
+  - `fpgai/backends/hls/emit/top_train_cpp.py`
+  - `fpgai/benchmark/training_reference.py`
+- `_iter_artifacts`
+  - `fpgai/backends/vivado/run_bridge.py`
+  - `fpgai/backends/vivado/vivado_bridge.py`
+- `_json_default`
+  - `fpgai/analysis/model_compatibility.py`
+  - `fpgai/experiments/result_store.py`
+- `_layer_codegen_values`
+  - `fpgai/backends/hls/emit/top_cpp.py`
+  - `fpgai/backends/hls/emit/top_train_cpp.py`
+- `_layer_name`
+  - `fpgai/analysis/hls_ii_comparison.py`
+  - `fpgai/analysis/tiling_reports.py`
+  - `fpgai/analysis/tiling_sweep.py`
+- `_layers`
+  - `fpgai/analysis/tiling_analysis.py`
+  - `fpgai/analysis/tiling_reports.py`
+  - `fpgai/analysis/tiling_sweep.py`
+- `_load_json`
+  - `fpgai/analysis/hls_layer_validation.py`
+  - `fpgai/analysis/output_check.py`
+  - `fpgai/backends/vivado/run_bridge.py`
+  - `fpgai/backends/vivado/vivado_bridge.py`
+  - `fpgai/devtools/contract_source_audit.py`
+  - `fpgai/reporting/artifact_smoke.py`
+  - `fpgai/reporting/hardware_feasibility.py`
+  - `fpgai/reporting/parallel_policy_artifacts.py`
+  - `fpgai/reporting/training_accumulated_batch_artifacts.py`
+  - `fpgai/reporting/training_batch_multistep_artifacts.py`
+  - `fpgai/reporting/training_multi_epoch_convergence_artifacts.py`
+  - `fpgai/reporting/training_native_accumulated_batch_artifacts.py`
+- `_load_yaml`
+  - `fpgai/config/loader.py`
+  - `fpgai/devtools/generate_paper_configs.py`
+  - `fpgai/experiments/paper_runner.py`
+- `_manual_sources`
+  - `fpgai/analysis/model_compatibility.py`
+  - `fpgai/reporting/parallel_pipeline_effect.py`
+  - `fpgai/reporting/precision_effect.py`
+- `_markdown`
+  - `fpgai/reporting/parallel_pipeline_effect.py`
+  - `fpgai/reporting/precision_effect.py`
+  - `fpgai/reporting/training_accumulated_batch_artifacts.py`
+- `_md_bool`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+- `_mean`
+  - `fpgai/analysis/hls_calibration_validation.py`
+  - `fpgai/experiments/comparison.py`
+- `_movement_requested`
+  - `fpgai/backends/hls/codegen.py`
+  - `fpgai/backends/hls/testbench_train.py`
+  - `fpgai/reporting/hardware_feasibility.py`
+- `_nested_get`
+  - `fpgai/backends/hls/codegen.py`
+  - `fpgai/backends/hls/emit/architecture_comments.py`
+- `_nonnegative_float`
+  - `fpgai/analysis/performance_estimator.py`
+  - `fpgai/analysis/resource_estimator.py`
+- `_normalise_user_weight_mode`
+  - `fpgai/engine/compiler.py`
+  - `fpgai/engine/planner.py`
+- `_normalise_weight_storage`
+  - `fpgai/engine/compiler.py`
+  - `fpgai/experiments/config_materializer.py`
+- `_num`
+  - `fpgai/devtools/build_paper_figures.py`
+  - `fpgai/devtools/build_paper_tables.py`
+- `_numel`
+  - `fpgai/analysis/hls_architecture.py`
+  - `fpgai/engine/analysis.py`
+- `_object_dict`
+  - `fpgai/backends/hls/emit/top_cpp.py`
+  - `fpgai/backends/hls/emit/top_train_cpp.py`
+- `_output_elements`
+  - `fpgai/analysis/architecture_schedule_model.py`
+  - `fpgai/analysis/performance_estimator.py`
+- `_parse_hls_xml`
+  - `fpgai/analysis/hls_calibration_dataset.py`
+  - `fpgai/devtools/build_paper_numeric_results.py`
+- `_parse_summary`
+  - `fpgai/reporting/parallel_policy_artifacts.py`
+  - `fpgai/reporting/training_accumulated_batch_artifacts.py`
+- `_passed`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+- `_pipeline_ii`
+  - `fpgai/analysis/architecture_schedule_model.py`
+  - `fpgai/analysis/hls_architecture.py`
+- `_plan_layers`
+  - `fpgai/backends/hls/emit/conv_tiling_codegen.py`
+  - `fpgai/backends/hls/emit/dense_tiling_codegen.py`
+- `_plan_map`
+  - `fpgai/analysis/hls_architecture.py`
+  - `fpgai/backends/hls/emit/top_cpp.py`
+  - `fpgai/backends/hls/emit/top_train_cpp.py`
+- `_plan_notes`
+  - `fpgai/engine/compiler.py`
+  - `fpgai/runtime/package.py`
+- `_positive_codegen_int`
+  - `fpgai/backends/hls/emit/top_cpp.py`
+  - `fpgai/backends/hls/emit/top_train_cpp.py`
+- `_positive_float`
+  - `fpgai/analysis/hls_architecture.py`
+  - `fpgai/analysis/performance_estimator.py`
+  - `fpgai/analysis/resource_estimator.py`
+- `_positive_int`
+  - `fpgai/analysis/architecture_schedule_model.py`
+  - `fpgai/analysis/hls_architecture.py`
+  - `fpgai/analysis/tiling_analysis.py`
+  - `fpgai/engine/communication.py`
+  - `fpgai/engine/models.py`
+  - `fpgai/reporting/data_movement.py`
+  - `fpgai/validation/numeric.py`
+- `_precision_bits`
+  - `fpgai/analysis/hls_architecture.py`
+  - `fpgai/backends/hls/testbench.py`
+- `_precision_tag`
+  - `fpgai/backends/hls/emit/params_cpp.py`
+  - `fpgai/backends/hls/emit/params_h.py`
+  - `fpgai/backends/hls/emit/top_cpp.py`
+- `_prediction_vs_hls`
+  - `fpgai/devtools/build_paper_figures.py`
+  - `fpgai/devtools/build_paper_tables.py`
+- `_prod`
+  - `fpgai/analysis/training_resource_estimate.py`
+  - `fpgai/runtime/io.py`
+- `_ratio`
+  - `fpgai/devtools/build_paper_tables.py`
+  - `fpgai/reporting/hls_calibration_summary.py`
+- `_read`
+  - `fpgai/reporting/memory_binding_artifacts.py`
+  - `fpgai/reporting/parallel_pipeline_effect.py`
+  - `fpgai/reports/memory_semantics.py`
+- `_read_json`
+  - `fpgai/devtools/build_paper_artifact_index.py`
+  - `fpgai/devtools/build_paper_numeric_results.py`
+  - `fpgai/devtools/collect_paper_prediction_codegen.py`
+  - `fpgai/devtools/end_to_end_audit.py`
+  - `fpgai/paper/verification.py`
+  - `fpgai/reporting/artifacts.py`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+  - `fpgai/reporting/precision_effect.py`
+  - `fpgai/reporting/training_accelerator_artifacts.py`
+  - `fpgai/validation/results.py`
+- `_read_rows`
+  - `fpgai/devtools/build_hls_csynth_table.py`
+  - `fpgai/devtools/build_paper_figures.py`
+  - `fpgai/devtools/build_paper_stage1_tables.py`
+  - `fpgai/devtools/build_paper_tables.py`
+- `_read_text`
+  - `fpgai/reporting/hls_explanation.py`
+  - `fpgai/reporting/training_accelerator_artifacts.py`
+  - `fpgai/reporting/training_multi_epoch_convergence_artifacts.py`
+  - `fpgai/reporting/training_native_accumulated_batch_artifacts.py`
+  - `fpgai/reporting/vivado_bridge_artifacts.py`
+- `_read_texts`
+  - `fpgai/devtools/canonical_hls_source_audit.py`
+  - `fpgai/devtools/contract_source_audit.py`
+  - `fpgai/devtools/hls_source_effect_audit.py`
+- `_rel_paths`
+  - `fpgai/reporting/training_multi_epoch_convergence_artifacts.py`
+  - `fpgai/reporting/training_native_accumulated_batch_artifacts.py`
+- `_report_statuses`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+- `_resolve_attr_array_or_ref`
+  - `fpgai/analysis/training_resource_estimate.py`
+  - `fpgai/backends/hls/codegen.py`
+- `_resolve_named_array`
+  - `fpgai/analysis/training_resource_estimate.py`
+  - `fpgai/backends/hls/codegen.py`
+- `_round`
+  - `fpgai/analysis/tiling_analysis.py`
+  - `fpgai/analysis/tiling_performance_model.py`
+- `_run`
+  - `fpgai/backends/hls/vitis_runner.py`
+  - `fpgai/devtools/end_to_end_audit.py`
+- `_run_one`
+  - `fpgai/devtools/run_paper_prediction_codegen.py`
+  - `fpgai/experiments/sweep_runner.py`
+- `_runtime_commands`
+  - `fpgai/backends/vivado/vivado_bridge.py`
+  - `fpgai/reporting/hardware_feasibility.py`
+- `_safe_float`
+  - `fpgai/analysis/hls_estimate_compare.py`
+  - `fpgai/analysis/hls_layer_validation.py`
+  - `fpgai/analysis/hls_module_breakdown.py`
+  - `fpgai/analysis/tiling_performance_model.py`
+  - `fpgai/reporting/hls_calibration_summary.py`
+  - `fpgai/reporting/hls_truth.py`
+- `_safe_int`
+  - `fpgai/analysis/hls_estimate_compare.py`
+  - `fpgai/analysis/hls_module_breakdown.py`
+  - `fpgai/analysis/tiling_manifest.py`
+  - `fpgai/analysis/tiling_performance_model.py`
+  - `fpgai/analysis/tiling_resource_model.py`
+  - `fpgai/reporting/hls_truth.py`
+- `_safe_name`
+  - `fpgai/experiments/design_matrix.py`
+  - `fpgai/experiments/sweep_runner.py`
+- `_search`
+  - `fpgai/devtools/canonical_hls_source_audit.py`
+  - `fpgai/devtools/hls_source_effect_audit.py`
+- `_set_cfg`
+  - `fpgai/analysis/design_space_report.py`
+  - `fpgai/analysis/precision_sweep.py`
+- `_set_path`
+  - `fpgai/devtools/generate_paper_configs.py`
+  - `fpgai/experiments/config_materializer.py`
+- `_status`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+  - `fpgai/reporting/training_multi_epoch_convergence_artifacts.py`
+- `_tensor_shape`
+  - `fpgai/analysis/training_resource_estimate.py`
+  - `fpgai/engine/analysis.py`
+- `_terminal_summary`
+  - `fpgai/analysis/design_space_report.py`
+  - `fpgai/analysis/hls_layer_validation.py`
+  - `fpgai/analysis/hls_module_breakdown.py`
+- `_tex_escape`
+  - `fpgai/analysis/hls_calibration_validation.py`
+  - `fpgai/devtools/build_paper_tables.py`
+- `_tile_value`
+  - `fpgai/backends/hls/emit/conv_tiling_codegen.py`
+  - `fpgai/backends/hls/emit/dense_tiling_codegen.py`
+- `_to_dict`
+  - `fpgai/analysis/hls_ii_comparison.py`
+  - `fpgai/analysis/tiling_analysis.py`
+  - `fpgai/analysis/tiling_reports.py`
+  - `fpgai/analysis/tiling_sweep.py`
+  - `fpgai/backends/hls/emit/architecture_comments.py`
+  - `fpgai/backends/hls/emit/conv_tiling_codegen.py`
+  - `fpgai/backends/hls/emit/dense_tiling_codegen.py`
+- `_to_float`
+  - `fpgai/analysis/hls_calibration_dataset.py`
+  - `fpgai/analysis/hls_calibration_model.py`
+  - `fpgai/analysis/hls_calibration_validation.py`
+  - `fpgai/reporting/hardware_feasibility.py`
+- `_training_capacity`
+  - `fpgai/devtools/build_paper_figures.py`
+  - `fpgai/devtools/build_paper_tables.py`
+- `_try_to_numpy`
+  - `fpgai/analysis/training_resource_estimate.py`
+  - `fpgai/backends/hls/codegen.py`
+- `_unwrap_tile_mapping`
+  - `fpgai/backends/hls/emit/conv_tiling_codegen.py`
+  - `fpgai/backends/hls/emit/dense_tiling_codegen.py`
+- `_write_csv`
+  - `fpgai/analysis/hls_calibration_validation.py`
+  - `fpgai/devtools/build_paper_artifact_index.py`
+  - `fpgai/devtools/build_paper_numeric_results.py`
+  - `fpgai/devtools/build_paper_tables.py`
+  - `fpgai/experiments/result_store.py`
+- `_write_json`
+  - `fpgai/analysis/model_compatibility.py`
+  - `fpgai/backends/vivado/run_bridge.py`
+  - `fpgai/devtools/build_paper_artifact_index.py`
+  - `fpgai/reporting/hls_truth.py`
+- `_write_md`
+  - `fpgai/devtools/audit_knob_materialization.py`
+  - `fpgai/devtools/build_paper_artifact_index.py`
+  - `fpgai/devtools/build_paper_tables.py`
+  - `fpgai/reporting/data_movement.py`
+- `_write_outputs`
+  - `fpgai/devtools/run_paper_prediction_codegen.py`
+  - `fpgai/reporting/vivado_bridge_artifacts.py`
+- `_write_tex`
+  - `fpgai/analysis/hls_calibration_validation.py`
+  - `fpgai/devtools/build_paper_tables.py`
+- `add`
+  - `fpgai/analysis/output_check.py`
+  - `fpgai/engine/compiler.py`
+- `as_dict`
+  - `fpgai/reporting/hls_truth.py`
+  - `fpgai/reporting/parallel_pipeline_effect.py`
+  - `fpgai/reporting/precision_effect.py`
+- `as_float`
+  - `fpgai/reporting/hardware_knob_tables.py`
+  - `fpgai/reporting/plot_training_loss_curves.py`
+  - `fpgai/reporting/safe_clock_recommendations.py`
+  - `fpgai/reporting/training_convergence.py`
+- `assign_stable_names`
+  - `fpgai/ir/passes.py`
+  - `fpgai/ir/passes/assign_names.py`
+- `build_arg_parser`
+  - `fpgai/reporting/analyze_experiments.py`
+  - `fpgai/reporting/compare_experiments.py`
+  - `fpgai/reporting/hls_calibration_samples.py`
+- `compile`
+  - `fpgai/compiler/compiler.py`
+  - `fpgai/engine/compiler.py`
+- `emit_activations_cpp`
+  - `fpgai/backends/hls/emit/layers.py`
+  - `fpgai/backends/hls/emit/layers_activations.py`
+- `emit_activations_h`
+  - `fpgai/backends/hls/emit/layers.py`
+  - `fpgai/backends/hls/emit/layers_activations.py`
+- `emit_dense_cpp`
+  - `fpgai/backends/hls/emit/layers.py`
+  - `fpgai/backends/hls/emit/layers_dense.py`
+- `emit_dense_h`
+  - `fpgai/backends/hls/emit/layers.py`
+  - `fpgai/backends/hls/emit/layers_dense.py`
+- `escape_latex`
+  - `fpgai/experiments/comparison.py`
+  - `fpgai/experiments/latex_tables.py`
+- `fmt`
+  - `fpgai/backends/hostcpp/emit_host_model.py`
+  - `fpgai/devtools/build_hls_paper_subset_table.py`
+  - `fpgai/reporting/communication_ablation.py`
+  - `fpgai/reporting/compare_hardware_knobs.py`
+  - `fpgai/reporting/estimator_accuracy.py`
+  - `fpgai/reporting/safe_clock_recommendations.py`
+  - `fpgai/reporting/vivado_impl_artifacts.py`
+- `fmt_num`
+  - `fpgai/reporting/estimator_tables.py`
+  - `fpgai/reporting/training_convergence.py`
+- `fnum`
+  - `fpgai/devtools/build_hls_paper_subset_table.py`
+  - `fpgai/reporting/estimator_accuracy.py`
+- `forward`
+  - `fpgai/experiments/model_generation.py`
+  - `fpgai/experiments/model_suite.py`
+- `get_model_arch`
+  - `fpgai/engine/legacy_engine.py`
+  - `fpgai/frontend/onnx/reader.py`
+- `get_shape`
+  - `fpgai/backends/hls/emit/top_train_cpp.py`
+  - `fpgai/benchmark/training_reference.py`
+- `insert_activations`
+  - `fpgai/ir/passes.py`
+  - `fpgai/ir/passes/insert_activations.py`
+- `items`
+  - `fpgai/reporting/hls_truth.py`
+  - `fpgai/reporting/parallel_pipeline_effect.py`
+  - `fpgai/reporting/precision_effect.py`
+- `load_json`
+  - `fpgai/reporting/communication_ablation.py`
+  - `fpgai/reporting/compare_hardware_knobs.py`
+  - `fpgai/reporting/estimator_accuracy.py`
+  - `fpgai/reporting/training_convergence.py`
+- `main`
+  - `fpgai/analysis/output_check.py`
+  - `fpgai/backends/vivado/run_bridge.py`
+  - `fpgai/cli.py`
+  - `fpgai/devtools/audit_knob_materialization.py`
+  - `fpgai/devtools/build_hls_csynth_table.py`
+  - `fpgai/devtools/build_hls_paper_subset_table.py`
+  - `fpgai/devtools/build_paper_artifact_index.py`
+  - `fpgai/devtools/build_paper_figures.py`
+  - `fpgai/devtools/build_paper_numeric_results.py`
+  - `fpgai/devtools/build_paper_stage1_tables.py`
+  - `fpgai/devtools/build_paper_tables.py`
+  - `fpgai/devtools/canonical_hls_source_audit.py`
+  - `fpgai/devtools/collect_paper_prediction_codegen.py`
+  - `fpgai/devtools/contract_source_audit.py`
+  - `fpgai/devtools/diagnose_training_csim.py`
+  - `fpgai/devtools/end_to_end_audit.py`
+  - `fpgai/devtools/generate_paper_configs.py`
+  - `fpgai/devtools/hls_source_effect_audit.py`
+  - `fpgai/devtools/paper_experiment_matrix.py`
+  - `fpgai/devtools/probe_config_schema.py`
+  - `fpgai/devtools/run_paper_prediction_codegen.py`
+  - `fpgai/reporting/analyze_experiments.py`
+  - `fpgai/reporting/artifact_smoke.py`
+  - `fpgai/reporting/claim_traceability.py`
+  - `fpgai/reporting/communication_ablation.py`
+  - `fpgai/reporting/compare_experiments.py`
+  - `fpgai/reporting/compare_hardware_knobs.py`
+  - `fpgai/reporting/estimator_accuracy.py`
+  - `fpgai/reporting/estimator_tables.py`
+  - `fpgai/reporting/generate_paper_artifacts.py`
+  - `fpgai/reporting/hardware_feasibility.py`
+  - `fpgai/reporting/hardware_knob_tables.py`
+  - `fpgai/reporting/hls_calibration_dataset.py`
+  - `fpgai/reporting/hls_calibration_samples.py`
+  - `fpgai/reporting/hls_calibration_summary.py`
+  - `fpgai/reporting/hls_calibration_validation.py`
+  - `fpgai/reporting/inspect_pipeline_policy_artifacts.py`
+  - `fpgai/reporting/memory_binding_artifacts.py`
+  - `fpgai/reporting/paper_artifacts.py`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_frontier.py`
+  - `fpgai/reporting/paper_training_precision.py`
+  - `fpgai/reporting/paper_training_table.py`
+  - `fpgai/reporting/paper_validation.py`
+  - `fpgai/reporting/parallel_policy_artifacts.py`
+  - `fpgai/reporting/plot_policy_results.py`
+  - `fpgai/reporting/plot_training_loss_curves.py`
+  - `fpgai/reporting/policy_summary.py`
+  - `fpgai/reporting/safe_clock_recommendations.py`
+  - `fpgai/reporting/training_accelerator_artifacts.py`
+  - `fpgai/reporting/training_accumulated_batch_artifacts.py`
+  - `fpgai/reporting/training_batch_multistep_artifacts.py`
+  - `fpgai/reporting/training_convergence.py`
+  - `fpgai/reporting/training_multi_epoch_convergence_artifacts.py`
+  - `fpgai/reporting/training_native_accumulated_batch_artifacts.py`
+  - `fpgai/reporting/vivado_bridge_artifacts.py`
+  - `fpgai/reporting/vivado_impl_artifacts.py`
+  - `fpgai/runtime/binary_io.py`
+  - `fpgai/runtime/bitstream.py`
+  - `fpgai/runtime/hostcpp.py`
+  - `fpgai/runtime/kv260.py`
+  - `fpgai/runtime/package.py`
+  - `fpgai/runtime/vitis.py`
+  - `fpgai/validation/verify_flow.py`
+- `parse_hls_csynth_report`
+  - `fpgai/analysis/hls_calibration_dataset.py`
+  - `fpgai/analysis/hls_estimate_compare.py`
+- `pick`
+  - `fpgai/devtools/build_paper_numeric_results.py`
+  - `fpgai/reporting/training_convergence.py`
+- `plot_resources_vs_precision`
+  - `fpgai/reporting/paper_training_precision.py`
+  - `fpgai/reporting/plot_policy_results.py`
+- `read_csv`
+  - `fpgai/reporting/estimator_accuracy.py`
+  - `fpgai/reporting/generate_paper_artifacts.py`
+  - `fpgai/reporting/hardware_knob_tables.py`
+- `read_json`
+  - `fpgai/reporting/paper_artifacts.py`
+  - `fpgai/reporting/vivado_impl_artifacts.py`
+- `read_rows`
+  - `fpgai/devtools/build_hls_paper_subset_table.py`
+  - `fpgai/reporting/plot_policy_results.py`
+  - `fpgai/reporting/policy_summary.py`
+- `render_markdown`
+  - `fpgai/reporting/paper_evidence.py`
+  - `fpgai/reporting/paper_validation.py`
+- `replace`
+  - `fpgai/backends/hls/emit/conv_tiling_codegen.py`
+  - `fpgai/backends/hls/emit/dense_tiling_codegen.py`
+  - `fpgai/backends/hls/emit/top_cpp.py`
+- `run_design_space_report`
+  - `fpgai/analysis/design_space_report.py`
+  - `fpgai/engine/compiler.py`
+- `run_host_executable`
+  - `fpgai/runtime/hostcpp.py`
+  - `fpgai/validation/onnx_compare.py`
+- `run_onnxruntime`
+  - `fpgai/runtime/onnxruntime_backend.py`
+  - `fpgai/validation/onnx_compare.py`
+- `run_precision_sweep`
+  - `fpgai/analysis/precision_sweep.py`
+  - `fpgai/engine/compiler.py`
+- `run_quantization_report`
+  - `fpgai/analysis/quantization_report.py`
+  - `fpgai/engine/compiler.py`
+- `run_vitis_csim`
+  - `fpgai/backends/hls/vitis_runner.py`
+  - `fpgai/runtime/vitis.py`
+- `score`
+  - `fpgai/analysis/hls_calibration_dataset.py`
+  - `fpgai/analysis/hls_calibration_runner.py`
+  - `fpgai/devtools/build_paper_numeric_results.py`
+  - `fpgai/reporting/vivado_impl_artifacts.py`
+- `summary`
+  - `fpgai/analysis/hls_schedule_report.py`
+  - `fpgai/analysis/model_inspection.py`
+  - `fpgai/compiler/architecture_capabilities.py`
+  - `fpgai/engine/result.py`
+  - `fpgai/ir/graph.py`
+- `to_bool`
+  - `fpgai/reporting/paper_training_precision.py`
+  - `fpgai/reporting/paper_training_table.py`
+  - `fpgai/reporting/plot_policy_results.py`
+  - `fpgai/reporting/policy_summary.py`
+- `to_dict`
+  - `fpgai/analysis/hls_architecture.py`
+  - `fpgai/analysis/hls_calibration_dataset.py`
+  - `fpgai/analysis/hls_schedule_report.py`
+  - `fpgai/analysis/model_inspection.py`
+  - `fpgai/analysis/output_check.py`
+  - `fpgai/backends/vivado/boards.py`
+  - `fpgai/compiler/architecture_capabilities.py`
+  - `fpgai/compiler/capabilities.py`
+  - `fpgai/engine/models.py`
+  - `fpgai/engine/partition.py`
+  - `fpgai/engine/training.py`
+  - `fpgai/layers/registry.py`
+  - `fpgai/numerics/precision_policy.py`
+  - `fpgai/reports/memory_semantics.py`
+  - `fpgai/runtime/weights.py`
+  - `fpgai/validation/correctness.py`
+  - `fpgai/validation/onnx_compare.py`
+- `to_float`
+  - `fpgai/reporting/plot_policy_results.py`
+  - `fpgai/reporting/policy_summary.py`
+- `validate_allowlist`
+  - `fpgai/ir/passes.py`
+  - `fpgai/ir/passes/validate.py`
+- `visit`
+  - `fpgai/reporting/hardware_feasibility.py`
+  - `fpgai/reporting/training_convergence.py`
+- `write_csv`
+  - `fpgai/reporting/estimator_accuracy.py`
+  - `fpgai/reporting/hardware_knob_tables.py`
+  - `fpgai/reporting/paper_artifacts.py`
+- `write_markdown`
+  - `fpgai/reporting/compare_hardware_knobs.py`
+  - `fpgai/reporting/hls_calibration_summary.py`
+  - `fpgai/reporting/safe_clock_recommendations.py`
+- `write_md`
+  - `fpgai/reporting/hardware_feasibility.py`
+  - `fpgai/reporting/paper_artifacts.py`
+- `write_outputs`
+  - `fpgai/reporting/communication_ablation.py`
+  - `fpgai/reporting/training_convergence.py`
+  - `fpgai/reporting/vivado_impl_artifacts.py`
+
+## Duplicate class names
+- `Compiler`
+  - `fpgai/compiler/compiler.py`
+  - `fpgai/engine/compiler.py`
+- `HLSProject`
+  - `fpgai/backends/hls/codegen.py`
+  - `fpgai/backends/hls/project.py`
+- `Op`
+  - `fpgai/ir/graph.py`
+  - `fpgai/ir/ops.py`
+- `PartitionPlan`
+  - `fpgai/engine/models.py`
+  - `fpgai/engine/partition.py`
+- `Row`
+  - `fpgai/reporting/communication_ablation.py`
+  - `fpgai/reporting/training_convergence.py`
+- `TensorSpec`
+  - `fpgai/ir/graph.py`
+  - `fpgai/ir/types.py`

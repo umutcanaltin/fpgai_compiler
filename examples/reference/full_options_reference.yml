@@ -1,0 +1,129 @@
+# FPGAI full options reference YAML.
+# This is a reference template for the canonical YAML direction after W0-lite.
+# Not every option should be enabled together in a real design.
+version: 1
+project:
+  name: reference_full_options
+  out_dir: build/examples/reference_full_options
+  clean: true
+pipeline:
+  mode: inference   # inference | training_on_device
+  outputs:
+    top_kernel_name: deeplearn
+model:
+  format: onnx
+  path: models/mlp.onnx
+targets:
+  platform:
+    board: kv260    # pynq_z2 | kv260 | kr260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+      - name: pl_clk0
+        target_mhz: 200
+weights:
+  mode: embedded    # embedded | import | import_export | tiled | tiled_mutable
+memory:
+  weight_storage: bram            # bram | uram | ddr
+  activation_storage: bram        # bram | uram | ddr
+  gradient_storage: bram          # training: bram | uram | ddr
+  optimizer_state_storage: bram   # training optimizer state: none | bram | uram | ddr
+data_movement:
+  inputs:
+    interface: m_axi              # m_axi | axi_stream | axi_lite
+    transport: ps_runtime         # ps_runtime | dma | none
+    tiled:
+      enabled: false
+      tile_size: 64
+  outputs:
+    interface: m_axi              # m_axi | axi_stream | axi_lite
+    transport: ps_runtime         # ps_runtime | dma | none
+    tiled:
+      enabled: false
+      tile_size: 64
+  labels:
+    interface: m_axi
+    transport: ps_runtime
+    tiled:
+      enabled: false
+      tile_size: 64
+  weights:
+    load:
+      interface: embedded         # embedded | m_axi | axi_stream
+      transport: none
+    export:
+      interface: m_axi
+      transport: ps_runtime
+      policy: full                # full | tiled
+  gradients:
+    export:
+      interface: m_axi
+      transport: ps_runtime
+      policy: full                # full | tiled
+      tile_size: 64
+  optimizer_state:
+    export:
+      interface: m_axi
+      transport: ps_runtime
+      policy: full                # full | tiled
+      tile_size: 64
+runtime:
+  sequence:
+    - run_inference
+training:
+  optimizer:
+    type: sgd                     # sgd | momentum | adam
+    learning_rate: 0.001
+    momentum: 0.9
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 1.0e-8
+    bias_correction: false
+  loss:
+    type: mse                     # mse | cross_entropy
+  batch:
+    size: 1
+    epochs: 1
+  accumulation:
+    steps: 1
+    mode: none                    # none | native | testbench | native_accumulated | testbench_accumulated
+optimization:
+  pipeline:
+    style: balanced               # none | conservative | balanced | aggressive
+    ii: 1
+  parallel:
+    pe: 1
+    simd: 1
+    unroll_factor: 1
+    partition_factor: 1
+    array_partition_mode: none    # none | cyclic | block | complete
+  tiling:
+    enabled: false
+    tile_size: 64
+codegen:
+  readability: high               # compact | normal | high | debug
+toolchain:
+  vitis_hls:
+    enabled: false
+    executable: vitis_hls
+  vivado:
+    enabled: false
+    executable: vivado
+build:
+  stages:
+    cpp: true
+    testbench: true
+    hls_project: false
+    hls_synthesis: false
+    vivado_project: false
+    vivado_implementation: false
+    bitstream: false
+    runtime_package: true
+    reports: true
+reports:
+  resolved_config: true
+  config_contract: true
+  generated_hls_explanation: true
+  data_movement_plan: true
+  ps_pl_transfer_plan: true
+  movement_contract_validation: true
+  board_fit: true

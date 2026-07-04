@@ -1,0 +1,16 @@
+name: paper_memory_strategy_sweep
+description: Reference sweep template for BRAM/URAM/DDR memory strategy comparisons.
+defaults:
+  base_config: examples/inference/mnist_mlp_embedded.yml
+  output_root: paper_experiments/memory_strategy_sweep
+design_points:
+  - name: bram_weights_bram_activations
+    memory: {weight_storage: bram, activation_storage: bram}
+  - name: ddr_weights_bram_activations
+    memory: {weight_storage: ddr, activation_storage: bram}
+  - name: uram_weights_bram_activations
+    memory: {weight_storage: uram, activation_storage: bram}
+materialize_configs:
+  enabled: true
+  parameter_mappings:
+    memory: {path: memory, create: true}

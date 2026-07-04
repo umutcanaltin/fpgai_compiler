@@ -256,3 +256,53 @@ def test_training_cross_entropy_generates_real_loss_kernel_and_reports(tmp_path:
     assert loss["loss"]["type"] == "cross_entropy"
     assert loss["loss"]["hls_status"] == "implemented"
     assert loss["loss"]["numeric_validation_status"] == "implemented"
+
+
+def test_training_cross_entropy_reference_artifacts_and_loss_validation_report(tmp_path: Path) -> None:
+    raw = copy.deepcopy(_load_training_config())
+    raw.setdefault("project", {})["out_dir"] = str(tmp_path / "training_cross_entropy_numeric")
+    raw.setdefault("pipeline", {})["mode"] = "training_on_device"
+    raw.setdefault("training", {}).setdefault("loss", {})["type"] = "cross_entropy"
+    _cpp_only(raw)
+
+    result = _compile_raw(raw, tmp_path)
+    out_dir = Path(result.out_dir)
+    ref_dir = out_dir / "training_reference"
+
+    assert (ref_dir / "logits_ref.bin").exists()
+    assert (ref_dir / "softmax_ref.bin").exists()
+    assert (ref_dir / "cross_entropy_loss_ref.json").exists()
+    assert (ref_dir / "dlogits_ref.bin").exists()
+
+    numeric = json.loads((out_dir / "reports/numeric_validation.json").read_text(encoding="utf-8"))
+    loss_validation = numeric["loss_validation"]
+    assert loss_validation["requested"] is True
+    assert loss_validation["loss_type"] == "cross_entropy"
+    assert loss_validation["softmax_stable"] is True
+    assert loss_validation["reference"]["logits_ref_exists"] is True
+    assert loss_validation["reference"]["softmax_ref_exists"] is True
+    assert loss_validation["reference"]["cross_entropy_loss_ref_exists"] is True
+    assert loss_validation["reference"]["dlogits_ref_exists"] is True
+    assert loss_validation["status"] == "artifact_missing"
+    assert loss_validation["passed"] is False
+    assert numeric["training"]["reference"]["loss_type"] == "cross_entropy"
+    assert numeric["training"]["reference"]["softmax_ref_bin"].endswith("training_reference/softmax_ref.bin")
+
+
+def test_training_mse_does_not_emit_cross_entropy_loss_kernel_or_validation(tmp_path: Path) -> None:
+    raw = copy.deepcopy(_load_training_config())
+    raw.setdefault("project", {})["out_dir"] = str(tmp_path / "training_mse_no_cross_entropy")
+    raw.setdefault("pipeline", {})["mode"] = "training_on_device"
+    raw.setdefault("training", {}).setdefault("loss", {})["type"] = "mse"
+    _cpp_only(raw)
+
+    result = _compile_raw(raw, tmp_path)
+    out_dir = Path(result.out_dir)
+    source = (out_dir / "hls/src/deeplearn.cpp").read_text(encoding="utf-8")
+    numeric = json.loads((out_dir / "reports/numeric_validation.json").read_text(encoding="utf-8"))
+
+    assert "FPGAI cross_entropy loss kernel" not in source
+    assert "softmax_denom" not in source
+    assert "cross_entropy_loss_ref.json" not in source
+    assert numeric["loss_validation"]["status"] == "not_requested"
+    assert numeric["loss_validation"]["loss_type"] == "mse"
