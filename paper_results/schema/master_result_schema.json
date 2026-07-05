@@ -1,0 +1,348 @@
+{
+  "schema_version": 1,
+  "artifact_kind": "paper_master_result_schema",
+  "fields": [
+    {
+      "name": "schema_version",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "design_id",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "out_dir",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "model",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "model_path",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "dataset",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "board",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "part",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "mode",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "precision",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "memory_strategy",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "data_movement",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "parallel_factor",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "pipeline_policy",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "tiling",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "training_optimizer",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "training_loss",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "build_cpp",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "build_hls_project",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "build_hls_synthesis",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "build_vivado_project",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "build_vivado_implementation",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "build_bitstream",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "runtime_package_status",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "estimated_lut",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_ff",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_bram",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_bram18",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_dsp",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_uram",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_fmax_mhz",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_clock_mhz",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_latency_ms",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_cycles",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_throughput_fps",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_parallel_macs",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_memory_bytes",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_weight_bytes",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_activation_bytes",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_gradient_bytes",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "estimated_optimizer_state_bytes",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "board_fit_status",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "board_fit_limiting_dimension",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "board_fit_vivado_allowed",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "board_fit_bitstream_allowed",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "generated_cpp_status",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "movement_validation_status",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "movement_validation_passed",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "runtime_sequence_commands",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "runtime_buffer_count",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "hls_status",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "hls_lut",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "hls_ff",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "hls_bram",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "hls_dsp",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "hls_latency_min",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "hls_latency_max",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "hls_ii",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "hls_clock_period_ns",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "vivado_project_status",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "vivado_implementation_status",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "vivado_lut",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "vivado_ff",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "vivado_bram",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "vivado_dsp",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "vivado_wns",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "vivado_tns",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "vivado_power_w",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "bitstream_status",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "deployment_package_status",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "runtime_status",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "runtime_board",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "runtime_sample_count",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "runtime_latency_ms_mean",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "runtime_latency_ms_p50",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "runtime_latency_ms_p95",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "runtime_throughput",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "runtime_accuracy",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "runtime_loss_before",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "runtime_loss_after",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "runtime_training_step_ms",
+      "type": "number_or_blank"
+    },
+    {
+      "name": "support_status",
+      "type": "string_or_bool_or_blank"
+    },
+    {
+      "name": "required_validation",
+      "type": "string_or_bool_or_blank"
+    }
+  ],
+  "status_values": {
+    "support_status": [
+      "incomplete",
+      "artifact_generated",
+      "static_validation_passed",
+      "hls_synthesis_available",
+      "vivado_implementation_available",
+      "runtime_result_available"
+    ]
+  }
+}

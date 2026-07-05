@@ -1,0 +1,300 @@
+[
+  {
+    "report": "model_profile.json",
+    "count": 6,
+    "top_level_keys": [
+      "compilation_ready",
+      "constants",
+      "disallowed_operators",
+      "graph_name",
+      "inputs",
+      "limited_operators",
+      "model_path",
+      "operator_counts",
+      "operators",
+      "outputs",
+      "parameter_bytes",
+      "parameter_values",
+      "pipeline_mode",
+      "unsupported_operators"
+    ],
+    "examples": [
+      "build/examples/cpp_only/reports/model_profile.json",
+      "build/examples/hls_project/reports/model_profile.json",
+      "build/examples/mnist_mlp_embedded/reports/model_profile.json",
+      "build/examples/mnist_mlp_import_weights/reports/model_profile.json",
+      "build/examples/mnist_mlp_training_sgd/reports/model_profile.json"
+    ]
+  },
+  {
+    "report": "resource_prediction.json",
+    "count": 6,
+    "top_level_keys": [
+      "analytical_model",
+      "architecture",
+      "architecture_model",
+      "architecture_signature",
+      "calibration",
+      "descriptor_count",
+      "estimation_mode",
+      "layers",
+      "model",
+      "model_path",
+      "prediction_kind",
+      "prediction_status",
+      "top_level",
+      "totals",
+      "training_components",
+      "worst_bram_layer",
+      "worst_dsp_layer",
+      "worst_lut_layer"
+    ],
+    "examples": [
+      "build/examples/cpp_only/reports/resource_prediction.json",
+      "build/examples/hls_project/reports/resource_prediction.json",
+      "build/examples/mnist_mlp_embedded/reports/resource_prediction.json",
+      "build/examples/mnist_mlp_import_weights/reports/resource_prediction.json",
+      "build/examples/mnist_mlp_training_sgd/reports/resource_prediction.json"
+    ]
+  },
+  {
+    "report": "timing_prediction.json",
+    "count": 6,
+    "top_level_keys": [
+      "analytical_performance_model",
+      "architecture_schedule_model",
+      "architecture_signature",
+      "calibration",
+      "clock_mhz",
+      "descriptor_count",
+      "estimation_mode",
+      "execution_mode",
+      "input_words",
+      "interface",
+      "layer_cycles",
+      "model_path",
+      "output_words",
+      "performance_model",
+      "predicted_analytical_cycles",
+      "predicted_compute_cycles",
+      "predicted_control_cycles",
+      "predicted_cycles",
+      "predicted_fixed_cycles",
+      "predicted_input_transfer_cycles",
+      "predicted_latency_ms",
+      "predicted_output_transfer_cycles",
+      "predicted_parallel_macs",
+      "predicted_pipeline_fill_cycles",
+      "predicted_sequential_compute_cycles",
+      "predicted_speedup_vs_cpu",
+      "predicted_throughput_fps",
+      "predicted_transfer_cycles",
+      "predicted_unscaled_cycles",
+      "prediction_kind",
+      "prediction_status"
+    ],
+    "examples": [
+      "build/examples/cpp_only/reports/timing_prediction.json",
+      "build/examples/hls_project/reports/timing_prediction.json",
+      "build/examples/mnist_mlp_embedded/reports/timing_prediction.json",
+      "build/examples/mnist_mlp_import_weights/reports/timing_prediction.json",
+      "build/examples/mnist_mlp_training_sgd/reports/timing_prediction.json"
+    ]
+  },
+  {
+    "report": "board_fit.json",
+    "count": 6,
+    "top_level_keys": [
+      "bitstream_allowed",
+      "board",
+      "build_stage_gating",
+      "derived_requirements",
+      "fit",
+      "format",
+      "interface_fit",
+      "limiting_dimension",
+      "normalized_resources",
+      "part",
+      "source",
+      "status",
+      "suggested_yaml_actions",
+      "truth_boundary",
+      "vivado_implementation_allowed"
+    ],
+    "examples": [
+      "build/examples/cpp_only/reports/board_fit.json",
+      "build/examples/hls_project/reports/board_fit.json",
+      "build/examples/mnist_mlp_embedded/reports/board_fit.json",
+      "build/examples/mnist_mlp_import_weights/reports/board_fit.json",
+      "build/examples/mnist_mlp_training_sgd/reports/board_fit.json"
+    ]
+  },
+  {
+    "report": "hardware_knob_contract.json",
+    "count": 6,
+    "top_level_keys": [
+      "board_fit_reason",
+      "board_fit_status",
+      "format",
+      "knobs",
+      "precedence",
+      "truth_boundary"
+    ],
+    "examples": [
+      "build/examples/cpp_only/reports/hardware_knob_contract.json",
+      "build/examples/hls_project/reports/hardware_knob_contract.json",
+      "build/examples/mnist_mlp_embedded/reports/hardware_knob_contract.json",
+      "build/examples/mnist_mlp_import_weights/reports/hardware_knob_contract.json",
+      "build/examples/mnist_mlp_training_sgd/reports/hardware_knob_contract.json"
+    ]
+  },
+  {
+    "report": "generated_hls_explanation.json",
+    "count": 6,
+    "top_level_keys": [
+      "artifact_kind",
+      "communication_summary",
+      "decisions",
+      "generated_files",
+      "memory_summary",
+      "review_status",
+      "schema_version",
+      "source_evidence",
+      "verification_artifacts"
+    ],
+    "examples": [
+      "build/examples/cpp_only/reports/generated_hls_explanation.json",
+      "build/examples/hls_project/reports/generated_hls_explanation.json",
+      "build/examples/mnist_mlp_embedded/reports/generated_hls_explanation.json",
+      "build/examples/mnist_mlp_import_weights/reports/generated_hls_explanation.json",
+      "build/examples/mnist_mlp_training_sgd/reports/generated_hls_explanation.json"
+    ]
+  },
+  {
+    "report": "movement_contract_validation.json",
+    "count": 6,
+    "top_level_keys": [
+      "artifact_kind",
+      "blocking_failure",
+      "checks",
+      "failed_checks",
+      "passed",
+      "schema_version",
+      "source_reports",
+      "status",
+      "summary",
+      "truth_boundary",
+      "validation_scope"
+    ],
+    "examples": [
+      "build/examples/cpp_only/reports/movement_contract_validation.json",
+      "build/examples/hls_project/reports/movement_contract_validation.json",
+      "build/examples/mnist_mlp_embedded/reports/movement_contract_validation.json",
+      "build/examples/mnist_mlp_import_weights/reports/movement_contract_validation.json",
+      "build/examples/mnist_mlp_training_sgd/reports/movement_contract_validation.json"
+    ]
+  },
+  {
+    "report": "runtime_sequence.json",
+    "count": 6,
+    "top_level_keys": [
+      "explicit",
+      "memory_semantics_mode",
+      "pipeline_mode",
+      "schema_version",
+      "sequence",
+      "supported_commands"
+    ],
+    "examples": [
+      "build/examples/cpp_only/reports/runtime_sequence.json",
+      "build/examples/hls_project/reports/runtime_sequence.json",
+      "build/examples/mnist_mlp_embedded/reports/runtime_sequence.json",
+      "build/examples/mnist_mlp_import_weights/reports/runtime_sequence.json",
+      "build/examples/mnist_mlp_training_sgd/reports/runtime_sequence.json"
+    ]
+  },
+  {
+    "report": "buffer_plan.json",
+    "count": 6,
+    "top_level_keys": [
+      "buffers",
+      "package_kind",
+      "schema_version",
+      "truth_boundary"
+    ],
+    "examples": [
+      "build/examples/cpp_only/runtime_package/buffer_plan.json",
+      "build/examples/hls_project/runtime_package/buffer_plan.json",
+      "build/examples/mnist_mlp_embedded/runtime_package/buffer_plan.json",
+      "build/examples/mnist_mlp_import_weights/runtime_package/buffer_plan.json",
+      "build/examples/mnist_mlp_training_sgd/runtime_package/buffer_plan.json"
+    ]
+  },
+  {
+    "report": "package_manifest.json",
+    "count": 6,
+    "top_level_keys": [
+      "board",
+      "board_runtime",
+      "build_stages",
+      "files",
+      "hardware",
+      "hls_artifacts",
+      "notes",
+      "package_dir",
+      "package_kind",
+      "pipeline_mode",
+      "runtime_activation_storage",
+      "runtime_api",
+      "runtime_buffer_plan",
+      "runtime_execution_plan",
+      "runtime_gradient_export",
+      "runtime_io",
+      "runtime_optimizer_state",
+      "runtime_sequence",
+      "runtime_weights",
+      "schema_version",
+      "source_out_dir",
+      "status",
+      "top_name"
+    ],
+    "examples": [
+      "build/examples/cpp_only/runtime_package/package_manifest.json",
+      "build/examples/hls_project/runtime_package/package_manifest.json",
+      "build/examples/mnist_mlp_embedded/runtime_package/package_manifest.json",
+      "build/examples/mnist_mlp_import_weights/runtime_package/package_manifest.json",
+      "build/examples/mnist_mlp_training_sgd/runtime_package/package_manifest.json"
+    ]
+  },
+  {
+    "report": "training_plan.json",
+    "count": 1,
+    "top_level_keys": [
+      "activation_storage",
+      "backward_only_ops",
+      "batch_size",
+      "cache_policy",
+      "epochs",
+      "estimator",
+      "fully_supported_ops",
+      "gradient_storage",
+      "learning_rate",
+      "loss_type",
+      "movement_policy",
+      "numerics",
+      "op_capabilities",
+      "op_sequence",
+      "optimizer_state_storage",
+      "optimizer_type",
+      "parameter_trainable_ops",
+      "phase_overrides",
+      "planner_policy",
+      "unsupported_ops",
+      "weight_storage",
+      "weights_mode"
+    ],
+    "examples": [
+      "build/examples/mnist_mlp_training_sgd/training/training_plan.json"
+    ]
+  }
+]

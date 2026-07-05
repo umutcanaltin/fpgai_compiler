@@ -93,6 +93,13 @@ from fpgai.backends.hls.testbench_train import emit_tb_train_cpp
 
 _cfg_get = get_path
 
+from fpgai.engine.build_stages import (
+    BUILD_STAGE_KEYS as _BUILD_STAGE_KEYS,
+    build_stage_summary as _build_stage_summary,
+    cfg_has_path as _cfg_has_path,
+    resolve_build_stages as _resolve_build_stages,
+)
+
 
 def _is_runtime_weight_mode(weights_mode: str) -> bool:
     return str(weights_mode).strip().lower() in {
@@ -121,122 +128,6 @@ def _runtime_weight_word_count(graph) -> int:
             total += int(weight_count) + int(bias_count)
     return int(total)
 
-
-_BUILD_STAGE_KEYS = (
-    "cpp",
-    "testbench",
-    "hls_project",
-    "hls_synthesis",
-    "vivado_project",
-    "vivado_implementation",
-    "bitstream",
-    "runtime_package",
-    "reports",
-    "host_cpp",
-)
-
-
-def _cfg_has_path(raw: Dict[str, Any], path: str) -> bool:
-    cur: Any = raw
-    for part in path.split("."):
-        if not isinstance(cur, dict) or part not in cur:
-            return False
-        cur = cur[part]
-    return True
-
-
-def _as_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on", "enabled"}
-    return bool(value)
-
-
-def _resolve_build_stages(raw: Dict[str, Any]) -> Dict[str, bool]:
-    """Resolve user-facing build.stages into an explicit stage contract.
-
-    Legacy configs without build.stages keep the old behavior: HLS source/project
-    generation follows backends.hls.enabled, Vitis execution follows
-    toolchain.vitis_hls.enabled, host C++ follows backends.host_cpp.enabled, and
-    runtime package/report metadata are emitted.
-    """
-    explicit = _cfg_has_path(raw, "build.stages")
-    requested = _cfg_get(raw, "build.stages", {}) or {}
-    if requested is not None and not isinstance(requested, dict):
-        raise ValueError("build.stages must be a mapping of stage names to booleans.")
-
-    legacy_hls = _as_bool(_cfg_get(raw, "backends.hls.enabled", True))
-    legacy_host = _as_bool(_cfg_get(raw, "backends.host_cpp.enabled", True))
-    legacy_hls_run = _as_bool(_cfg_get(raw, "toolchain.vitis_hls.enabled", False))
-
-    if explicit:
-        stages: Dict[str, bool] = {
-            "cpp": True,
-            "testbench": True,
-            "hls_project": False,
-            "hls_synthesis": False,
-            "vivado_project": False,
-            "vivado_implementation": False,
-            "bitstream": False,
-            "runtime_package": True,
-            "reports": True,
-            "host_cpp": legacy_host,
-        }
-        unknown = sorted(set(requested) - set(_BUILD_STAGE_KEYS) - {"existing_hls_ip"})
-        if unknown:
-            raise ValueError(
-                "Unsupported build.stages keys: " + ", ".join(unknown) + ". "
-                "Supported keys are: " + ", ".join(_BUILD_STAGE_KEYS) + "."
-            )
-        for key, value in requested.items():
-            if key in stages:
-                stages[key] = _as_bool(value)
-    else:
-        stages = {
-            "cpp": legacy_hls,
-            "testbench": legacy_hls,
-            "hls_project": legacy_hls,
-            "hls_synthesis": legacy_hls and legacy_hls_run,
-            "vivado_project": False,
-            "vivado_implementation": False,
-            "bitstream": False,
-            "runtime_package": True,
-            "reports": True,
-            "host_cpp": legacy_host,
-        }
-
-    _validate_build_stage_dependencies(raw, stages)
-    return stages
-
-
-def _validate_build_stage_dependencies(raw: Dict[str, Any], stages: Dict[str, bool]) -> None:
-    if stages.get("testbench") and not stages.get("cpp"):
-        raise ValueError("build.stages.testbench=true requires build.stages.cpp=true.")
-    if stages.get("hls_project") and not stages.get("cpp"):
-        raise ValueError("build.stages.hls_project=true requires build.stages.cpp=true.")
-    if stages.get("hls_synthesis") and not stages.get("hls_project"):
-        raise ValueError("build.stages.hls_synthesis=true requires build.stages.hls_project=true.")
-
-    existing_hls_ip = _as_bool(_cfg_get(raw, "build.existing_hls_ip", False))
-    if stages.get("vivado_project") and not (stages.get("hls_synthesis") or existing_hls_ip):
-        raise ValueError(
-            "build.stages.vivado_project=true requires build.stages.hls_synthesis=true "
-            "or build.existing_hls_ip=true."
-        )
-    if stages.get("vivado_implementation") and not stages.get("vivado_project"):
-        raise ValueError("build.stages.vivado_implementation=true requires build.stages.vivado_project=true.")
-    if stages.get("bitstream") and not (stages.get("vivado_project") and stages.get("vivado_implementation")):
-        raise ValueError(
-            "build.stages.bitstream=true requires build.stages.vivado_project=true "
-            "and build.stages.vivado_implementation=true."
-        )
-
-
-def _build_stage_summary(stages: Dict[str, bool]) -> Dict[str, Any]:
-    return {key: bool(stages.get(key, False)) for key in _BUILD_STAGE_KEYS}
 
 
 _RUNTIME_COMMANDS = {

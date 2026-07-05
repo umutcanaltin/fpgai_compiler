@@ -1,18 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-import copy
 import yaml
 import torch
 import torch.nn as nn
 
 
-# Repository root. This keeps generated models/configs under repo-level
-# models/suite and configs/suite, matching the checked-in example configs.
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[1]
 MODELS_DIR = ROOT / "models" / "suite"
 CONFIGS_DIR = ROOT / "configs" / "suite"
-PAPER_CONFIGS_DIR = ROOT / "examples" / "paper" / "models"
 
 
 class MLPMNIST(nn.Module):
@@ -131,159 +127,9 @@ class MLPLeakyRelu(nn.Module):
         return x
 
 
-class CIFARSmallCNN(nn.Module):
-    """Medium paper CNN workload with CIFAR-like 3x32x32 input."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.conv1 = nn.Conv2d(3, 8, kernel_size=3, stride=1, padding=1)
-        self.relu1 = nn.ReLU()
-        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.conv2 = nn.Conv2d(8, 16, kernel_size=3, stride=1, padding=1)
-        self.relu2 = nn.ReLU()
-        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.flatten = nn.Flatten()
-        self.fc = nn.Linear(16 * 8 * 8, 10)
-        self.softmax = nn.Softmax(dim=1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.conv1(x)
-        x = self.relu1(x)
-        x = self.pool1(x)
-        x = self.conv2(x)
-        x = self.relu2(x)
-        x = self.pool2(x)
-        x = self.flatten(x)
-        x = self.fc(x)
-        x = self.softmax(x)
-        return x
-
-
-class LargeDDRStressCNN(nn.Module):
-    """Larger DDR-backed stress workload for board-fit and tiling validation."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.conv1 = nn.Conv2d(3, 16, kernel_size=3, stride=1, padding=1)
-        self.relu1 = nn.ReLU()
-        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.conv2 = nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1)
-        self.relu2 = nn.ReLU()
-        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.conv3 = nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1)
-        self.relu3 = nn.ReLU()
-        self.flatten = nn.Flatten()
-        self.fc1 = nn.Linear(32 * 16 * 16, 64)
-        self.relu4 = nn.ReLU()
-        self.fc2 = nn.Linear(64, 10)
-        self.softmax = nn.Softmax(dim=1)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.conv1(x)
-        x = self.relu1(x)
-        x = self.pool1(x)
-        x = self.conv2(x)
-        x = self.relu2(x)
-        x = self.pool2(x)
-        x = self.conv3(x)
-        x = self.relu3(x)
-        x = self.flatten(x)
-        x = self.fc1(x)
-        x = self.relu4(x)
-        x = self.fc2(x)
-        x = self.softmax(x)
-        return x
-
-
-class TinyYOLOLike(nn.Module):
-    """Tiny detection-shaped workload: 4x4 grid with 7 values per cell."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.conv1 = nn.Conv2d(3, 8, kernel_size=3, stride=1, padding=1)
-        self.relu1 = nn.ReLU()
-        self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.conv2 = nn.Conv2d(8, 16, kernel_size=3, stride=1, padding=1)
-        self.relu2 = nn.ReLU()
-        self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.conv3 = nn.Conv2d(16, 16, kernel_size=3, stride=1, padding=1)
-        self.relu3 = nn.ReLU()
-        self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2)
-        self.flatten = nn.Flatten()
-        self.head = nn.Linear(16 * 8 * 8, 4 * 4 * 7)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.conv1(x)
-        x = self.relu1(x)
-        x = self.pool1(x)
-        x = self.conv2(x)
-        x = self.relu2(x)
-        x = self.pool2(x)
-        x = self.conv3(x)
-        x = self.relu3(x)
-        x = self.pool3(x)
-        x = self.flatten(x)
-        x = self.head(x)
-        return x.reshape(x.shape[0], 4, 4, 7)
-
-
-MODEL_SPECS: list[tuple[str, nn.Module, tuple[int, ...]]] = [
-    ("mlp_mnist", MLPMNIST(), (1, 1, 28, 28)),
-    ("cnn_mnist", CNNMNIST(), (1, 1, 28, 28)),
-    ("cnn_no_pool", CNNNoPool(), (1, 1, 28, 28)),
-    ("cnn_avgpool", CNNAvgPool(), (1, 1, 28, 28)),
-    ("mlp_sigmoid", MLPSigmoid(), (1, 1, 28, 28)),
-    ("mlp_leakyrelu", MLPLeakyRelu(), (1, 1, 28, 28)),
-    ("cifar_small_cnn", CIFARSmallCNN(), (1, 3, 32, 32)),
-    ("large_ddr_stress_cnn", LargeDDRStressCNN(), (1, 3, 64, 64)),
-    ("tiny_yolo_like", TinyYOLOLike(), (1, 3, 64, 64)),
-]
-
-
-PAPER_MODEL_CONFIGS: dict[str, dict] = {
-    "compact_onchip_mnist_mlp": {
-        "model_name": "mlp_mnist",
-        "mode": "inference",
-        "weights_mode": "embedded",
-        "memory_regime": "onchip",
-    },
-    "compact_onchip_mnist_training": {
-        "model_name": "mlp_mnist",
-        "mode": "training_on_device",
-        "weights_mode": "embedded",
-        "memory_regime": "onchip",
-    },
-    "medium_ddr_cifar_cnn": {
-        "model_name": "cifar_small_cnn",
-        "mode": "inference",
-        "weights_mode": "import",
-        "memory_regime": "ddr_backed",
-    },
-    "medium_ddr_cifar_training": {
-        "model_name": "cifar_small_cnn",
-        "mode": "training_on_device",
-        "weights_mode": "import",
-        "memory_regime": "ddr_backed",
-    },
-    "large_ddr_stress_cnn": {
-        "model_name": "large_ddr_stress_cnn",
-        "mode": "inference",
-        "weights_mode": "import",
-        "memory_regime": "ddr_backed_tiled",
-    },
-    "large_ddr_yolo_like": {
-        "model_name": "tiny_yolo_like",
-        "mode": "inference",
-        "weights_mode": "import",
-        "memory_regime": "ddr_backed_tiled",
-    },
-}
-
-
 def ensure_dirs() -> None:
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
-    PAPER_CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def export_onnx(
@@ -297,6 +143,7 @@ def export_onnx(
     model.eval()
     x = torch.randn(*input_shape, dtype=torch.float32)
 
+    # Force the classic exporter path to avoid noisy exporter/version-converter issues
     torch.onnx.export(
         model,
         x,
@@ -426,74 +273,7 @@ def make_base_config(model_rel_path: str, project_name: str) -> dict:
     }
 
 
-def make_paper_config(config_name: str, spec: dict) -> dict:
-    model_name = str(spec["model_name"])
-    cfg = make_base_config(
-        model_rel_path=f"models/suite/{model_name}.onnx",
-        project_name=f"paper_{config_name}",
-    )
-    cfg["project"]["out_dir"] = f"build/paper/{config_name}"
-    cfg["pipeline"]["mode"] = spec["mode"]
-    cfg.setdefault("paper", {})["model_class"] = config_name
-    cfg["paper"]["memory_regime"] = spec["memory_regime"]
-
-    weights_mode = str(spec["weights_mode"])
-    cfg["data_movement"]["ps_pl"]["weights"]["mode"] = weights_mode
-
-    if "training" in str(spec["mode"]):
-        cfg["training"] = {
-            "enabled": True,
-            "optimizer": {"type": "sgd", "learning_rate": 0.001},
-            "loss": {"type": "mse"},
-            "epochs": 1,
-            "batch_size": 1,
-        }
-
-    if spec["memory_regime"] in {"ddr_backed", "ddr_backed_tiled"}:
-        cfg.setdefault("optimization", {})["tiling"] = {
-            "enabled": True,
-            "conv": {"tm": 8, "tn": 8, "tr": 8, "tc": 8, "tk": 3},
-        }
-        cfg["data_movement"]["ps_pl"].setdefault("activations", {})["mode"] = "stream"
-        cfg["data_movement"]["ps_pl"].setdefault("interface", {})["kind"] = "m_axi"
-
-    return cfg
-
-
-
-def _schema_compatible_config(cfg: dict) -> dict:
-    """Normalize generated example YAMLs to the public FPGAI config schema."""
-    out = copy.deepcopy(cfg)
-
-    # Paper metadata belongs in paper_results/master_results, not as an
-    # unsupported top-level compile config section.
-    out.pop("paper", None)
-
-    weights = (
-        out.get("data_movement", {})
-        .get("ps_pl", {})
-        .get("weights", {})
-    )
-    if isinstance(weights, dict):
-        mode = str(weights.get("mode", "")).strip().lower()
-        aliases = {
-            "m_axi": "ddr",
-            "axi": "ddr",
-            "axi_m": "ddr",
-            "ddr_m_axi": "ddr",
-            "external": "ddr",
-            "external_ddr": "ddr",
-            "runtime": "ddr",
-            "import": "ddr",
-            "import_weights": "ddr",
-        }
-        if mode in aliases:
-            weights["mode"] = aliases[mode]
-
-    return out
-
 def write_yaml(cfg: dict, out_path: Path) -> None:
-    cfg = _schema_compatible_config(cfg)
     with out_path.open("w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
 
@@ -501,11 +281,20 @@ def write_yaml(cfg: dict, out_path: Path) -> None:
 def create_suite() -> None:
     ensure_dirs()
 
-    for name, model, input_shape in MODEL_SPECS:
+    suite = [
+        ("mlp_mnist", MLPMNIST()),
+        ("cnn_mnist", CNNMNIST()),
+        ("cnn_no_pool", CNNNoPool()),
+        ("cnn_avgpool", CNNAvgPool()),
+        ("mlp_sigmoid", MLPSigmoid()),
+        ("mlp_leakyrelu", MLPLeakyRelu()),
+    ]
+
+    for name, model in suite:
         onnx_path = MODELS_DIR / f"{name}.onnx"
         cfg_path = CONFIGS_DIR / f"{name}.yml"
 
-        export_onnx(model, onnx_path, input_shape=input_shape, opset_version=18)
+        export_onnx(model, onnx_path, opset_version=18)
 
         rel_model_path = str(onnx_path.relative_to(ROOT))
         cfg = make_base_config(
@@ -517,20 +306,13 @@ def create_suite() -> None:
         print(f"[OK] model  : {onnx_path}")
         print(f"[OK] config : {cfg_path}")
 
-    for config_name, spec in PAPER_MODEL_CONFIGS.items():
-        cfg = make_paper_config(config_name, spec)
-        cfg_path = PAPER_CONFIGS_DIR / f"{config_name}.yml"
-        write_yaml(cfg, cfg_path)
-        print(f"[OK] paper config : {cfg_path}")
-
     print()
     print("Suite generation complete.")
-    print(f"Models       : {MODELS_DIR}")
-    print(f"Configs      : {CONFIGS_DIR}")
-    print(f"Paper configs: {PAPER_CONFIGS_DIR}")
+    print(f"Models : {MODELS_DIR}")
+    print(f"Configs: {CONFIGS_DIR}")
     print()
     print("Example run:")
-    print("python -m fpgai.experiments.model_suite")
+    print("python3 main.py --config configs/suite/cnn_mnist.yml")
 
 
 if __name__ == "__main__":

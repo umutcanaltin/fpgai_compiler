@@ -1,0 +1,769 @@
+[
+  {
+    "path": "fpgai/analysis/design_space_report.py",
+    "lines": 876,
+    "has_main": false,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth"
+    ],
+    "refs": [
+      "fpgai/engine/compiler.py",
+      "tests/test_design_space_report.py"
+    ]
+  },
+  {
+    "path": "fpgai/analysis/model_compatibility.py",
+    "lines": 611,
+    "has_main": false,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth",
+      "evidence"
+    ],
+    "refs": [
+      "fpgai/engine/compiler.py",
+      "tests/test_layer_registry_and_compatibility.py"
+    ]
+  },
+  {
+    "path": "fpgai/analysis/output_check.py",
+    "lines": 419,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/backends/hls/emit/top_train_cpp.py",
+    "lines": 3969,
+    "has_main": false,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth"
+    ],
+    "refs": [
+      "fpgai/backends/hls/codegen.py",
+      "fpgai/engine/compiler.py",
+      "tests/test_runtime_package.py",
+      "tests/test_training_memory_storage_contract.py",
+      "tests/test_training_per_layer_codegen.py"
+    ]
+  },
+  {
+    "path": "fpgai/backends/vivado/run_bridge.py",
+    "lines": 594,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": [
+      "docs/CLI_WORKFLOWS.md",
+      "docs/FPGAI_PROJECT_STATUS.md",
+      "fpgai/backends/vivado/vivado_bridge.py"
+    ]
+  },
+  {
+    "path": "fpgai/backends/vivado/vivado_bridge.py",
+    "lines": 1200,
+    "has_main": false,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth",
+      "evidence"
+    ],
+    "refs": [
+      "fpgai/engine/compiler.py",
+      "tests/test_vivado_bridge_boards.py"
+    ]
+  },
+  {
+    "path": "fpgai/cli.py",
+    "lines": 1312,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": true,
+    "old_terms": [],
+    "refs": [
+      "docs/EXAMPLE_ARTIFACT_SMOKE.md",
+      "examples/README.md",
+      "fpgai/devtools/end_to_end_audit.py",
+      "tests/test_cli.py",
+      "tests/test_cli_experiment_inspect.py",
+      "tests/test_cli_experiment_run.py",
+      "tests/test_cli_quiet_logging.py",
+      "tests/test_cli_schema_inspect.py",
+      "tests/test_cli_sweep_run.py",
+      "tests/test_cli_validate_correctness.py"
+    ]
+  },
+  {
+    "path": "fpgai/config/contract.py",
+    "lines": 661,
+    "has_main": false,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth",
+      "evidence"
+    ],
+    "refs": [
+      "fpgai/engine/compiler.py",
+      "tests/test_runtime_package.py"
+    ]
+  },
+  {
+    "path": "fpgai/devtools/audit_knob_materialization.py",
+    "lines": 256,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/devtools/build_paper_artifact_index.py",
+    "lines": 311,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/devtools/build_paper_figures.py",
+    "lines": 234,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/devtools/build_paper_numeric_results.py",
+    "lines": 492,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/devtools/build_paper_tables.py",
+    "lines": 448,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/devtools/canonical_hls_source_audit.py",
+    "lines": 194,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/devtools/contract_source_audit.py",
+    "lines": 215,
+    "has_main": true,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": [
+      "docs/FPGAI_PROJECT_STATUS.md"
+    ]
+  },
+  {
+    "path": "fpgai/devtools/end_to_end_audit.py",
+    "lines": 388,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth"
+    ],
+    "refs": []
+  },
+  {
+    "path": "fpgai/devtools/hls_source_effect_audit.py",
+    "lines": 151,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/devtools/probe_config_schema.py",
+    "lines": 25,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/engine/compiler.py",
+    "lines": 4813,
+    "has_main": false,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth",
+      "paper_safe"
+    ],
+    "refs": [
+      "fpgai/benchmark/pipeline.py",
+      "fpgai/cli.py",
+      "fpgai/validation/onnx_compare.py",
+      "tests/integration/test_compile_correctness.py",
+      "tests/test_build_stages.py",
+      "tests/test_compile_hls_schedule_integration.py",
+      "tests/test_compiler_artifact_meta.py",
+      "tests/test_dense_tiling_codegen.py",
+      "tests/test_execution_semantics_and_board_contract.py",
+      "tests/test_generated_hls_explanation_and_numeric.py",
+      "tests/test_layer_registry_and_compatibility.py",
+      "tests/test_memory_storage_effect.py",
+      "tests/test_runtime_package.py",
+      "tests/test_training_memory_storage_contract.py",
+      "tests/test_training_movement_gradient_export.py",
+      "tests/test_training_optimizer_loss_contract.py",
+      "tests/test_vivado_runtime_truth_contract.py"
+    ]
+  },
+  {
+    "path": "fpgai/experiments/model_generation.py",
+    "lines": 73,
+    "has_main": true,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/experiments/model_suite.py",
+    "lines": 319,
+    "has_main": true,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/experiments/result_store.py",
+    "lines": 138,
+    "has_main": false,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth"
+    ],
+    "refs": [
+      "tests/test_experiment_result_store.py"
+    ]
+  },
+  {
+    "path": "fpgai/numerics/precision_policy.py",
+    "lines": 563,
+    "has_main": false,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth"
+    ],
+    "refs": [
+      "fpgai/analysis/design_space_report.py",
+      "fpgai/analysis/hls_architecture.py",
+      "fpgai/analysis/precision_sweep.py",
+      "fpgai/analysis/quantization_report.py",
+      "fpgai/backends/hls/emit/top_cpp.py",
+      "fpgai/backends/hls/testbench.py",
+      "fpgai/engine/compiler.py",
+      "fpgai/engine/layerwise_precision.py",
+      "tests/test_precision_policy.py"
+    ]
+  },
+  {
+    "path": "fpgai/paper/verification.py",
+    "lines": 117,
+    "has_main": false,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [
+      "paper_safe"
+    ],
+    "refs": [
+      "fpgai/engine/compiler.py",
+      "tests/test_validation_and_paper_contract.py"
+    ]
+  },
+  {
+    "path": "fpgai/reporting/analyze_experiments.py",
+    "lines": 59,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/artifact_smoke.py",
+    "lines": 176,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth",
+      "evidence",
+      "paper_safe"
+    ],
+    "refs": [
+      "docs/EXAMPLE_ARTIFACT_SMOKE.md",
+      "docs/YAML_SCHEMA_AUDIT.md",
+      "examples/README.md",
+      "tests/test_runtime_package.py"
+    ]
+  },
+  {
+    "path": "fpgai/reporting/claim_traceability.py",
+    "lines": 269,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [
+      "evidence",
+      "safe_wording"
+    ],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/communication_ablation.py",
+    "lines": 286,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [
+      "evidence"
+    ],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/compare_experiments.py",
+    "lines": 37,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/data_movement.py",
+    "lines": 1054,
+    "has_main": false,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth",
+      "evidence"
+    ],
+    "refs": [
+      "fpgai/engine/compiler.py",
+      "tests/test_runtime_package.py"
+    ]
+  },
+  {
+    "path": "fpgai/reporting/estimator_accuracy.py",
+    "lines": 394,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [
+      "evidence"
+    ],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/estimator_tables.py",
+    "lines": 462,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": [
+      "fpgai/cli.py"
+    ]
+  },
+  {
+    "path": "fpgai/reporting/generate_paper_artifacts.py",
+    "lines": 318,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": [
+      "fpgai/cli.py"
+    ]
+  },
+  {
+    "path": "fpgai/reporting/hardware_feasibility.py",
+    "lines": 979,
+    "has_main": true,
+    "uses_argparse": false,
+    "uses_sysargv": true,
+    "old_terms": [
+      "truth",
+      "evidence"
+    ],
+    "refs": [
+      "fpgai/engine/compiler.py",
+      "tests/test_vivado_bridge_boards.py"
+    ]
+  },
+  {
+    "path": "fpgai/reporting/hardware_knob_tables.py",
+    "lines": 301,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/hls_calibration_dataset.py",
+    "lines": 88,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/hls_calibration_samples.py",
+    "lines": 347,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/hls_calibration_summary.py",
+    "lines": 249,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/hls_calibration_validation.py",
+    "lines": 56,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/hls_explanation.py",
+    "lines": 510,
+    "has_main": false,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [
+      "evidence"
+    ],
+    "refs": [
+      "fpgai/engine/compiler.py"
+    ]
+  },
+  {
+    "path": "fpgai/reporting/hls_truth.py",
+    "lines": 301,
+    "has_main": false,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth",
+      "paper_safe"
+    ],
+    "refs": [
+      "fpgai/engine/compiler.py",
+      "tests/test_generated_hls_explanation_and_numeric.py"
+    ]
+  },
+  {
+    "path": "fpgai/reporting/paper_artifacts.py",
+    "lines": 475,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [
+      "evidence"
+    ],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/paper_evidence.py",
+    "lines": 499,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth",
+      "evidence",
+      "safe_wording",
+      "unsafe_wording",
+      "paper_safe"
+    ],
+    "refs": [
+      "tests/test_paper_evidence_chain.py"
+    ]
+  },
+  {
+    "path": "fpgai/reporting/paper_frontier.py",
+    "lines": 343,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": [
+      "fpgai/cli.py"
+    ]
+  },
+  {
+    "path": "fpgai/reporting/paper_training_precision.py",
+    "lines": 252,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/paper_training_table.py",
+    "lines": 298,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/paper_validation.py",
+    "lines": 499,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [
+      "evidence"
+    ],
+    "refs": [
+      "tests/test_paper_validation_trace.py"
+    ]
+  },
+  {
+    "path": "fpgai/reporting/parallel_pipeline_effect.py",
+    "lines": 283,
+    "has_main": false,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth",
+      "evidence",
+      "paper_safe"
+    ],
+    "refs": [
+      "fpgai/engine/compiler.py"
+    ]
+  },
+  {
+    "path": "fpgai/reporting/plot_policy_results.py",
+    "lines": 289,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/plot_training_loss_curves.py",
+    "lines": 75,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/policy_summary.py",
+    "lines": 98,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/precision_effect.py",
+    "lines": 254,
+    "has_main": false,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth",
+      "evidence",
+      "paper_safe"
+    ],
+    "refs": [
+      "fpgai/engine/compiler.py"
+    ]
+  },
+  {
+    "path": "fpgai/reporting/safe_clock_recommendations.py",
+    "lines": 197,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [
+      "evidence"
+    ],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/training_convergence.py",
+    "lines": 361,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/vivado_bridge_artifacts.py",
+    "lines": 401,
+    "has_main": true,
+    "uses_argparse": false,
+    "uses_sysargv": true,
+    "old_terms": [
+      "evidence"
+    ],
+    "refs": []
+  },
+  {
+    "path": "fpgai/reporting/vivado_impl_artifacts.py",
+    "lines": 448,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [
+      "evidence"
+    ],
+    "refs": []
+  },
+  {
+    "path": "fpgai/runtime/binary_io.py",
+    "lines": 94,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/runtime/bitstream.py",
+    "lines": 36,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/runtime/hostcpp.py",
+    "lines": 32,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/runtime/kv260.py",
+    "lines": 34,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/runtime/package.py",
+    "lines": 1553,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth"
+    ],
+    "refs": [
+      "docs/CLI_WORKFLOWS.md",
+      "fpgai/engine/compiler.py",
+      "tests/test_build_stages.py",
+      "tests/test_runtime_package.py"
+    ]
+  },
+  {
+    "path": "fpgai/runtime/vitis.py",
+    "lines": 32,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/validation/numeric.py",
+    "lines": 951,
+    "has_main": false,
+    "uses_argparse": false,
+    "uses_sysargv": false,
+    "old_terms": [
+      "truth",
+      "evidence"
+    ],
+    "refs": [
+      "fpgai/engine/compiler.py",
+      "tests/test_generated_hls_explanation_and_numeric.py",
+      "tests/test_validation_and_paper_contract.py"
+    ]
+  },
+  {
+    "path": "fpgai/validation/onnx_compare.py",
+    "lines": 291,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  },
+  {
+    "path": "fpgai/validation/verify_flow.py",
+    "lines": 187,
+    "has_main": true,
+    "uses_argparse": true,
+    "uses_sysargv": false,
+    "old_terms": [],
+    "refs": []
+  }
+]

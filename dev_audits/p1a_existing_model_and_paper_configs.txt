@@ -1,0 +1,1379 @@
+
+===== fpgai/experiments/model_generation.py =====
+import torch
+import torch.nn as nn
+import torch.onnx
+import os
+
+# Ensure models directory exists
+os.makedirs("models", exist_ok=True)
+
+# --- Model 1: Simple MLP (What you have been using) ---
+class SimpleMLP(nn.Module):
+    def __init__(self):
+        super(SimpleMLP, self).__init__()
+        self.fc1 = nn.Linear(8, 4)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(4, 2)
+        # Note: We usually don't include Softmax in the ONNX export for training
+        # but for FPGA inference we might want it explicit.
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x):
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
+        return self.softmax(x)
+
+def export_mlp():
+    model = SimpleMLP()
+    model.eval()
+    # Dummy input: Batch size 1, 8 input features
+    dummy_input = torch.randn(1, 8)
+    
+    torch.onnx.export(model, dummy_input, "models/mlp.onnx",
+                      input_names=['input'], output_names=['output'],
+                      opset_version=13)
+    print("[OK] Generated models/mlp.onnx")
+
+# --- Model 2: Small CNN (Conv + Pool + Flat + Dense) ---
+class TinyCNN(nn.Module):
+    def __init__(self):
+        super(TinyCNN, self).__init__()
+        # Input: 1 channel (grayscale), 28x28 image
+        # Conv: 1 -> 4 channels, 3x3 kernel
+        self.conv1 = nn.Conv2d(1, 4, kernel_size=3, stride=1, padding=0) 
+        self.relu = nn.ReLU()
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.flatten = nn.Flatten()
+        # After Conv (26x26) -> Pool (13x13) -> 4 channels
+        # Flatten size = 4 * 13 * 13 = 676
+        self.fc = nn.Linear(4 * 13 * 13, 10)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.relu(x)
+        x = self.pool(x)
+        x = self.flatten(x)
+        x = self.fc(x)
+        return self.softmax(x)
+
+def export_cnn():
+    model = TinyCNN()
+    model.eval()
+    # Dummy input: Batch 1, 1 Channel, 28x28 (MNIST size)
+    dummy_input = torch.randn(1, 1, 28, 28)
+    
+    torch.onnx.export(model, dummy_input, "models/cnn_mnist.onnx",
+                      input_names=['input'], output_names=['output'],
+                      opset_version=13)
+    print("[OK] Generated models/cnn_mnist.onnx")
+
+if __name__ == "__main__":
+    export_mlp()
+    export_cnn()
+===== fpgai/experiments/model_suite.py =====
+from __future__ import annotations
+
+from pathlib import Path
+import yaml
+import torch
+import torch.nn as nn
+
+
+ROOT = Path(__file__).resolve().parents[1]
+MODELS_DIR = ROOT / "models" / "suite"
+CONFIGS_DIR = ROOT / "configs" / "suite"
+
+
+class MLPMNIST(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.flatten = nn.Flatten()
+        self.fc1 = nn.Linear(28 * 28, 128)
+        self.relu = nn.ReLU()
+        self.fc2 = nn.Linear(128, 10)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.flatten(x)
+        x = self.fc1(x)
+        x = self.relu(x)
+        x = self.fc2(x)
+        x = self.softmax(x)
+        return x
+
+
+class CNNMNIST(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv1 = nn.Conv2d(1, 4, kernel_size=3, stride=1, padding=0)
+        self.relu = nn.ReLU()
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(4 * 13 * 13, 10)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.conv1(x)
+        x = self.relu(x)
+        x = self.pool(x)
+        x = self.flatten(x)
+        x = self.fc(x)
+        x = self.softmax(x)
+        return x
+
+
+class CNNNoPool(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv1 = nn.Conv2d(1, 4, kernel_size=3, stride=1, padding=1)
+        self.relu1 = nn.ReLU()
+        self.conv2 = nn.Conv2d(4, 4, kernel_size=3, stride=1, padding=1)
+        self.relu2 = nn.ReLU()
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(4 * 28 * 28, 10)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.conv1(x)
+        x = self.relu1(x)
+        x = self.conv2(x)
+        x = self.relu2(x)
+        x = self.flatten(x)
+        x = self.fc(x)
+        x = self.softmax(x)
+        return x
+
+
+class CNNAvgPool(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.conv1 = nn.Conv2d(1, 4, kernel_size=3, stride=1, padding=0)
+        self.relu = nn.ReLU()
+        self.pool = nn.AvgPool2d(kernel_size=2, stride=2)
+        self.flatten = nn.Flatten()
+        self.fc = nn.Linear(4 * 13 * 13, 10)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.conv1(x)
+        x = self.relu(x)
+        x = self.pool(x)
+        x = self.flatten(x)
+        x = self.fc(x)
+        x = self.softmax(x)
+        return x
+
+
+class MLPSigmoid(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.flatten = nn.Flatten()
+        self.fc1 = nn.Linear(28 * 28, 64)
+        self.sigmoid = nn.Sigmoid()
+        self.fc2 = nn.Linear(64, 10)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.flatten(x)
+        x = self.fc1(x)
+        x = self.sigmoid(x)
+        x = self.fc2(x)
+        x = self.softmax(x)
+        return x
+
+
+class MLPLeakyRelu(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.flatten = nn.Flatten()
+        self.fc1 = nn.Linear(28 * 28, 64)
+        self.act = nn.LeakyReLU(negative_slope=0.1)
+        self.fc2 = nn.Linear(64, 10)
+        self.softmax = nn.Softmax(dim=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.flatten(x)
+        x = self.fc1(x)
+        x = self.act(x)
+        x = self.fc2(x)
+        x = self.softmax(x)
+        return x
+
+
+def ensure_dirs() -> None:
+    MODELS_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def export_onnx(
+    model: nn.Module,
+    out_path: Path,
+    input_shape: tuple[int, ...] = (1, 1, 28, 28),
+    input_name: str = "input",
+    output_name: str = "output",
+    opset_version: int = 18,
+) -> None:
+    model.eval()
+    x = torch.randn(*input_shape, dtype=torch.float32)
+
+    # Force the classic exporter path to avoid noisy exporter/version-converter issues
+    torch.onnx.export(
+        model,
+        x,
+        str(out_path),
+        export_params=True,
+        do_constant_folding=True,
+        input_names=[input_name],
+        output_names=[output_name],
+        opset_version=opset_version,
+        dynamic_axes=None,
+        dynamo=False,
+    )
+
+
+def make_base_config(model_rel_path: str, project_name: str) -> dict:
+    return {
+        "version": 1,
+        "project": {
+            "name": project_name,
+            "out_dir": f"build/{project_name}",
+            "clean": True,
+        },
+        "pipeline": {
+            "mode": "inference",
+            "outputs": {
+                "top_kernel_name": "deeplearn",
+            },
+        },
+        "targets": {
+            "platform": {
+                "board": "kv260",
+                "part": "xck26-sfvc784-2LV-c",
+                "clocks": [
+                    {
+                        "name": "pl_clk0",
+                        "target_mhz": 200,
+                    }
+                ],
+            }
+        },
+        "operators": {
+            "supported": [
+                "Dense",
+                "Conv",
+                "MaxPool",
+                "AvgPool",
+                "Add",
+                "Relu",
+                "LeakyRelu",
+                "Sigmoid",
+                "Softmax",
+                "BatchNormalization",
+                "Flatten",
+                "Reshape",
+            ],
+            "defaults": {
+                "activation_insert": {
+                    "kind": "none",
+                    "alpha": 0.1,
+                    "except_last": True,
+                }
+            },
+        },
+        "model": {
+            "format": "onnx",
+            "path": model_rel_path,
+        },
+        "numerics": {
+            "defaults": {
+                "activation": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
+                "weight": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
+                "bias": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
+                "accum": {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
+            }
+
+===== fpgai/experiments/paper_runner.py =====
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+from typing import Any, Callable
+
+
+SweepRunner = Callable[..., int]
+
+
+def default_sweep_for_experiment_name(name: str) -> str | None:
+    """Map paper experiment names to public sweep configs."""
+    mapping = {
+        "precision_selection": "configs/sweeps/precision_selection.yml",
+        "precision": "configs/sweeps/precision_selection.yml",
+        "pipeline_policy": "configs/sweeps/pipeline_policy_strength.yml",
+        "pipeline": "configs/sweeps/pipeline_policy_strength.yml",
+        "parallel_envelope": "configs/sweeps/parallelism_feasible_envelope.yml",
+        "parallelism": "configs/sweeps/parallelism_feasible_envelope.yml",
+        "hardware_knobs": "configs/sweeps/hardware_knob_validation.yml",
+        "memory_strategy": "configs/sweeps/memory_strategy.yml",
+        "training_convergence": "configs/sweeps/training_multi_epoch_convergence.yml",
+        "training": "configs/sweeps/training_multi_epoch_convergence.yml",
+        "vivado_impl": "configs/sweeps/vivado_bridge.yml",
+        "vivado_bridge": "configs/sweeps/vivado_bridge.yml",
+    }
+    return mapping.get(str(name))
+
+
+def _load_yaml(path: Path) -> dict[str, Any]:
+    try:
+        import yaml
+    except Exception as exc:  # pragma: no cover - environment error
+        raise RuntimeError(
+            f"PyYAML is required to read experiment configs: {exc}"
+        ) from exc
+
+    try:
+        payload = yaml.safe_load(path.read_text()) or {}
+    except Exception as exc:
+        raise RuntimeError(f"Failed to parse experiment config {path}: {exc}") from exc
+
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Experiment config must contain a YAML mapping: {path}")
+
+    return payload
+
+
+def _load_child_sweep_summary(item_out: Path) -> dict[str, Any]:
+    """Read child sweep status from its results.json when available.
+
+    The public sweep runner can return successfully after writing a results file
+    that contains failed design records. The paper-level coordinator must not
+    report such a child as passed. This helper extracts stable counters from the
+    child sweep output and returns an empty dict when no summary exists.
+    """
+    results_path = item_out / "results.json"
+    if not results_path.exists():
+        return {}
+
+    try:
+        payload = json.loads(results_path.read_text())
+    except Exception as exc:
+        return {
+            "results_path": str(results_path),
+            "results_read_error": str(exc),
+        }
+
+    if not isinstance(payload, dict):
+        return {
+            "results_path": str(results_path),
+            "results_read_error": "results.json is not a JSON object",
+        }
+
+    summary: dict[str, Any] = {"results_path": str(results_path)}
+    for key in (
+        "failed_count",
+        "passed_count",
+        "dry_run_count",
+        "skipped_count",
+        "total_count",
+        "design_points",
+        "failed",
+        "passed",
+    ):
+        if key in payload:
+            summary[key] = payload.get(key)
+
+    # Some result schemas store records under a list. Use that as a fallback.
+    records = payload.get("records")
+    if isinstance(records, list):
+        summary.setdefault("total_count", len(records))
+        failed_records = [
+            record
+            for record in records
+            if isinstance(record, dict)
+            and str(record.get("status", "")).lower() in {"failed", "error", "timeout"}
+        ]
+        summary.setdefault("failed_count", len(failed_records))
+        summary.setdefault("passed_count", len(records) - len(failed_records))
+
+    return summary
+
+
+def _child_sweep_failed(returncode: int, child_summary: dict[str, Any]) -> tuple[bool, str | None]:
+    """Classify a child sweep from return code plus results.json counters."""
+    if returncode != 0:
+        return True, f"child sweep returned non-zero exit code {returncode}"
+
+    if child_summary.get("results_read_error"):
+        return True, "child sweep results.json could not be read"
+
+    failed_count = child_summary.get("failed_count")
+    if isinstance(failed_count, bool):
+        # bool is an int subclass; treat it separately to avoid confusing True as 1.
+        failed_count = int(failed_count)
+
+    if isinstance(failed_count, int) and failed_count > 0:
+        return True, f"child sweep reported failed_count={failed_count}"
+
+    failed_flag = child_summary.get("failed")
+    if isinstance(failed_flag, bool) and failed_flag:
+        return True, "child sweep reported failed=True"
+
+    return False, None
+
+
+def run_experiment_from_config(
+    config_path: str,
+    *,
+    out_dir: str,
+    run_sweep_callable: SweepRunner,
+    max_design_points: int | None = None,
+    timeout_sec: int | None = None,
+    dry_run: bool = False,
+    repo_root: str | None = None,
+) -> int:
+    """Run a paper experiment YAML through the public sweep runner."""
+    cfg_path = Path(config_path)
+    if not cfg_path.exists():
+        print(f"[ERROR] Experiment config not found: {cfg_path}")
+        return 2
+
+    try:
+        payload = _load_yaml(cfg_path)
+    except RuntimeError as exc:
+        print(f"[ERROR] {exc}")
+        return 2
+
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+
+    paper = payload.get("paper") or {}
+    inputs = payload.get("inputs") or {}
+    experiments = inputs.get("experiments") or {}
+
+    if not isinstance(experiments, dict) or not experiments:
+        print("[ERROR] Experiment config has no inputs.experiments entries")
+        return 2
+
+    manifest: dict[str, Any] = {
+        "kind": "paper_experiment_run",
+        "config": str(cfg_path),
+        "out_dir": str(out_path),
+        "paper": paper,
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "dry_run": bool(dry_run),
+        "items": [],
+    }
+
+    failed = 0
+
+    for name, source in experiments.items():
+        source_str = str(source)
+
+        if source_str.endswith((".yml", ".yaml")) and Path(source_str).exists():
+            sweep_config = source_str
+        else:
+            sweep_config = default_sweep_for_experiment_name(str(name))
+
+        item_out = out_path / str(name)
+
+        item: dict[str, Any] = {
+            "name": str(name),
+            "source": source_str,
+            "sweep_config": sweep_config,
+            "out_dir": str(item_out),
+            "status": "pending",
+            "returncode": None,
+        }
+
+        if not sweep_config or not Path(sweep_config).exists():
+            item["status"] = "skipped"
+            item["reason"] = "no runnable public sweep config was found"
+            manifest["items"].append(item)
+            print(f"[SKIP] {name}: no runnable public sweep config found")
+            continue
+
+        print(f"[RUN] {name}: {sweep_config} -> {item_out}")
+
+        if dry_run:
+            item["status"] = "dry_run"
+            item["returncode"] = 0
+            manifest["items"].append(item)
+            continue
+
+        rc = run_sweep_callable(
+            sweep_config,
+            out_dir=str(item_out),
+            max_design_points=max_design_points,
+            timeout_sec=timeout_sec,
+            dry_run=False,
+            repo_root=repo_root,
+        )
+
+        item["returncode"] = int(rc)
+        child_summary = _load_child_sweep_summary(item_out)
+        if child_summary:
+            item["child_summary"] = child_summary
+
+===== configs/suite/mlp_mnist.yml =====
+version: 1
+project:
+  name: fpgai_mlp_mnist
+  out_dir: build/fpgai_mlp_mnist
+  clean: true
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+operators:
+  supported:
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true
+model:
+  format: onnx
+  path: models/suite/mlp_mnist.onnx
+numerics:
+  defaults:
+    activation:
+      type: ap_fixed
+      total_bits: 16
+      int_bits: 6
+    weight:
+      type: ap_fixed
+      total_bits: 16
+      int_bits: 6
+    bias:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+    accum:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+data_movement:
+  ps_pl:
+    compression:
+      enabled: true
+    weights:
+      mode: embedded
+backends:
+  hls:
+    enabled: true
+    vitis:
+      enabled: true
+      mode: csim
+      exe: vitis_hls
+toolchain:
+  vitis_hls:
+    enabled: true
+    settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
+  vivado:
+    enabled: true
+benchmark:
+  enabled: true
+  fail_on_mismatch: true
+  seed: 0
+  compare:
+    atol: 0.08
+    rtol: 0.08
+    max_abs_error: 0.08
+    mean_abs_error: 0.03
+    rmse: 0.04
+    require_argmax_match: false
+    min_cosine_similarity: 0.95
+  intermediate:
+    enabled: true
+    fail_on_layer_mismatch: false
+    stop_on_first_bad_layer: false
+debug:
+  verbose: false
+
+===== configs/suite/cnn_mnist.yml =====
+version: 1
+project:
+  name: fpgai_cnn_mnist
+  out_dir: build/fpgai_cnn_mnist
+  clean: true
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+operators:
+  supported:
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true
+model:
+  format: onnx
+  path: models/suite/cnn_mnist.onnx
+numerics:
+  defaults:
+    activation:
+      type: ap_fixed
+      total_bits: 16
+      int_bits: 6
+    weight:
+      type: ap_fixed
+      total_bits: 16
+      int_bits: 6
+    bias:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+    accum:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+data_movement:
+  ps_pl:
+    compression:
+      enabled: true
+    weights:
+      mode: embedded
+backends:
+  hls:
+    enabled: true
+    vitis:
+      enabled: true
+      mode: csim
+      exe: vitis_hls
+toolchain:
+  vitis_hls:
+    enabled: true
+    settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
+  vivado:
+    enabled: true
+benchmark:
+  enabled: true
+  fail_on_mismatch: true
+  seed: 0
+  compare:
+    atol: 0.08
+    rtol: 0.08
+    max_abs_error: 0.08
+    mean_abs_error: 0.03
+    rmse: 0.04
+    require_argmax_match: false
+    min_cosine_similarity: 0.95
+  intermediate:
+    enabled: true
+    fail_on_layer_mismatch: false
+    stop_on_first_bad_layer: false
+debug:
+  verbose: false
+
+===== configs/suite/cnn_avgpool.yml =====
+version: 1
+project:
+  name: fpgai_cnn_avgpool
+  out_dir: build/fpgai_cnn_avgpool
+  clean: true
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+operators:
+  supported:
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true
+model:
+  format: onnx
+  path: models/suite/cnn_avgpool.onnx
+numerics:
+  defaults:
+    activation:
+      type: ap_fixed
+      total_bits: 16
+      int_bits: 6
+    weight:
+      type: ap_fixed
+      total_bits: 16
+      int_bits: 6
+    bias:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+    accum:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+data_movement:
+  ps_pl:
+    compression:
+      enabled: true
+    weights:
+      mode: embedded
+backends:
+  hls:
+    enabled: true
+    vitis:
+      enabled: true
+      mode: csim
+      exe: vitis_hls
+toolchain:
+  vitis_hls:
+    enabled: true
+    settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
+  vivado:
+    enabled: true
+benchmark:
+  enabled: true
+  fail_on_mismatch: true
+  seed: 0
+  compare:
+    atol: 0.08
+    rtol: 0.08
+    max_abs_error: 0.08
+    mean_abs_error: 0.03
+    rmse: 0.04
+    require_argmax_match: false
+    min_cosine_similarity: 0.95
+  intermediate:
+    enabled: true
+    fail_on_layer_mismatch: false
+    stop_on_first_bad_layer: false
+debug:
+  verbose: false
+
+===== configs/suite/cnn_no_pool.yml =====
+version: 1
+project:
+  name: fpgai_cnn_no_pool
+  out_dir: build/fpgai_cnn_no_pool
+  clean: true
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+operators:
+  supported:
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true
+model:
+  format: onnx
+  path: models/suite/cnn_no_pool.onnx
+numerics:
+  defaults:
+    activation:
+      type: ap_fixed
+      total_bits: 16
+      int_bits: 6
+    weight:
+      type: ap_fixed
+      total_bits: 16
+      int_bits: 6
+    bias:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+    accum:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+data_movement:
+  ps_pl:
+    compression:
+      enabled: true
+    weights:
+      mode: embedded
+backends:
+  hls:
+    enabled: true
+    vitis:
+      enabled: true
+      mode: csim
+      exe: vitis_hls
+toolchain:
+  vitis_hls:
+    enabled: true
+    settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
+  vivado:
+    enabled: true
+benchmark:
+  enabled: true
+  fail_on_mismatch: true
+  seed: 0
+  compare:
+    atol: 0.08
+    rtol: 0.08
+    max_abs_error: 0.08
+    mean_abs_error: 0.03
+    rmse: 0.04
+    require_argmax_match: false
+    min_cosine_similarity: 0.95
+  intermediate:
+    enabled: true
+    fail_on_layer_mismatch: false
+    stop_on_first_bad_layer: false
+debug:
+  verbose: false
+
+===== configs/sweeps/model_suite.yml =====
+name: model_suite
+command_template: "python main.py benchmark --config {config_path}"
+point_name_template: "model_{model_name}_{policy}"
+defaults:
+  config_path: configs/examples/default_compile.yml
+  board: kv260
+parameters:
+  model_name: [mlp_mnist, cnn_mnist, lenet5_mnist, fashion_mnist_cnn, tinyml_kws]
+  policy: [balanced, latency_first]
+
+===== examples/paper/memory_strategy_sweep.yml =====
+name: paper_memory_strategy_sweep
+description: Reference sweep template for BRAM/URAM/DDR memory strategy comparisons.
+defaults:
+  base_config: examples/inference/mnist_mlp_embedded.yml
+  output_root: paper_experiments/memory_strategy_sweep
+design_points:
+  - name: bram_weights_bram_activations
+    memory: {weight_storage: bram, activation_storage: bram}
+  - name: ddr_weights_bram_activations
+    memory: {weight_storage: ddr, activation_storage: bram}
+  - name: uram_weights_bram_activations
+    memory: {weight_storage: uram, activation_storage: bram}
+materialize_configs:
+  enabled: true
+  parameter_mappings:
+    memory: {path: memory, create: true}
+
+===== examples/paper/precision_sweep.yml =====
+name: paper_precision_sweep
+description: Reference sweep template for precision/resource/accuracy tradeoffs. Materialize these design points into compiler YAML before running.
+defaults:
+  base_config: examples/inference/mnist_mlp_embedded.yml
+  output_root: paper_experiments/precision_sweep
+design_points:
+  - name: fx8_3
+    numerics:
+      defaults:
+        activation: {type: ap_fixed, total_bits: 8, int_bits: 3}
+        weight: {type: ap_fixed, total_bits: 8, int_bits: 3}
+        bias: {type: ap_fixed, total_bits: 16, int_bits: 6}
+        accum: {type: ap_fixed, total_bits: 24, int_bits: 8}
+  - name: fx16_6
+    numerics:
+      defaults:
+        activation: {type: ap_fixed, total_bits: 16, int_bits: 6}
+        weight: {type: ap_fixed, total_bits: 16, int_bits: 6}
+        bias: {type: ap_fixed, total_bits: 24, int_bits: 8}
+        accum: {type: ap_fixed, total_bits: 32, int_bits: 10}
+materialize_configs:
+  enabled: true
+  parameter_mappings:
+    numerics: {path: numerics.defaults, create: true}
+
+===== examples/paper/pipeline_parallel_sweep.yml =====
+name: paper_pipeline_parallel_sweep
+description: Reference sweep template for pipeline II, PE, SIMD, and partition-factor effects.
+defaults:
+  base_config: examples/inference/mnist_mlp_embedded.yml
+  output_root: paper_experiments/pipeline_parallel_sweep
+design_points:
+  - name: baseline_ii1_pe1_simd1
+    optimization: {pipeline: {ii: 1, style: balanced}, parallel: {pe: 1, simd: 1, partition_factor: 1}}
+  - name: pe4_simd2_partition4
+    optimization: {pipeline: {ii: 1, style: aggressive}, parallel: {pe: 4, simd: 2, partition_factor: 4}}
+  - name: ii2_pe4_simd2
+    optimization: {pipeline: {ii: 2, style: balanced}, parallel: {pe: 4, simd: 2, partition_factor: 4}}
+materialize_configs:
+  enabled: true
+  parameter_mappings:
+    optimization: {path: optimization, create: true}
+
+===== examples/inference/cnn_m_axi_input.yml =====
+version: 1
+project:
+  name: example_cnn_m_axi_input
+  out_dir: build/examples/cnn_m_axi_input
+  clean: true
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+model:
+  format: onnx
+  path: models/cnn_mnist.onnx
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+weights:
+  mode: embedded
+memory:
+  weight_storage: bram
+  activation_storage: bram
+  gradient_storage: bram
+  optimizer_state_storage: bram
+data_movement:
+  inputs:
+    interface: m_axi
+    transport: ps_runtime
+    tiled:
+      enabled: false
+  outputs:
+    interface: m_axi
+    transport: ps_runtime
+    tiled:
+      enabled: false
+runtime:
+  sequence:
+  - run_inference
+optimization:
+  pipeline:
+    style: balanced
+    ii: 1
+  parallel:
+    pe: 1
+    simd: 1
+    unroll_factor: 1
+    partition_factor: 1
+    array_partition_mode: none
+build:
+  stages:
+    cpp: true
+    testbench: true
+    hls_project: false
+    hls_synthesis: false
+    vivado_project: false
+    vivado_implementation: false
+    bitstream: false
+    runtime_package: true
+    reports: true
+operators:
+  supported:
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true
+
+===== examples/inference/cnn_stream_input.yml =====
+version: 1
+project:
+  name: example_cnn_stream_input
+  out_dir: build/examples/cnn_stream_input
+  clean: true
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+model:
+  format: onnx
+  path: models/cnn_mnist.onnx
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+weights:
+  mode: embedded
+memory:
+  weight_storage: bram
+  activation_storage: bram
+  gradient_storage: bram
+  optimizer_state_storage: bram
+data_movement:
+  inputs:
+    interface: axi_stream
+    transport: dma
+    tiled:
+      enabled: false
+  outputs:
+    interface: axi_stream
+    transport: dma
+    tiled:
+      enabled: false
+runtime:
+  sequence:
+  - run_inference
+optimization:
+  pipeline:
+    style: balanced
+    ii: 1
+  parallel:
+    pe: 1
+    simd: 1
+    unroll_factor: 1
+    partition_factor: 1
+    array_partition_mode: none
+build:
+  stages:
+    cpp: true
+    testbench: true
+    hls_project: false
+    hls_synthesis: false
+    vivado_project: false
+    vivado_implementation: false
+    bitstream: false
+    runtime_package: true
+    reports: true
+operators:
+  supported:
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true
+
+===== examples/build/hls_synthesis.yml =====
+version: 1
+project:
+  name: example_hls_synthesis
+  out_dir: build/examples/hls_synthesis
+  clean: true
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+model:
+  format: onnx
+  path: models/mlp.onnx
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+weights:
+  mode: embedded
+memory:
+  weight_storage: bram
+  activation_storage: bram
+  gradient_storage: bram
+  optimizer_state_storage: bram
+data_movement:
+  inputs:
+    interface: m_axi
+    transport: ps_runtime
+    tiled:
+      enabled: false
+  outputs:
+    interface: m_axi
+    transport: ps_runtime
+    tiled:
+      enabled: false
+runtime:
+  sequence:
+  - run_inference
+optimization:
+  pipeline:
+    style: balanced
+    ii: 1
+  parallel:
+    pe: 1
+    simd: 1
+    unroll_factor: 1
+    partition_factor: 1
+    array_partition_mode: none
+build:
+  stages:
+    cpp: true
+    testbench: true
+    hls_project: true
+    hls_synthesis: true
+    vivado_project: false
+    vivado_implementation: false
+    bitstream: false
+    runtime_package: true
+    reports: true
+operators:
+  supported:
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true
+toolchain:
+  vitis_hls:
+    enabled: true
+    executable: vitis_hls
+
+===== examples/build/vivado_project.yml =====
+version: 1
+project:
+  name: example_vivado_project_handoff
+  out_dir: build/examples/vivado_project
+  clean: true
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+model:
+  format: onnx
+  path: models/mlp.onnx
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+weights:
+  mode: embedded
+memory:
+  weight_storage: bram
+  activation_storage: bram
+data_movement:
+  inputs:
+    interface: axi_stream
+    transport: dma
+    tiled:
+      enabled: false
+  outputs:
+    interface: axi_stream
+    transport: dma
+    tiled:
+      enabled: false
+runtime:
+  sequence:
+  - run_inference
+build:
+  existing_hls_ip: true
+  stages:
+    cpp: true
+    testbench: true
+    hls_project: true
+    hls_synthesis: false
+    vivado_project: true
+    vivado_implementation: false
+    bitstream: false
+    runtime_package: true
+    reports: true
+operators:
+  supported:
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true
+
+===== examples/build/vivado_bitstream.yml =====
+version: 1
+project:
+  name: example_vivado_bitstream
+  out_dir: build/examples/vivado_bitstream
+  clean: true
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+model:
+  format: onnx
+  path: models/mlp.onnx
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+weights:
+  mode: embedded
+memory:
+  weight_storage: bram
+  activation_storage: bram
+  gradient_storage: bram
+  optimizer_state_storage: bram
+data_movement:
+  inputs:
+    interface: axi_stream
+    transport: dma
+    tiled:
+      enabled: false
+  outputs:
+    interface: axi_stream
+    transport: dma
+    tiled:
+      enabled: false
+runtime:
+  sequence:
+  - run_inference
+optimization:
+  pipeline:
+    style: balanced
+    ii: 1
+  parallel:
+    pe: 1
+    simd: 1
+    unroll_factor: 1
+    partition_factor: 1
+    array_partition_mode: none
+build:
+  stages:
+    cpp: true
+    testbench: true
+    hls_project: true
+    hls_synthesis: false
+    vivado_project: true
+    vivado_implementation: true
+    bitstream: true
+    runtime_package: true
+    reports: true
+  existing_hls_ip: true
+operators:
+  supported:
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true
+toolchain:
+  vivado:
+    enabled: true
+    executable: vivado
