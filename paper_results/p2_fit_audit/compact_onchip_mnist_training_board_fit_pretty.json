@@ -1,0 +1,143 @@
+{
+  "bitstream_allowed": false,
+  "board": "kv260",
+  "build_stage_gating": {
+    "bitstream": {
+      "allowed": false,
+      "requested": false
+    },
+    "vivado_implementation": {
+      "allowed": false,
+      "requested": false
+    },
+    "vivado_project": {
+      "allowed": true,
+      "requested": false
+    }
+  },
+  "derived_requirements": {
+    "checks": [],
+    "interface_requirements": {
+      "axi_stream_ports": 0,
+      "ddr_required": false,
+      "dma_count": 0,
+      "m_axi_bundles": 0,
+      "reasons": []
+    },
+    "resources": {},
+    "storage_values": []
+  },
+  "fit": {
+    "board": "kv260",
+    "limiting_dimension": "lut",
+    "limiting_resource": "lut",
+    "near_limit_ratio": 0.8,
+    "part": "xck26-sfvc784-2LV-c",
+    "resources": {
+      "bram_18k": {
+        "available": 288,
+        "ratio": 1.708333,
+        "status": "over_limit",
+        "used": 492,
+        "util_pct": 170.83
+      },
+      "ddr_bytes": {
+        "available": 4294967296,
+        "ratio": null,
+        "status": "unknown",
+        "used": null,
+        "util_pct": null
+      },
+      "dsp": {
+        "available": 1248,
+        "ratio": 0.091346,
+        "status": "fits",
+        "used": 114,
+        "util_pct": 9.13
+      },
+      "ff": {
+        "available": 234240,
+        "ratio": 1.643161,
+        "status": "over_limit",
+        "used": 384894,
+        "util_pct": 164.32
+      },
+      "lut": {
+        "available": 117120,
+        "ratio": 2.533333,
+        "status": "over_limit",
+        "used": 296704,
+        "util_pct": 253.33
+      },
+      "target_clock_mhz": {
+        "available": 100.0,
+        "ratio": 2.0,
+        "status": "near_limit",
+        "used": 200.0,
+        "util_pct": 200.0
+      },
+      "uram": {
+        "available": 64,
+        "ratio": null,
+        "status": "unknown",
+        "used": null,
+        "util_pct": null
+      }
+    },
+    "status": "over_limit",
+    "vivado_allowed": false
+  },
+  "format": "fpgai.board_fit.v1",
+  "interface_fit": {
+    "checks": {
+      "axi_dma_count": {
+        "available": 4,
+        "required": 0,
+        "status": "not_required"
+      },
+      "axi_stream_ports": {
+        "available": 8,
+        "required": 0,
+        "status": "not_required"
+      },
+      "ddr_interface": {
+        "available": true,
+        "required": false,
+        "status": "not_required"
+      },
+      "m_axi_bundles": {
+        "available": 8,
+        "required": 0,
+        "status": "not_required"
+      }
+    },
+    "failures": [],
+    "reasons": [],
+    "status": "fits"
+  },
+  "limiting_dimension": "lut",
+  "normalized_resources": {
+    "bram_18k": 492,
+    "dsp": 114,
+    "ff": 384894,
+    "lut": 296704,
+    "target_clock_mhz": 200.0
+  },
+  "part": "xck26-sfvc784-2LV-c",
+  "source": "prediction",
+  "status": "over_limit",
+  "suggested_yaml_actions": [
+    "Reduce parallelism/unroll factors in YAML.",
+    "Prefer a resource-oriented policy instead of aggressive/latency-first settings.",
+    "Reduce tiling buffer fanout or array partition factors.",
+    "Check generated HLS comments/macros to see which manual override expanded logic."
+  ],
+  "truth_boundary": {
+    "prediction_based": true,
+    "requires_board_runtime_for_deployment_truth": true,
+    "requires_hls_for_synthesis_truth": true,
+    "requires_vivado_for_implementation_truth": true,
+    "unrequested_paths_not_counted": true
+  },
+  "vivado_implementation_allowed": false
+}

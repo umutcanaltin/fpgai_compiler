@@ -1,0 +1,159 @@
+{
+  "bitstream_allowed": true,
+  "board": "kv260",
+  "build_stage_gating": {
+    "bitstream": {
+      "allowed": true,
+      "requested": false
+    },
+    "vivado_implementation": {
+      "allowed": true,
+      "requested": false
+    },
+    "vivado_project": {
+      "allowed": true,
+      "requested": false
+    }
+  },
+  "derived_requirements": {
+    "checks": [
+      {
+        "name": "ddr_required",
+        "reason": "Selected storage or movement uses external DDR/m_axi.",
+        "required": true
+      }
+    ],
+    "interface_requirements": {
+      "axi_stream_ports": 0,
+      "ddr_required": true,
+      "dma_count": 0,
+      "m_axi_bundles": 1,
+      "reasons": [
+        "data_movement.ps_pl.weights: requested m_axi/DDR movement"
+      ]
+    },
+    "resources": {
+      "ddr_bytes": 1
+    },
+    "storage_values": [
+      "ddr",
+      "bram"
+    ]
+  },
+  "fit": {
+    "board": "kv260",
+    "limiting_dimension": "target_clock_mhz",
+    "limiting_resource": "target_clock_mhz",
+    "near_limit_ratio": 0.8,
+    "part": "xck26-sfvc784-2LV-c",
+    "resources": {
+      "bram_18k": {
+        "available": 288,
+        "ratio": 0.121528,
+        "status": "fits",
+        "used": 35,
+        "util_pct": 12.15
+      },
+      "ddr_bytes": {
+        "available": 4294967296,
+        "ratio": 0.0,
+        "status": "fits",
+        "used": 1,
+        "util_pct": 0.0
+      },
+      "dsp": {
+        "available": 1248,
+        "ratio": 0.153846,
+        "status": "fits",
+        "used": 192,
+        "util_pct": 15.38
+      },
+      "ff": {
+        "available": 234240,
+        "ratio": 0.049471,
+        "status": "fits",
+        "used": 11588,
+        "util_pct": 4.95
+      },
+      "lut": {
+        "available": 117120,
+        "ratio": 0.06361,
+        "status": "fits",
+        "used": 7450,
+        "util_pct": 6.36
+      },
+      "target_clock_mhz": {
+        "available": 100.0,
+        "ratio": 2.0,
+        "status": "near_limit",
+        "used": 200.0,
+        "util_pct": 200.0
+      },
+      "uram": {
+        "available": 64,
+        "ratio": null,
+        "status": "unknown",
+        "used": null,
+        "util_pct": null
+      }
+    },
+    "status": "near_limit",
+    "vivado_allowed": true
+  },
+  "format": "fpgai.board_fit.v1",
+  "interface_fit": {
+    "checks": {
+      "axi_dma_count": {
+        "available": 4,
+        "required": 0,
+        "status": "not_required"
+      },
+      "axi_stream_ports": {
+        "available": 8,
+        "required": 0,
+        "status": "not_required"
+      },
+      "ddr_interface": {
+        "available": true,
+        "required": true,
+        "status": "fits"
+      },
+      "m_axi_bundles": {
+        "available": 8,
+        "required": 1,
+        "status": "fits"
+      }
+    },
+    "failures": [],
+    "reasons": [
+      "data_movement.ps_pl.weights: requested m_axi/DDR movement"
+    ],
+    "status": "fits"
+  },
+  "limiting_dimension": "target_clock_mhz",
+  "normalized_resources": {
+    "bram_18k": 35,
+    "ddr_bytes": 1,
+    "dsp": 192,
+    "ff": 11588,
+    "lut": 7450,
+    "target_clock_mhz": 200.0
+  },
+  "part": "xck26-sfvc784-2LV-c",
+  "source": "prediction",
+  "status": "near_limit",
+  "suggested_yaml_actions": [
+    "The requested clock is above the board safe/default guide rail.",
+    "This is allowed as an experiment, but it requires Vitis HLS/Vivado timing validation before deployment claims.",
+    "Lower targets.platform.clocks[0].target_mhz for a safer first implementation, or keep the higher clock and require timing reports.",
+    "Use pipeline settings to improve timing, but do not claim timing closure until Vivado reports pass."
+  ],
+  "truth_boundary": {
+    "prediction_based": true,
+    "requires_board_runtime_for_deployment_truth": true,
+    "requires_hls_for_synthesis_truth": true,
+    "requires_vivado_for_implementation_truth": true,
+    "unrequested_paths_not_counted": true
+  },
+  "vivado_implementation_allowed": true
+}

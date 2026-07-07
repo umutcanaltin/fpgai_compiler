@@ -1,41 +1,47 @@
 version: 1
+
 project:
-  name: paper_medium_ddr_cifar_cnn
-  out_dir: build/paper/medium_ddr_cifar_cnn
+  name: medium_ddr_cifar_cnn_vivado
+  out_dir: build/paper/medium_ddr_cifar_cnn_vivado
   clean: true
+
 pipeline:
   mode: inference
   outputs:
     top_kernel_name: deeplearn
+
 targets:
   platform:
     board: kv260
     part: xck26-sfvc784-2LV-c
     clocks:
-    - name: pl_clk0
-      target_mhz: 200
+      - name: pl_clk0
+        target_mhz: 200
+
 operators:
   supported:
-  - Dense
-  - Conv
-  - MaxPool
-  - AvgPool
-  - Add
-  - Relu
-  - LeakyRelu
-  - Sigmoid
-  - Softmax
-  - BatchNormalization
-  - Flatten
-  - Reshape
+    - Dense
+    - Conv
+    - MaxPool
+    - AvgPool
+    - Add
+    - Relu
+    - LeakyRelu
+    - Sigmoid
+    - Softmax
+    - BatchNormalization
+    - Flatten
+    - Reshape
   defaults:
     activation_insert:
       kind: none
       alpha: 0.1
       except_last: true
+
 model:
   format: onnx
   path: models/suite/cifar_small_cnn.onnx
+
 numerics:
   defaults:
     activation:
@@ -54,6 +60,7 @@ numerics:
       type: ap_fixed
       total_bits: 24
       int_bits: 10
+
 data_movement:
   ps_pl:
     compression:
@@ -67,6 +74,7 @@ data_movement:
       mode: stream
     interface:
       kind: m_axi
+
 backends:
   hls:
     enabled: true
@@ -74,12 +82,17 @@ backends:
       enabled: true
       mode: csim
       exe: vitis_hls
+
 toolchain:
   vitis_hls:
     enabled: true
     settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
+    executable: vitis_hls
   vivado:
     enabled: true
+    settings64: /tools/Xilinx/Vivado/2023.2/settings64.sh
+    executable: vivado
+
 benchmark:
   enabled: true
   fail_on_mismatch: true
@@ -96,8 +109,10 @@ benchmark:
     enabled: true
     fail_on_layer_mismatch: false
     stop_on_first_bad_layer: false
+
 debug:
   verbose: false
+
 optimization:
   tiling:
     enabled: true
@@ -107,7 +122,22 @@ optimization:
       tr: 8
       tc: 8
       tk: 3
+
 memory:
   weight_storage: ddr
   activation_storage: bram
   allow_external_memory: true
+
+build:
+  stages:
+    cpp: true
+    host_cpp: true
+    testbench: true
+    hls_project: true
+    hls_synthesis: true
+    vivado_project: true
+    vivado_implementation: true
+    bitstream: true
+    runtime_package: true
+    reports: true
+  fit_policy: block_over_limit

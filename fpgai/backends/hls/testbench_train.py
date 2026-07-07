@@ -188,6 +188,12 @@ def emit_tb_train_cpp(
     gradient_mem_call_arg = "gradients_mem.data(), " if gradient_export_requested else ""
     optimizer_state_mem_call_arg = "optimizer_state_mem.data(), " if optimizer_state_export_requested else ""
 
+    runtime_preload_call = "" if m_axi_weight_runtime else (
+        f"        {top_name}(in_stream, out_stream, aux_stream, "
+        f"{call_weights_arg}{gradient_mem_call_arg}{optimizer_state_mem_call_arg}0);\n"
+    )
+
+
     gradient_capture_block = ""
     if gradient_export_requested:
         gradient_capture_block = (
@@ -423,7 +429,7 @@ int main(int argc, char** argv) {{
             );
             std::exit(4);
         }}
-{weight_mem_pack}{aux_preload_push}        {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}{gradient_mem_call_arg}{optimizer_state_mem_call_arg}0);
+{weight_mem_pack}{aux_preload_push}{runtime_preload_call}
         printf("[TB-TRAIN] Preloaded runtime weights (%zu floats)\\n", preload.size());
     }}
 

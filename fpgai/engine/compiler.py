@@ -862,6 +862,32 @@ def _write_runtime_sequence_report(out_dir: Path, runtime_sequence: Dict[str, An
     return path
 
 
+def _resolved_toolchain_summary(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the YAML toolchain section in manifest-safe form.
+
+    External bridge flows need this because they run after compile and may not
+    share the user's shell environment. We preserve explicit user configuration
+    without inventing success or resolving unavailable tools here.
+    """
+    tc = raw.get("toolchain", {}) if isinstance(raw.get("toolchain", {}), dict) else {}
+    out: Dict[str, Any] = {}
+    for name in ("vitis_hls", "vivado"):
+        cfg = tc.get(name, {}) if isinstance(tc.get(name, {}), dict) else {}
+        if not cfg:
+            continue
+        allowed = {
+            "enabled",
+            "settings64",
+            "settings",
+            "executable",
+            "exe",
+            "path",
+            "version",
+        }
+        out[name] = {str(k): v for k, v in cfg.items() if str(k) in allowed}
+    return out
+
+
 def _emit_resolved_config_reports(
     out_dir: Path,
     raw: Dict[str, Any],
@@ -882,6 +908,7 @@ def _emit_resolved_config_reports(
         "memory_semantics_mode": str(_plan_notes(memory_plan).get("memory_semantics_mode", weights_mode)),
         "build_stages": _build_stage_summary(build_stages),
         "runtime_sequence": runtime_sequence,
+        "toolchain": _resolved_toolchain_summary(raw),
         "codegen": {"readability": _resolve_codegen_readability(raw)},
         "memory_plan_notes": _plan_notes(memory_plan),
         "communication_edges": [getattr(edge, "to_dict", lambda: dict(edge))() if not isinstance(edge, dict) else edge for edge in getattr(communication_plan, "edges", [])],
@@ -4263,16 +4290,21 @@ class Compiler:
                 "HLS/Vivado clock when backend is enabled",
             ],
         )
+        normalized_fit_policy, fit_policy_source = self._normalized_fit_policy()
         add(
             "targets.platform.fit_policy",
-            self._raw_get_path(raw, "targets.platform.fit_policy", self._raw_get_path(raw, "hardware.fit_policy", "report_only")),
+            normalized_fit_policy,
             applied_to=[
                 "board-fit reporting now",
                 "fit_policy_gate manifest decision",
                 "Vivado/bitstream gating decision",
             ],
             status="report_only",
-            note="fit_policy is enforced through fit_policy_gate. Main compile records the gate; the Vivado bridge flow must honor blocked=true before implementation/bitstream.",
+            note=(
+                "fit_policy is enforced through fit_policy_gate. Main compile records the gate; "
+                "the Vivado bridge flow must honor blocked=true before implementation/bitstream. "
+                f"Resolved from {fit_policy_source or 'compiler_default'}; build.fit_policy=block_over_limit is normalized to enforce."
+            ),
         )
 
         # Normalized PS/PL data_movement schema reporting.
@@ -4402,19 +4434,33 @@ class Compiler:
         }
 
 
-    def _fit_policy_gate(self, prediction_artifacts: dict[str, Any] | None) -> dict[str, Any]:
+    def _normalized_fit_policy(self) -> tuple[str, str | None]:
         raw = self.cfg.raw
-        policy = str(
-            self._raw_get_path(
-                raw,
-                "targets.platform.fit_policy",
-                self._raw_get_path(raw, "hardware.fit_policy", "report_only"),
-            )
-            or "report_only"
-        ).strip().lower()
+        candidates = (
+            "targets.platform.fit_policy",
+            "hardware.fit_policy",
+            "build.fit_policy",
+        )
+        source = None
+        value = None
+        for path in candidates:
+            value = self._raw_get_path(raw, path, None)
+            if value is not None:
+                source = path
+                break
+
+        policy = str(value or "report_only").strip().lower()
+        aliases = {"block_over_limit": "enforce"}
+        policy = aliases.get(policy, policy)
 
         if policy not in {"report_only", "warn", "enforce"}:
             policy = "report_only"
+            source = source or "compiler_default"
+
+        return policy, source
+
+    def _fit_policy_gate(self, prediction_artifacts: dict[str, Any] | None) -> dict[str, Any]:
+        policy, policy_source = self._normalized_fit_policy()
 
         board_fit = {}
         if isinstance(prediction_artifacts, dict):
@@ -4461,6 +4507,7 @@ class Compiler:
             "warning": warning,
             "severity": severity,
             "blocked_stages": blocked_stages,
+            "policy_source": policy_source,
             "reason": reason,
         }
 
@@ -4649,6 +4696,7 @@ class Compiler:
             ),
             "build_stages": _build_stage_summary(kwargs.get("build_stages") or _resolve_build_stages(self.cfg.raw)),
             "runtime_sequence": kwargs.get("runtime_sequence"),
+            "toolchain": _resolved_toolchain_summary(self.cfg.raw),
             "resolved_config_artifacts": kwargs.get("resolved_config_artifacts"),
             "numeric_validation_artifacts": None if kwargs.get("numeric_validation_artifacts") is None else {
                 key: str(value) for key, value in kwargs.get("numeric_validation_artifacts", {}).items()

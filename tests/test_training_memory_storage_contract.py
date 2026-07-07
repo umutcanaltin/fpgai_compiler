@@ -236,7 +236,8 @@ def test_training_bram_import_export_full_source_has_m_axi_commands_and_testbenc
     assert "#pragma HLS BIND_STORAGE variable=W_" in source
     assert "impl=bram" in source
     assert "hls::stream<axis_t>& aux,\n    ap_uint<32>* weights_mem," in tb
-    assert "weights_mem.data(), 0" in tb
+    assert "weights_mem.data(), 0" not in tb
+    assert "weights_mem.data(), 1" in tb
     assert "weights_mem.data(), 2" in tb
     assert '"weights_mode": "bram_import_export_full"' in manifest
     assert '"export_supported": true' in manifest

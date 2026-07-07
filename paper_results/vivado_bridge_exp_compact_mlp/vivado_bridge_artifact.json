@@ -1,0 +1,43 @@
+[
+  {
+    "artifact_dir": "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado",
+    "bitstream_requested": true,
+    "block_design_tcl_generated": true,
+    "board": "kv260",
+    "board_part": "xilinx.com:kv260_som:part0:1.4",
+    "build_dir": "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build",
+    "design": "compact_onchip_mnist_mlp_vivado",
+    "energy_estimation": {
+      "enabled_after_power_report": true,
+      "formula": "estimated_energy_j = vivado_total_power_w * hls_latency_s",
+      "status": "pending_reports"
+    },
+    "hls_dir": "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/hls",
+    "hls_export_tcl_generated": true,
+    "hls_ip_expected": true,
+    "hls_ip_exported": false,
+    "overlay_style": "kria_xsa_dtbo",
+    "part": "xck26-sfvc784-2LV-c",
+    "ps_type": "zynq_ultra_ps_e",
+    "reports_expected": [
+      "utilization_synth.rpt",
+      "timing_synth.rpt",
+      "power_synth.rpt",
+      "utilization_impl.rpt",
+      "timing_impl.rpt",
+      "power_impl.rpt"
+    ],
+    "status": "generated",
+    "supports_bridge_generation": true,
+    "supports_hls_ip_export": true,
+    "supports_vivado_impl": true,
+    "supports_vivado_synth": true,
+    "top_name": "deeplearn",
+    "vivado_bridge_dir": "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/vivado_bridge",
+    "vivado_bridge_generated": true,
+    "vivado_impl_requested": true,
+    "vivado_project_tcl_generated": true,
+    "vivado_synth_requested": true,
+    "vivado_tcl_generated": true
+  }
+]

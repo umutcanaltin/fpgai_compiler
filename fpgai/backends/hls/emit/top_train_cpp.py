@@ -2566,7 +2566,9 @@ def _fpgai_insert_training_ddr_tiled_mutable(source: str, *, graph: Graph, compi
         return updated
     tile_lines = [
         "  // FPGAI training DDR tiled mutable backend.",
-        "  static const int FPGAI_MODE_RUN_TRAINING = 2;",
+        # FPGAI_MODE_RUN_TRAINING is emitted by _fpgai_insert_training_storage_bindings.
+        # Do not redeclare it here; Vitis CSim rejects duplicate static const declarations
+        # inside the generated deeplearn() function for DDR-tiled mutable training.
         "  static const int FPGAI_MODE_DDR_TILED_TRAINING = 7;",
         "  static wgt_t weight_tile[FPGAI_DDR_TRAIN_TILE_OUT][FPGAI_DDR_TRAIN_TILE_IN];",
         "  static grad_wgt_t grad_tile[FPGAI_DDR_TRAIN_TILE_OUT][FPGAI_DDR_TRAIN_TILE_IN];",

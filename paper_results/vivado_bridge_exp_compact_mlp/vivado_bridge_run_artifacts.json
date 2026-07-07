@@ -1,0 +1,134 @@
+{
+  "generated": [
+    {
+      "artifact_dir": "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado",
+      "bitstream_requested": true,
+      "block_design_tcl_generated": true,
+      "board": "kv260",
+      "board_part": "xilinx.com:kv260_som:part0:1.4",
+      "build_dir": "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build",
+      "design": "compact_onchip_mnist_mlp_vivado",
+      "energy_estimation": {
+        "enabled_after_power_report": true,
+        "formula": "estimated_energy_j = vivado_total_power_w * hls_latency_s",
+        "status": "pending_reports"
+      },
+      "hls_dir": "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/hls",
+      "hls_export_tcl_generated": true,
+      "hls_ip_expected": true,
+      "hls_ip_exported": false,
+      "overlay_style": "kria_xsa_dtbo",
+      "part": "xck26-sfvc784-2LV-c",
+      "ps_type": "zynq_ultra_ps_e",
+      "reports_expected": [
+        "utilization_synth.rpt",
+        "timing_synth.rpt",
+        "power_synth.rpt",
+        "utilization_impl.rpt",
+        "timing_impl.rpt",
+        "power_impl.rpt"
+      ],
+      "status": "generated",
+      "supports_bridge_generation": true,
+      "supports_hls_ip_export": true,
+      "supports_vivado_impl": true,
+      "supports_vivado_synth": true,
+      "top_name": "deeplearn",
+      "vivado_bridge_dir": "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/vivado_bridge",
+      "vivado_bridge_generated": true,
+      "vivado_impl_requested": true,
+      "vivado_project_tcl_generated": true,
+      "vivado_synth_requested": true,
+      "vivado_tcl_generated": true
+    }
+  ],
+  "tool_runs": [
+    {
+      "bitstream_exists": true,
+      "component_xml_count": 2,
+      "component_xml_exists": true,
+      "component_xml_paths": [
+        "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/hls/fpgai_hls_proj/sol1/impl/ip/component.xml",
+        "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/vivado_bridge/hls_ip/component.xml"
+      ],
+      "design": "compact_onchip_mnist_mlp_vivado",
+      "hls_ip_artifacts": [
+        "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/hls/fpgai_hls_proj/sol1/impl/ip/component.xml",
+        "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/hls/fpgai_hls_proj/sol1/impl/ip/fpgai_hls_deeplearn_1_0.zip",
+        "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/vivado_bridge/hls_ip/component.xml",
+        "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/vivado_bridge/hls_ip/fpgai_hls_deeplearn_1_0.zip"
+      ],
+      "hls_ip_export_error": "",
+      "hls_ip_export_ok": true,
+      "hls_ip_export_ran": false,
+      "hls_ip_export_requested": true,
+      "hls_ip_export_returncode": 0,
+      "hls_ip_export_reused_existing_ip": true,
+      "hls_ip_export_run": {
+        "component_xml_count": 2,
+        "component_xml_paths": [
+          "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/hls/fpgai_hls_proj/sol1/impl/ip/component.xml",
+          "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/vivado_bridge/hls_ip/component.xml"
+        ],
+        "error": "",
+        "ok": true,
+        "ran": false,
+        "requested": true,
+        "returncode": 0,
+        "reused_existing_ip": true
+      },
+      "hls_ip_export_stderr_log": "",
+      "hls_ip_export_stdout_log": "",
+      "hls_ip_export_tool_ok": true,
+      "hls_ip_exported": true,
+      "vivado_bridge_dir": "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/vivado_bridge",
+      "vivado_error": "",
+      "vivado_failure_class": "",
+      "vivado_impl_requested": true,
+      "vivado_ok": true,
+      "vivado_ran": true,
+      "vivado_reports_present": true,
+      "vivado_returncode": 0,
+      "vivado_run": {
+        "cmd": [
+          "bash",
+          "-lc",
+          "source /tools/Xilinx/Vivado/2023.2/settings64.sh && exec vivado -mode batch -source scripts/run_vivado.tcl"
+        ],
+        "cwd": "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/vivado_bridge",
+        "finished_at": "2026-07-06T21:18:30",
+        "ok": true,
+        "ran": true,
+        "requested": true,
+        "resolved_tool": {
+          "executable": "vivado",
+          "launcher": "bash",
+          "path_available_without_settings": false,
+          "resolved_launcher": "/usr/bin/bash",
+          "settings64": "/tools/Xilinx/Vivado/2023.2/settings64.sh",
+          "source": "manifest_or_env",
+          "tool": "vivado",
+          "uses_settings64": true
+        },
+        "returncode": 0,
+        "started_at": "2026-07-06T20:57:12",
+        "stderr_log": "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/vivado_bridge/logs/vivado_build_stderr.log",
+        "stdout_log": "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/vivado_bridge/logs/vivado_build_stdout.log"
+      },
+      "vivado_stderr_log": "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/vivado_bridge/logs/vivado_build_stderr.log",
+      "vivado_stdout_log": "/home/umutcanaltin/Desktop/github_projects/fpgai_compiler/paper_results/vivado_bridge_exp_compact_mlp/artifacts/compact_onchip_mnist_mlp_vivado/build/vivado_bridge/logs/vivado_build_stdout.log",
+      "vivado_synth_requested": true,
+      "vivado_tool": {
+        "executable": "vivado",
+        "launcher": "bash",
+        "path_available_without_settings": false,
+        "resolved_launcher": "/usr/bin/bash",
+        "settings64": "/tools/Xilinx/Vivado/2023.2/settings64.sh",
+        "source": "manifest_or_env",
+        "tool": "vivado",
+        "uses_settings64": true
+      },
+      "xsa_exists": true
+    }
+  ]
+}

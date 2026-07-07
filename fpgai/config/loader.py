@@ -961,19 +961,26 @@ def _validate_fit_policy(
     issues: List[ConfigIssue],
 ) -> None:
     allowed = {"report_only", "warn", "enforce"}
+    aliases = {"block_over_limit": "enforce"}
 
-    for path in ("targets.platform.fit_policy", "hardware.fit_policy"):
+    for path in (
+        "targets.platform.fit_policy",
+        "hardware.fit_policy",
+        "build.fit_policy",
+    ):
         value = _deep_get(raw, path, None)
         if value is None:
             continue
 
         normalized = str(value).strip().lower()
+        if normalized in aliases:
+            normalized = aliases[normalized]
         if normalized not in allowed:
             issues.append(
                 ConfigIssue(
                     path,
                     "Invalid fit_policy. Expected one of: "
-                    + ", ".join(sorted(allowed)),
+                    + ", ".join(sorted(allowed | set(aliases))),
                 )
             )
 

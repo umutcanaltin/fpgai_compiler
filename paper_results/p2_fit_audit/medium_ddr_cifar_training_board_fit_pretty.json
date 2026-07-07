@@ -1,0 +1,160 @@
+{
+  "bitstream_allowed": false,
+  "board": "kv260",
+  "build_stage_gating": {
+    "bitstream": {
+      "allowed": false,
+      "requested": false
+    },
+    "vivado_implementation": {
+      "allowed": false,
+      "requested": false
+    },
+    "vivado_project": {
+      "allowed": true,
+      "requested": false
+    }
+  },
+  "derived_requirements": {
+    "checks": [
+      {
+        "name": "ddr_required",
+        "reason": "Selected storage or movement uses external DDR/m_axi.",
+        "required": true
+      }
+    ],
+    "interface_requirements": {
+      "axi_stream_ports": 0,
+      "ddr_required": true,
+      "dma_count": 0,
+      "m_axi_bundles": 1,
+      "reasons": [
+        "data_movement.ps_pl.weights: requested m_axi/DDR movement"
+      ]
+    },
+    "resources": {
+      "ddr_bytes": 1
+    },
+    "storage_values": [
+      "ddr",
+      "bram"
+    ]
+  },
+  "fit": {
+    "board": "kv260",
+    "limiting_dimension": "dsp",
+    "limiting_resource": "dsp",
+    "near_limit_ratio": 0.8,
+    "part": "xck26-sfvc784-2LV-c",
+    "resources": {
+      "bram_18k": {
+        "available": 288,
+        "ratio": 0.274306,
+        "status": "fits",
+        "used": 79,
+        "util_pct": 27.43
+      },
+      "ddr_bytes": {
+        "available": 4294967296,
+        "ratio": 0.0,
+        "status": "fits",
+        "used": 1,
+        "util_pct": 0.0
+      },
+      "dsp": {
+        "available": 1248,
+        "ratio": 3.046474,
+        "status": "over_limit",
+        "used": 3802,
+        "util_pct": 304.65
+      },
+      "ff": {
+        "available": 234240,
+        "ratio": 0.691556,
+        "status": "fits",
+        "used": 161990,
+        "util_pct": 69.16
+      },
+      "lut": {
+        "available": 117120,
+        "ratio": 1.073916,
+        "status": "over_limit",
+        "used": 125777,
+        "util_pct": 107.39
+      },
+      "target_clock_mhz": {
+        "available": 100.0,
+        "ratio": 2.0,
+        "status": "near_limit",
+        "used": 200.0,
+        "util_pct": 200.0
+      },
+      "uram": {
+        "available": 64,
+        "ratio": null,
+        "status": "unknown",
+        "used": null,
+        "util_pct": null
+      }
+    },
+    "status": "over_limit",
+    "vivado_allowed": false
+  },
+  "format": "fpgai.board_fit.v1",
+  "interface_fit": {
+    "checks": {
+      "axi_dma_count": {
+        "available": 4,
+        "required": 0,
+        "status": "not_required"
+      },
+      "axi_stream_ports": {
+        "available": 8,
+        "required": 0,
+        "status": "not_required"
+      },
+      "ddr_interface": {
+        "available": true,
+        "required": true,
+        "status": "fits"
+      },
+      "m_axi_bundles": {
+        "available": 8,
+        "required": 1,
+        "status": "fits"
+      }
+    },
+    "failures": [],
+    "reasons": [
+      "data_movement.ps_pl.weights: requested m_axi/DDR movement"
+    ],
+    "status": "fits"
+  },
+  "limiting_dimension": "dsp",
+  "normalized_resources": {
+    "bram_18k": 79,
+    "ddr_bytes": 1,
+    "dsp": 3802,
+    "ff": 161990,
+    "lut": 125777,
+    "target_clock_mhz": 200.0
+  },
+  "part": "xck26-sfvc784-2LV-c",
+  "source": "prediction",
+  "status": "over_limit",
+  "suggested_yaml_actions": [
+    "Reduce optimization.parallel.pe, optimization.parallel.simd, or optimization.parallel.unroll_factor.",
+    "Use a resource-oriented policy such as DSP-Saver/resource_first if available.",
+    "Reduce manual conv/dense unroll overrides.",
+    "Try a lower precision_mode if accuracy remains acceptable.",
+    "Use hardware.fit_policy: report_only only for design-space analysis, not deployment."
+  ],
+  "truth_boundary": {
+    "prediction_based": true,
+    "requires_board_runtime_for_deployment_truth": true,
+    "requires_hls_for_synthesis_truth": true,
+    "requires_vivado_for_implementation_truth": true,
+    "unrequested_paths_not_counted": true
+  },
+  "vivado_implementation_allowed": false
+}

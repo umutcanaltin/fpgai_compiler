@@ -1,7 +1,7 @@
 version: 1
 project:
-  name: paper_medium_ddr_cifar_cnn
-  out_dir: build/paper/medium_ddr_cifar_cnn
+  name: compact_onchip_mnist_mlp_vivado
+  out_dir: build/paper/compact_onchip_mnist_mlp_vivado
   clean: true
 pipeline:
   mode: inference
@@ -35,7 +35,7 @@ operators:
       except_last: true
 model:
   format: onnx
-  path: models/suite/cifar_small_cnn.onnx
+  path: models/suite/mlp_mnist.onnx
 numerics:
   defaults:
     activation:
@@ -59,14 +59,7 @@ data_movement:
     compression:
       enabled: true
     weights:
-      mode: ddr
-      interface: m_axi
-      lifetime: runtime
-      transfer: full
-    activations:
-      mode: stream
-    interface:
-      kind: m_axi
+      mode: embedded
 backends:
   hls:
     enabled: true
@@ -78,8 +71,11 @@ toolchain:
   vitis_hls:
     enabled: true
     settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
+    executable: vitis_hls
   vivado:
     enabled: true
+    settings64: /tools/Xilinx/Vivado/2023.2/settings64.sh
+    executable: vivado
 benchmark:
   enabled: true
   fail_on_mismatch: true
@@ -98,16 +94,16 @@ benchmark:
     stop_on_first_bad_layer: false
 debug:
   verbose: false
-optimization:
-  tiling:
-    enabled: true
-    conv:
-      tm: 8
-      tn: 8
-      tr: 8
-      tc: 8
-      tk: 3
-memory:
-  weight_storage: ddr
-  activation_storage: bram
-  allow_external_memory: true
+build:
+  stages:
+    cpp: true
+    host_cpp: true
+    testbench: true
+    hls_project: true
+    hls_synthesis: true
+    vivado_project: true
+    vivado_implementation: true
+    bitstream: true
+    runtime_package: true
+    reports: true
+  fit_policy: block_over_limit

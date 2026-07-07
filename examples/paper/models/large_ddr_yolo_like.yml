@@ -60,6 +60,9 @@ data_movement:
       enabled: true
     weights:
       mode: ddr
+      interface: m_axi
+      lifetime: runtime
+      transfer: full
     activations:
       mode: stream
     interface:
@@ -104,3 +107,7 @@ optimization:
       tr: 8
       tc: 8
       tk: 3
+memory:
+  weight_storage: ddr
+  activation_storage: bram
+  allow_external_memory: true

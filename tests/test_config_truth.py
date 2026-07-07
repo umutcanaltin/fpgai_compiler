@@ -164,6 +164,26 @@ backends:
     assert loaded.raw["optimization"]["parallel_policy"] == "Memory-First"
 
 
+
+def test_build_fit_policy_block_over_limit_alias_is_accepted(tmp_path):
+    import yaml
+
+    from fpgai.config.loader import load_config
+
+    src = Path("configs/examples/inference_compile.yml")
+    cfg = yaml.safe_load(src.read_text(encoding="utf-8"))
+
+    cfg.setdefault("project", {})
+    cfg["project"]["out_dir"] = str(tmp_path / "out")
+    cfg.setdefault("build", {})["fit_policy"] = "block_over_limit"
+
+    path = tmp_path / "build_fit_policy_alias.yml"
+    path.write_text(yaml.safe_dump(cfg, sort_keys=False), encoding="utf-8")
+
+    loaded = load_config(str(path))
+
+    assert loaded.raw["build"]["fit_policy"] == "block_over_limit"
+
 def test_invalid_fit_policy_is_rejected(tmp_path):
     import pytest
     import yaml

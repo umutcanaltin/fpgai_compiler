@@ -1,0 +1,2141 @@
+===== run_bridge.py args and execution =====
+#!/usr/bin/env python3
+"""Generate Vivado bridge artifacts and optionally run Vitis HLS/Vivado automatically."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional
+
+from fpgai.backends.vivado import generate_vivado_bridge_for_experiment
+
+
+def _load_json(path: Path) -> Any:
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+    return None
+
+
+def _write_json(path: Path, obj: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(obj, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _iter_artifacts(exp: Path) -> Iterable[Path]:
+    arts = exp / "artifacts"
+    if arts.exists():
+        for p in sorted(arts.iterdir()):
+            if p.is_dir():
+                yield p
+    else:
+        yield exp
+
+
+def _limited(items: Iterable[Path], max_designs: Optional[int]) -> List[Path]:
+    vals = list(items)
+    if max_designs is not None and max_designs >= 0:
+        return vals[:max_designs]
+    return vals
+
+
+def _bridge_dir(artifact: Path) -> Path:
+    build = artifact / "build" if (artifact / "build").exists() else artifact
+    return build / "vivado_bridge"
+
+
+def _hls_impl_ip_dir(bridge: Path) -> Path:
+    return bridge.parent / "hls" / "fpgai_hls_proj" / "sol1" / "impl" / "ip"
+
+
+def _clear_exported_ip(bridge: Path) -> None:
+    """Remove stale exported IP locations before a forced re-export.
+
+    This prevents stale component.xml files from making a failed HLS export look
+    successful and from allowing Vivado to continue with incompatible old IP.
+    """
+    for path in [bridge / "hls_ip", _hls_impl_ip_dir(bridge)]:
+        if path.exists():
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+
+def _mirror_hls_ip_to_bridge(bridge: Path) -> None:
+    """Copy canonical Vitis HLS impl/ip contents into vivado_bridge/hls_ip.
+
+    Vitis HLS may place component.xml under build/hls/.../impl/ip while the
+    Vivado bridge expects a stable IP repo at build/vivado_bridge/hls_ip. This
+    mirror makes both manual inspection and Vivado ip_repo_paths deterministic.
+    """
+    src = _hls_impl_ip_dir(bridge)
+    dst = bridge / "hls_ip"
+    if not src.exists():
+        return
+    dst.mkdir(parents=True, exist_ok=True)
+    for child in src.iterdir():
+        target = dst / child.name
+        if child.is_dir():
+            if target.exists():
+                shutil.rmtree(target)
+            shutil.copytree(child, target)
+        else:
+            shutil.copy2(child, target)
+
+
+def _component_xml_paths(bridge: Path) -> List[str]:
+    paths: List[str] = []
+    for root in [bridge / "hls_ip", _hls_impl_ip_dir(bridge)]:
+        if root.exists():
+            paths.extend([p.as_posix() for p in root.glob("**/component.xml")])
+    return sorted(set(paths))
+
+
+def _component_xml_exists(bridge: Path) -> bool:
+    return bool(_component_xml_paths(bridge))
+
+
+def _exported_ip_artifacts(bridge: Path) -> List[str]:
+    paths = _component_xml_paths(bridge)
+    for root in [bridge / "hls_ip", _hls_impl_ip_dir(bridge)]:
+        if root.exists():
+            paths.extend([p.as_posix() for p in root.glob("**/*.zip")])
+    return sorted(set(paths))
+
+
+def _load_compile_manifest(project_dir: Path) -> dict:
+    manifest_path = project_dir / "manifest.json"
+    if not manifest_path.exists():
+        return {}
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _fit_policy_gate_from_manifest(project_dir: Path) -> dict:
+    manifest = _load_compile_manifest(project_dir)
+    gate = manifest.get("fit_policy_gate", {})
+    return gate if isinstance(gate, dict) else {}
+
+
+def _vivado_gate_block_reason(project_dir: Path, *, run_vivado_impl: bool) -> str:
+    if not run_vivado_impl:
+        return ""
+
+    gate = _fit_policy_gate_from_manifest(project_dir)
+    if not bool(gate.get("blocked")):
+        return ""
+
+    blocked_stages = gate.get("blocked_stages") or []
+    if "vivado_impl" not in blocked_stages and "bitstream" not in blocked_stages:
+        return ""
+
+    policy = gate.get("policy", "unknown")
+    status = gate.get("board_fit_status", "unknown")
+    limiting = gate.get("board_fit_limiting_dimension", "unknown")
+    reason = gate.get("reason", "fit_policy_gate blocked Vivado implementation.")
+    return (
+        f"fit_policy_gate blocked Vivado implementation: "
+        f"policy={policy}, board_fit_status={status}, limiting={limiting}. {reason}"
+    )
+
+
+def _bitstream_exists(bridge: Path) -> bool:
+    return bool(list((bridge / "bitstream").glob("*.bit"))) if (bridge / "bitstream").exists() else False
+
+
+def _xsa_exists(bridge: Path) -> bool:
+    return bool(list((bridge / "bitstream").glob("*.xsa"))) if (bridge / "bitstream").exists() else False
+
+
+def _reports_present(bridge: Path) -> bool:
+    reports = bridge / "reports"
+    return any(reports.glob("*.rpt")) if reports.exists() else False
+
+
+def _run_cmd(cmd: List[str], cwd: Path, log_prefix: str, timeout_sec: int | None, env: Dict[str, str] | None = None) -> Dict[str, Any]:
+    logs = cwd / "logs"
+    logs.mkdir(parents=True, exist_ok=True)
+    stdout_path = logs / f"{log_prefix}_stdout.log"
+    stderr_path = logs / f"{log_prefix}_stderr.log"
+    meta_path = logs / f"{log_prefix}_run.json"
+    started = datetime.now().isoformat(timespec="seconds")
+
+    if shutil.which(cmd[0]) is None:
+        result = {
+            "requested": True,
+            "ran": False,
+            "ok": False,
+            "returncode": None,
+            "cmd": cmd,
+            "cwd": cwd.as_posix(),
+            "started_at": started,
+            "finished_at": datetime.now().isoformat(timespec="seconds"),
+            "error": f"Executable not found: {cmd[0]}",
+            "stdout_log": stdout_path.as_posix(),
+            "stderr_log": stderr_path.as_posix(),
+        }
+        stdout_path.write_text("", encoding="utf-8")
+        stderr_path.write_text(result["error"] + "\n", encoding="utf-8")
+        _write_json(meta_path, result)
+        return result
+
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(cwd),
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_sec,
+            check=False,
+            env=env,
+        )
+        stdout_path.write_text(proc.stdout or "", encoding="utf-8", errors="ignore")
+        stderr_path.write_text(proc.stderr or "", encoding="utf-8", errors="ignore")
+        result = {
+            "requested": True,
+            "ran": True,
+            "ok": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "cmd": cmd,
+            "cwd": cwd.as_posix(),
+            "started_at": started,
+            "finished_at": datetime.now().isoformat(timespec="seconds"),
+            "stdout_log": stdout_path.as_posix(),
+            "stderr_log": stderr_path.as_posix(),
+        }
+    except subprocess.TimeoutExpired as exc:
+        stdout_path.write_text(exc.stdout or "", encoding="utf-8", errors="ignore")
+        stderr_path.write_text((exc.stderr or "") + f"\nTIMEOUT after {timeout_sec}s\n", encoding="utf-8", errors="ignore")
+        result = {
+            "requested": True,
+            "ran": True,
+            "ok": False,
+            "returncode": None,
+            "cmd": cmd,
+            "cwd": cwd.as_posix(),
+            "started_at": started,
+            "finished_at": datetime.now().isoformat(timespec="seconds"),
+            "error": f"timeout after {timeout_sec}s",
+            "stdout_log": stdout_path.as_posix(),
+            "stderr_log": stderr_path.as_posix(),
+        }
+    _write_json(meta_path, result)
+    return result
+
+
+def _refresh_manifest(bridge: Path, updates: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    path = bridge / "vivado_bridge_manifest.json"
+    man = _load_json(path) or {}
+    if updates:
+        man.update(updates)
+    component_paths = _component_xml_paths(bridge)
+    man["hls_ip_exported"] = bool(component_paths)
+    man["component_xml_exists"] = bool(component_paths)
+    man["component_xml_count"] = len(component_paths)
+    man["component_xml_paths"] = component_paths
+    man["hls_ip_artifacts"] = _exported_ip_artifacts(bridge)
+    man["bitstream_exists"] = _bitstream_exists(bridge)
+    man["xsa_exists"] = _xsa_exists(bridge)
+    man["vivado_reports_present"] = _reports_present(bridge)
+    _write_json(path, man)
+    return man
+
+
+def _classify_vivado_failure(bridge_dir: Path, res: Dict[str, Any]) -> str:
+    """Classify common Vivado failures from generated text logs/reports."""
+    text_parts: List[str] = [str(res.get("error") or "")]
+
+    for root in [
+        bridge_dir / "logs",
+        bridge_dir / "reports",
+        bridge_dir / "project" / "fpgai_vivado.runs" / "impl_1",
+    ]:
+        if root.exists():
+            for path in root.rglob("*"):
+                if path.is_file() and path.suffix.lower() in {".log", ".jou", ".rpt", ".txt", ".rst"}:
+                    try:
+                        text_parts.append(path.read_text(errors="ignore"))
+                    except Exception:
+                        pass
+
+    low = "\n".join(text_parts).lower()
+
+    if (
+        "utlz-1" in low
+        and "resource utilization" in low
+        and (
+            "lut as logic over-utilized" in low
+            or "slice luts over-utilized" in low
+            or ("slice lut" in low and "over-utilized" in low)
+        )
+    ):
+        return "vivado_impl_failed_board_capacity_lut_overutilized"
+
+    if "utlz-1" in low and "over-utilized" in low:
+        return "vivado_impl_failed_board_capacity_overutilized"
+
+    if "place_design failed" in low:
+        return "vivado_impl_failed_place_design"
+
+    if "route_design failed" in low:
+        return "vivado_impl_failed_route_design"
+
+    if "write_bitstream" in low and "failed" in low:
+        return "vivado_impl_failed_write_bitstream"
+
+    if not bool(res.get("ok")):
+        return "vivado_failed"
+
+    return ""
+
+
+
+def _run_for_artifact(
+    artifact: Path,
+    export_hls_ip: bool,
+    run_vivado_synth: bool,
+    run_vivado_impl: bool,
+    timeout_sec: int | None,
+    force_hls_export: bool = False,
+) -> Dict[str, Any]:
+    bridge = _bridge_dir(artifact)
+    bridge.mkdir(parents=True, exist_ok=True)
+    row: Dict[str, Any] = {
+        "design": artifact.name,
+        "vivado_bridge_dir": bridge.as_posix(),
+        "hls_ip_export_requested": bool(export_hls_ip),
+        "hls_ip_export_ran": False,
+        "hls_ip_export_tool_ok": False,
+        "hls_ip_export_returncode": None,
+        "vivado_synth_requested": bool(run_vivado_synth or run_vivado_impl),
+        "vivado_impl_requested": bool(run_vivado_impl),
+        "vivado_ran": False,
+        "vivado_ok": False,
+        "vivado_returncode": None,
+    }
+
+    if export_hls_ip:
+        if force_hls_export:
+            _clear_exported_ip(bridge)
+        else:
+            _mirror_hls_ip_to_bridge(bridge)
+        existing_components = _component_xml_paths(bridge)
+        if existing_components and not force_hls_export:
+            res = {
+                "requested": True,
+                "ran": False,
+                "ok": True,
+                "returncode": 0,
+                "reused_existing_ip": True,
+                "component_xml_count": len(existing_components),
+                "component_xml_paths": existing_components,
+                "error": "",
+            }
+        else:
+            res = _run_cmd(["vitis_hls", "-f", "scripts/export_hls_ip.tcl"], bridge, "vitis_hls_export_ip", timeout_sec)
+            _mirror_hls_ip_to_bridge(bridge)
+        row.update({
+            "hls_ip_export_run": res,
+            "hls_ip_export_ran": bool(res.get("ran")),
+            "hls_ip_export_reused_existing_ip": bool(res.get("reused_existing_ip", False)),
+            "hls_ip_export_tool_ok": bool(res.get("ok")),
+            "hls_ip_export_returncode": res.get("returncode"),
+            "hls_ip_export_error": res.get("error", ""),
+            "hls_ip_export_stdout_log": res.get("stdout_log", ""),
+            "hls_ip_export_stderr_log": res.get("stderr_log", ""),
+        })
+        row["hls_ip_export_ok"] = bool(res.get("ok")) and _component_xml_exists(bridge)
+        _refresh_manifest(bridge, {
+            "hls_ip_export_run": res,
+            "hls_ip_export_ok": row["hls_ip_export_ok"],
+            "hls_ip_export_error": row.get("hls_ip_export_error", ""),
+        })
+
+    compile_project_dir = bridge.parent
+    gate_block_reason = _vivado_gate_block_reason(compile_project_dir, run_vivado_impl=run_vivado_impl)
+    if gate_block_reason:
+        bridge.mkdir(parents=True, exist_ok=True)
+        manifest_path = bridge / "manifest.json"
+        blocked_manifest = {
+            "design": artifact.name,
+            "vivado_bridge_generated": False,
+            "fit_policy_gate_blocked": True,
+            "fit_policy_gate_reason": gate_block_reason,
+            "hls_ip_export_requested": bool(export_hls_ip or run_vivado_synth or run_vivado_impl),
+            "hls_ip_export_ran": False,
+            "hls_ip_export_reused_existing_ip": False,
+            "hls_ip_export_tool_ok": False,
+            "hls_ip_export_returncode": None,
+            "hls_ip_exported": False,
+            "component_xml_exists": False,
+            "component_xml_count": 0,
+            "vivado_synth_requested": bool(run_vivado_synth or run_vivado_impl),
+            "vivado_impl_requested": bool(run_vivado_impl),
+            "bitstream_requested": bool(run_vivado_impl),
+            "vivado_ran": False,
+            "vivado_ok": False,
+            "vivado_returncode": None,
+            "vivado_reports_present": False,
+            "bitstream_exists": False,
+            "xsa_exists": False,
+            "error": gate_block_reason,
+        }
+        _write_json(manifest_path, blocked_manifest)
+        print(f"[FPGAI] {gate_block_reason}")
+        return blocked_manifest
+
+    if run_vivado_synth or run_vivado_impl:
+        if export_hls_ip and not row.get("hls_ip_export_ok", False):
+            res = {
+                "requested": True,
+                "ran": False,
+                "ok": False,
+                "returncode": None,
+                "error": "Cannot run Vivado: HLS IP export failed; inspect vitis_hls_export_ip logs",
+                "stdout_log": row.get("hls_ip_export_stdout_log", ""),
+                "stderr_log": row.get("hls_ip_export_stderr_log", ""),
+            }
+        else:
+            _mirror_hls_ip_to_bridge(bridge)
+            if not _component_xml_exists(bridge):
+                res = {
+                    "requested": True,
+                    "ran": False,
+                    "ok": False,
+                    "returncode": None,
+                    "error": "Cannot run Vivado: no exported HLS IP component.xml found under vivado_bridge/hls_ip",
+                    "stdout_log": "",
+                    "stderr_log": "",
+                }
+            else:
+                env = os.environ.copy()
+                if run_vivado_impl:
+                    env["FPGAI_VIVADO_RUN_IMPL"] = "1"
+                res = _run_cmd(["vivado", "-mode", "batch", "-source", "scripts/run_vivado.tcl"], bridge, "vivado_build", timeout_sec, env=env)
+
+        failure_class = "" if bool(res.get("ok")) else _classify_vivado_failure(bridge, res)
+        if failure_class:
+            res["failure_class"] = failure_class
+            if not res.get("error"):
+                res["error"] = failure_class
+
+        row.update({
+            "vivado_run": res,
+            "vivado_ran": bool(res.get("ran")),
+            "vivado_ok": bool(res.get("ok")),
+            "vivado_returncode": res.get("returncode"),
+            "vivado_error": res.get("error", ""),
+            "vivado_failure_class": res.get("failure_class", ""),
+            "vivado_stdout_log": res.get("stdout_log", ""),
+            "vivado_stderr_log": res.get("stderr_log", ""),
+        })
+        _refresh_manifest(
+            bridge,
+            {
+                "vivado_run": res,
+                "vivado_ok": row["vivado_ok"],
+                "vivado_returncode": row.get("vivado_returncode"),
+                "vivado_error": row.get("vivado_error", ""),
+                "vivado_failure_class": row.get("vivado_failure_class", ""),
+            },
+        )
+
+    _mirror_hls_ip_to_bridge(bridge)
+    man = _refresh_manifest(bridge)
+    row["hls_ip_exported"] = bool(man.get("hls_ip_exported"))
+    row["component_xml_exists"] = bool(man.get("component_xml_exists"))
+    row["component_xml_count"] = int(man.get("component_xml_count") or 0)
+    row["component_xml_paths"] = man.get("component_xml_paths", [])
+    row["hls_ip_artifacts"] = man.get("hls_ip_artifacts", [])
+    row["bitstream_exists"] = bool(man.get("bitstream_exists"))
+    row["xsa_exists"] = bool(man.get("xsa_exists"))
+    row["vivado_reports_present"] = bool(man.get("vivado_reports_present"))
+    return row
+
+
+def _cell(v: Any) -> str:
+    if v is None:
+        return ""
+    return str(v).replace("|", "/").replace("\n", " ")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("experiment", help="Experiment directory containing artifacts/<design>/build/hls")
+    ap.add_argument("--board", default="pynq_z2", help="Board key: pynq_z2, kv260, kr260")
+    ap.add_argument("--run-impl-default", action="store_true", help="Generate run_vivado.tcl with implementation/bitstream enabled")
+    ap.add_argument("--export-hls-ip", action="store_true", help="Ensure an exported HLS IP repo exists for each selected design; reuses existing IP unless --force-hls-export is set")
+    ap.add_argument("--force-hls-export", action="store_true", help="Force rerunning vitis_hls export even if vivado_bridge/hls_ip/component.xml already exists")
+    ap.add_argument("--run-vivado-synth", action="store_true", help="Automatically run vivado -mode batch -source scripts/run_vivado.tcl")
+    ap.add_argument("--run-vivado-impl", action="store_true", help="Generate implementation-enabled Vivado script and run it")
+    ap.add_argument("--max-designs", type=int, default=None, help="Limit tool execution to the first N designs for smoke testing")
+    ap.add_argument("--timeout-sec", type=int, default=3600, help="Timeout per tool command")
+    args = ap.parse_args()
+
+    exp = Path(args.experiment).resolve()
+    run_impl_default = bool(args.run_impl_default or args.run_vivado_impl)
+
+    gen_rows = generate_vivado_bridge_for_experiment(exp, board_name=args.board, run_impl_default=run_impl_default)
+
+    run_rows: List[Dict[str, Any]] = []
+    tool_artifacts = _limited(_iter_artifacts(exp), args.max_designs)
+    if args.export_hls_ip or args.run_vivado_synth or args.run_vivado_impl:
+        for art in tool_artifacts:
+            try:
+                run_rows.append(_run_for_artifact(
+                    art,
+                    export_hls_ip=args.export_hls_ip or args.run_vivado_synth or args.run_vivado_impl,
+                    run_vivado_synth=args.run_vivado_synth,
+                    run_vivado_impl=args.run_vivado_impl,
+                    timeout_sec=args.timeout_sec,
+                    force_hls_export=args.force_hls_export,
+                ))
+            except Exception as exc:
+                run_rows.append({"design": art.name, "error": str(exc)})
+
+    out = exp / "vivado_bridge_run_artifacts.json"
+    _write_json(out, {"generated": gen_rows, "tool_runs": run_rows})
+
+    print("# Automated Vivado bridge")
+    print()
+    print("| design | generated | hls_req | hls_ran | hls_reused | hls_tool_ok | hls_returncode | hls_ip_exported | component_xml_count | vivado_req | vivado_ran | vivado_ok | vivado_returncode | reports | bitstream | xsa | error | stdout_log | stderr_log |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+    by_design = {r.get("design"): r for r in run_rows}
+    for g in gen_rows:
+        d = g.get("design", "")
+        r = by_design.get(d, {})
+        bridge = Path(g.get("vivado_bridge_dir", "")) if g.get("vivado_bridge_dir") else None
+        if bridge and bridge.exists():
+            _mirror_hls_ip_to_bridge(bridge)
+            man = _refresh_manifest(bridge)
+            fallback_ip = bool(man.get("hls_ip_exported"))
+            fallback_count = int(man.get("component_xml_count") or 0)
+        else:
+            fallback_ip = False
+            fallback_count = 0
+        err = r.get("error") or r.get("hls_ip_export_error") or r.get("vivado_error") or g.get("error", "")
+        stdout_log = r.get("vivado_stdout_log") or r.get("hls_ip_export_stdout_log") or ""
+        stderr_log = r.get("vivado_stderr_log") or r.get("hls_ip_export_stderr_log") or ""
+        print(
+            "| {design} | {generated} | {hls_req} | {hls_ran} | {hls_reused} | {hls_ok} | {hls_rc} | {ip} | {count} | {vivado_req} | {vivado_ran} | {vivado_ok} | {vivado_rc} | {reports} | {bit} | {xsa} | {error} | {stdout} | {stderr} |".format(
+                design=_cell(d),
+                generated=_cell(g.get("vivado_bridge_generated", False)),
+                hls_req=_cell(r.get("hls_ip_export_requested", False)),
+                hls_ran=_cell(r.get("hls_ip_export_ran", False)),
+                hls_reused=_cell(r.get("hls_ip_export_reused_existing_ip", False)),
+                hls_ok=_cell(r.get("hls_ip_export_tool_ok", False)),
+                hls_rc=_cell(r.get("hls_ip_export_returncode")),
+                ip=_cell(r.get("hls_ip_exported", fallback_ip)),
+                count=_cell(r.get("component_xml_count", fallback_count)),
+                vivado_req=_cell(r.get("vivado_synth_requested", False) or r.get("vivado_impl_requested", False)),
+                vivado_ran=_cell(r.get("vivado_ran", False)),
+                vivado_ok=_cell(r.get("vivado_ok", False)),
+                vivado_rc=_cell(r.get("vivado_returncode")),
+                reports=_cell(r.get("vivado_reports_present", False)),
+                bit=_cell(r.get("bitstream_exists", False)),
+                xsa=_cell(r.get("xsa_exists", False)),
+                error=_cell(err),
+                stdout=_cell(stdout_log),
+                stderr=_cell(stderr_log),
+            )
+        )
+    requested_tool_run = bool(args.export_hls_ip or args.run_vivado_synth or args.run_vivado_impl)
+    failed_rows = []
+
+    if requested_tool_run:
+        for row in run_rows:
+            design = row.get("design", "")
+            if row.get("error"):
+                failed_rows.append((design, row.get("error")))
+
+===== vivado_bridge.py report/bridge sections =====
+331-  CONFIG.PSU__FPGA_PL0_ENABLE {{1}} \\
+332-  CONFIG.PSU__CRL_APB__PL0_REF_CTRL__FREQMHZ {{100}} \\
+333-] [get_bd_cells zynq_ultra_ps_e_0]}} zynqmp_cfg_msg
+334-puts "FPGAI-Vivado ZynqMP config result: $zynqmp_cfg_msg"
+335-
+336-catch {{make_bd_intf_pins_external [get_bd_intf_pins zynq_ultra_ps_e_0/DDR]}} ddr_ext_msg
+337-catch {{make_bd_intf_pins_external [get_bd_intf_pins zynq_ultra_ps_e_0/FIXED_IO]}} fixed_ext_msg
+338-puts "FPGAI-Vivado DDR external result: $ddr_ext_msg"
+339-puts "FPGAI-Vivado FIXED_IO external result: $fixed_ext_msg"
+340-
+341-set clk [fpgai_first_pin zynq_ultra_ps_e_0 {{pl_clk0 maxihpm0_fpd_aclk saxihpc0_fpd_aclk *pl_clk0*}}]
+342-set rstn [fpgai_first_pin zynq_ultra_ps_e_0 {{pl_resetn0 *resetn*}}]
+343-if {{$clk eq ""}} {{ error "FPGAI-Vivado could not find ZynqMP PL clock pin" }}
+344-if {{$rstn eq ""}} {{
+345-  puts "FPGAI-Vivado ZynqMP reset pin not found; creating active-low reset constant through proc_sys_reset only"
+346-  set rstn $clk
+347-}}
+348-
+349-set ps_ctrl_axi [fpgai_first_intf zynq_ultra_ps_e_0 {{M_AXI_HPM0_FPD M_AXI_HPM0_LPD *M_AXI_HPM* *M_AXI_GP*}}]
+350-set ps_mem_axi [fpgai_first_intf zynq_ultra_ps_e_0 {{S_AXI_HPC0_FPD S_AXI_HP0_FPD S_AXI_HPC1_FPD *S_AXI_HPC* *S_AXI_HP*}}]
+351-if {{$ps_ctrl_axi eq ""}} {{ error "FPGAI-Vivado could not find ZynqMP PS AXI master interface" }}
+352-if {{$ps_mem_axi eq ""}} {{ error "FPGAI-Vivado could not find ZynqMP PS AXI memory slave interface" }}
+353-
+354-foreach pin [concat \\
+355-  [get_bd_pins -quiet zynq_ultra_ps_e_0/*aclk] \\
+356-  [get_bd_pins -quiet zynq_ultra_ps_e_0/*ACLK] \\
+357-] {{
+358-  if {{$pin ne ""}} {{ fpgai_connect_net_if_unconnected $clk $pin "PS clock fanout" }}
+359-}}
+360-
+361-{_bd_accelerator_tcl(top_name)}"""
+362-
+363-
+364-def _create_bd_tcl(board_name: str, top_name: str, ps_type: str = "processing_system7") -> str:
+365-    if ps_type == "processing_system7":
+366-        return _create_zynq7000_bd_tcl(board_name, top_name)
+367-    if ps_type == "zynq_ultra_ps_e":
+368-        return _create_zynqmp_bd_tcl(board_name, top_name)
+369-    raise ValueError(f"Unsupported Vivado PS type for board {board_name}: {ps_type}")
+370-
+371:def _run_vivado_tcl(board: Dict[str, Any], top_name: str, run_impl_default: bool) -> str:
+372-    run_impl = "1" if run_impl_default else "0"
+373-    board_part = board.get("board_part") or ""
+374-    return rf'''# Auto-generated by FPGAI.
+375-# Creates a Vivado project, imports exported HLS IP, runs OOC IP reports, and
+376-# optionally builds a board-specific PS/DMA block design through bitstream/XSA.
+377-
+378-set script_dir [file normalize [file dirname [info script]]]
+379-set vivado_dir [file normalize [file join $script_dir ..]]
+380-set project_dir [file normalize [file join $vivado_dir project]]
+381-set report_dir [file normalize [file join $vivado_dir reports]]
+382-set bit_dir [file normalize [file join $vivado_dir bitstream]]
+383-set ip_repo [file normalize [file join $vivado_dir hls_ip]]
+384-file mkdir $project_dir
+385-file mkdir $report_dir
+386-file mkdir $bit_dir
+387-
+388-set part "{board['part']}"
+389-set board_part "{board_part}"
+390-set run_impl {run_impl}
+391-if {{[info exists ::env(FPGAI_VIVADO_RUN_IMPL)]}} {{
+392-  set run_impl $::env(FPGAI_VIVADO_RUN_IMPL)
+393-}}
+394-set jobs [expr {{[info exists ::env(FPGAI_VIVADO_JOBS)] ? $::env(FPGAI_VIVADO_JOBS) : 4}}]
+395-
+396-puts "FPGAI-Vivado project_dir=$project_dir"
+397-puts "FPGAI-Vivado ip_repo=$ip_repo"
+398-puts "FPGAI-Vivado part=$part board_part=$board_part run_impl=$run_impl"
+399-
+400-create_project fpgai_vivado $project_dir -part $part -force
+401-if {{$board_part ne ""}} {{
+402-  catch {{set_property board_part $board_part [current_project]}} board_part_msg
+403-  puts "FPGAI-Vivado board_part result: $board_part_msg"
+404-}}
+405-
+406-if {{[file exists $ip_repo]}} {{
+407-  set component_paths [glob -nocomplain -directory $ip_repo -types f component.xml]
+408-  set nested_component_paths [glob -nocomplain -directory $ip_repo -types f */component.xml */*/component.xml */*/*/component.xml]
+409-  set component_paths [concat $component_paths $nested_component_paths]
+410-  foreach component_xml $component_paths {{
+411-    puts "FPGAI-Vivado Normalizing IP compatibility: $component_xml"
+412-    catch {{
+413-      ipx::open_core $component_xml
+414-      set_property supported_families {{zynq Production artix7 Production kintex7 Production zynquplus Production}} [ipx::current_core]
+415-      ipx::save_core [ipx::current_core]
+416-      ipx::unload_core [ipx::current_core]
+417-    }} ipx_msg
+418-    puts "FPGAI-Vivado IP compatibility result: $ipx_msg"
+419-  }}
+420-  set_property ip_repo_paths $ip_repo [current_project]
+421-  update_ip_catalog
+422-}} else {{
+423-  error "FPGAI-Vivado HLS IP repo does not exist: $ip_repo"
+424-}}
+425-
+426-set hls_top_name "{top_name}"
+427-set hls_ip_defs [get_ipdefs -all "*$hls_top_name*"]
+428-puts "FPGAI-Vivado Candidate HLS IP defs for $hls_top_name: $hls_ip_defs"
+429-if {{[llength $hls_ip_defs] == 0}} {{
+430-  puts "FPGAI-Vivado Available HLS-like IP defs: [get_ipdefs -all *hls*]"
+431-  error "Could not find exported HLS IP for top=$hls_top_name in current IP catalog"
+432-}}
+433-set hls_vlnv [lindex $hls_ip_defs 0]
+434-puts "FPGAI-Vivado Using HLS IP VLNV: $hls_vlnv"
+435-
+436-set ip_inst "${{hls_top_name}}_ip_ooc"
+437-create_ip -vlnv $hls_vlnv -module_name $ip_inst
+438-set ip_obj [get_ips $ip_inst]
+439-generate_target all $ip_obj
+440-synth_ip $ip_obj
+441-
+442-set dcp_candidates [glob -nocomplain \
+443-  [file join $project_dir fpgai_vivado.gen sources_1 ip $ip_inst ${{ip_inst}}.dcp] \
+444-  [file join $project_dir fpgai_vivado.gen sources_1 ip * *.dcp] \
+445-  [file join $project_dir *.gen sources_1 ip * *.dcp]]
+446-puts "FPGAI-Vivado OOC DCP candidates: $dcp_candidates"
+447-if {{[llength $dcp_candidates] == 0}} {{
+448-  error "FPGAI-Vivado could not find synthesized OOC DCP for $ip_inst"
+449-}}
+450-set ooc_dcp [lindex $dcp_candidates 0]
+451-puts "FPGAI-Vivado Opening synthesized checkpoint: $ooc_dcp"
+452-open_checkpoint $ooc_dcp
+453-report_utilization -file [file join $report_dir utilization_synth.rpt]
+454-report_timing_summary -file [file join $report_dir timing_synth.rpt]
+455-catch {{report_power -file [file join $report_dir power_synth.rpt]}} power_msg
+456-puts "FPGAI-Vivado report_power result: $power_msg"
+457-close_design
+458-
+459-if {{$run_impl}} {{
+460-  puts "FPGAI-Vivado Starting full BD implementation/bitstream path"
+461-  source [file join $script_dir create_bd.tcl]
+462-  set bd_files [get_files -quiet *.bd]
+463-  if {{[llength $bd_files] == 0}} {{
+464-    set bd_files [get_files -quiet $project_dir/fpgai_vivado.srcs/sources_1/bd/*/*.bd]
+465-  }}
+466-  puts "FPGAI-Vivado BD files: $bd_files"
+467-  if {{[llength $bd_files] == 0}} {{ error "No BD file found after create_bd.tcl" }}
+468-  set bd_file [lindex $bd_files 0]
+469-  generate_target all $bd_file
+470-  make_wrapper -files $bd_file -top
+471-  set wrapper_files [glob -nocomplain $project_dir/fpgai_vivado.gen/sources_1/bd/*/hdl/*_wrapper.v]
+472-  puts "FPGAI-Vivado wrapper files: $wrapper_files"
+473-  if {{[llength $wrapper_files] == 0}} {{ error "No generated BD wrapper found" }}
+474-  add_files -norecurse $wrapper_files
+475-  update_compile_order -fileset sources_1
+476-
+477-  launch_runs synth_1 -jobs $jobs
+478-  wait_on_run synth_1
+479-  open_run synth_1
+480-  report_utilization -file [file join $report_dir utilization_bd_synth.rpt]
+481-  report_timing_summary -file [file join $report_dir timing_bd_synth.rpt]
+482-  catch {{report_power -file [file join $report_dir power_bd_synth.rpt]}} bd_synth_power_msg
+483-  puts "FPGAI-Vivado BD synth report_power result: $bd_synth_power_msg"
+484-
+485:  launch_runs impl_1 -to_step write_bitstream -jobs $jobs
+486-  wait_on_run impl_1
+487-  open_run impl_1
+488-  report_utilization -file [file join $report_dir utilization_impl.rpt]
+489-  report_timing_summary -file [file join $report_dir timing_impl.rpt]
+490-  catch {{report_power -file [file join $report_dir power_impl.rpt]}} impl_power_msg
+491-  puts "FPGAI-Vivado impl report_power result: $impl_power_msg"
+492-
+493-  set bit_candidates [glob -nocomplain $project_dir/fpgai_vivado.runs/impl_1/*.bit]
+494-  puts "FPGAI-Vivado bit candidates: $bit_candidates"
+495-  foreach bit_file $bit_candidates {{ file copy -force $bit_file [file join $bit_dir [file tail $bit_file]] }}
+496-  write_hw_platform -fixed -include_bit -force -file [file join $bit_dir fpgai_bd.xsa]
+497-}}
+498-
+499-puts "FPGAI-Vivado Vivado flow finished for top={top_name}"
+500-exit
+501-'''
+502-
+503-def _readme(board: Dict[str, Any], top_name: str) -> str:
+504-    return f'''# FPGAI Vivado Bridge Artifact
+505-
+506-This folder was generated by FPGAI.
+507-
+508-## Target
+509-
+510-- top: `{top_name}`
+511-- board: `{board['name']}`
+512-- part: `{board['part']}`
+513-- board_part: `{board.get('board_part') or ''}`
+514-- overlay_style: `{board['overlay_style']}`
+515-
+516-## Files
+517-
+518-- `scripts/export_hls_ip.tcl`: opens the generated Vitis HLS project, runs synthesis, and exports Vivado IP.
+519-- `scripts/create_bd.tcl`: block-design skeleton for the exported HLS IP.
+520:- `scripts/run_vivado.tcl`: creates the Vivado project, imports the IP repo, runs synthesis reports, and optionally implementation/bitstream.
+521-- `vivado_bridge_manifest.json`: machine-readable artifact/configuration metadata.
+522-
+523-## Automated command from repo root
+524-
+525-```bash
+526-python -m fpgai.backends.vivado.run_bridge <experiment_dir> --board pynq_z2 --export-hls-ip
+527-python -m fpgai.backends.vivado.run_bridge <experiment_dir> --board pynq_z2 --export-hls-ip --run-vivado-synth
+528-python -m fpgai.backends.vivado.run_bridge <experiment_dir> --board pynq_z2 --export-hls-ip --run-vivado-impl
+529-```
+530-
+531-The lower-level Tcl scripts remain in this folder for reproducibility and debugging.
+532-'''
+533-
+534-
+535-# ---------------------------------------------------------------------------
+536-# Direct compiler-integrated Vivado handoff generation (Sprint D)
+537-# ---------------------------------------------------------------------------
+538-
+539-def _runtime_commands(runtime_sequence: Optional[Dict[str, Any]]) -> List[str]:
+540-    seq = runtime_sequence.get("sequence", []) if isinstance(runtime_sequence, dict) else []
+541-    out: List[str] = []
+542-    for item in seq:
+543-        if isinstance(item, str):
+544-            out.append(item)
+545-        elif isinstance(item, dict):
+546-            cmd = item.get("command")
+547-            if isinstance(cmd, str):
+548-                out.append(cmd)
+549-            elif len(item) == 1:
+550-                key = next(iter(item.keys()))
+551-                if isinstance(key, str):
+552-                    out.append(key)
+553-    return out
+554-
+555-
+556-def _data_movement_requests_axi_dma(raw_config: Optional[Dict[str, Any]]) -> bool:
+557-    """Return True only when YAML explicitly selects AXI-stream/DMA movement.
+558-
+559-    Generated C++ may contain host/testbench stream-looking ports for internal or
+560-    compatibility reasons. Direct Vivado handoff must not instantiate DMA just
+561-    because those names appear: DMA consumes resources and must be tied to a real
+562-    user/compiler movement decision.
+563-    """
+564-    dm = (raw_config or {}).get("data_movement", {})
+565-    if not isinstance(dm, dict):
+566-        return False
+567-
+568-    def wants_dma(node: Any) -> bool:
+569-        if isinstance(node, dict):
+570-            interface = str(node.get("interface", "")).lower()
+571-            transport = str(node.get("transport", "")).lower()
+572-            if interface in {"axi_stream", "axis"} or transport == "dma":
+573-                return True
+574-            return any(wants_dma(v) for v in node.values())
+575-        if isinstance(node, list):
+576-            return any(wants_dma(v) for v in node)
+577-        return False
+578-
+579-    return wants_dma(dm)
+580-
+581-
+582-def _vivado_requested_features(
+583-    *,
+584-    runtime_sequence: Optional[Dict[str, Any]],
+585-    source_ports: Optional[Dict[str, Any]],
+586-    pipeline_mode: str,
+587-    raw_config: Optional[Dict[str, Any]] = None,
+588-) -> Dict[str, Any]:
+589-    commands = set(_runtime_commands(runtime_sequence))
+590-    m_axi_ports = sorted(str(p) for p in (source_ports or {}).get("m_axi_ports", []) or [])
+591-    axis_ports = sorted(str(p) for p in (source_ports or {}).get("axis_ports", []) or [])
+592-    lowered_ports = {p.lower() for p in m_axi_ports + axis_ports}
+593-    axi_dma_requested = _data_movement_requests_axi_dma(raw_config)
+594-    return {
+595-        "commands": sorted(commands),
+596-        "m_axi_ports": m_axi_ports,
+597-        "axis_ports": axis_ports,
+598-        "axi_dma": bool(axis_ports) and axi_dma_requested,
+599-        "axi_dma_decision_source": "data_movement_axi_stream_or_dma" if axi_dma_requested else "not_requested_by_data_movement",
+600-        "m_axi_memory": bool(m_axi_ports),
+--
+722-            lines.append(f"catch {{connect_bd_intf_net [get_bd_intf_pins ${{hls_cell}}/{port}] [get_bd_intf_pins axi_mem_interconnect/S{idx:02d}_AXI]}} m_axi_{idx}_msg")
+723-        lines.append("connect_bd_intf_net [get_bd_intf_pins axi_mem_interconnect/M00_AXI] $ps_mem_axi")
+724-    if use_dma:
+725-        lines.extend([
+726-            "",
+727-            "# AXI DMA is generated only because the HLS source exposes AXI-stream ports.",
+728-            "create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:* axi_dma_0",
+729-            "catch {set_property -dict [list CONFIG.c_include_sg {0} CONFIG.c_include_mm2s {1} CONFIG.c_include_s2mm {1}] [get_bd_cells axi_dma_0]} dma_cfg_msg",
+730-            "catch {connect_bd_intf_net [get_bd_intf_pins axi_ctrl_interconnect/M01_AXI] [get_bd_intf_pins axi_dma_0/S_AXI_LITE]} dma_ctrl_msg",
+731-        ])
+732-        if len(axis_ports) >= 1:
+733-            lines.append(f"# AXI-stream input port required by generated HLS: {axis_ports[0]}")
+734-            lines.append(f"catch {{connect_bd_intf_net [get_bd_intf_pins axi_dma_0/M_AXIS_MM2S] [get_bd_intf_pins ${{hls_cell}}/{axis_ports[0]}]}} dma_in_msg")
+735-        if len(axis_ports) >= 2:
+736-            lines.append(f"# AXI-stream output port required by generated HLS: {axis_ports[-1]}")
+737-            lines.append(f"catch {{connect_bd_intf_net [get_bd_intf_pins ${{hls_cell}}/{axis_ports[-1]}] [get_bd_intf_pins axi_dma_0/S_AXIS_S2MM]}} dma_out_msg")
+738-    lines.extend([
+739-        "",
+740-        "assign_bd_address",
+741-        "puts \"FPGAI-Vivado direct block design Tcl generated for $design_name\"",
+742-    ])
+743-    return "\n".join(lines) + "\n"
+744-
+745-
+746-def _vivado_run_tcl(build_stages: Dict[str, Any]) -> str:
+747-    run_impl = "1" if bool(build_stages.get("vivado_implementation")) else "0"
+748-    run_bit = "1" if bool(build_stages.get("bitstream")) else "0"
+749-    return rf'''# Auto-generated by FPGAI Sprint D.
+750-# This script executes the generated Vivado project handoff. It does not fake
+751-# implementation or bitstream success; those are handled by later report import.
+752-set script_dir [file normalize [file dirname [info script]]]
+753-set run_impl {run_impl}
+754-set run_bitstream {run_bit}
+755-source [file join $script_dir project.tcl]
+756-if {{$run_impl}} {{
+757-  launch_runs synth_1 -jobs 4
+758-  wait_on_run synth_1
+759-  launch_runs impl_1 -jobs 4
+760-  wait_on_run impl_1
+761-  if {{$run_bitstream}} {{
+762:    launch_runs impl_1 -to_step write_bitstream -jobs 4
+763-    wait_on_run impl_1
+764-  }}
+765-}}
+766-'''
+767-
+768-
+769-def emit_vivado_project_handoff(
+770-    out_dir: str | Path,
+771-    *,
+772-    raw_config: Optional[Dict[str, Any]] = None,
+773-    build_stages: Optional[Dict[str, Any]] = None,
+774-    pipeline_mode: str = "inference",
+775-    top_name: str = "deeplearn",
+776-    hls_dir: Optional[str | Path] = None,
+777-    runtime_sequence: Optional[Dict[str, Any]] = None,
+778-    source_ports: Optional[Dict[str, Any]] = None,
+779-) -> Optional[Dict[str, str]]:
+780-    """Emit direct Vivado project/BD Tcl handoff files for compiler builds.
+781-
+782-    This is generation/structural validation only. It does not run Vivado and it
+783-    must only produce Tcl when build.stages.vivado_project is requested.
+784-    """
+785-    stages = build_stages or {}
+786-    reports_dir = Path(out_dir) / "reports"
+787-    reports_dir.mkdir(parents=True, exist_ok=True)
+788-    if not bool(stages.get("vivado_project")):
+789-        payload = {
+790-            "format": "fpgai.vivado_bd_validation.v1",
+791-            "status": "not_requested",
+792-            "vivado_project_requested": False,
+793-            "truth_boundary": "Vivado Tcl generation was not requested by build.stages.vivado_project.",
+794-        }
+795-        json_path = reports_dir / "vivado_bd_validation.json"
+796-        md_path = reports_dir / "vivado_bd_validation.md"
+797-        json_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+798-        md_path.write_text("# Vivado BD validation\n\n- status: `not_requested`\n", encoding="utf-8")
+799-        return {"vivado_bd_validation_json": str(json_path), "vivado_bd_validation_md": str(md_path)}
+800-
+801-    raw = raw_config or {}
+802-    board_name = str(
+803-        raw.get("targets", {}).get("board")
+804-        or raw.get("targets", {}).get("platform", {}).get("board")
+805-        or raw.get("project", {}).get("board")
+806-        or "pynq_z2"
+807-    )
+808-    board = get_board(board_name).to_dict()
+809-    features = _vivado_requested_features(runtime_sequence=runtime_sequence, source_ports=source_ports, pipeline_mode=pipeline_mode, raw_config=raw)
+810-    vivado_dir = Path(out_dir) / "vivado"
+811-    vivado_dir.mkdir(parents=True, exist_ok=True)
+812-    (vivado_dir / "hls_ip").mkdir(parents=True, exist_ok=True)
+813-    (vivado_dir / "reports").mkdir(parents=True, exist_ok=True)
+814-    project_tcl = vivado_dir / "project.tcl"
+815-    bd_tcl = vivado_dir / "bd.tcl"
+816:    run_tcl = vivado_dir / "run_vivado.tcl"
+817-    project_tcl.write_text(_vivado_project_tcl(board, top_name), encoding="utf-8")
+818-    bd_tcl.write_text(_vivado_direct_bd_tcl(board, top_name, features=features), encoding="utf-8")
+819-    run_tcl.write_text(_vivado_run_tcl(stages), encoding="utf-8")
+820-
+821-    bd_source = bd_tcl.read_text(encoding="utf-8")
+822-    checks = {
+823-        "project_tcl": project_tcl.exists(),
+824-        "bd_tcl": bd_tcl.exists(),
+825:        "run_vivado_tcl": run_tcl.exists(),
+826-        "ps_block": ("processing_system7" in bd_source) or ("zynq_ultra_ps_e" in bd_source),
+827-        "hls_ip_instance": "create_bd_cell -type ip" in bd_source and "hls_ip_defs" in bd_source,
+828-        "axi_lite_control_path": "axi_ctrl_interconnect" in bd_source and "s_axi_control" in bd_source,
+829-        "axi_dma_required": bool(features.get("axi_dma")),
+830-        "axi_dma_present": "axi_dma_0" in bd_source,
+831-        "m_axi_memory_required": bool(features.get("m_axi_memory")),
+832-        "m_axi_memory_present": "axi_mem_interconnect" in bd_source,
+833-        "gradient_path_requested": bool(features.get("export_gradients")),
+834-        "optimizer_state_path_requested": bool(features.get("export_optimizer_state")),
+835-    }
+836-    failures: List[str] = []
+837:    for name in ["project_tcl", "bd_tcl", "run_vivado_tcl", "ps_block", "hls_ip_instance", "axi_lite_control_path"]:
+838-        if not checks.get(name):
+839-            failures.append(name)
+840-    if checks["axi_dma_required"] and not checks["axi_dma_present"]:
+841-        failures.append("axi_dma_missing")
+842-    if not checks["axi_dma_required"] and checks["axi_dma_present"]:
+843-        failures.append("axi_dma_unrequested_present")
+844-    if checks["m_axi_memory_required"] and not checks["m_axi_memory_present"]:
+845-        failures.append("m_axi_memory_missing")
+846-    status = "passed" if not failures else "failed"
+847-    payload = {
+848-        "format": "fpgai.vivado_bd_validation.v1",
+849-        "status": status,
+850-        "vivado_project_requested": True,
+851-        "build_stages": {str(k): bool(v) for k, v in stages.items()},
+852-        "board": board["name"],
+853-        "part": board["part"],
+854-        "ps_type": board.get("ps_type"),
+855-        "top_name": top_name,
+856-        "hls_dir": str(hls_dir) if hls_dir is not None else None,
+857-        "vivado_dir": str(vivado_dir),
+858-        "generated_files": {
+859-            "project_tcl": str(project_tcl),
+860-            "bd_tcl": str(bd_tcl),
+861:            "run_vivado_tcl": str(run_tcl),
+862-        },
+863-        "requested_features": features,
+864-        "checks": checks,
+865-        "failures": failures,
+866-        "truth_boundary": "This is structural Tcl generation/validation. It is not proof that Vivado synthesis, implementation, bitstream, or FPGA execution succeeded.",
+867-    }
+868-    json_path = reports_dir / "vivado_bd_validation.json"
+869-    md_path = reports_dir / "vivado_bd_validation.md"
+870-    json_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+871-    lines = [
+872-        "# Vivado BD validation",
+873-        "",
+874-        f"- status: `{status}`",
+875-        f"- board: `{board['name']}`",
+876-        f"- ps_type: `{board.get('ps_type')}`",
+877-        f"- top_name: `{top_name}`",
+878-        f"- vivado_project_requested: `True`",
+879-        "",
+880-        "## Generated files",
+881-        f"- `{project_tcl}`",
+882-        f"- `{bd_tcl}`",
+883-        f"- `{run_tcl}`",
+884-        "",
+885-        "## Requested hardware paths",
+886-        f"- axi_dma: `{features.get('axi_dma')}`",
+887-        f"- m_axi_memory: `{features.get('m_axi_memory')}`",
+888-        f"- export_gradients: `{features.get('export_gradients')}`",
+889-        f"- export_optimizer_state: `{features.get('export_optimizer_state')}`",
+890-        "",
+891-        "This report validates generated Tcl structure only; Vivado execution is a later verification level.",
+892-        "",
+893-    ]
+894-    md_path.write_text("\n".join(lines), encoding="utf-8")
+895-    return {
+896-        "vivado_project_tcl": str(project_tcl),
+897-        "vivado_bd_tcl": str(bd_tcl),
+898-        "vivado_run_tcl": str(run_tcl),
+899-        "vivado_bd_validation_json": str(json_path),
+900-        "vivado_bd_validation_md": str(md_path),
+901-    }
+902-
+903-
+904:def _vivado_tool_status(raw_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+905-    """Return honest Vivado executable availability without running Vivado."""
+906-    raw = raw_config or {}
+907-    toolchain = raw.get("toolchain", {}) if isinstance(raw.get("toolchain", {}), dict) else {}
+908-    vivado_cfg = toolchain.get("vivado", {}) if isinstance(toolchain.get("vivado", {}), dict) else {}
+909-    configured = vivado_cfg.get("executable") or vivado_cfg.get("path") or os.environ.get("FPGAI_VIVADO") or "vivado"
+910-    executable = str(configured)
+911-    resolved = shutil.which(executable) if executable else None
+912-    return {
+913-        "executable": executable,
+914-        "resolved_path": resolved,
+915-        "available": resolved is not None,
+916-    }
+917-
+918-
+919-def _find_first_existing(base: Path, patterns: Iterable[str]) -> Optional[Path]:
+920-    for pattern in patterns:
+921-        for candidate in sorted(base.glob(pattern)):
+922-            try:
+923-                if candidate.exists() and candidate.is_file():
+924-                    return candidate
+925-            except OSError:
+926-                continue
+927-    return None
+928-
+929-
+930-def _write_truth_report(path_json: Path, path_md: Path, payload: Dict[str, Any], *, title: str) -> Dict[str, str]:
+931-    path_json.parent.mkdir(parents=True, exist_ok=True)
+932-    path_md.parent.mkdir(parents=True, exist_ok=True)
+933-    path_json.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+934-    lines = [
+935-        f"# {title}",
+936-        "",
+937-        f"- status: `{payload.get('status')}`",
+938-        f"- stage: `{payload.get('stage')}`",
+939-        f"- requested: `{payload.get('requested')}`",
+940-        f"- claimed_success: `{payload.get('claimed_success')}`",
+941-    ]
+942-    reason = payload.get("reason")
+943-    if reason:
+944-        lines.append(f"- reason: {reason}")
+945:    tool = payload.get("vivado_tool")
+946-    if isinstance(tool, dict):
+947-        lines.extend([
+948-            "",
+949-            "## Vivado tool",
+950-            f"- executable: `{tool.get('executable')}`",
+951-            f"- resolved_path: `{tool.get('resolved_path')}`",
+952-            f"- available: `{tool.get('available')}`",
+953-        ])
+954-    artifact = payload.get("artifact")
+955-    if artifact:
+956-        lines.extend(["", "## Artifact", f"- `{artifact}`"])
+957-    lines.extend(["", str(payload.get("truth_boundary", "No success is claimed without real tool/artifact evidence.")), ""])
+958-    path_md.write_text("\n".join(lines), encoding="utf-8")
+959-    return {path_json.stem + "_json": str(path_json), path_md.stem + "_md": str(path_md)}
+960-
+961-
+962-def emit_vivado_truth_reports(
+963-    out_dir: str | Path,
+964-    *,
+965-    raw_config: Optional[Dict[str, Any]] = None,
+966-    build_stages: Optional[Dict[str, Any]] = None,
+967-    vivado_handoff_artifacts: Optional[Dict[str, str]] = None,
+968-    board_fit_artifacts: Optional[Dict[str, Any]] = None,
+969-) -> Dict[str, str]:
+970-    """Emit Sprint E Vivado execution/implementation/bitstream truth reports.
+971-
+972-    This function does not run Vivado. It records whether the requested Vivado
+973-    verification level has real tool/artifact evidence or must remain unclaimed.
+974-    """
+975-    root = Path(out_dir)
+976-    reports_dir = root / "reports"
+977-    vivado_dir = root / "vivado"
+978-    reports_dir.mkdir(parents=True, exist_ok=True)
+979-    stages = build_stages or {}
+980:    tool = _vivado_tool_status(raw_config)
+981-    handoff_present = bool(vivado_handoff_artifacts and vivado_handoff_artifacts.get("vivado_bd_tcl"))
+982-    board_fit = board_fit_artifacts or {}
+983-    board_fit_status = str(board_fit.get("status") or "unknown")
+984-    board_fit_allows_impl = bool(board_fit.get("vivado_implementation_allowed", board_fit.get("vivado_allowed", True)))
+985-    board_fit_allows_bitstream = bool(board_fit.get("bitstream_allowed", board_fit.get("vivado_allowed", True)))
+986-    board_fit_json = board_fit.get("json") or board_fit.get("board_fit_json")
+987-
+988-    validation_requested = bool(stages.get("vivado_project"))
+989-    if not validation_requested:
+990-        validation_status = "not_requested"
+991-        validation_reason = "build.stages.vivado_project is false."
+992-    elif not tool["available"]:
+993-        validation_status = "tool_missing"
+994-        validation_reason = "Vivado executable was not found; generated Tcl was not executed."
+995-    else:
+996-        validation_log = _find_first_existing(vivado_dir, ["reports/*validation*.log", "reports/*validate*.rpt", "project/*.jou"])
+997-        if validation_log is not None:
+998-            validation_status = "passed"
+999-            validation_reason = "Vivado validation artifact was found."
+1000-        else:
+1001-            validation_status = "not_run"
+1002-            validation_reason = "Vivado Tcl was generated, but no Vivado validation log/report was found."
+1003-    validation_payload = {
+1004-        "format": "fpgai.vivado_validation_report.v1",
+1005-        "stage": "vivado_project_validation",
+1006-        "requested": validation_requested,
+1007-        "status": validation_status,
+1008-        "reason": validation_reason,
+1009-        "claimed_success": validation_status == "passed",
+1010:        "vivado_tool": tool,
+1011-        "vivado_handoff_present": handoff_present,
+1012-        "vivado_handoff_artifacts": vivado_handoff_artifacts or {},
+1013-        "truth_boundary": "This report only claims Vivado validation success when a real Vivado validation artifact exists. Generated Tcl/structural validation alone is not Vivado execution proof.",
+1014-    }
+1015-
+1016-    impl_requested = bool(stages.get("vivado_implementation"))
+1017-    impl_artifact = _find_first_existing(vivado_dir, [
+1018-        "reports/*impl*.rpt",
+1019-        "reports/*implementation*.rpt",
+1020-        "project/**/*.dcp",
+1021-        "project/**/*.jou",
+1022-    ])
+1023-    if not impl_requested:
+1024-        impl_status = "not_requested"
+1025-        impl_reason = "build.stages.vivado_implementation is false."
+1026-    elif not board_fit_allows_impl:
+1027-        impl_status = "blocked_by_board_fit"
+1028-        impl_reason = f"Vivado implementation was requested but board_fit.status={board_fit_status!r} does not allow implementation for the selected board."
+1029-    elif not tool["available"]:
+1030-        impl_status = "tool_missing"
+1031-        impl_reason = "Vivado executable was not found on PATH/configured location."
+1032-    elif impl_artifact is None:
+1033-        impl_status = "artifact_missing"
+1034-        impl_reason = "Vivado implementation was requested but no implementation report/checkpoint artifact was found."
+1035-    else:
+1036-        impl_status = "passed"
+1037-        impl_reason = "Vivado implementation artifact was found."
+1038-    impl_payload = {
+1039:        "format": "fpgai.vivado_implementation_report.v1",
+1040-        "stage": "vivado_implementation",
+1041-        "requested": impl_requested,
+1042-        "status": impl_status,
+1043-        "reason": impl_reason,
+1044-        "claimed_success": impl_status == "passed",
+1045:        "vivado_tool": tool,
+1046-        "artifact": str(impl_artifact) if impl_artifact is not None else None,
+1047-        "requires_vivado_project": True,
+1048-        "vivado_project_requested": validation_requested,
+1049-        "board_fit_status": board_fit_status,
+1050-        "board_fit_json": board_fit_json,
+1051-        "board_fit_allowed": board_fit_allows_impl,
+1052-        "truth_boundary": "Vivado implementation success is claimed only when board-fit allows the stage and real implementation reports/checkpoints are present. Missing tools/artifacts are not converted into success.",
+1053-    }
+1054-
+1055-    bit_requested = bool(stages.get("bitstream"))
+1056-    bit_artifact = _find_first_existing(vivado_dir, ["**/*.bit", "**/*.xsa"])
+1057-    if not bit_requested:
+1058-        bit_status = "not_requested"
+1059-        bit_reason = "build.stages.bitstream is false."
+1060-    elif not board_fit_allows_bitstream:
+1061-        bit_status = "blocked_by_board_fit"
+1062-        bit_reason = f"Bitstream was requested but board_fit.status={board_fit_status!r} does not allow bitstream generation for the selected board."
+1063-    elif impl_status != "passed":
+1064-        bit_status = "artifact_missing" if tool["available"] else "tool_missing"
+1065-        bit_reason = "Bitstream was requested but Vivado implementation has not passed with real artifacts."
+1066-    elif bit_artifact is None:
+1067-        bit_status = "artifact_missing"
+1068-        bit_reason = "Bitstream was requested but no .bit/.xsa artifact was found."
+1069-    else:
+1070-        bit_status = "passed"
+1071-        bit_reason = "Bitstream/XSA artifact was found."
+1072-    bit_payload = {
+1073:        "format": "fpgai.bitstream_report.v1",
+1074-        "stage": "bitstream",
+1075-        "requested": bit_requested,
+1076-        "status": bit_status,
+1077-        "reason": bit_reason,
+1078-        "claimed_success": bit_status == "passed",
+1079:        "vivado_tool": tool,
+1080-        "artifact": str(bit_artifact) if bit_artifact is not None else None,
+1081-        "requires_vivado_implementation_passed": True,
+1082-        "vivado_implementation_status": impl_status,
+1083-        "board_fit_status": board_fit_status,
+1084-        "board_fit_json": board_fit_json,
+1085-        "board_fit_allowed": board_fit_allows_bitstream,
+1086-        "truth_boundary": "Bitstream success is claimed only when board-fit allows the stage, implementation has passed, and a real .bit or .xsa artifact exists.",
+1087-    }
+1088-
+1089-    artifacts: Dict[str, str] = {}
+1090-    artifacts.update(_write_truth_report(reports_dir / "vivado_validation_report.json", reports_dir / "vivado_validation_report.md", validation_payload, title="Vivado validation report"))
+1091:    artifacts.update(_write_truth_report(reports_dir / "vivado_implementation_report.json", reports_dir / "vivado_implementation_report.md", impl_payload, title="Vivado implementation report"))
+1092:    artifacts.update(_write_truth_report(reports_dir / "bitstream_report.json", reports_dir / "bitstream_report.md", bit_payload, title="Bitstream report"))
+1093-    return artifacts
+1094-
+1095:def generate_vivado_bridge_for_artifact(
+1096-    artifact_dir: str | Path,
+1097-    board_name: str = "pynq_z2",
+1098-    run_impl_default: bool = False,
+1099-) -> Dict[str, Any]:
+1100-    artifact = Path(artifact_dir).resolve()
+1101-    build_dir = artifact / "build"
+1102-    if not build_dir.exists():
+1103-        build_dir = artifact
+1104-    manifest = _load_json(build_dir / "manifest.json")
+1105-    top_name = _top_name_from_manifest(manifest)
+1106-    board = get_board(board_name).to_dict()
+1107-    hls_dir = _find_hls_dir(build_dir)
+1108-    if hls_dir is None:
+1109-        raise FileNotFoundError(f"Could not find HLS directory/run_hls.tcl under {build_dir}")
+1110-
+1111-    out_dir = build_dir / "vivado_bridge"
+1112-    scripts_dir = out_dir / "scripts"
+1113-    reports_dir = out_dir / "reports"
+1114-    (out_dir / "hls_ip").mkdir(parents=True, exist_ok=True)
+1115-    reports_dir.mkdir(parents=True, exist_ok=True)
+1116-
+1117-    _write(scripts_dir / "export_hls_ip.tcl", _hls_export_tcl(hls_dir, out_dir, top_name, board["part"]))
+1118-    _write(scripts_dir / "create_bd.tcl", _create_bd_tcl(board["name"], top_name, board.get("ps_type", "processing_system7")))
+1119:    _write(scripts_dir / "run_vivado.tcl", _run_vivado_tcl(board, top_name, run_impl_default))
+1120-    _write(out_dir / "README_VIVADO.md", _readme(board, top_name))
+1121-
+1122-    artifact = {
+1123-        "vivado_bridge_generated": True,
+1124-        "vivado_tcl_generated": True,
+1125-        "hls_export_tcl_generated": True,
+1126-        "vivado_project_tcl_generated": True,
+1127-        "block_design_tcl_generated": True,
+1128-        "board": board["name"],
+1129-        "part": board["part"],
+1130-        "board_part": board.get("board_part"),
+1131-        "ps_type": board.get("ps_type"),
+1132-        "overlay_style": board.get("overlay_style"),
+1133-        "supports_bridge_generation": board.get("supports_bridge_generation", True),
+1134-        "supports_hls_ip_export": board.get("supports_hls_ip_export", True),
+1135-        "supports_vivado_synth": board.get("supports_vivado_synth", True),
+1136-        "supports_vivado_impl": board.get("supports_vivado_impl", True),
+1137-        "top_name": top_name,
+1138-        "artifact_dir": artifact.as_posix(),
+1139-        "build_dir": build_dir.as_posix(),
+1140-        "hls_dir": hls_dir.as_posix(),
+1141-        "vivado_bridge_dir": out_dir.as_posix(),
+1142-        "hls_ip_expected": True,
+1143-        "hls_ip_exported": False,
+1144-        "vivado_synth_requested": True,
+1145-        "vivado_impl_requested": bool(run_impl_default),
+1146-        "bitstream_requested": bool(run_impl_default),
+1147-        "reports_expected": [
+1148-            "utilization_synth.rpt",
+1149-            "timing_synth.rpt",
+1150-            "power_synth.rpt",
+1151-            "utilization_impl.rpt",
+1152-            "timing_impl.rpt",
+1153-            "power_impl.rpt",
+1154-        ],
+1155-        "energy_estimation": {
+1156-            "enabled_after_power_report": True,
+1157-            "formula": "estimated_energy_j = vivado_total_power_w * hls_latency_s",
+1158-            "status": "pending_reports",
+1159-        },
+1160-    }
+1161-    _write(out_dir / "vivado_bridge_manifest.json", json.dumps(artifact, indent=2, sort_keys=True))
+1162-    return artifact
+1163-
+1164-
+1165-def _iter_artifacts(experiment_dir: Path) -> Iterable[Path]:
+1166-    artifacts = experiment_dir / "artifacts"
+1167-    if artifacts.exists():
+1168-        for p in sorted(artifacts.iterdir()):
+1169-            if p.is_dir():
+1170-                yield p
+1171-    else:
+1172-        # Allow direct artifact/build paths for debugging.
+1173-        yield experiment_dir
+1174-
+1175-
+1176-def generate_vivado_bridge_for_experiment(
+1177-    experiment_dir: str | Path,
+1178-    board_name: str = "pynq_z2",
+1179-    run_impl_default: bool = False,
+1180-) -> List[Dict[str, Any]]:
+1181-    exp = Path(experiment_dir).resolve()
+1182-    rows: List[Dict[str, Any]] = []
+1183-    for art in _iter_artifacts(exp):
+1184-        try:
+1185:            ev = generate_vivado_bridge_for_artifact(art, board_name=board_name, run_impl_default=run_impl_default)
+1186-            ev["design"] = art.name
+1187-            ev["status"] = "generated"
+1188-        except Exception as exc:  # keep artifact-driven behavior across all records
+1189-            ev = {
+1190-                "design": art.name,
+1191-                "status": "error",
+1192-                "vivado_bridge_generated": False,
+1193-                "error": str(exc),
+1194-                "artifact_dir": art.as_posix(),
+1195-            }
+1196-        rows.append(ev)
+1197-    out = exp / "vivado_bridge_artifact.json"
+1198-    _write(out, json.dumps(rows, indent=2, sort_keys=True))
+1199-    return rows
+
+===== runtime package bitstream detection =====
+1300-        "gradients_export_bin": (root / "gradients_export.bin", package_dir / "outputs" / "gradients_export.bin"),
+1301-        "grads_ref_bin": (root / "training_reference" / "grads_ref.bin", package_dir / "reference" / "grads_ref.bin"),
+1302-        "gradients_after_ref_bin": (root / "training_reference" / "gradients_after_ref.bin", package_dir / "reference" / "gradients_after_ref.bin"),
+1303-        "optimizer_state_after_bin": (root / "optimizer_state_after.bin", package_dir / "outputs" / "optimizer_state_after.bin"),
+1304-        "optimizer_state_after_ref_bin": (root / "training_reference" / "optimizer_state_after_ref.bin", package_dir / "reference" / "optimizer_state_after_ref.bin"),
+1305-        "hls_artifact_metadata": (
+1306-            root / "hls_artifact_metadata.json",
+1307-            package_dir / "hls" / "hls_artifact_metadata.json",
+1308-        ),
+1309-        "hls_schedule_summary": (
+1310-            root / "hls_schedule_summary.json",
+1311-            package_dir / "hls" / "hls_schedule_summary.json",
+1312-        ),
+1313-        "hls_ii_comparison": (
+1314-            root / "hls_ii_comparison.json",
+1315-            package_dir / "hls" / "hls_ii_comparison.json",
+1316-        ),
+1317-    }
+1318-
+1319-    for name, (src, dst) in copy_plan.items():
+1320-        copied = _copy_if_exists(src, dst)
+1321-        if copied is not None:
+1322-            copied["package_path"] = _safe_rel(Path(copied["package_path"]), package_dir)
+1323-            files[name] = copied
+1324-
+1325-    # Capture HLS run logs when present.
+1326-    hls_logs = _collect_existing(root, ["hls/logs/*.log", "hls/logs/*.json"])
+1327-    copied_logs: list[dict[str, Any]] = []
+1328-    for src in hls_logs:
+1329-        copied = _copy_if_exists(src, package_dir / "hls" / "logs" / src.name)
+1330-        if copied is not None:
+1331-            copied["package_path"] = _safe_rel(Path(copied["package_path"]), package_dir)
+1332-            copied_logs.append(copied)
+1333-    if copied_logs:
+1334-        files["hls_logs"] = copied_logs
+1335-
+1336-    # Runtime hardware handoff/status. These are presence checks only.
+1337-    bitstream = _first_existing(
+1338-        root,
+1339-        [
+1340:            "vivado_bridge/bitstream/*.bit",
+1341-            "vivado_bridge/project/**/*.bit",
+1342-            "**/*.bit",
+1343-        ],
+1344-    )
+1345-    hwh = _first_existing(
+1346-        root,
+1347-        [
+1348:            "vivado_bridge/bitstream/*.hwh",
+1349-            "vivado_bridge/project/**/*.hwh",
+1350-            "**/*.hwh",
+1351-        ],
+1352-    )
+1353-    xsa = _first_existing(
+1354-        root,
+1355-        [
+1356:            "vivado_bridge/bitstream/*.xsa",
+1357-            "vivado_bridge/project/**/*.xsa",
+1358-            "**/*.xsa",
+1359-        ],
+1360-    )
+1361-
+1362-    hardware = {
+1363-        "bitstream": _artifact_status(bitstream),
+1364-        "hwh": _artifact_status(hwh),
+1365-        "xsa": _artifact_status(xsa),
+1366-        "deployable_overlay_present": bool(bitstream is not None and (hwh is not None or xsa is not None)),
+1367-    }
+1368-
+1369-    for name, src in {"bitstream": bitstream, "hwh": hwh, "xsa": xsa}.items():
+1370-        if src is None:
+1371-            continue
+1372-        copied = _copy_if_exists(src, package_dir / "hardware" / src.name)
+1373-        if copied is not None:
+1374-            copied["package_path"] = _safe_rel(Path(copied["package_path"]), package_dir)
+1375-            files[name] = copied
+1376-
+1377-    weight_payload = _emit_runtime_weight_payload(root, package_dir, weights_mode=weights_mode)
+1378-    files.update(weight_payload["files"])
+1379-
+1380-    runtime_sequence_payload = dict(runtime_sequence or {})
+1381-    if runtime_sequence_payload:
+1382-        run_sequence_path = package_dir / "run_sequence.json"
+1383-        run_sequence_path.write_text(json.dumps(runtime_sequence_payload, indent=2, sort_keys=True), encoding="utf-8")
+1384-        files["runtime_sequence"] = {
+1385-            "path": "runtime_package/run_sequence.json",
+1386-            "package_path": "run_sequence.json",
+1387-            "present": True,
+1388-        }
+1389-
+1390-    runtime_buffer_plans = _emit_runtime_buffer_plans(
+1391-        root,
+1392-        package_dir,
+1393-        runtime_sequence=runtime_sequence_payload,
+1394-        runtime_weights=weight_payload["summary"],
+1395-        pipeline_mode=pipeline_mode,
+1396-    )
+1397-    files.update(runtime_buffer_plans["files"])
+1398-
+1399-    payload: dict[str, Any] = {
+1400-        "schema_version": 1,
+1401-        "package_kind": "fpgai_runtime_package",
+1402-        "status": "created",
+1403-        "package_dir": package_dir.as_posix(),
+1404-        "source_out_dir": root.as_posix(),
+1405-        "board": board,
+1406-        "pipeline_mode": pipeline_mode,
+1407-        "top_name": top_name,
+1408-        "hls_artifacts": dict(hls_artifacts or {}),
+1409-        "build_stages": {str(k): bool(v) for k, v in dict(build_stages or {}).items()},
+1410-        "runtime_sequence": runtime_sequence_payload,
+1411-        "runtime_buffer_plan": runtime_buffer_plans["buffer_plan"],
+1412-        "runtime_execution_plan": runtime_buffer_plans["runtime_execution_plan"],
+1413-        "hardware": hardware,
+1414-        "runtime_weights": weight_payload["summary"],
+1415-        "runtime_io": _runtime_io_movement_summary(communication_plan),
+1416-        "runtime_activation_storage": _runtime_activation_storage_summary(memory_plan),
+1417-        "runtime_gradient_export": {
+1418-            "capture_supported_by_api": True,
+1419-            "captured_gradients_present": ("gradients_after_bin" in files or "gradients_export_bin" in files),
+1420-            "reference_gradients_present": ("grads_ref_bin" in files or "gradients_after_ref_bin" in files),
+1421-            "capture_filename": "gradients_after.bin",
+1422-            "reference_filename": "grads_ref.bin",
+1423-        },
+1424-        "runtime_optimizer_state": {
+1425-            "capture_supported_by_api": True,
+1426-            "captured_state_present": "optimizer_state_after_bin" in files,
+1427-            "reference_state_present": "optimizer_state_after_ref_bin" in files,
+1428-            "capture_filename": "optimizer_state_after.bin",
+1429-            "reference_filename": "optimizer_state_after_ref.bin",
+1430-        },
+1431-        "files": files,
+1432-        "notes": [
+1433-            "Runtime package records and copies existing artifacts only.",
+1434-            "It does not run Vivado, deploy to hardware, or infer missing bitstream/XSA/HWH files.",
+1435-        ],
+1436-    }
+--
+1483-    manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+1484-
+1485-    readme = package_dir / "README_RUNTIME.md"
+1486-    readme.write_text(
+1487-        "\n".join(
+1488-            [
+1489-                "# FPGAI Runtime Package",
+1490-                "",
+1491-                "This package contains runtime-facing artifacts copied from an FPGAI compile output.",
+1492-                "",
+1493-                f"- board: `{board}`",
+1494-                f"- pipeline_mode: `{pipeline_mode}`",
+1495-                f"- top_name: `{top_name}`",
+1496-                f"- bitstream present: `{hardware['bitstream']['present']}`",
+1497-                f"- hwh present: `{hardware['hwh']['present']}`",
+1498-                f"- xsa present: `{hardware['xsa']['present']}`",
+1499-                f"- deployable overlay present: `{hardware['deployable_overlay_present']}`",
+1500-                f"- runtime weight payload required: `{weight_payload['summary']['required']}`",
+1501-                f"- runtime weight payload present: `{weight_payload['summary']['present']}`",
+1502-                f"- gradient export capture API: `{payload['runtime_gradient_export']['capture_supported_by_api']}`",
+1503-                f"- gradient export captured file present: `{payload['runtime_gradient_export']['captured_gradients_present']}`",
+1504-                f"- optimizer-state capture API: `{payload['runtime_optimizer_state']['capture_supported_by_api']}`",
+1505-                f"- optimizer-state captured file present: `{payload['runtime_optimizer_state']['captured_state_present']}`",
+1506-                f"- selected build stages: `{json.dumps(payload['build_stages'], sort_keys=True)}`",
+1507-                f"- runtime sequence: `{json.dumps(runtime_sequence_payload.get('sequence', []), sort_keys=True)}`",
+1508-                f"- runtime buffers: `{len(runtime_buffer_plans['buffer_plan'].get('buffers', []))}`",
+1509-                "",
+1510-                "The package is truthful: missing hardware handoff files are recorded as missing.",
+1511-                "Use the Vivado bridge flow to generate bitstream/XSA artifacts before board deployment.",
+1512-                "",
+1513-            ]
+1514-        ),
+1515-        encoding="utf-8",
+1516-    )
+1517-
+1518-    return {
+1519-        "path": "runtime_package/package_manifest.json",
+1520-        "package_dir": "runtime_package",
+1521-        "status": payload["status"],
+1522-        "deployable_overlay_present": hardware["deployable_overlay_present"],
+1523:        "bitstream_present": hardware["bitstream"]["present"],
+1524:        "hwh_present": hardware["hwh"]["present"],
+1525:        "xsa_present": hardware["xsa"]["present"],
+1526-        "runtime_weight_payload_required": weight_payload["summary"]["required"],
+1527-        "runtime_weight_payload_present": weight_payload["summary"]["present"],
+1528-        "runtime_weight_total_words": weight_payload["summary"]["total_words"],
+1529-        "file_count": len(files),
+1530-    }
+1531-
+1532-
+1533-def main(argv: list[str] | None = None) -> int:
+1534-    parser = argparse.ArgumentParser(description="Create an FPGAI runtime package from a compile output directory.")
+1535-    parser.add_argument("out_dir")
+1536-    parser.add_argument("--board")
+1537-    parser.add_argument("--pipeline-mode")
+1538-    parser.add_argument("--top-name")
+1539-    ns = parser.parse_args(argv)
+1540-
+1541-    result = emit_runtime_package(
+1542-        ns.out_dir,
+1543-        board=ns.board,
+1544-        pipeline_mode=ns.pipeline_mode,
+1545-        top_name=ns.top_name,
+1546-    )
+1547-    print(json.dumps(result, indent=2, sort_keys=True))
+1548-    return 0
+1549-
+1550-
+1551-if __name__ == "__main__":
+1552-    raise SystemExit(main())
+
+===== compiler placeholder report generation =====
+fpgai/engine/compiler.py-27-from fpgai.analysis.performance_estimator import estimate_performance
+fpgai/engine/compiler.py-28-try:
+fpgai/engine/compiler.py-29-    from fpgai.analysis.quantization_report import run_quantization_report
+fpgai/engine/compiler.py-30-except ModuleNotFoundError as exc:  # pragma: no cover - exercised in lightweight test envs
+fpgai/engine/compiler.py-31-    _QUANTIZATION_REPORT_IMPORT_ERROR = exc
+fpgai/engine/compiler.py-32-
+fpgai/engine/compiler.py-33-    def run_quantization_report(*args, **kwargs):
+fpgai/engine/compiler.py-34-        raise _QUANTIZATION_REPORT_IMPORT_ERROR
+fpgai/engine/compiler.py-35-try:
+fpgai/engine/compiler.py-36-    from fpgai.analysis.precision_sweep import run_precision_sweep
+fpgai/engine/compiler.py-37-except ModuleNotFoundError as exc:  # pragma: no cover
+fpgai/engine/compiler.py-38-    _PRECISION_SWEEP_IMPORT_ERROR = exc
+fpgai/engine/compiler.py-39-
+fpgai/engine/compiler.py-40-    def run_precision_sweep(*args, **kwargs):
+fpgai/engine/compiler.py-41-        raise _PRECISION_SWEEP_IMPORT_ERROR
+fpgai/engine/compiler.py-42-try:
+fpgai/engine/compiler.py-43-    from fpgai.analysis.design_space_report import run_design_space_report
+fpgai/engine/compiler.py-44-except ModuleNotFoundError as exc:  # pragma: no cover
+fpgai/engine/compiler.py-45-    _DESIGN_SPACE_IMPORT_ERROR = exc
+fpgai/engine/compiler.py-46-
+fpgai/engine/compiler.py-47-    def run_design_space_report(*args, **kwargs):
+fpgai/engine/compiler.py-48-        raise _DESIGN_SPACE_IMPORT_ERROR
+fpgai/engine/compiler.py-49-from fpgai.analysis.post_synthesis import run_post_synthesis_analysis
+fpgai/engine/compiler.py-50-from fpgai.analysis.training_resource_estimate import run_training_resource_estimate
+fpgai/engine/compiler.py-51-from fpgai.benchmark.training_reference import run_training_reference_step
+fpgai/engine/compiler.py-52-from fpgai.benchmark.training_compare import compare_training_artifacts
+fpgai/engine/compiler.py-53-from fpgai.util.fs import ensure_clean_dir, write_text
+fpgai/engine/compiler.py-54-from fpgai.numerics.precision_policy import (
+fpgai/engine/compiler.py-55-    build_precision_layout,
+fpgai/engine/compiler.py-56-    precision_layout_markdown,
+fpgai/engine/compiler.py-57-)
+fpgai/engine/compiler.py-58-from fpgai.analysis.hls_schedule_report import write_hls_schedule_summary
+fpgai/engine/compiler.py-59-from fpgai.analysis.hls_ii_comparison import write_requested_achieved_ii_summary
+fpgai/engine/compiler.py-60-from fpgai.analysis.hls_artifact_metadata import emit_hls_artifact_metadata
+fpgai/engine/compiler.py-61-from fpgai.analysis.hls_calibration_runner import run_hls_calibration
+fpgai/engine/compiler.py-62-from fpgai.util.binio import write_f32_bin
+fpgai/engine/compiler.py-63-from fpgai.runtime.package import emit_runtime_package
+fpgai/engine/compiler.py-64-from fpgai.validation.numeric import emit_numeric_validation_report
+fpgai/engine/compiler.py-65-from fpgai.paper.verification import emit_paper_verification_artifacts
+fpgai/engine/compiler.py-66-from fpgai.backends.vivado.boards import get_board
+fpgai/engine/compiler.py:67:from fpgai.backends.vivado.vivado_bridge import emit_vivado_project_handoff, emit_vivado_truth_reports
+fpgai/engine/compiler.py-68-from fpgai.reporting.hardware_feasibility import emit_board_fit_report
+fpgai/engine/compiler.py-69-from fpgai.reporting.hls_explanation import emit_generated_hls_explanation_reports
+fpgai/engine/compiler.py-70-from fpgai.reporting.hls_truth import emit_hls_truth_reports
+fpgai/engine/compiler.py-71-from fpgai.reporting.precision_effect import emit_precision_effect_reports
+fpgai/engine/compiler.py-72-from fpgai.reporting.parallel_pipeline_effect import emit_parallel_pipeline_effect_reports
+fpgai/engine/compiler.py-73-from fpgai.reporting.data_movement import emit_data_movement_reports, emit_movement_contract_validation, movement_contract_validation_summary
+fpgai/engine/compiler.py-74-
+fpgai/engine/compiler.py-75-from fpgai.backends.hls.emit.types_h import emit_types_h
+fpgai/engine/compiler.py-76-from fpgai.backends.hls.emit.top_cpp import emit_top_cpp
+fpgai/engine/compiler.py-77-from fpgai.backends.hls.emit.top_train_cpp import emit_top_train_cpp
+fpgai/engine/compiler.py-78-_emit_top_train_cpp = emit_top_train_cpp
+fpgai/engine/compiler.py-79-from fpgai.backends.hls.emit.layers_dense import emit_dense_h, emit_dense_cpp
+fpgai/engine/compiler.py-80-from fpgai.backends.hls.emit.layers_conv import emit_conv_h, emit_conv_cpp
+fpgai/engine/compiler.py-81-from fpgai.backends.hls.emit.layers_pool import emit_pool_h, emit_pool_cpp
+fpgai/engine/compiler.py-82-from fpgai.backends.hls.emit.layers_activations import emit_activations_h, emit_activations_cpp
+fpgai/engine/compiler.py-83-from fpgai.backends.hls.emit.layers_batchnorm import emit_batchnorm_h, emit_batchnorm_cpp
+fpgai/engine/compiler.py-84-from fpgai.backends.hls.emit.params_h import emit_params_h, _conv_sizes, _dense_sizes
+fpgai/engine/compiler.py-85-from fpgai.backends.hls.emit.params_cpp import emit_params_cpp
+fpgai/engine/compiler.py-86-from fpgai.backends.hls.emit.weights_runtime_h import emit_weights_runtime_h
+fpgai/engine/compiler.py-87-from fpgai.backends.hls.emit.weights_runtime_cpp import emit_weights_runtime_cpp
+fpgai/engine/compiler.py-88-from fpgai.backends.hls.emit.csim_tcl import emit_csim_tcl
+fpgai/engine/compiler.py-89-from fpgai.backends.hls.emit.csim_train_tcl import emit_csim_train_tcl
+fpgai/engine/compiler.py-90-from fpgai.backends.hls.testbench import emit_tb_cpp
+fpgai/engine/compiler.py-91-from fpgai.backends.hls.testbench_train import emit_tb_train_cpp
+fpgai/engine/compiler.py-92-
+fpgai/engine/compiler.py-93-
+fpgai/engine/compiler.py-94-_cfg_get = get_path
+fpgai/engine/compiler.py-95-
+fpgai/engine/compiler.py-96-from fpgai.engine.build_stages import (
+fpgai/engine/compiler.py-97-    BUILD_STAGE_KEYS as _BUILD_STAGE_KEYS,
+fpgai/engine/compiler.py-98-    build_stage_summary as _build_stage_summary,
+fpgai/engine/compiler.py-99-    cfg_has_path as _cfg_has_path,
+fpgai/engine/compiler.py-100-    resolve_build_stages as _resolve_build_stages,
+fpgai/engine/compiler.py-101-)
+fpgai/engine/compiler.py-102-
+fpgai/engine/compiler.py-103-
+fpgai/engine/compiler.py-104-def _is_runtime_weight_mode(weights_mode: str) -> bool:
+fpgai/engine/compiler.py-105-    return str(weights_mode).strip().lower() in {
+fpgai/engine/compiler.py-106-        "stream",
+fpgai/engine/compiler.py-107-        "streamed",
+fpgai/engine/compiler.py-108-        "ddr",
+fpgai/engine/compiler.py-109-        "dma_ddr",
+fpgai/engine/compiler.py-110-        "uram",
+fpgai/engine/compiler.py-111-        "bram_import_full",
+fpgai/engine/compiler.py-112-        "bram_import_export_full",
+fpgai/engine/compiler.py-113-        "uram_import_full",
+fpgai/engine/compiler.py-114-        "uram_import_export_full",
+fpgai/engine/compiler.py-115-        "ddr_tiled",
+fpgai/engine/compiler.py-116-        "ddr_tiled_mutable",
+fpgai/engine/compiler.py-117-    }
+fpgai/engine/compiler.py-118-
+fpgai/engine/compiler.py-119-
+fpgai/engine/compiler.py-120-def _runtime_weight_word_count(graph) -> int:
+fpgai/engine/compiler.py-121-    total = 0
+fpgai/engine/compiler.py-122-    for op in graph.ops:
+fpgai/engine/compiler.py-123-        if op.op_type == "Conv":
+fpgai/engine/compiler.py-124-            weight_count, bias_count = _conv_sizes(graph, op)
+fpgai/engine/compiler.py-125-            total += int(weight_count) + int(bias_count)
+fpgai/engine/compiler.py-126-        elif op.op_type == "Dense":
+fpgai/engine/compiler.py-127-            weight_count, bias_count = _dense_sizes(graph, op)
+fpgai/engine/compiler.py-128-            total += int(weight_count) + int(bias_count)
+fpgai/engine/compiler.py-129-    return int(total)
+fpgai/engine/compiler.py-130-
+fpgai/engine/compiler.py-131-
+fpgai/engine/compiler.py-132-
+fpgai/engine/compiler.py-133-_RUNTIME_COMMANDS = {
+fpgai/engine/compiler.py-134-    "import_weights",
+fpgai/engine/compiler.py-135-    "run_inference",
+fpgai/engine/compiler.py-136-    "run_training",
+fpgai/engine/compiler.py-137-    "export_weights",
+fpgai/engine/compiler.py-138-    "export_gradients",
+fpgai/engine/compiler.py-139-    "reset_accumulators",
+fpgai/engine/compiler.py-140-    "accumulate_gradients",
+fpgai/engine/compiler.py-141-    "apply_accumulated_gradients",
+fpgai/engine/compiler.py-142-}
+fpgai/engine/compiler.py-143-
+fpgai/engine/compiler.py-144-_CODEGEN_READABILITY = {"compact", "normal", "high", "debug"}
+fpgai/engine/compiler.py-145-
+fpgai/engine/compiler.py-146-
+fpgai/engine/compiler.py-147-def _movement_cfg(raw: Dict[str, Any], tensor: str, direction: str) -> Dict[str, str]:
+--
+fpgai/engine/compiler.py-1104-            hls_schedule_summary = None
+fpgai/engine/compiler.py-1105-            hls_artifact_metadata = None
+fpgai/engine/compiler.py-1106-            hls_ii_comparison = None
+fpgai/engine/compiler.py-1107-        runtime_package = emit_runtime_package(
+fpgai/engine/compiler.py-1108-            out_dir,
+fpgai/engine/compiler.py-1109-            board=str(_cfg_get(raw, "targets.board", _cfg_get(raw, "project.board", "")) or ""),
+fpgai/engine/compiler.py-1110-            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
+fpgai/engine/compiler.py-1111-            top_name=top_name,
+fpgai/engine/compiler.py-1112-            weights_mode=memory_plan.notes.get("memory_semantics_mode", weights_mode),
+fpgai/engine/compiler.py-1113-            communication_plan=communication_plan,
+fpgai/engine/compiler.py-1114-            memory_plan=memory_plan,
+fpgai/engine/compiler.py-1115-            build_stages=build_stages,
+fpgai/engine/compiler.py-1116-            runtime_sequence=runtime_sequence,
+fpgai/engine/compiler.py-1117-            hls_artifacts=self._hls_artifacts_manifest_payload(
+fpgai/engine/compiler.py-1118-                out_dir=out_dir,
+fpgai/engine/compiler.py-1119-                hls_run=hls_run,
+fpgai/engine/compiler.py-1120-                hls_schedule_summary=hls_schedule_summary,
+fpgai/engine/compiler.py-1121-                hls_artifact_metadata=hls_artifact_metadata,
+fpgai/engine/compiler.py-1122-                hls_ii_comparison=hls_ii_comparison,
+fpgai/engine/compiler.py-1123-            ),
+fpgai/engine/compiler.py-1124-        ) if enable_runtime_package else None
+fpgai/engine/compiler.py-1125-        vivado_bd_contract_artifacts = _write_vivado_bd_contract_reports(
+fpgai/engine/compiler.py-1126-            out_dir,
+fpgai/engine/compiler.py-1127-            raw,
+fpgai/engine/compiler.py-1128-            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
+fpgai/engine/compiler.py-1129-            build_stages=build_stages,
+fpgai/engine/compiler.py-1130-            memory_plan=memory_plan,
+fpgai/engine/compiler.py-1131-            communication_plan=communication_plan,
+fpgai/engine/compiler.py-1132-            hls_dir=hls_dir,
+fpgai/engine/compiler.py-1133-        ) if enable_reports else None
+fpgai/engine/compiler.py-1134-        vivado_handoff_artifacts = emit_vivado_project_handoff(
+fpgai/engine/compiler.py-1135-            out_dir,
+fpgai/engine/compiler.py-1136-            raw_config=raw,
+fpgai/engine/compiler.py-1137-            build_stages=build_stages,
+fpgai/engine/compiler.py-1138-            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
+fpgai/engine/compiler.py-1139-            top_name=top_name,
+fpgai/engine/compiler.py-1140-            hls_dir=hls_dir,
+fpgai/engine/compiler.py-1141-            runtime_sequence=runtime_sequence,
+fpgai/engine/compiler.py-1142-            source_ports=_scan_hls_top_ports(hls_dir),
+fpgai/engine/compiler.py-1143-        ) if enable_reports else None
+fpgai/engine/compiler.py:1144:        vivado_truth_artifacts = emit_vivado_truth_reports(
+fpgai/engine/compiler.py-1145-            out_dir,
+fpgai/engine/compiler.py-1146-            raw_config=raw,
+fpgai/engine/compiler.py-1147-            build_stages=build_stages,
+fpgai/engine/compiler.py-1148-            vivado_handoff_artifacts=vivado_handoff_artifacts,
+fpgai/engine/compiler.py-1149-            board_fit_artifacts=(prediction_artifacts.get("board_fit") if isinstance(prediction_artifacts, dict) else None),
+fpgai/engine/compiler.py-1150-        ) if enable_reports else None
+fpgai/engine/compiler.py-1151-        hls_truth_artifacts = emit_hls_truth_reports(
+fpgai/engine/compiler.py-1152-            out_dir=out_dir,
+fpgai/engine/compiler.py-1153-            hls_dir=hls_dir,
+fpgai/engine/compiler.py-1154-            build_stages=build_stages,
+fpgai/engine/compiler.py-1155-            hls_run=hls_run,
+fpgai/engine/compiler.py-1156-            design_result=design_result,
+fpgai/engine/compiler.py-1157-            clock_mhz=float(getattr(compile_plan, "clock_mhz", _cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0))),
+fpgai/engine/compiler.py-1158-        ) if enable_reports else None
+fpgai/engine/compiler.py-1159-        precision_layout_artifacts_for_effect = self._emit_precision_layout_reports(
+fpgai/engine/compiler.py-1160-            out_dir=out_dir,
+fpgai/engine/compiler.py-1161-            graph=g,
+fpgai/engine/compiler.py-1162-            descriptors=descriptors,
+fpgai/engine/compiler.py-1163-            compile_plan=compile_plan,
+fpgai/engine/compiler.py-1164-        ) if enable_reports else None
+fpgai/engine/compiler.py-1165-        precision_effect_artifacts = emit_precision_effect_reports(
+fpgai/engine/compiler.py-1166-            out_dir=out_dir,
+fpgai/engine/compiler.py-1167-            raw_config=raw,
+fpgai/engine/compiler.py-1168-            hls_dir=hls_dir,
+fpgai/engine/compiler.py-1169-            precision_layout_artifacts=precision_layout_artifacts_for_effect,
+fpgai/engine/compiler.py-1170-            quant_result=quant_result,
+fpgai/engine/compiler.py-1171-            sweep_result=sweep_result,
+fpgai/engine/compiler.py-1172-            hls_truth_artifacts=hls_truth_artifacts,
+fpgai/engine/compiler.py-1173-        ) if enable_reports else None
+fpgai/engine/compiler.py-1174-        parallel_pipeline_effect_artifacts = emit_parallel_pipeline_effect_reports(
+fpgai/engine/compiler.py-1175-            out_dir=out_dir,
+fpgai/engine/compiler.py-1176-            raw_config=raw,
+fpgai/engine/compiler.py-1177-            hls_dir=hls_dir,
+fpgai/engine/compiler.py-1178-            hls_truth_artifacts=hls_truth_artifacts,
+fpgai/engine/compiler.py-1179-        ) if enable_reports else None
+fpgai/engine/compiler.py-1180-
+fpgai/engine/compiler.py-1181-        numeric_validation_artifacts = emit_numeric_validation_report(
+fpgai/engine/compiler.py-1182-            out_dir,
+fpgai/engine/compiler.py-1183-            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
+fpgai/engine/compiler.py-1184-            source_generated=(hls_dir is not None),
+fpgai/engine/compiler.py-1185-            hls_ran=(hls_run is not None),
+fpgai/engine/compiler.py-1186-            hls_ok=(hls_run.ok if hls_run is not None else None),
+fpgai/engine/compiler.py-1187-            raw_config=raw,
+fpgai/engine/compiler.py-1188-            runtime_sequence=runtime_sequence,
+fpgai/engine/compiler.py-1189-        ) if enable_reports else None
+fpgai/engine/compiler.py-1190-        generated_hls_explanation_artifacts = emit_generated_hls_explanation_reports(
+fpgai/engine/compiler.py-1191-            out_dir,
+fpgai/engine/compiler.py-1192-            raw_config=raw,
+fpgai/engine/compiler.py-1193-            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
+fpgai/engine/compiler.py-1194-            top_name=top_name,
+fpgai/engine/compiler.py-1195-            hls_dir=hls_dir,
+fpgai/engine/compiler.py-1196-            build_stages=build_stages,
+fpgai/engine/compiler.py-1197-            runtime_sequence=runtime_sequence,
+fpgai/engine/compiler.py-1198-            memory_plan=memory_plan,
+fpgai/engine/compiler.py-1199-            communication_plan=communication_plan,
+fpgai/engine/compiler.py-1200-            numeric_validation_artifacts=numeric_validation_artifacts,
+fpgai/engine/compiler.py-1201-        ) if enable_reports else None
+fpgai/engine/compiler.py-1202-        movement_contract_validation_artifacts = emit_movement_contract_validation(
+fpgai/engine/compiler.py-1203-            out_dir,
+fpgai/engine/compiler.py-1204-            data_movement_artifacts=data_movement_artifacts,
+fpgai/engine/compiler.py-1205-        ) if enable_reports else None
+fpgai/engine/compiler.py-1206-        if data_movement_artifacts is not None and movement_contract_validation_artifacts is not None:
+fpgai/engine/compiler.py-1207-            data_movement_artifacts = dict(data_movement_artifacts)
+fpgai/engine/compiler.py-1208-            data_movement_artifacts.update(movement_contract_validation_artifacts)
+fpgai/engine/compiler.py-1209-
+fpgai/engine/compiler.py-1210-        paper_verification_artifacts = emit_paper_verification_artifacts(
+fpgai/engine/compiler.py-1211-            out_dir,
+fpgai/engine/compiler.py-1212-            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
+fpgai/engine/compiler.py-1213-            source_generated=(hls_dir is not None),
+fpgai/engine/compiler.py-1214-            numeric_validation_json=(
+fpgai/engine/compiler.py-1215-                numeric_validation_artifacts.get("numeric_validation_json")
+fpgai/engine/compiler.py-1216-                if numeric_validation_artifacts is not None
+fpgai/engine/compiler.py-1217-                else None
+fpgai/engine/compiler.py-1218-            ),
+fpgai/engine/compiler.py-1219-            hls_ran=(hls_run is not None),
+fpgai/engine/compiler.py-1220-            hls_ok=(hls_run.ok if hls_run is not None else None),
+fpgai/engine/compiler.py-1221-            build_stages=build_stages,
+fpgai/engine/compiler.py-1222-        ) if enable_reports else None
+fpgai/engine/compiler.py-1223-        feature_truth_artifacts = _write_feature_truth_reports(
+fpgai/engine/compiler.py-1224-            out_dir,
+--
+fpgai/engine/compiler.py-1559-            hls_schedule_summary = None
+fpgai/engine/compiler.py-1560-            hls_artifact_metadata = None
+fpgai/engine/compiler.py-1561-            hls_ii_comparison = None
+fpgai/engine/compiler.py-1562-        runtime_package = emit_runtime_package(
+fpgai/engine/compiler.py-1563-            out_dir,
+fpgai/engine/compiler.py-1564-            board=str(_cfg_get(raw, "targets.board", _cfg_get(raw, "project.board", "")) or ""),
+fpgai/engine/compiler.py-1565-            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
+fpgai/engine/compiler.py-1566-            top_name=top_name,
+fpgai/engine/compiler.py-1567-            weights_mode=memory_plan.notes.get("memory_semantics_mode", weights_mode),
+fpgai/engine/compiler.py-1568-            communication_plan=communication_plan,
+fpgai/engine/compiler.py-1569-            memory_plan=memory_plan,
+fpgai/engine/compiler.py-1570-            build_stages=build_stages,
+fpgai/engine/compiler.py-1571-            runtime_sequence=runtime_sequence,
+fpgai/engine/compiler.py-1572-            hls_artifacts=self._hls_artifacts_manifest_payload(
+fpgai/engine/compiler.py-1573-                out_dir=out_dir,
+fpgai/engine/compiler.py-1574-                hls_run=hls_run,
+fpgai/engine/compiler.py-1575-                hls_schedule_summary=hls_schedule_summary,
+fpgai/engine/compiler.py-1576-                hls_artifact_metadata=hls_artifact_metadata,
+fpgai/engine/compiler.py-1577-                hls_ii_comparison=hls_ii_comparison,
+fpgai/engine/compiler.py-1578-            ),
+fpgai/engine/compiler.py-1579-        ) if enable_runtime_package else None
+fpgai/engine/compiler.py-1580-        vivado_bd_contract_artifacts = _write_vivado_bd_contract_reports(
+fpgai/engine/compiler.py-1581-            out_dir,
+fpgai/engine/compiler.py-1582-            raw,
+fpgai/engine/compiler.py-1583-            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
+fpgai/engine/compiler.py-1584-            build_stages=build_stages,
+fpgai/engine/compiler.py-1585-            memory_plan=memory_plan,
+fpgai/engine/compiler.py-1586-            communication_plan=communication_plan,
+fpgai/engine/compiler.py-1587-            hls_dir=hls_dir,
+fpgai/engine/compiler.py-1588-        ) if enable_reports else None
+fpgai/engine/compiler.py-1589-        vivado_handoff_artifacts = emit_vivado_project_handoff(
+fpgai/engine/compiler.py-1590-            out_dir,
+fpgai/engine/compiler.py-1591-            raw_config=raw,
+fpgai/engine/compiler.py-1592-            build_stages=build_stages,
+fpgai/engine/compiler.py-1593-            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
+fpgai/engine/compiler.py-1594-            top_name=top_name,
+fpgai/engine/compiler.py-1595-            hls_dir=hls_dir,
+fpgai/engine/compiler.py-1596-            runtime_sequence=runtime_sequence,
+fpgai/engine/compiler.py-1597-            source_ports=_scan_hls_top_ports(hls_dir),
+fpgai/engine/compiler.py-1598-        ) if enable_reports else None
+fpgai/engine/compiler.py:1599:        vivado_truth_artifacts = emit_vivado_truth_reports(
+fpgai/engine/compiler.py-1600-            out_dir,
+fpgai/engine/compiler.py-1601-            raw_config=raw,
+fpgai/engine/compiler.py-1602-            build_stages=build_stages,
+fpgai/engine/compiler.py-1603-            vivado_handoff_artifacts=vivado_handoff_artifacts,
+fpgai/engine/compiler.py-1604-            board_fit_artifacts=(prediction_artifacts.get("board_fit") if isinstance(prediction_artifacts, dict) else None),
+fpgai/engine/compiler.py-1605-        ) if enable_reports else None
+fpgai/engine/compiler.py-1606-        hls_truth_artifacts = emit_hls_truth_reports(
+fpgai/engine/compiler.py-1607-            out_dir=out_dir,
+fpgai/engine/compiler.py-1608-            hls_dir=hls_dir,
+fpgai/engine/compiler.py-1609-            build_stages=build_stages,
+fpgai/engine/compiler.py-1610-            hls_run=hls_run,
+fpgai/engine/compiler.py-1611-            design_result=None,
+fpgai/engine/compiler.py-1612-            clock_mhz=float(getattr(compile_plan, "clock_mhz", _cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0))),
+fpgai/engine/compiler.py-1613-        ) if enable_reports else None
+fpgai/engine/compiler.py-1614-
+fpgai/engine/compiler.py-1615-        _gradient_export_cfg = _cfg_get(raw, "data_movement.gradients.export", {}) or {}
+fpgai/engine/compiler.py-1616-        _gradient_export_requested = isinstance(_gradient_export_cfg, dict) and str(_gradient_export_cfg.get("interface", "")).lower().replace("-", "_") == "m_axi" and str(_gradient_export_cfg.get("policy", "")).lower().replace("-", "_") in {"full", "tiled"}
+fpgai/engine/compiler.py-1617-
+fpgai/engine/compiler.py-1618-        def _first_existing_gradient_file(*candidates: Path) -> Path | None:
+fpgai/engine/compiler.py-1619-            for candidate in candidates:
+fpgai/engine/compiler.py-1620-                try:
+fpgai/engine/compiler.py-1621-                    if candidate.exists():
+fpgai/engine/compiler.py-1622-                        return candidate
+fpgai/engine/compiler.py-1623-                except OSError:
+fpgai/engine/compiler.py-1624-                    continue
+fpgai/engine/compiler.py-1625-            return None
+fpgai/engine/compiler.py-1626-
+fpgai/engine/compiler.py-1627-        _preserved_validation_dir = out_dir / ".fpgai_preserved_validation"
+fpgai/engine/compiler.py-1628-        _gradient_ref_file = _first_existing_gradient_file(
+fpgai/engine/compiler.py-1629-            _preserved_validation_dir / "training_reference" / "grads_ref.bin",
+fpgai/engine/compiler.py-1630-            _preserved_validation_dir / "training_reference" / "gradients_after_ref.bin",
+fpgai/engine/compiler.py-1631-            _preserved_validation_dir / "gradients_after_ref.bin",
+fpgai/engine/compiler.py-1632-            _preserved_validation_dir / "reference" / "gradients_after_ref.bin",
+fpgai/engine/compiler.py-1633-            _preserved_validation_dir / "runtime_package" / "reference" / "grads_ref.bin",
+fpgai/engine/compiler.py-1634-            _preserved_validation_dir / "runtime_package" / "reference" / "gradients_after_ref.bin",
+fpgai/engine/compiler.py-1635-            out_dir / "training_reference" / "grads_ref.bin",
+fpgai/engine/compiler.py-1636-            out_dir / "training_reference" / "gradients_after_ref.bin",
+fpgai/engine/compiler.py-1637-            out_dir / "gradients_after_ref.bin",
+fpgai/engine/compiler.py-1638-            out_dir / "reference" / "gradients_after_ref.bin",
+fpgai/engine/compiler.py-1639-            out_dir / "runtime_package" / "reference" / "grads_ref.bin",
+fpgai/engine/compiler.py-1640-            out_dir / "runtime_package" / "reference" / "gradients_after_ref.bin",
+fpgai/engine/compiler.py-1641-        )
+fpgai/engine/compiler.py-1642-        _gradient_got_file = _first_existing_gradient_file(
+fpgai/engine/compiler.py-1643-            _preserved_validation_dir / "gradients_after.bin",
+fpgai/engine/compiler.py-1644-            _preserved_validation_dir / "gradients_export.bin",
+fpgai/engine/compiler.py-1645-            _preserved_validation_dir / "gradients_mem_after.bin",
+fpgai/engine/compiler.py-1646-            _preserved_validation_dir / "hls" / "gradients_after.bin",
+fpgai/engine/compiler.py-1647-            _preserved_validation_dir / "runtime_package" / "outputs" / "gradients_after.bin",
+fpgai/engine/compiler.py-1648-            _preserved_validation_dir / "runtime_package" / "outputs" / "gradients_export.bin",
+fpgai/engine/compiler.py-1649-            out_dir / "gradients_after.bin",
+fpgai/engine/compiler.py-1650-            out_dir / "gradients_export.bin",
+fpgai/engine/compiler.py-1651-            out_dir / "gradients_mem_after.bin",
+fpgai/engine/compiler.py-1652-            out_dir / "hls" / "gradients_after.bin",
+fpgai/engine/compiler.py-1653-            out_dir / "runtime_package" / "outputs" / "gradients_after.bin",
+fpgai/engine/compiler.py-1654-            out_dir / "runtime_package" / "outputs" / "gradients_export.bin",
+fpgai/engine/compiler.py-1655-        )
+fpgai/engine/compiler.py-1656-        _gradient_export_comparisons = {}
+fpgai/engine/compiler.py-1657-        # Only request a dedicated export comparison when both sides exist.
+fpgai/engine/compiler.py-1658-        # A generated training reference alone is not a failed export capture; it
+fpgai/engine/compiler.py-1659-        # simply means the HLS/runtime export mode has not been captured yet.
+fpgai/engine/compiler.py-1660-        if _gradient_ref_file is not None and _gradient_got_file is not None:
+fpgai/engine/compiler.py-1661-            _gradient_export_comparisons["flattened_gradients_export"] = {
+fpgai/engine/compiler.py-1662-                "ref": _gradient_ref_file,
+fpgai/engine/compiler.py-1663-                "got": _gradient_got_file,
+fpgai/engine/compiler.py-1664-            }
+fpgai/engine/compiler.py-1665-
+fpgai/engine/compiler.py-1666-        _gradient_export_artifacts = {
+fpgai/engine/compiler.py-1667-            "requested": bool(_gradient_export_requested),
+fpgai/engine/compiler.py-1668-            "policy": (str(_gradient_export_cfg.get("policy", "none")).lower().replace("-", "_") if isinstance(_gradient_export_cfg, dict) else "none"),
+fpgai/engine/compiler.py-1669-            "status": ("covered_by_training_gradient_compare" if (_gradient_export_requested and training_compare_result is not None) else ("generated_not_captured_by_testbench" if _gradient_export_requested else "not_requested")),
+fpgai/engine/compiler.py-1670-            "export_capture_mode": 7 if _gradient_export_requested else None,
+fpgai/engine/compiler.py-1671-            "note": "Gradient export HLS mode is generated; dedicated gradients_mem capture is compared when gradients_after.bin/gradients_export.bin and a reference gradient file exist." if _gradient_export_requested else "Gradient export was not requested.",
+fpgai/engine/compiler.py-1672-            "comparisons": _gradient_export_comparisons,
+fpgai/engine/compiler.py-1673-            "capture_files": {
+fpgai/engine/compiler.py-1674-                "gradients_ref_bin": str(_gradient_ref_file) if _gradient_ref_file is not None else None,
+fpgai/engine/compiler.py-1675-                "gradients_after_bin": str(_gradient_got_file) if _gradient_got_file is not None else None,
+fpgai/engine/compiler.py-1676-            },
+fpgai/engine/compiler.py-1677-        }
+fpgai/engine/compiler.py-1678-        _optimizer_contract = _resolve_training_optimizer_loss_contract(raw)
+fpgai/engine/compiler.py-1679-        _optimizer_type = str(_optimizer_contract.get("optimizer", {}).get("type", "sgd")).lower().replace("-", "_")
+--
+fpgai/backends/vivado/vivado_bridge.py-922-            try:
+fpgai/backends/vivado/vivado_bridge.py-923-                if candidate.exists() and candidate.is_file():
+fpgai/backends/vivado/vivado_bridge.py-924-                    return candidate
+fpgai/backends/vivado/vivado_bridge.py-925-            except OSError:
+fpgai/backends/vivado/vivado_bridge.py-926-                continue
+fpgai/backends/vivado/vivado_bridge.py-927-    return None
+fpgai/backends/vivado/vivado_bridge.py-928-
+fpgai/backends/vivado/vivado_bridge.py-929-
+fpgai/backends/vivado/vivado_bridge.py-930-def _write_truth_report(path_json: Path, path_md: Path, payload: Dict[str, Any], *, title: str) -> Dict[str, str]:
+fpgai/backends/vivado/vivado_bridge.py-931-    path_json.parent.mkdir(parents=True, exist_ok=True)
+fpgai/backends/vivado/vivado_bridge.py-932-    path_md.parent.mkdir(parents=True, exist_ok=True)
+fpgai/backends/vivado/vivado_bridge.py-933-    path_json.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+fpgai/backends/vivado/vivado_bridge.py-934-    lines = [
+fpgai/backends/vivado/vivado_bridge.py-935-        f"# {title}",
+fpgai/backends/vivado/vivado_bridge.py-936-        "",
+fpgai/backends/vivado/vivado_bridge.py-937-        f"- status: `{payload.get('status')}`",
+fpgai/backends/vivado/vivado_bridge.py-938-        f"- stage: `{payload.get('stage')}`",
+fpgai/backends/vivado/vivado_bridge.py-939-        f"- requested: `{payload.get('requested')}`",
+fpgai/backends/vivado/vivado_bridge.py-940-        f"- claimed_success: `{payload.get('claimed_success')}`",
+fpgai/backends/vivado/vivado_bridge.py-941-    ]
+fpgai/backends/vivado/vivado_bridge.py-942-    reason = payload.get("reason")
+fpgai/backends/vivado/vivado_bridge.py-943-    if reason:
+fpgai/backends/vivado/vivado_bridge.py-944-        lines.append(f"- reason: {reason}")
+fpgai/backends/vivado/vivado_bridge.py-945-    tool = payload.get("vivado_tool")
+fpgai/backends/vivado/vivado_bridge.py-946-    if isinstance(tool, dict):
+fpgai/backends/vivado/vivado_bridge.py-947-        lines.extend([
+fpgai/backends/vivado/vivado_bridge.py-948-            "",
+fpgai/backends/vivado/vivado_bridge.py-949-            "## Vivado tool",
+fpgai/backends/vivado/vivado_bridge.py-950-            f"- executable: `{tool.get('executable')}`",
+fpgai/backends/vivado/vivado_bridge.py-951-            f"- resolved_path: `{tool.get('resolved_path')}`",
+fpgai/backends/vivado/vivado_bridge.py-952-            f"- available: `{tool.get('available')}`",
+fpgai/backends/vivado/vivado_bridge.py-953-        ])
+fpgai/backends/vivado/vivado_bridge.py-954-    artifact = payload.get("artifact")
+fpgai/backends/vivado/vivado_bridge.py-955-    if artifact:
+fpgai/backends/vivado/vivado_bridge.py-956-        lines.extend(["", "## Artifact", f"- `{artifact}`"])
+fpgai/backends/vivado/vivado_bridge.py-957-    lines.extend(["", str(payload.get("truth_boundary", "No success is claimed without real tool/artifact evidence.")), ""])
+fpgai/backends/vivado/vivado_bridge.py-958-    path_md.write_text("\n".join(lines), encoding="utf-8")
+fpgai/backends/vivado/vivado_bridge.py-959-    return {path_json.stem + "_json": str(path_json), path_md.stem + "_md": str(path_md)}
+fpgai/backends/vivado/vivado_bridge.py-960-
+fpgai/backends/vivado/vivado_bridge.py-961-
+fpgai/backends/vivado/vivado_bridge.py:962:def emit_vivado_truth_reports(
+fpgai/backends/vivado/vivado_bridge.py-963-    out_dir: str | Path,
+fpgai/backends/vivado/vivado_bridge.py-964-    *,
+fpgai/backends/vivado/vivado_bridge.py-965-    raw_config: Optional[Dict[str, Any]] = None,
+fpgai/backends/vivado/vivado_bridge.py-966-    build_stages: Optional[Dict[str, Any]] = None,
+fpgai/backends/vivado/vivado_bridge.py-967-    vivado_handoff_artifacts: Optional[Dict[str, str]] = None,
+fpgai/backends/vivado/vivado_bridge.py-968-    board_fit_artifacts: Optional[Dict[str, Any]] = None,
+fpgai/backends/vivado/vivado_bridge.py-969-) -> Dict[str, str]:
+fpgai/backends/vivado/vivado_bridge.py-970-    """Emit Sprint E Vivado execution/implementation/bitstream truth reports.
+fpgai/backends/vivado/vivado_bridge.py-971-
+fpgai/backends/vivado/vivado_bridge.py-972-    This function does not run Vivado. It records whether the requested Vivado
+fpgai/backends/vivado/vivado_bridge.py-973-    verification level has real tool/artifact evidence or must remain unclaimed.
+fpgai/backends/vivado/vivado_bridge.py-974-    """
+fpgai/backends/vivado/vivado_bridge.py-975-    root = Path(out_dir)
+fpgai/backends/vivado/vivado_bridge.py-976-    reports_dir = root / "reports"
+fpgai/backends/vivado/vivado_bridge.py-977-    vivado_dir = root / "vivado"
+fpgai/backends/vivado/vivado_bridge.py-978-    reports_dir.mkdir(parents=True, exist_ok=True)
+fpgai/backends/vivado/vivado_bridge.py-979-    stages = build_stages or {}
+fpgai/backends/vivado/vivado_bridge.py-980-    tool = _vivado_tool_status(raw_config)
+fpgai/backends/vivado/vivado_bridge.py-981-    handoff_present = bool(vivado_handoff_artifacts and vivado_handoff_artifacts.get("vivado_bd_tcl"))
+fpgai/backends/vivado/vivado_bridge.py-982-    board_fit = board_fit_artifacts or {}
+fpgai/backends/vivado/vivado_bridge.py-983-    board_fit_status = str(board_fit.get("status") or "unknown")
+fpgai/backends/vivado/vivado_bridge.py-984-    board_fit_allows_impl = bool(board_fit.get("vivado_implementation_allowed", board_fit.get("vivado_allowed", True)))
+fpgai/backends/vivado/vivado_bridge.py-985-    board_fit_allows_bitstream = bool(board_fit.get("bitstream_allowed", board_fit.get("vivado_allowed", True)))
+fpgai/backends/vivado/vivado_bridge.py-986-    board_fit_json = board_fit.get("json") or board_fit.get("board_fit_json")
+fpgai/backends/vivado/vivado_bridge.py-987-
+fpgai/backends/vivado/vivado_bridge.py-988-    validation_requested = bool(stages.get("vivado_project"))
+fpgai/backends/vivado/vivado_bridge.py-989-    if not validation_requested:
+fpgai/backends/vivado/vivado_bridge.py-990-        validation_status = "not_requested"
+fpgai/backends/vivado/vivado_bridge.py-991-        validation_reason = "build.stages.vivado_project is false."
+fpgai/backends/vivado/vivado_bridge.py-992-    elif not tool["available"]:
+fpgai/backends/vivado/vivado_bridge.py:993:        validation_status = "tool_missing"
+fpgai/backends/vivado/vivado_bridge.py-994-        validation_reason = "Vivado executable was not found; generated Tcl was not executed."
+fpgai/backends/vivado/vivado_bridge.py-995-    else:
+fpgai/backends/vivado/vivado_bridge.py-996-        validation_log = _find_first_existing(vivado_dir, ["reports/*validation*.log", "reports/*validate*.rpt", "project/*.jou"])
+fpgai/backends/vivado/vivado_bridge.py-997-        if validation_log is not None:
+fpgai/backends/vivado/vivado_bridge.py-998-            validation_status = "passed"
+fpgai/backends/vivado/vivado_bridge.py-999-            validation_reason = "Vivado validation artifact was found."
+fpgai/backends/vivado/vivado_bridge.py-1000-        else:
+fpgai/backends/vivado/vivado_bridge.py-1001-            validation_status = "not_run"
+fpgai/backends/vivado/vivado_bridge.py-1002-            validation_reason = "Vivado Tcl was generated, but no Vivado validation log/report was found."
+fpgai/backends/vivado/vivado_bridge.py-1003-    validation_payload = {
+fpgai/backends/vivado/vivado_bridge.py-1004-        "format": "fpgai.vivado_validation_report.v1",
+fpgai/backends/vivado/vivado_bridge.py-1005-        "stage": "vivado_project_validation",
+fpgai/backends/vivado/vivado_bridge.py-1006-        "requested": validation_requested,
+fpgai/backends/vivado/vivado_bridge.py-1007-        "status": validation_status,
+fpgai/backends/vivado/vivado_bridge.py-1008-        "reason": validation_reason,
+fpgai/backends/vivado/vivado_bridge.py-1009-        "claimed_success": validation_status == "passed",
+fpgai/backends/vivado/vivado_bridge.py-1010-        "vivado_tool": tool,
+fpgai/backends/vivado/vivado_bridge.py-1011-        "vivado_handoff_present": handoff_present,
+fpgai/backends/vivado/vivado_bridge.py-1012-        "vivado_handoff_artifacts": vivado_handoff_artifacts or {},
+fpgai/backends/vivado/vivado_bridge.py-1013-        "truth_boundary": "This report only claims Vivado validation success when a real Vivado validation artifact exists. Generated Tcl/structural validation alone is not Vivado execution proof.",
+fpgai/backends/vivado/vivado_bridge.py-1014-    }
+fpgai/backends/vivado/vivado_bridge.py-1015-
+fpgai/backends/vivado/vivado_bridge.py-1016-    impl_requested = bool(stages.get("vivado_implementation"))
+fpgai/backends/vivado/vivado_bridge.py-1017-    impl_artifact = _find_first_existing(vivado_dir, [
+fpgai/backends/vivado/vivado_bridge.py-1018-        "reports/*impl*.rpt",
+fpgai/backends/vivado/vivado_bridge.py-1019-        "reports/*implementation*.rpt",
+fpgai/backends/vivado/vivado_bridge.py-1020-        "project/**/*.dcp",
+fpgai/backends/vivado/vivado_bridge.py-1021-        "project/**/*.jou",
+fpgai/backends/vivado/vivado_bridge.py-1022-    ])
+fpgai/backends/vivado/vivado_bridge.py-1023-    if not impl_requested:
+fpgai/backends/vivado/vivado_bridge.py-1024-        impl_status = "not_requested"
+fpgai/backends/vivado/vivado_bridge.py-1025-        impl_reason = "build.stages.vivado_implementation is false."
+fpgai/backends/vivado/vivado_bridge.py-1026-    elif not board_fit_allows_impl:
+fpgai/backends/vivado/vivado_bridge.py-1027-        impl_status = "blocked_by_board_fit"
+fpgai/backends/vivado/vivado_bridge.py-1028-        impl_reason = f"Vivado implementation was requested but board_fit.status={board_fit_status!r} does not allow implementation for the selected board."
+fpgai/backends/vivado/vivado_bridge.py-1029-    elif not tool["available"]:
+fpgai/backends/vivado/vivado_bridge.py:1030:        impl_status = "tool_missing"
+fpgai/backends/vivado/vivado_bridge.py-1031-        impl_reason = "Vivado executable was not found on PATH/configured location."
+fpgai/backends/vivado/vivado_bridge.py-1032-    elif impl_artifact is None:
+fpgai/backends/vivado/vivado_bridge.py-1033-        impl_status = "artifact_missing"
+fpgai/backends/vivado/vivado_bridge.py-1034-        impl_reason = "Vivado implementation was requested but no implementation report/checkpoint artifact was found."
+fpgai/backends/vivado/vivado_bridge.py-1035-    else:
+fpgai/backends/vivado/vivado_bridge.py-1036-        impl_status = "passed"
+fpgai/backends/vivado/vivado_bridge.py-1037-        impl_reason = "Vivado implementation artifact was found."
+fpgai/backends/vivado/vivado_bridge.py-1038-    impl_payload = {
+fpgai/backends/vivado/vivado_bridge.py:1039:        "format": "fpgai.vivado_implementation_report.v1",
+fpgai/backends/vivado/vivado_bridge.py-1040-        "stage": "vivado_implementation",
+fpgai/backends/vivado/vivado_bridge.py-1041-        "requested": impl_requested,
+fpgai/backends/vivado/vivado_bridge.py-1042-        "status": impl_status,
+fpgai/backends/vivado/vivado_bridge.py-1043-        "reason": impl_reason,
+fpgai/backends/vivado/vivado_bridge.py-1044-        "claimed_success": impl_status == "passed",
+fpgai/backends/vivado/vivado_bridge.py-1045-        "vivado_tool": tool,
+fpgai/backends/vivado/vivado_bridge.py-1046-        "artifact": str(impl_artifact) if impl_artifact is not None else None,
+fpgai/backends/vivado/vivado_bridge.py-1047-        "requires_vivado_project": True,
+fpgai/backends/vivado/vivado_bridge.py-1048-        "vivado_project_requested": validation_requested,
+fpgai/backends/vivado/vivado_bridge.py-1049-        "board_fit_status": board_fit_status,
+fpgai/backends/vivado/vivado_bridge.py-1050-        "board_fit_json": board_fit_json,
+fpgai/backends/vivado/vivado_bridge.py-1051-        "board_fit_allowed": board_fit_allows_impl,
+fpgai/backends/vivado/vivado_bridge.py-1052-        "truth_boundary": "Vivado implementation success is claimed only when board-fit allows the stage and real implementation reports/checkpoints are present. Missing tools/artifacts are not converted into success.",
+fpgai/backends/vivado/vivado_bridge.py-1053-    }
+fpgai/backends/vivado/vivado_bridge.py-1054-
+fpgai/backends/vivado/vivado_bridge.py-1055-    bit_requested = bool(stages.get("bitstream"))
+fpgai/backends/vivado/vivado_bridge.py-1056-    bit_artifact = _find_first_existing(vivado_dir, ["**/*.bit", "**/*.xsa"])
+fpgai/backends/vivado/vivado_bridge.py-1057-    if not bit_requested:
+fpgai/backends/vivado/vivado_bridge.py-1058-        bit_status = "not_requested"
+fpgai/backends/vivado/vivado_bridge.py-1059-        bit_reason = "build.stages.bitstream is false."
+fpgai/backends/vivado/vivado_bridge.py-1060-    elif not board_fit_allows_bitstream:
+fpgai/backends/vivado/vivado_bridge.py-1061-        bit_status = "blocked_by_board_fit"
+fpgai/backends/vivado/vivado_bridge.py-1062-        bit_reason = f"Bitstream was requested but board_fit.status={board_fit_status!r} does not allow bitstream generation for the selected board."
+fpgai/backends/vivado/vivado_bridge.py-1063-    elif impl_status != "passed":
+fpgai/backends/vivado/vivado_bridge.py:1064:        bit_status = "artifact_missing" if tool["available"] else "tool_missing"
+fpgai/backends/vivado/vivado_bridge.py-1065-        bit_reason = "Bitstream was requested but Vivado implementation has not passed with real artifacts."
+fpgai/backends/vivado/vivado_bridge.py-1066-    elif bit_artifact is None:
+fpgai/backends/vivado/vivado_bridge.py-1067-        bit_status = "artifact_missing"
+fpgai/backends/vivado/vivado_bridge.py-1068-        bit_reason = "Bitstream was requested but no .bit/.xsa artifact was found."
+fpgai/backends/vivado/vivado_bridge.py-1069-    else:
+fpgai/backends/vivado/vivado_bridge.py-1070-        bit_status = "passed"
+fpgai/backends/vivado/vivado_bridge.py-1071-        bit_reason = "Bitstream/XSA artifact was found."
+fpgai/backends/vivado/vivado_bridge.py-1072-    bit_payload = {
+fpgai/backends/vivado/vivado_bridge.py:1073:        "format": "fpgai.bitstream_report.v1",
+fpgai/backends/vivado/vivado_bridge.py-1074-        "stage": "bitstream",
+fpgai/backends/vivado/vivado_bridge.py-1075-        "requested": bit_requested,
+fpgai/backends/vivado/vivado_bridge.py-1076-        "status": bit_status,
+fpgai/backends/vivado/vivado_bridge.py-1077-        "reason": bit_reason,
+fpgai/backends/vivado/vivado_bridge.py-1078-        "claimed_success": bit_status == "passed",
+fpgai/backends/vivado/vivado_bridge.py-1079-        "vivado_tool": tool,
+fpgai/backends/vivado/vivado_bridge.py-1080-        "artifact": str(bit_artifact) if bit_artifact is not None else None,
+fpgai/backends/vivado/vivado_bridge.py-1081-        "requires_vivado_implementation_passed": True,
+fpgai/backends/vivado/vivado_bridge.py-1082-        "vivado_implementation_status": impl_status,
+fpgai/backends/vivado/vivado_bridge.py-1083-        "board_fit_status": board_fit_status,
+fpgai/backends/vivado/vivado_bridge.py-1084-        "board_fit_json": board_fit_json,
+fpgai/backends/vivado/vivado_bridge.py-1085-        "board_fit_allowed": board_fit_allows_bitstream,
+fpgai/backends/vivado/vivado_bridge.py-1086-        "truth_boundary": "Bitstream success is claimed only when board-fit allows the stage, implementation has passed, and a real .bit or .xsa artifact exists.",
+fpgai/backends/vivado/vivado_bridge.py-1087-    }
+fpgai/backends/vivado/vivado_bridge.py-1088-
+fpgai/backends/vivado/vivado_bridge.py-1089-    artifacts: Dict[str, str] = {}
+fpgai/backends/vivado/vivado_bridge.py-1090-    artifacts.update(_write_truth_report(reports_dir / "vivado_validation_report.json", reports_dir / "vivado_validation_report.md", validation_payload, title="Vivado validation report"))
+fpgai/backends/vivado/vivado_bridge.py:1091:    artifacts.update(_write_truth_report(reports_dir / "vivado_implementation_report.json", reports_dir / "vivado_implementation_report.md", impl_payload, title="Vivado implementation report"))
+fpgai/backends/vivado/vivado_bridge.py:1092:    artifacts.update(_write_truth_report(reports_dir / "bitstream_report.json", reports_dir / "bitstream_report.md", bit_payload, title="Bitstream report"))
+fpgai/backends/vivado/vivado_bridge.py-1093-    return artifacts
+fpgai/backends/vivado/vivado_bridge.py-1094-
+fpgai/backends/vivado/vivado_bridge.py-1095-def generate_vivado_bridge_for_artifact(
+fpgai/backends/vivado/vivado_bridge.py-1096-    artifact_dir: str | Path,
+fpgai/backends/vivado/vivado_bridge.py-1097-    board_name: str = "pynq_z2",
+fpgai/backends/vivado/vivado_bridge.py-1098-    run_impl_default: bool = False,
+fpgai/backends/vivado/vivado_bridge.py-1099-) -> Dict[str, Any]:
+fpgai/backends/vivado/vivado_bridge.py-1100-    artifact = Path(artifact_dir).resolve()
+fpgai/backends/vivado/vivado_bridge.py-1101-    build_dir = artifact / "build"
+fpgai/backends/vivado/vivado_bridge.py-1102-    if not build_dir.exists():
+fpgai/backends/vivado/vivado_bridge.py-1103-        build_dir = artifact
+fpgai/backends/vivado/vivado_bridge.py-1104-    manifest = _load_json(build_dir / "manifest.json")
+fpgai/backends/vivado/vivado_bridge.py-1105-    top_name = _top_name_from_manifest(manifest)
+fpgai/backends/vivado/vivado_bridge.py-1106-    board = get_board(board_name).to_dict()
+fpgai/backends/vivado/vivado_bridge.py-1107-    hls_dir = _find_hls_dir(build_dir)
+fpgai/backends/vivado/vivado_bridge.py-1108-    if hls_dir is None:
+fpgai/backends/vivado/vivado_bridge.py-1109-        raise FileNotFoundError(f"Could not find HLS directory/run_hls.tcl under {build_dir}")
+fpgai/backends/vivado/vivado_bridge.py-1110-
+fpgai/backends/vivado/vivado_bridge.py-1111-    out_dir = build_dir / "vivado_bridge"
+fpgai/backends/vivado/vivado_bridge.py-1112-    scripts_dir = out_dir / "scripts"
+fpgai/backends/vivado/vivado_bridge.py-1113-    reports_dir = out_dir / "reports"
+fpgai/backends/vivado/vivado_bridge.py-1114-    (out_dir / "hls_ip").mkdir(parents=True, exist_ok=True)
+fpgai/backends/vivado/vivado_bridge.py-1115-    reports_dir.mkdir(parents=True, exist_ok=True)
+fpgai/backends/vivado/vivado_bridge.py-1116-
+fpgai/backends/vivado/vivado_bridge.py-1117-    _write(scripts_dir / "export_hls_ip.tcl", _hls_export_tcl(hls_dir, out_dir, top_name, board["part"]))
+fpgai/backends/vivado/vivado_bridge.py-1118-    _write(scripts_dir / "create_bd.tcl", _create_bd_tcl(board["name"], top_name, board.get("ps_type", "processing_system7")))
+fpgai/backends/vivado/vivado_bridge.py-1119-    _write(scripts_dir / "run_vivado.tcl", _run_vivado_tcl(board, top_name, run_impl_default))
+fpgai/backends/vivado/vivado_bridge.py-1120-    _write(out_dir / "README_VIVADO.md", _readme(board, top_name))
+fpgai/backends/vivado/vivado_bridge.py-1121-
+fpgai/backends/vivado/vivado_bridge.py-1122-    artifact = {
+fpgai/backends/vivado/vivado_bridge.py-1123-        "vivado_bridge_generated": True,
+fpgai/backends/vivado/vivado_bridge.py-1124-        "vivado_tcl_generated": True,
+fpgai/backends/vivado/vivado_bridge.py-1125-        "hls_export_tcl_generated": True,
+fpgai/backends/vivado/vivado_bridge.py-1126-        "vivado_project_tcl_generated": True,
+fpgai/backends/vivado/vivado_bridge.py-1127-        "block_design_tcl_generated": True,
+fpgai/backends/vivado/vivado_bridge.py-1128-        "board": board["name"],
+fpgai/backends/vivado/vivado_bridge.py-1129-        "part": board["part"],
+fpgai/backends/vivado/vivado_bridge.py-1130-        "board_part": board.get("board_part"),
+fpgai/backends/vivado/vivado_bridge.py-1131-        "ps_type": board.get("ps_type"),
+fpgai/backends/vivado/vivado_bridge.py-1132-        "overlay_style": board.get("overlay_style"),
+fpgai/backends/vivado/vivado_bridge.py-1133-        "supports_bridge_generation": board.get("supports_bridge_generation", True),
+fpgai/backends/vivado/vivado_bridge.py-1134-        "supports_hls_ip_export": board.get("supports_hls_ip_export", True),
+fpgai/backends/vivado/vivado_bridge.py-1135-        "supports_vivado_synth": board.get("supports_vivado_synth", True),
+fpgai/backends/vivado/vivado_bridge.py-1136-        "supports_vivado_impl": board.get("supports_vivado_impl", True),
+fpgai/backends/vivado/vivado_bridge.py-1137-        "top_name": top_name,
+fpgai/backends/vivado/vivado_bridge.py-1138-        "artifact_dir": artifact.as_posix(),
+fpgai/backends/vivado/vivado_bridge.py-1139-        "build_dir": build_dir.as_posix(),
+fpgai/backends/vivado/vivado_bridge.py-1140-        "hls_dir": hls_dir.as_posix(),
+fpgai/backends/vivado/vivado_bridge.py-1141-        "vivado_bridge_dir": out_dir.as_posix(),
+fpgai/backends/vivado/vivado_bridge.py-1142-        "hls_ip_expected": True,
+fpgai/backends/vivado/vivado_bridge.py-1143-        "hls_ip_exported": False,
+fpgai/backends/vivado/vivado_bridge.py-1144-        "vivado_synth_requested": True,
+fpgai/backends/vivado/vivado_bridge.py-1145-        "vivado_impl_requested": bool(run_impl_default),
+fpgai/backends/vivado/vivado_bridge.py-1146-        "bitstream_requested": bool(run_impl_default),
+fpgai/backends/vivado/vivado_bridge.py-1147-        "reports_expected": [
+fpgai/backends/vivado/vivado_bridge.py-1148-            "utilization_synth.rpt",
+fpgai/backends/vivado/vivado_bridge.py-1149-            "timing_synth.rpt",
+fpgai/backends/vivado/vivado_bridge.py-1150-            "power_synth.rpt",
+fpgai/backends/vivado/vivado_bridge.py-1151-            "utilization_impl.rpt",
+fpgai/backends/vivado/vivado_bridge.py-1152-            "timing_impl.rpt",
+fpgai/backends/vivado/vivado_bridge.py-1153-            "power_impl.rpt",
+fpgai/backends/vivado/vivado_bridge.py-1154-        ],
+fpgai/backends/vivado/vivado_bridge.py-1155-        "energy_estimation": {
+fpgai/backends/vivado/vivado_bridge.py-1156-            "enabled_after_power_report": True,
+fpgai/backends/vivado/vivado_bridge.py-1157-            "formula": "estimated_energy_j = vivado_total_power_w * hls_latency_s",
+fpgai/backends/vivado/vivado_bridge.py-1158-            "status": "pending_reports",
+fpgai/backends/vivado/vivado_bridge.py-1159-        },
+fpgai/backends/vivado/vivado_bridge.py-1160-    }
+fpgai/backends/vivado/vivado_bridge.py-1161-    _write(out_dir / "vivado_bridge_manifest.json", json.dumps(artifact, indent=2, sort_keys=True))
+fpgai/backends/vivado/vivado_bridge.py-1162-    return artifact
+fpgai/backends/vivado/vivado_bridge.py-1163-
+fpgai/backends/vivado/vivado_bridge.py-1164-
+fpgai/backends/vivado/vivado_bridge.py-1165-def _iter_artifacts(experiment_dir: Path) -> Iterable[Path]:
+fpgai/backends/vivado/vivado_bridge.py-1166-    artifacts = experiment_dir / "artifacts"
+fpgai/backends/vivado/vivado_bridge.py-1167-    if artifacts.exists():
+fpgai/backends/vivado/vivado_bridge.py-1168-        for p in sorted(artifacts.iterdir()):
+fpgai/backends/vivado/vivado_bridge.py-1169-            if p.is_dir():
+fpgai/backends/vivado/vivado_bridge.py-1170-                yield p
+fpgai/backends/vivado/vivado_bridge.py-1171-    else:
+fpgai/backends/vivado/vivado_bridge.py-1172-        # Allow direct artifact/build paths for debugging.

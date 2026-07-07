@@ -7,12 +7,14 @@ import argparse
 import json
 import os
 import shutil
+import shlex
 import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from fpgai.backends.vivado import generate_vivado_bridge_for_experiment
+from fpgai.runtime.package import emit_runtime_package
 
 
 def _load_json(path: Path) -> Any:
@@ -125,6 +127,258 @@ def _fit_policy_gate_from_manifest(project_dir: Path) -> dict:
     manifest = _load_compile_manifest(project_dir)
     gate = manifest.get("fit_policy_gate", {})
     return gate if isinstance(gate, dict) else {}
+
+
+def _manifest_path(project_dir: Path) -> Path:
+    return project_dir / "manifest.json"
+
+
+def _compile_output_dir_from_project_dir(project_dir: Path) -> Path:
+    """Return the original compiler output directory.
+
+    In paper bridge wrappers, build/manifest.json may be a symlink to the real
+    build/paper/<design>/manifest.json. Resolving it lets the bridge update the
+    original build reports/package instead of only the temporary wrapper.
+    """
+    manifest = _manifest_path(project_dir)
+    try:
+        if manifest.exists():
+            return manifest.resolve().parent
+    except OSError:
+        pass
+    return project_dir.resolve()
+
+
+def _deep_find_dict(obj: Any, key: str) -> Dict[str, Any]:
+    if isinstance(obj, dict):
+        if key in obj and isinstance(obj[key], dict):
+            return obj[key]
+        for value in obj.values():
+            found = _deep_find_dict(value, key)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for value in obj:
+            found = _deep_find_dict(value, key)
+            if found:
+                return found
+    return {}
+
+
+def _tool_cfg_from_manifest(project_dir: Path, tool: str) -> Dict[str, Any]:
+    manifest = _load_compile_manifest(project_dir)
+    toolchain = manifest.get("toolchain", {}) if isinstance(manifest.get("toolchain", {}), dict) else {}
+    if not toolchain:
+        toolchain = _deep_find_dict(manifest, "toolchain")
+    cfg = toolchain.get(tool, {}) if isinstance(toolchain.get(tool, {}), dict) else {}
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def _resolved_tool_command(project_dir: Path, tool: str, args: List[str]) -> tuple[List[str], Dict[str, Any]]:
+    """Resolve Vivado/Vitis commands from manifest/YAML/env/PATH.
+
+    Priority:
+    1. manifest/resolved config toolchain.<tool>.settings64 + executable/exe/path
+    2. environment variables
+    3. PATH fallback
+    """
+    cfg = _tool_cfg_from_manifest(project_dir, tool)
+    env_prefix = "VIVADO" if tool == "vivado" else "VITIS_HLS"
+    default_exe = "vivado" if tool == "vivado" else "vitis_hls"
+
+    executable = (
+        cfg.get("executable")
+        or cfg.get("exe")
+        or cfg.get("path")
+        or os.environ.get(f"FPGAI_{env_prefix}_EXECUTABLE")
+        or os.environ.get(f"{env_prefix}_EXECUTABLE")
+        or os.environ.get(f"FPGAI_{env_prefix}")
+        or os.environ.get(env_prefix)
+        or default_exe
+    )
+    settings64 = (
+        cfg.get("settings64")
+        or cfg.get("settings")
+        or os.environ.get(f"FPGAI_{env_prefix}_SETTINGS64")
+        or os.environ.get(f"{env_prefix}_SETTINGS64")
+    )
+
+    executable = str(executable)
+    settings64 = str(settings64) if settings64 else ""
+
+    if settings64:
+        shell_cmd = "source {settings} && exec {exe} {args}".format(
+            settings=shlex.quote(settings64),
+            exe=shlex.quote(executable),
+            args=" ".join(shlex.quote(str(a)) for a in args),
+        )
+        cmd = ["bash", "-lc", shell_cmd]
+        resolved = shutil.which("bash")
+    else:
+        cmd = [executable] + list(args)
+        resolved = shutil.which(executable)
+
+    return cmd, {
+        "tool": tool,
+        "executable": executable,
+        "settings64": settings64 or None,
+        "uses_settings64": bool(settings64),
+        "launcher": cmd[0],
+        "resolved_launcher": resolved,
+        "path_available_without_settings": shutil.which(executable) is not None,
+        "source": "manifest_or_env" if (cfg or settings64 or executable != default_exe) else "path_default",
+    }
+
+
+def _same_path(src: Path, dst: Path) -> bool:
+    """Return True when src and dst refer to the same filesystem path."""
+    try:
+        return src.resolve() == dst.resolve()
+    except OSError:
+        return src.absolute() == dst.absolute()
+
+
+def _copy_dir_contents(src: Path, dst: Path) -> None:
+    if not src.exists() or not src.is_dir():
+        return
+    if _same_path(src, dst):
+        # Direct build-directory bridge mode already writes into the compiler
+        # output's vivado_bridge directory. Treat syncing a directory onto
+        # itself as a no-op, not as a tool failure.
+        return
+    dst.mkdir(parents=True, exist_ok=True)
+    for child in src.iterdir():
+        target = dst / child.name
+        if _same_path(child, target):
+            continue
+        if child.is_dir():
+            if target.exists() and not target.is_symlink():
+                shutil.rmtree(target)
+            if target.exists() or target.is_symlink():
+                target.unlink()
+            shutil.copytree(child, target)
+        else:
+            shutil.copy2(child, target)
+
+
+def _first_existing_file(root: Path, patterns: Iterable[str]) -> Optional[Path]:
+    for pattern in patterns:
+        for path in sorted(root.glob(pattern)):
+            if path.exists() and path.is_file():
+                return path
+    return None
+
+
+def _write_md_report(path: Path, payload: Dict[str, Any], title: str) -> None:
+    lines = [
+        f"# {title}",
+        "",
+        f"- status: `{payload.get('status')}`",
+        f"- stage: `{payload.get('stage')}`",
+        f"- requested: `{payload.get('requested')}`",
+        f"- claimed_success: `{payload.get('claimed_success')}`",
+    ]
+    reason = payload.get("reason")
+    if reason:
+        lines.append(f"- reason: {reason}")
+    artifact = payload.get("artifact")
+    if artifact:
+        lines.extend(["", "## Artifact", f"- `{artifact}`"])
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _sync_bridge_result_to_compile_output(artifact: Path, bridge: Path, row: Dict[str, Any]) -> None:
+    """Synchronize successful external Vivado bridge evidence into the real build.
+
+    This replaces stale compile-time placeholder reports such as tool_missing only
+    after the bridge has real Vivado reports/bitstream/XSA artifacts.
+    """
+    wrapper_build_dir = bridge.parent
+    compile_dir = _compile_output_dir_from_project_dir(wrapper_build_dir)
+    if not compile_dir.exists():
+        return
+
+    # Mirror only deployment/report-facing bridge outputs, not necessarily the full Vivado project.
+    target_bridge = compile_dir / "vivado_bridge"
+    for subdir in ["bitstream", "reports", "logs", "scripts", "hls_ip"]:
+        _copy_dir_contents(bridge / subdir, target_bridge / subdir)
+    for filename in ["vivado_bridge_manifest.json", "README_VIVADO.md"]:
+        src = bridge / filename
+        if src.exists():
+            target_bridge.mkdir(parents=True, exist_ok=True)
+            target = target_bridge / filename
+            if not _same_path(src, target):
+                shutil.copy2(src, target)
+
+    reports_dir = compile_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+
+    bit = _first_existing_file(target_bridge, ["bitstream/*.bit", "project/**/*.bit"])
+    hwh = _first_existing_file(target_bridge, ["bitstream/*.hwh", "project/**/*.hwh"])
+    xsa = _first_existing_file(target_bridge, ["bitstream/*.xsa", "project/**/*.xsa"])
+    util = _first_existing_file(target_bridge, ["reports/utilization_impl.rpt", "project/**/*utilization*impl*.rpt"])
+    timing = _first_existing_file(target_bridge, ["reports/timing_impl.rpt", "project/**/*timing*impl*.rpt"])
+    power = _first_existing_file(target_bridge, ["reports/power_impl.rpt", "project/**/*power*impl*.rpt"])
+
+    vivado_ok = bool(row.get("vivado_ok"))
+    bit_ok = bool(bit is not None and xsa is not None)
+
+    tool_info = row.get("vivado_tool") or {}
+    vivado_run = row.get("vivado_run") or {}
+
+    impl_payload = {
+        "format": "fpgai.vivado_implementation_report.v1",
+        "stage": "vivado_implementation",
+        "requested": bool(row.get("vivado_impl_requested")),
+        "status": "passed" if vivado_ok and (util or timing or power or bit or xsa) else "failed",
+        "reason": "Vivado bridge implementation completed with real artifacts." if vivado_ok else (row.get("vivado_error") or "Vivado bridge implementation failed."),
+        "claimed_success": bool(vivado_ok and (util or timing or power or bit or xsa)),
+        "vivado_ok": vivado_ok,
+        "vivado_ran": bool(row.get("vivado_ran")),
+        "returncode": row.get("vivado_returncode"),
+        "vivado_tool": tool_info,
+        "vivado_run": vivado_run,
+        "vivado_bridge_dir": target_bridge.as_posix(),
+        "artifact": str(util or timing or power or bit or xsa) if (util or timing or power or bit or xsa) else None,
+        "utilization_report": str(util) if util else None,
+        "timing_report": str(timing) if timing else None,
+        "power_report": str(power) if power else None,
+        "stdout_log": row.get("vivado_stdout_log"),
+        "stderr_log": row.get("vivado_stderr_log"),
+        "truth_boundary": "Vivado implementation success is claimed only from a completed bridge run and real Vivado reports or implementation artifacts.",
+    }
+
+    bit_payload = {
+        "format": "fpgai.bitstream_report.v1",
+        "stage": "bitstream",
+        "requested": bool(row.get("vivado_impl_requested")),
+        "status": "passed" if vivado_ok and bit_ok else "failed",
+        "reason": "Bitstream/XSA artifacts were generated by the Vivado bridge." if vivado_ok and bit_ok else "Bitstream/XSA artifacts are missing after Vivado bridge run.",
+        "claimed_success": bool(vivado_ok and bit_ok),
+        "requires_vivado_implementation_passed": True,
+        "vivado_implementation_status": impl_payload["status"],
+        "vivado_tool": tool_info,
+        "artifact": str(bit or xsa) if (bit or xsa) else None,
+        "bitstream_exists": bit is not None,
+        "hwh_exists": hwh is not None,
+        "xsa_exists": xsa is not None,
+        "bitstream_path": str(bit) if bit else None,
+        "hwh_path": str(hwh) if hwh else None,
+        "xsa_path": str(xsa) if xsa else None,
+        "vivado_bridge_dir": target_bridge.as_posix(),
+        "truth_boundary": "Bitstream success is claimed only when real .bit and XSA artifacts exist after a completed Vivado bridge implementation run.",
+    }
+
+    _write_json(reports_dir / "vivado_implementation_report.json", impl_payload)
+    _write_json(reports_dir / "bitstream_report.json", bit_payload)
+    _write_md_report(reports_dir / "vivado_implementation_report.md", impl_payload, "Vivado implementation report")
+    _write_md_report(reports_dir / "bitstream_report.md", bit_payload, "Bitstream report")
+
+    # Refresh runtime package so package_manifest sees vivado_bridge/bitstream.
+    try:
+        emit_runtime_package(compile_dir)
+    except Exception as exc:
+        _write_json(reports_dir / "runtime_package_refresh_error.json", {"error": str(exc)})
 
 
 def _vivado_gate_block_reason(project_dir: Path, *, run_vivado_impl: bool) -> str:
@@ -343,7 +597,9 @@ def _run_for_artifact(
                 "error": "",
             }
         else:
-            res = _run_cmd(["vitis_hls", "-f", "scripts/export_hls_ip.tcl"], bridge, "vitis_hls_export_ip", timeout_sec)
+            cmd, tool_info = _resolved_tool_command(bridge.parent, "vitis_hls", ["-f", "scripts/export_hls_ip.tcl"])
+            res = _run_cmd(cmd, bridge, "vitis_hls_export_ip", timeout_sec)
+            res["resolved_tool"] = tool_info
             _mirror_hls_ip_to_bridge(bridge)
         row.update({
             "hls_ip_export_run": res,
@@ -422,7 +678,9 @@ def _run_for_artifact(
                 env = os.environ.copy()
                 if run_vivado_impl:
                     env["FPGAI_VIVADO_RUN_IMPL"] = "1"
-                res = _run_cmd(["vivado", "-mode", "batch", "-source", "scripts/run_vivado.tcl"], bridge, "vivado_build", timeout_sec, env=env)
+                cmd, tool_info = _resolved_tool_command(bridge.parent, "vivado", ["-mode", "batch", "-source", "scripts/run_vivado.tcl"])
+                res = _run_cmd(cmd, bridge, "vivado_build", timeout_sec, env=env)
+                res["resolved_tool"] = tool_info
 
         failure_class = "" if bool(res.get("ok")) else _classify_vivado_failure(bridge, res)
         if failure_class:
@@ -439,6 +697,7 @@ def _run_for_artifact(
             "vivado_failure_class": res.get("failure_class", ""),
             "vivado_stdout_log": res.get("stdout_log", ""),
             "vivado_stderr_log": res.get("stderr_log", ""),
+            "vivado_tool": res.get("resolved_tool", {}),
         })
         _refresh_manifest(
             bridge,
@@ -461,6 +720,8 @@ def _run_for_artifact(
     row["bitstream_exists"] = bool(man.get("bitstream_exists"))
     row["xsa_exists"] = bool(man.get("xsa_exists"))
     row["vivado_reports_present"] = bool(man.get("vivado_reports_present"))
+    if run_vivado_synth or run_vivado_impl:
+        _sync_bridge_result_to_compile_output(artifact, bridge, row)
     return row
 
 

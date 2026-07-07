@@ -146,7 +146,8 @@ def test_compiler_manifest_records_pipeline_stages_in_source() -> None:
 
     assert "_build_pipeline_stages" in source
     assert '"pipeline_stages": self._build_pipeline_stages(**kwargs)' in source
-    assert '"vivado_bridge"' in source
+    assert '"vivado_project"' in source
+    assert '"bitstream"' in source
     assert '"runtime_package"' in source
 
 def test_compiler_pipeline_stage_helper_returns_expected_names(tmp_path):
@@ -197,10 +198,11 @@ def test_compiler_pipeline_stage_helper_returns_expected_names(tmp_path):
     assert by_name["analyze_model"]["status"] == "done"
     assert by_name["plan_architecture"]["status"] == "done"
     assert by_name["generate_host_cpp"]["status"] == "skipped"
-    assert by_name["generate_hls"]["status"] == "skipped"
+    assert by_name["generate_hls_project"]["status"] == "skipped"
     assert by_name["run_hls"]["status"] == "skipped"
     assert by_name["training_artifacts"]["status"] == "skipped"
-    assert by_name["vivado_bridge"]["status"] == "not_requested"
+    assert by_name["vivado_project"]["status"] == "not_requested"
+    assert by_name["bitstream"]["status"] == "not_requested"
     assert by_name["runtime_package"]["status"] == "skipped"
     assert by_name["runtime_package"]["detail"] == "Runtime package was not emitted."
 
@@ -450,6 +452,8 @@ def test_compiler_has_fit_policy_gate_in_source() -> None:
     assert '"fit_policy_gate": fit_policy_gate' in source
     assert "targets.platform.fit_policy" in source
     assert "hardware.fit_policy" in source
+    assert "build.fit_policy" in source
+    assert "block_over_limit" in source
     assert "blocked_stages" in source
     assert "vivado_impl" in source
     assert "bitstream" in source
@@ -474,6 +478,7 @@ def test_fit_policy_gate_modes_behavior() -> None:
         "report_only": (False, False, "info"),
         "warn": (False, True, "warning"),
         "enforce": (True, False, "error"),
+        "block_over_limit": (True, False, "error"),
     }
 
     for policy, (blocked, warning, severity) in expected.items():
@@ -490,7 +495,7 @@ def test_fit_policy_gate_modes_behavior() -> None:
 
         gate = compiler._fit_policy_gate(prediction_artifacts)
 
-        assert gate["policy"] == policy
+        assert gate["policy"] == ("enforce" if policy == "block_over_limit" else policy)
         assert gate["board_fit_status"] == "over_limit"
         assert gate["board_fit_limiting_dimension"] == "dsp"
         assert gate["vivado_allowed_by_board_fit"] is False
@@ -522,6 +527,8 @@ def test_config_loader_validates_fit_policy_enum_in_source() -> None:
     assert "def _validate_fit_policy" in source
     assert '"targets.platform.fit_policy"' in source
     assert '"hardware.fit_policy"' in source
+    assert '"build.fit_policy"' in source
+    assert "block_over_limit" in source
     assert '{"report_only", "warn", "enforce"}' in source
     assert "Invalid fit_policy" in source
     assert "_validate_fit_policy(" in source
