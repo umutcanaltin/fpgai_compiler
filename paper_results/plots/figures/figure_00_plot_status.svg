@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="770" viewBox="0 0 980 770">
+<rect width="100%" height="100%" fill="white"/>
+<text x="32" y="34" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#111">Paper plot manifest</text>
+<text x="32" y="58" font-family="Arial, sans-serif" font-size="12" fill="#555">Created plots and pending real-measurement inputs</text>
+<circle cx="42" cy="83" r="7" fill="#2e7d32"/>
+<text x="60" y="88" font-family="Arial, sans-serif" font-size="13" fill="#111">figure_00_plot_status: created</text>
+<circle cx="42" cy="117" r="7" fill="#2e7d32"/>
+<text x="60" y="122" font-family="Arial, sans-serif" font-size="13" fill="#111">figure_01_inference_hls_latency: created</text>
+<circle cx="42" cy="151" r="7" fill="#2e7d32"/>
+<text x="60" y="156" font-family="Arial, sans-serif" font-size="13" fill="#111">figure_02_inference_vivado_lut: created</text>
+<circle cx="42" cy="185" r="7" fill="#2e7d32"/>
+<text x="60" y="190" font-family="Arial, sans-serif" font-size="13" fill="#111">figure_05_training_hls_latency: created</text>
+<circle cx="42" cy="219" r="7" fill="#2e7d32"/>
+<text x="60" y="224" font-family="Arial, sans-serif" font-size="13" fill="#111">figure_06_training_vivado_lut: created</text>
+<circle cx="42" cy="253" r="7" fill="#2e7d32"/>
+<text x="60" y="258" font-family="Arial, sans-serif" font-size="13" fill="#111">figure_09_knob_status_counts: created</text>
+<circle cx="42" cy="287" r="7" fill="#2e7d32"/>
+<text x="60" y="292" font-family="Arial, sans-serif" font-size="13" fill="#111">figure_10_training_vivado_power: created</text>
+<circle cx="42" cy="321" r="7" fill="#2e7d32"/>
+<text x="60" y="326" font-family="Arial, sans-serif" font-size="13" fill="#111">figure_11_training_vivado_dsp: created</text>
+<circle cx="42" cy="355" r="7" fill="#2e7d32"/>
+<text x="60" y="360" font-family="Arial, sans-serif" font-size="13" fill="#111">figure_12_all_hls_lut: created</text>
+<circle cx="42" cy="389" r="7" fill="#2e7d32"/>
+<text x="60" y="394" font-family="Arial, sans-serif" font-size="13" fill="#111">figure_13_all_vivado_power: created</text>
+<circle cx="42" cy="423" r="7" fill="#2e7d32"/>
+<text x="60" y="428" font-family="Arial, sans-serif" font-size="13" fill="#111">figure_14_all_vivado_wns: created</text>
+<circle cx="42" cy="457" r="7" fill="#ef6c00"/>
+<text x="60" y="462" font-family="Arial, sans-serif" font-size="13" fill="#111">figure_03_inference_real_latency_ms: pending</text>
+<circle cx="42" cy="491" r="7" fill="#ef6c00"/>
+<text x="60" y="496" font-family="Arial, sans-serif" font-size="13" fill="#111">figure_04_inference_energy_mj: pending</text>
+<circle cx="42" cy="525" r="7" fill="#ef6c00"/>
+<text x="60" y="530" font-family="Arial, sans-serif" font-size="13" fill="#111">figure_07_training_step_ms: pending</text>
+<circle cx="42" cy="559" r="7" fill="#ef6c00"/>
+<text x="60" y="564" font-family="Arial, sans-serif" font-size="13" fill="#111">figure_08_training_curve_loss: pending</text>
+</svg>

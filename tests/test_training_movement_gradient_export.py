@@ -220,3 +220,147 @@ def test_normal_training_omits_tiled_io_markers_and_reports_not_requested(tmp_pa
     numeric = json.loads((out_dir / "reports/numeric_validation.json").read_text(encoding="utf-8"))
     assert numeric["training_tiled_io"]["requested"] is False
     assert numeric["training_tiled_io"]["status"] == "not_requested"
+
+
+def test_p2t_training_m_axi_tile_sizes_and_real_load_store_loops_follow_yaml() -> None:
+    from fpgai.backends.hls.emit.top_train_cpp import _fpgai_p2t_materialize_training_m_axi_tiles
+
+    source = "\n".join(
+        [
+            "using namespace fpgai;",
+            "#ifndef FPGAI_TRAIN_INPUT_TILE_SIZE",
+            "#define FPGAI_TRAIN_INPUT_TILE_SIZE 64",
+            "#endif",
+            "#ifndef FPGAI_TRAIN_LABEL_TILE_SIZE",
+            "#define FPGAI_TRAIN_LABEL_TILE_SIZE 64",
+            "#endif",
+            "#ifndef FPGAI_TRAIN_OUTPUT_TILE_SIZE",
+            "#define FPGAI_TRAIN_OUTPUT_TILE_SIZE 64",
+            "#endif",
+            "#ifndef FPGAI_GRADIENT_EXPORT_TILE_SIZE",
+            "#define FPGAI_GRADIENT_EXPORT_TILE_SIZE 64",
+            "#endif",
+            "extern \"C\" void deeplearn(",
+            "  hls::stream<axis_t>& in,",
+            "  hls::stream<axis_t>& out,",
+            "  hls::stream<axis_t>& aux,",
+            "  ap_uint<32>* input_mem,",
+            "  ap_uint<32>* label_mem,",
+            "  ap_uint<32>* output_mem,",
+            "  ap_uint<32>* gradients_mem,",
+            "  int mode",
+            ") {",
+            "#pragma HLS INTERFACE s_axilite port=return bundle=CTRL",
+            "  static act_t input_tile[FPGAI_TRAIN_INPUT_TILE_SIZE];",
+            "  static act_t label_tile[FPGAI_TRAIN_LABEL_TILE_SIZE];",
+            "  static act_t output_tile[FPGAI_TRAIN_OUTPUT_TILE_SIZE];",
+            "  static act_t target_buf[2];",
+            "  for (int i = 0; i < 8; ++i) buf_input[i] = (act_t)read_f32(in);",
+            "  for (int i = 0; i < 2; ++i) target_buf[i] = (act_t)read_f32(aux);",
+            "  acc_t difference = (acc_t)buf_linear_1[i] - (acc_t)target_buf[i];",
+            "  loss_t loss_value = (loss_t)0;",
+            "}",
+        ]
+    )
+    cfg = {
+        "data_movement": {
+            "inputs": {"interface": "m_axi", "transport": "ps_runtime", "tiled": {"enabled": True, "tile_size": 32}},
+            "labels": {"interface": "m_axi", "transport": "ps_runtime", "tiled": {"enabled": True, "tile_size": 32}},
+            "outputs": {"interface": "m_axi", "transport": "ps_runtime", "tiled": {"enabled": True, "tile_size": 32}},
+            "gradients": {"export": {"interface": "m_axi", "transport": "ps_runtime", "policy": "tiled", "tile_size": 32}},
+        }
+    }
+
+    updated = _fpgai_p2t_materialize_training_m_axi_tiles(source, raw_cfg=cfg)
+
+    assert "#define FPGAI_TRAIN_INPUT_TILE_SIZE 32" in updated
+    assert "#define FPGAI_TRAIN_LABEL_TILE_SIZE 32" in updated
+    assert "#define FPGAI_TRAIN_OUTPUT_TILE_SIZE 32" in updated
+    assert "#define FPGAI_GRADIENT_EXPORT_TILE_SIZE 32" in updated
+    assert "FPGAI real training m_axi tiled input import" in updated
+    assert "input_mem[idx].to_uint()" in updated
+    assert "FPGAI real training m_axi tiled label import" in updated
+    assert "label_mem[idx].to_uint()" in updated
+    assert "FPGAI real training m_axi tiled output export" in updated
+    assert "output_mem[idx] = f32_to_u32((float)output_tile[lane])" in updated
+    assert "read_f32(in)" not in updated
+    assert "read_f32(aux)" not in updated
+
+
+def test_training_testbench_packs_m_axi_records_before_train_and_loss_calls(tmp_path: Path) -> None:
+    from fpgai.backends.hls.testbench_train import emit_tb_train_cpp
+
+    tb_dir = tmp_path / "tb"
+    tb_dir.mkdir()
+    raw_cfg = {
+        "data_movement": {
+            "inputs": {"interface": "m_axi", "transport": "ps_runtime", "tiled": {"enabled": True, "tile_size": 32}},
+            "labels": {"interface": "m_axi", "transport": "ps_runtime", "tiled": {"enabled": True, "tile_size": 32}},
+        }
+    }
+
+    emit_tb_train_cpp(
+        tb_dir,
+        graph=None,  # unused by the emitter
+        top_name="deeplearn",
+        in_words=8,
+        out_words=2,
+        weights_mode="ddr",
+        weight_words=10,
+        preload_weights=[0.0] * 10,
+        training_cfg={"optimizer": {"learning_rate": 0.01}, "execution": {"convergence_smoke": True}},
+        output_dir=str(tmp_path),
+        raw_cfg=raw_cfg,
+    )
+    tb = (tb_dir / "tb.cpp").read_text(encoding="utf-8")
+    assert "static void pack_record_mem" in tb
+    assert 'pack_record_mem(input_mem, input_data, input_words_per_record, r, "input")' in tb
+    assert 'pack_record_mem(label_mem, target_data, target_words_per_record, r, "label")' in tb
+    assert 'pack_record_mem(input_mem, input_data, input_words_per_record, rec, "input")' in tb
+    assert 'pack_record_mem(label_mem, target_data, target_words_per_record, rec, "label")' in tb
+
+
+def test_training_m_axi_testbench_escapes_record_error_newlines(tmp_path: Path) -> None:
+    raw = copy.deepcopy(_load_training_config())
+    raw.setdefault("project", {})["out_dir"] = str(tmp_path / "training_m_axi_tb_escape")
+    raw.setdefault("pipeline", {})["mode"] = "training_on_device"
+    dm = raw.setdefault("data_movement", {})
+    dm.setdefault("inputs", {})["import"] = {"interface": "m_axi", "transport": "ps_runtime", "policy": "tiled", "tile_size": 32}
+    dm.setdefault("labels", {})["import"] = {"interface": "m_axi", "transport": "ps_runtime", "policy": "tiled", "tile_size": 32}
+    dm.setdefault("outputs", {})["export"] = {"interface": "m_axi", "transport": "ps_runtime", "policy": "tiled", "tile_size": 32}
+
+    result = _compile_raw(raw, tmp_path)
+    tb_source = (Path(result.out_dir) / "hls/src/tb.cpp").read_text(encoding="utf-8")
+
+    assert 'record count is zero. words_per_record=%d size=%zu\\n", label' in tb_source
+    assert 'buffer too small. got=%zu expected=%d\\n", label' in tb_source
+    assert 'record count is zero. words_per_record=%d size=%zu\n", label' not in tb_source
+    assert 'buffer too small. got=%zu expected=%d\n", label' not in tb_source
+
+
+def test_optimizer_state_export_runtime_sequence_is_supported_for_training(tmp_path: Path) -> None:
+    raw = copy.deepcopy(_load_training_config())
+    raw.setdefault("project", {})["out_dir"] = str(tmp_path / "training_optimizer_state_export_sequence")
+    raw.setdefault("pipeline", {})["mode"] = "training_on_device"
+    raw.setdefault("training", {}).setdefault("optimizer", {})["type"] = "adam"
+    raw.setdefault("memory", {})["optimizer_state_storage"] = "bram"
+    raw.setdefault("data_movement", {}).setdefault("optimizer_state", {})["export"] = {
+        "interface": "m_axi",
+        "transport": "ps_runtime",
+        "policy": "full",
+    }
+    raw.setdefault("runtime", {})["sequence"] = [
+        {"run_training": {"steps": 1}},
+        "export_optimizer_state",
+    ]
+
+    result = _compile_raw(raw, tmp_path)
+    out_dir = Path(result.out_dir)
+    manifest = json.loads((out_dir / "runtime_package/package_manifest.json").read_text(encoding="utf-8"))
+    sequence = manifest["runtime_sequence"]
+
+    assert sequence["supported_commands"]["export_optimizer_state"] is True
+    assert sequence["sequence"][-1]["command"] == "export_optimizer_state"
+    source = (out_dir / "hls/src/deeplearn.cpp").read_text(encoding="utf-8")
+    assert "FPGAI_MODE_EXPORT_OPTIMIZER_STATE" in source
+    assert "ap_uint<32>* optimizer_state_mem" in source

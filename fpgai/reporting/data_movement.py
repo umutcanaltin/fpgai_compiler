@@ -632,12 +632,54 @@ def _source_macro_int(source: str, macro: str) -> int | None:
 
 
 def _tile_macro_for(role: str, kind: str) -> str | None:
+    candidates = _tile_macro_candidates_for(role, kind)
+    return candidates[0] if candidates else None
+
+
+def _tile_macro_candidates_for(role: str, kind: str) -> list[str]:
     prefix = "INPUT" if role == "inputs" else "OUTPUT"
     if kind == "m_axi_tiled":
-        return f"FPGAI_{prefix}_TILE_SIZE"
+        # Training-on-device tops use explicit training tile macros while the
+        # original inference m_axi path uses the generic macros.  Keep both
+        # accepted so movement validation reflects the generated artifact
+        # status instead of hard-coding one backend spelling.
+        return [f"FPGAI_{prefix}_TILE_SIZE", f"FPGAI_TRAIN_{prefix}_TILE_SIZE"]
     if kind == "axi_stream_tiled":
-        return f"FPGAI_AXIS_{prefix}_TILE_SIZE"
-    return None
+        return [f"FPGAI_AXIS_{prefix}_TILE_SIZE", f"FPGAI_TRAIN_AXIS_{prefix}_TILE_SIZE"]
+    return []
+
+
+def _source_macro_int_any(source: str, macros: list[str]) -> tuple[int | None, str | None]:
+    for macro in macros:
+        value = _source_macro_int(source, macro)
+        if value is not None:
+            return value, macro
+    return None, macros[0] if macros else None
+
+
+def _source_has_training_hybrid_axi(source: str) -> bool:
+    signatures = _top_kernel_signatures(source)
+    if not signatures:
+        return False
+    joined = "\n".join(signatures)
+    has_training_streams = (
+        "hls::stream" in joined
+        and ("& in" in joined or "&in" in joined)
+        and ("& out" in joined or "&out" in joined)
+        and ("& aux" in joined or "&aux" in joined)
+    )
+    has_tensor_m_axi = any(
+        token in source
+        for token in (
+            "m_axi port=input_mem",
+            "m_axi port=label_mem",
+            "m_axi port=output_mem",
+            "m_axi port=weights_mem",
+            "m_axi port=gradients_mem",
+            "m_axi port=optimizer_state_mem",
+        )
+    )
+    return bool(has_training_streams and has_tensor_m_axi)
 
 
 def _top_kernel_signatures(source: str) -> list[str]:
@@ -691,14 +733,14 @@ def _source_io_actuals(source: str, role: str) -> dict[str, bool]:
         return {
             "m_axi_port": "m_axi port=input_mem" in source and "input_mem" in source,
             "stream_port": input_stream_port,
-            "m_axi_tiled": "FPGAI_INPUT_TILE_SIZE" in source and "m_axi tiled input import" in source,
-            "axis_tiled": "FPGAI_AXIS_INPUT_TILE_SIZE" in source and ("in_stream.read()" in source or "read_f32(in)" in source),
+            "m_axi_tiled": ("FPGAI_INPUT_TILE_SIZE" in source or "FPGAI_TRAIN_INPUT_TILE_SIZE" in source) and ("m_axi tiled input import" in source or "training tiled input import" in source),
+            "axis_tiled": ("FPGAI_AXIS_INPUT_TILE_SIZE" in source or "FPGAI_TRAIN_AXIS_INPUT_TILE_SIZE" in source) and ("in_stream.read()" in source or "read_f32(in)" in source),
         }
     return {
         "m_axi_port": "m_axi port=output_mem" in source and "output_mem" in source,
         "stream_port": output_stream_port,
-        "m_axi_tiled": "FPGAI_OUTPUT_TILE_SIZE" in source and "m_axi tiled output export" in source,
-        "axis_tiled": "FPGAI_AXIS_OUTPUT_TILE_SIZE" in source and ("out_stream.write(packet)" in source or "write_f32(out" in source),
+        "m_axi_tiled": ("FPGAI_OUTPUT_TILE_SIZE" in source or "FPGAI_TRAIN_OUTPUT_TILE_SIZE" in source) and ("m_axi tiled output export" in source or "training tiled output export" in source),
+        "axis_tiled": ("FPGAI_AXIS_OUTPUT_TILE_SIZE" in source or "FPGAI_TRAIN_AXIS_OUTPUT_TILE_SIZE" in source) and ("out_stream.write(packet)" in source or "write_f32(out" in source),
         "tlast": "packet.last" in source or "write_f32(out" in source,
     }
 
@@ -710,13 +752,23 @@ def _append_source_io_checks(checks: list[dict[str, Any]], source: str, role: st
     prefix = "input" if role == "inputs" else "output"
     if kind.startswith("m_axi"):
         checks.append(_check(f"cpp_{prefix}_m_axi_port_matches_plan", True, actual["m_axi_port"], evidence=f"{prefix}_mem m_axi interface pragma"))
-        checks.append(_check(f"cpp_{prefix}_stream_port_absent_for_m_axi", False, actual["stream_port"], evidence=f"hls::stream<axis_t>& {'in_stream/in' if role == 'inputs' else 'out_stream/out'}"))
+        hybrid_training_axi = _source_has_training_hybrid_axi(source) and actual["m_axi_port"]
+        checks.append(_check(
+            f"cpp_{prefix}_stream_port_absent_for_m_axi",
+            False,
+            actual["stream_port"] and not hybrid_training_axi,
+            evidence=(
+                f"hls::stream<axis_t>& {'in_stream/in' if role == 'inputs' else 'out_stream/out'}"
+                + ("; accepted as training hybrid control/runtime stream because tensor payload uses m_axi" if hybrid_training_axi else "")
+            ),
+        ))
         if kind == "m_axi_tiled":
-            checks.append(_check(f"cpp_{prefix}_m_axi_tiling_matches_plan", True, actual["m_axi_tiled"], evidence=f"FPGAI_{prefix.upper()}_TILE_SIZE and m_axi tiled {prefix}"))
+            macros = _tile_macro_candidates_for(role, kind)
+            checks.append(_check(f"cpp_{prefix}_m_axi_tiling_matches_plan", True, actual["m_axi_tiled"], evidence=f"{'/'.join(macros)} and m_axi tiled {prefix}"))
             expected_tile = row.get("tile_size")
             if expected_tile:
-                macro = _tile_macro_for(role, kind)
-                checks.append(_check_value(f"cpp_{prefix}_m_axi_tile_size_matches_plan", int(expected_tile), _source_macro_int(source, macro or ""), evidence=macro or "tile macro"))
+                actual_tile, macro = _source_macro_int_any(source, macros)
+                checks.append(_check_value(f"cpp_{prefix}_m_axi_tile_size_matches_plan", int(expected_tile), actual_tile, evidence=macro or "tile macro"))
     elif kind.startswith("axi_stream"):
         checks.append(_check(f"cpp_{prefix}_stream_port_matches_plan", True, actual["stream_port"], evidence=f"hls::stream<axis_t>& {'in_stream/in' if role == 'inputs' else 'out_stream/out'}"))
         checks.append(_check(f"cpp_{prefix}_m_axi_port_absent_for_stream", False, actual["m_axi_port"], evidence=f"{prefix}_mem m_axi interface pragma"))
@@ -753,7 +805,13 @@ def _append_source_aux_role_checks(checks: list[dict[str, Any]], source: str, ro
             return
         if kind.startswith("m_axi"):
             checks.append(_check("cpp_labels_m_axi_port_matches_plan", True, label_m_axi, evidence="label_mem m_axi interface pragma"))
-            checks.append(_check("cpp_labels_stream_path_absent_for_m_axi", False, label_stream, evidence="axis_label_tile/read_f32(aux)"))
+            hybrid_training_axi = _source_has_training_hybrid_axi(source) and label_m_axi
+            checks.append(_check(
+                "cpp_labels_stream_path_absent_for_m_axi",
+                False,
+                label_stream and not hybrid_training_axi,
+                evidence="axis_label_tile/read_f32(aux)" + ("; accepted as training hybrid auxiliary stream because label_mem is the tensor payload path" if hybrid_training_axi else ""),
+            ))
         elif kind.startswith("axi_stream"):
             checks.append(_check("cpp_labels_stream_path_matches_plan", True, label_stream, evidence="axis_label_tile/read_f32(aux)"))
             checks.append(_check("cpp_labels_m_axi_port_absent_for_stream", False, label_m_axi, evidence="label_mem m_axi interface pragma"))

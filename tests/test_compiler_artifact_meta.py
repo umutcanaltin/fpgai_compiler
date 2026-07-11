@@ -448,12 +448,15 @@ def test_hardware_knob_contract_status_treats_numeric_equivalence_as_applied() -
 def test_compiler_has_fit_policy_gate_in_source() -> None:
     source = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
 
+    assert "def _resolved_fit_policy" in source
     assert "def _fit_policy_gate" in source
     assert '"fit_policy_gate": fit_policy_gate' in source
     assert "targets.platform.fit_policy" in source
     assert "hardware.fit_policy" in source
     assert "build.fit_policy" in source
     assert "block_over_limit" in source
+    assert "policy_source" in source
+    assert "requested_policy" in source
     assert "blocked_stages" in source
     assert "vivado_impl" in source
     assert "bitstream" in source
@@ -496,6 +499,8 @@ def test_fit_policy_gate_modes_behavior() -> None:
         gate = compiler._fit_policy_gate(prediction_artifacts)
 
         assert gate["policy"] == ("enforce" if policy == "block_over_limit" else policy)
+        assert gate["policy_source"] == "targets.platform.fit_policy"
+        assert gate["requested_policy"] == policy
         assert gate["board_fit_status"] == "over_limit"
         assert gate["board_fit_limiting_dimension"] == "dsp"
         assert gate["vivado_allowed_by_board_fit"] is False
@@ -519,6 +524,56 @@ def test_fit_policy_gate_modes_behavior() -> None:
     assert gate["policy"] == "report_only"
     assert gate["blocked"] is False
     assert gate["warning"] is False
+
+
+def test_fit_policy_resolver_supports_build_path_and_priority() -> None:
+    from types import SimpleNamespace
+
+    from fpgai.engine.compiler import Compiler
+
+    compiler = object.__new__(Compiler)
+    compiler.cfg = SimpleNamespace(raw={"build": {"fit_policy": "block_over_limit"}})
+    assert compiler._resolved_fit_policy() == ("enforce", "build.fit_policy", "block_over_limit")
+
+    compiler.cfg = SimpleNamespace(raw={"hardware": {"fit_policy": "warn"}, "build": {"fit_policy": "block_over_limit"}})
+    assert compiler._resolved_fit_policy() == ("warn", "hardware.fit_policy", "warn")
+
+    compiler.cfg = SimpleNamespace(
+        raw={
+            "targets": {"platform": {"fit_policy": "enforce"}},
+            "hardware": {"fit_policy": "warn"},
+            "build": {"fit_policy": "report_only"},
+        }
+    )
+    assert compiler._resolved_fit_policy() == ("enforce", "targets.platform.fit_policy", "enforce")
+
+    compiler.cfg = SimpleNamespace(raw={"build": {"fit_policy": "invalid_policy_name"}})
+    assert compiler._resolved_fit_policy() == ("report_only", "invalid_fallback", "invalid_policy_name")
+
+
+def test_fit_policy_gate_uses_build_fit_policy_alias() -> None:
+    from types import SimpleNamespace
+
+    from fpgai.engine.compiler import Compiler
+
+    compiler = object.__new__(Compiler)
+    compiler.cfg = SimpleNamespace(raw={"build": {"fit_policy": "block_over_limit"}})
+    gate = compiler._fit_policy_gate(
+        {
+            "board_fit": {
+                "status": "over_limit",
+                "limiting_dimension": "lut",
+                "vivado_allowed": False,
+            }
+        }
+    )
+
+    assert gate["policy"] == "enforce"
+    assert gate["policy_source"] == "build.fit_policy"
+    assert gate["requested_policy"] == "block_over_limit"
+    assert gate["blocked"] is True
+    assert "vivado_impl" in gate["blocked_stages"]
+    assert "bitstream" in gate["blocked_stages"]
 
 
 def test_config_loader_validates_fit_policy_enum_in_source() -> None:

@@ -1,0 +1,1 @@
+[ERROR] YAML-requested Vivado bridge flow failed: T2_adam_tiled_m_axi: fit_policy_gate blocked Vivado implementation: policy=enforce, board_fit_status=over_limit, limiting=target_clock_mhz. Board fit status is over_limit under fit_policy=enforce.

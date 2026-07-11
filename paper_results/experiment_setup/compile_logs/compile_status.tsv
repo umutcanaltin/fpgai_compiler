@@ -1,0 +1,3 @@
+order	id	status	log
+00	I0_baseline_fx16_embedded	0	paper_results/experiment_setup/compile_logs/00_I0_baseline_fx16_embedded.log
+01	I1_precision_fx8_embedded	0	paper_results/experiment_setup/compile_logs/01_I1_precision_fx8_embedded.log

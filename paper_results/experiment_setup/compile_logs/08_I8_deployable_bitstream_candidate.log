@@ -1,0 +1,182 @@
+
+=============== FPGAI Compile Result ===============
+Out dir              : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate
+Ops                  : 5
+Params               : 4
+Inputs               : ['input']
+Outputs              : ['output']
+---------------------------------------------------
+HLS project dir      : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/hls
+Host C++ dir         : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/hostcpp
+---------------------------------------------------
+HLS ran              : True
+HLS ok               : True
+HLS returncode       : 0
+HLS stdout log       : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/hls/logs/vitis_hls_stdout.log
+HLS stderr log       : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/hls/logs/vitis_hls_stderr.log
+HLS csynth report    : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/hls/fpgai_hls_proj/sol1/syn/report/csynth.rpt
+---------------------------------------------------
+Quant report dir     : None
+Quant metrics JSON   : None
+Quant summary TXT    : None
+Quant layerwise CSV  : None
+---------------------------------------------------
+Precision sweep dir  : None
+Sweep results JSON   : None
+Sweep summary TXT    : None
+Sweep results CSV    : None
+---------------------------------------------------
+Design space dir     : None
+Design space JSON    : None
+Design space TXT     : None
+Design space CSV     : None
+Layer breakdown CSV  : None
+---------------------------------------------------
+Estimate/HLS dir     : None
+Estimate/HLS JSON    : None
+Estimate/HLS TXT     : None
+---------------------------------------------------
+HLS modules dir      : None
+HLS modules JSON     : None
+HLS modules CSV      : None
+HLS modules TXT      : None
+---------------------------------------------------
+Training plan JSON   : None
+Training summary TXT : None
+---------------------------------------------------
+Manifest             : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/manifest.json
+Pipeline mode        : inference
+Top kernel           : deeplearn
+Compile seconds      : 393.045535
+---------------------------------------------------
+Prediction artifacts:
+  - Model profile JSON: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/reports/model_profile.json
+  - Resource prediction: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/reports/resource_prediction.json
+  - Timing prediction: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/reports/timing_prediction.json
+  - Prediction summary: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/reports/prediction_summary.md
+  - Board fit JSON: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/reports/board_fit.json
+  - Board fit summary: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/reports/board_fit.md
+  - Board fit status: near_limit
+  - Board fit limiting: target_clock_mhz
+  - Vivado allowed by fit: True
+---------------------------------------------------
+HLS artifacts       : available
+  - hls_ran: True
+  - hls_ok: True
+  - hls_returncode: 0
+  - stdout_log: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/hls/logs/vitis_hls_stdout.log
+  - stderr_log: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/hls/logs/vitis_hls_stderr.log
+  - csynth_report: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/hls/fpgai_hls_proj/sol1/syn/report/csynth.rpt
+  - artifact_metadata: hls_artifact_metadata.json
+  - hls_file_count: 503
+  - schedule_summary: hls_schedule_summary.json
+  - ii_comparison: hls_ii_comparison.json
+---------------------------------------------------
+Fit policy gate    : available
+  - policy: enforce
+  - policy_source: build.fit_policy
+  - requested_policy: block_over_limit
+  - board_fit_status: near_limit
+  - limiting: target_clock_mhz
+  - vivado_allowed_by_board_fit: True
+  - over_limit: False
+  - blocked: False
+  - warning: False
+  - severity: info
+  - reason: Board fit gate passed or board fit status is not over_limit.
+---------------------------------------------------
+Vivado bridge       : available
+  - board: kv260
+  - part: xck26-sfvc784-2LV-c
+  - ps_type: zynq_ultra_ps_e
+  - vivado_bridge_generated: True
+  - vivado_synth_requested: True
+  - vivado_impl_requested: True
+  - bitstream_requested: True
+  - bitstream_exists: True
+  - xsa_exists: True
+---------------------------------------------------
+Runtime package     : created
+  - package: runtime_package/package_manifest.json
+  - deployable_overlay_present: True
+  - bitstream_present: True
+  - hwh_present: True
+  - xsa_present: True
+  - file_count: 16
+---------------------------------------------------
+Pipeline stages     :
+  - load_config: done
+  - import_model: done
+  - analyze_model: done
+  - plan_architecture: done
+  - quantization_report: skipped
+  - precision_sweep: skipped
+  - design_space: skipped
+  - estimate_vs_hls: skipped
+  - hls_module_breakdown: skipped
+  - generate_host_cpp: done
+  - generate_cpp: done
+  - generate_hls_project: done
+  - run_hls: done
+  - training_artifacts: skipped
+  - vivado_project: done
+  - bitstream: done
+  - runtime_package: done
+---------------------------------------------------
+Hardware knob contract: available
+  - JSON: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/reports/hardware_knob_contract.json
+  - Summary: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/reports/hardware_knob_contract.md
+  - Knob count: 18
+  - Manual YAML knobs: 11
+  - Changed/clamped: 2
+  - Report-only: 0
+===================================================
+---------------------------------------------------
+Captured stdout log : build/cli_logs/20260710_150650_008846_compile_stdout.log
+Captured stderr log : build/cli_logs/20260710_150650_008846_compile_stderr.log
+[OK] Wrote artifacts to: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate
+{
+  "checks": [
+    {
+      "actual": "build/paper_experiments/inference/I8_deployable_bitstream_candidate",
+      "name": "manifest_or_artifact_report_present",
+      "passed": true
+    },
+    {
+      "actual": true,
+      "name": "source_generated",
+      "passed": true
+    },
+    {
+      "actual": true,
+      "name": "hls_ok",
+      "passed": true
+    },
+    {
+      "actual": true,
+      "name": "vivado_implemented",
+      "passed": true
+    },
+    {
+      "actual": true,
+      "name": "bitstream_generated",
+      "passed": true
+    },
+    {
+      "actual": true,
+      "name": "runtime_package_created",
+      "passed": true
+    },
+    {
+      "actual": true,
+      "name": "runtime_package_validated",
+      "passed": true
+    }
+  ],
+  "claim_level": "level_3_bitstream_package",
+  "configured_stage": "bitstream_package",
+  "expected_claim_level": "level_3_bitstream_package",
+  "failed_checks": [],
+  "out_dir": "build/paper_experiments/inference/I8_deployable_bitstream_candidate",
+  "status": "passed"
+}

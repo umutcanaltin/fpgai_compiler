@@ -2907,16 +2907,25 @@ def _fpgai_insert_training_io_and_gradient_ports(source: str, *, raw_cfg: Any) -
         branch.extend(["    return;", "  }", ""])
         if marker in updated:
             updated = updated.replace(marker, "\n".join(branch) + marker, 1)
-    if any([input_tiled, label_tiled, output_tiled, gradient_export_policy == "tiled"]) and "FPGAI_TRAIN_INPUT_TILE_SIZE" not in updated[:2500]:
+    if any([input_tiled, label_tiled, output_tiled, gradient_export_policy == "tiled"]) and "#define FPGAI_TRAIN_INPUT_TILE_SIZE" not in updated[:2500]:
         macros = [
             "#ifndef FPGAI_TRAIN_INPUT_TILE_SIZE",
             "#define FPGAI_TRAIN_INPUT_TILE_SIZE 64",
             "#endif",
+            "#ifndef FPGAI_INPUT_TILE_SIZE",
+            "#define FPGAI_INPUT_TILE_SIZE FPGAI_TRAIN_INPUT_TILE_SIZE",
+            "#endif",
             "#ifndef FPGAI_TRAIN_LABEL_TILE_SIZE",
             "#define FPGAI_TRAIN_LABEL_TILE_SIZE 64",
             "#endif",
+            "#ifndef FPGAI_LABEL_TILE_SIZE",
+            "#define FPGAI_LABEL_TILE_SIZE FPGAI_TRAIN_LABEL_TILE_SIZE",
+            "#endif",
             "#ifndef FPGAI_TRAIN_OUTPUT_TILE_SIZE",
             "#define FPGAI_TRAIN_OUTPUT_TILE_SIZE 64",
+            "#endif",
+            "#ifndef FPGAI_OUTPUT_TILE_SIZE",
+            "#define FPGAI_OUTPUT_TILE_SIZE FPGAI_TRAIN_OUTPUT_TILE_SIZE",
             "#endif",
             "#ifndef FPGAI_GRADIENT_EXPORT_TILE_SIZE",
             "#define FPGAI_GRADIENT_EXPORT_TILE_SIZE 64",
@@ -3968,3 +3977,180 @@ def _fpgai_insert_optimizer_state_export_capture(source: str, *, raw_cfg: Any) -
 def emit_top_train_cpp(*args, **kwargs):
     source = _fpgai_training_optimizer_state_export_previous_emit_top_train_cpp(*args, **kwargs)
     return _fpgai_insert_optimizer_state_export_capture(source, raw_cfg=kwargs.get("raw_cfg") or {})
+
+# FPGAI P2T real m_axi tiled training movement materialization.
+#
+# Earlier training m_axi/tiled support exposed ports, local tile buffers, and
+# movement reports, but preserved the legacy stream-fed numeric path.  That made
+# different YAML tile sizes produce identical generated training tops.  This final
+# wrapper keeps the existing owner path and post-processes the generated source so
+# m_axi tiled input/label/output settings become real load/store loops and the
+# tile-size macros come from the raw YAML.
+_fpgai_p2t_training_m_axi_previous_emit_top_train_cpp = emit_top_train_cpp
+
+
+def _fpgai_p2t_positive_int(value: Any, default: int = 64) -> int:
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return max(1, int(default))
+
+
+def _fpgai_p2t_movement_cfg(raw: Any, tensor: str, direction: str) -> dict:
+    cfg = _fpgai_training_raw_get(raw, f"data_movement.{tensor}.{direction}", {}) or {}
+    if not isinstance(cfg, dict) or not any(k in cfg for k in {"interface", "transport", "policy", "tiled", "tile_size"}):
+        direct = _fpgai_training_raw_get(raw, f"data_movement.{tensor}", {}) or {}
+        cfg = direct if isinstance(direct, dict) else {}
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def _fpgai_p2t_tile_size(raw: Any, tensor: str, direction: str, default: int = 64) -> int:
+    cfg = _fpgai_p2t_movement_cfg(raw, tensor, direction)
+    tiled = cfg.get("tiled", {})
+    if isinstance(tiled, dict):
+        return _fpgai_p2t_positive_int(tiled.get("tile_size", cfg.get("tile_size", default)), default)
+    return _fpgai_p2t_positive_int(cfg.get("tile_size", default), default)
+
+
+def _fpgai_p2t_replace_macro(source: str, name: str, value: int) -> str:
+    line = f"#define {name} {int(value)}"
+    pattern = re.compile(rf"#define\s+{re.escape(name)}\s+\d+")
+    if pattern.search(source):
+        return pattern.sub(line, source, count=1)
+    return source
+
+
+def _fpgai_p2t_apply_training_tile_macros(source: str, *, raw_cfg: Any) -> str:
+    raw = raw_cfg or {}
+    replacements = {
+        "FPGAI_TRAIN_INPUT_TILE_SIZE": _fpgai_p2t_tile_size(raw, "inputs", "import", 64),
+        "FPGAI_TRAIN_LABEL_TILE_SIZE": _fpgai_p2t_tile_size(raw, "labels", "import", 64),
+        "FPGAI_TRAIN_OUTPUT_TILE_SIZE": _fpgai_p2t_tile_size(raw, "outputs", "export", 64),
+        "FPGAI_GRADIENT_EXPORT_TILE_SIZE": _fpgai_p2t_tile_size(raw, "gradients", "export", 64),
+    }
+    updated = source
+    for name, value in replacements.items():
+        updated = _fpgai_p2t_replace_macro(updated, name, value)
+    return updated
+
+
+def _fpgai_p2t_input_import_block(total: str, buffer: str) -> str:
+    return "\n".join([
+        "  // FPGAI real training m_axi tiled input import: input_mem -> input_tile -> activation buffer.",
+        f"  for (int tile_base = 0; tile_base < {total}; tile_base += FPGAI_TRAIN_INPUT_TILE_SIZE) {{",
+        "    for (int lane = 0; lane < FPGAI_TRAIN_INPUT_TILE_SIZE; ++lane) {",
+        "#pragma HLS PIPELINE II=1",
+        "      const int idx = tile_base + lane;",
+        f"      input_tile[lane] = (idx < {total}) ? (act_t)u32_to_f32(input_mem[idx].to_uint()) : (act_t)0;",
+        "    }",
+        "    for (int lane = 0; lane < FPGAI_TRAIN_INPUT_TILE_SIZE; ++lane) {",
+        "#pragma HLS PIPELINE II=1",
+        "      const int idx = tile_base + lane;",
+        f"      if (idx < {total}) {buffer}[idx] = input_tile[lane];",
+        "    }",
+        "  }",
+    ])
+
+
+def _fpgai_p2t_label_import_block(total: str) -> str:
+    return "\n".join([
+        "  // FPGAI real training m_axi tiled label import: label_mem -> label_tile -> target buffer.",
+        f"  for (int tile_base = 0; tile_base < {total}; tile_base += FPGAI_TRAIN_LABEL_TILE_SIZE) {{",
+        "    for (int lane = 0; lane < FPGAI_TRAIN_LABEL_TILE_SIZE; ++lane) {",
+        "#pragma HLS PIPELINE II=1",
+        "      const int idx = tile_base + lane;",
+        f"      label_tile[lane] = (idx < {total}) ? (act_t)u32_to_f32(label_mem[idx].to_uint()) : (act_t)0;",
+        "    }",
+        "    for (int lane = 0; lane < FPGAI_TRAIN_LABEL_TILE_SIZE; ++lane) {",
+        "#pragma HLS PIPELINE II=1",
+        "      const int idx = tile_base + lane;",
+        f"      if (idx < {total}) target_buf[idx] = label_tile[lane];",
+        "    }",
+        "  }",
+    ])
+
+
+def _fpgai_p2t_output_export_block(total: int, buffer: str) -> str:
+    return "\n".join([
+        "  // FPGAI real training m_axi tiled output export: final activation buffer -> output_tile -> output_mem.",
+        f"  for (int tile_base = 0; tile_base < {int(total)}; tile_base += FPGAI_TRAIN_OUTPUT_TILE_SIZE) {{",
+        "    for (int lane = 0; lane < FPGAI_TRAIN_OUTPUT_TILE_SIZE; ++lane) {",
+        "#pragma HLS PIPELINE II=1",
+        "      const int idx = tile_base + lane;",
+        f"      output_tile[lane] = (idx < {int(total)}) ? {buffer}[idx] : (act_t)0;",
+        "    }",
+        "    for (int lane = 0; lane < FPGAI_TRAIN_OUTPUT_TILE_SIZE; ++lane) {",
+        "#pragma HLS PIPELINE II=1",
+        "      const int idx = tile_base + lane;",
+        f"      if (idx < {int(total)}) output_mem[idx] = f32_to_u32((float)output_tile[lane]);",
+        "    }",
+        "  }",
+        "",
+    ])
+
+
+def _fpgai_p2t_find_final_training_buffer(source: str) -> Optional[str]:
+    for pattern in [
+        r"acc_t\s+difference\s*=\s*\(acc_t\)([A-Za-z0-9_]+)\[i\]\s*-\s*\(acc_t\)target_buf\[i\];",
+        r"acc_t\s+max_logit\s*=\s*\(acc_t\)([A-Za-z0-9_]+)\[0\];",
+    ]:
+        m = re.search(pattern, source)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _fpgai_p2t_find_target_size(source: str) -> Optional[int]:
+    m = re.search(r"static\s+act_t\s+target_buf\[(\d+)\];", source)
+    if m:
+        return _fpgai_p2t_positive_int(m.group(1), 1)
+    m = re.search(r"for\s*\(int i = 0; i < (\d+); \+\+i\)\s*target_buf\[i\]", source)
+    if m:
+        return _fpgai_p2t_positive_int(m.group(1), 1)
+    return None
+
+
+def _fpgai_p2t_materialize_training_m_axi_tiles(source: str, *, raw_cfg: Any) -> str:
+    raw = raw_cfg or {}
+    updated = _fpgai_p2t_apply_training_tile_macros(source, raw_cfg=raw)
+
+    input_tiled = _fpgai_training_has_m_axi_tiled(raw, "inputs", "import")
+    label_tiled = _fpgai_training_has_m_axi_tiled(raw, "labels", "import")
+    output_tiled = _fpgai_training_has_m_axi_tiled(raw, "outputs", "export")
+
+    if input_tiled and "FPGAI real training m_axi tiled input import" not in updated:
+        input_pattern = re.compile(
+            r"  for \(int i = 0; i < (?P<total>\d+); \+\+i\) (?P<buffer>[A-Za-z0-9_]+)\[i\] = \(act_t\)read_f32\(in\);"
+        )
+        updated = input_pattern.sub(
+            lambda m: _fpgai_p2t_input_import_block(m.group("total"), m.group("buffer")),
+            updated,
+            count=1,
+        )
+
+    if label_tiled and "FPGAI real training m_axi tiled label import" not in updated:
+        label_pattern = re.compile(
+            r"  for \(int i = 0; i < (?P<total>\d+); \+\+i\) target_buf\[i\] = \(act_t\)read_f32\(aux\);"
+        )
+        updated = label_pattern.sub(
+            lambda m: _fpgai_p2t_label_import_block(m.group("total")),
+            updated,
+            count=1,
+        )
+
+    if output_tiled and "FPGAI real training m_axi tiled output export" not in updated:
+        final_buffer = _fpgai_p2t_find_final_training_buffer(updated)
+        output_size = _fpgai_p2t_find_target_size(updated)
+        if final_buffer and output_size:
+            block = _fpgai_p2t_output_export_block(output_size, final_buffer)
+            anchor = "  loss_t loss_value = (loss_t)0;\n"
+            if anchor in updated:
+                updated = updated.replace(anchor, block + anchor, 1)
+
+    return updated
+
+
+def emit_top_train_cpp(*args, **kwargs):
+    source = _fpgai_p2t_training_m_axi_previous_emit_top_train_cpp(*args, **kwargs)
+    return _fpgai_p2t_materialize_training_m_axi_tiles(source, raw_cfg=kwargs.get("raw_cfg") or {})
+

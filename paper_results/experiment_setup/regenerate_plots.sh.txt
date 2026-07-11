@@ -1,0 +1,3 @@
+# Regenerate paper tables and figures
+set -e
+python -m fpgai.paper.plots build --output-dir paper_results/plots

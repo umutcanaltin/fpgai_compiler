@@ -1,0 +1,1 @@
+design_id,source,step,epoch,batch,mode,loss,accuracy,runtime_seconds,cumulative_runtime_seconds,gradient_norm,weight_delta_norm,gradient_cosine_vs_reference,weight_after_cosine_vs_reference,weight_delta_cosine_vs_reference,status

@@ -1288,6 +1288,8 @@ def emit_runtime_package(
 
     root = Path(out_dir).resolve()
     package_dir = root / "runtime_package"
+    if package_dir.exists():
+        shutil.rmtree(package_dir)
     package_dir.mkdir(parents=True, exist_ok=True)
 
     files: dict[str, Any] = {}
@@ -1515,6 +1517,21 @@ def emit_runtime_package(
         encoding="utf-8",
     )
 
+    from fpgai.runtime.package_validation import emit_runtime_package_validation
+
+    validation_summary = emit_runtime_package_validation(root, package_dir)
+    files["runtime_package_validation_json"] = {
+        "package_path": "runtime_package_validation.json",
+        "present": True,
+    }
+    files["runtime_package_validation_md"] = {
+        "package_path": "runtime_package_validation.md",
+        "present": True,
+    }
+    payload["runtime_package_validation"] = validation_summary
+    manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    emit_runtime_package_validation(root, package_dir)
+
     return {
         "path": "runtime_package/package_manifest.json",
         "package_dir": "runtime_package",
@@ -1526,6 +1543,9 @@ def emit_runtime_package(
         "runtime_weight_payload_required": weight_payload["summary"]["required"],
         "runtime_weight_payload_present": weight_payload["summary"]["present"],
         "runtime_weight_total_words": weight_payload["summary"]["total_words"],
+        "runtime_package_validation_status": validation_summary["status"],
+        "runtime_package_deployability_ready": validation_summary["deployability_ready"],
+        "runtime_package_validation_json": validation_summary["validation_json"],
         "file_count": len(files),
     }
 

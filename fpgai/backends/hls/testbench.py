@@ -118,6 +118,39 @@ static std::vector<float> read_packed_activations(
 """
 
 
+
+def _cfg_get(raw: Mapping[str, Any] | None, path: str, default: Any = None) -> Any:
+    if not isinstance(raw, Mapping):
+        return default
+    current: Any = raw
+    for part in path.split('.'):
+        if not isinstance(current, Mapping) or part not in current:
+            return default
+        current = current[part]
+    return current
+
+
+def _normalise_token(value: Any) -> str:
+    return str(value or '').strip().lower().replace('-', '_')
+
+
+def _io_m_axi_requested(raw_cfg: Mapping[str, Any] | None, kind: str) -> bool:
+    kind = str(kind).strip().lower()
+    if kind == 'input':
+        prefixes = ('data_movement.inputs.import', 'data_movement.inputs', 'data_movement.input.load')
+    else:
+        prefixes = ('data_movement.outputs.export', 'data_movement.outputs', 'data_movement.output.store')
+
+    interface = ''
+    policy = ''
+    for prefix in prefixes:
+        interface = interface or _normalise_token(_cfg_get(raw_cfg, f'{prefix}.interface', ''))
+        policy = policy or _normalise_token(_cfg_get(raw_cfg, f'{prefix}.policy', ''))
+        tiled = _cfg_get(raw_cfg, f'{prefix}.tiled', None)
+        if not policy and isinstance(tiled, Mapping) and bool(tiled.get('enabled', False)):
+            policy = 'tiled'
+    return interface in {'m_axi', 'maxi', 'ddr'} and policy in {'', 'full', 'tiled'}
+
 def emit_tb_cpp(
     tb_dir: Path,
     *,
@@ -137,7 +170,104 @@ def emit_tb_cpp(
         out_words=out_words,
     )
 
-    if mode in {"stream", "streamed"}:
+    input_m_axi = _io_m_axi_requested(raw_cfg, "input")
+    output_m_axi = _io_m_axi_requested(raw_cfg, "output")
+
+    if mode in {"embedded", "compile_time", "static", ""} and (input_m_axi or output_m_axi):
+        input_arg = "const ap_uint<32>* input_mem" if input_m_axi else "hls::stream<axis_t>& in_stream"
+        output_arg = "ap_uint<32>* output_mem" if output_m_axi else "hls::stream<axis_t>& out_stream"
+        input_decl = f"    std::vector<ap_uint<32> > input_mem({max(1, int(in_words))});\n" if input_m_axi else "    hls::stream<axis_t> in_stream;\n"
+        output_decl = f"    std::vector<ap_uint<32> > output_mem({max(1, int(out_words))});\n" if output_m_axi else "    hls::stream<axis_t> out_stream;\n"
+        input_load = f"""    for (int index = 0; index < {max(1, int(in_words))}; ++index) {{
+        float value = (index < n_floats) ? input_data[index] : 0.0f;
+        input_mem[index] = fpgai_float_to_bits(value);
+    }}
+""" if input_m_axi else "    push_packed_activations(in_stream, input_data);\n"
+        output_capture = f"""    std::vector<float> output_data;
+    output_data.reserve({max(1, int(out_words))});
+    for (int index = 0; index < {max(1, int(out_words))}; ++index) {{
+        output_data.push_back(fpgai_bits_to_float(output_mem[index].to_uint()));
+    }}
+""" if output_m_axi else "    std::vector<float> output_data = read_packed_activations(out_stream, FPGAI_OUTPUT_VALUES);\n"
+        call_input = "input_mem.data()" if input_m_axi else "in_stream"
+        call_output = "output_mem.data()" if output_m_axi else "out_stream"
+        tb_text = f"""
+#include <cstdio>
+#include <cstdlib>
+#include <vector>
+#include <fstream>
+#include <hls_stream.h>
+#include <ap_axi_sdata.h>
+#include <ap_int.h>
+#include "fpgai_params.h"
+
+using std::size_t;
+typedef ap_axis<32,0,0,0> axis_t;
+
+extern "C" void {top_name}(
+    {input_arg},
+    {output_arg}
+);
+
+{helpers}
+
+static unsigned int fpgai_float_to_bits(float value) {{
+    union {{ float f; unsigned int i; }} u;
+    u.f = value;
+    return u.i;
+}}
+
+static float fpgai_bits_to_float(unsigned int value) {{
+    union {{ unsigned int i; float f; }} u;
+    u.i = value;
+    return u.f;
+}}
+
+int main(int argc, char** argv) {{
+    const char* in_path = "input.bin";
+    const char* out_path = "output.bin";
+    if (argc >= 2) in_path = argv[1];
+    if (argc >= 3) out_path = argv[2];
+
+    std::ifstream f(in_path, std::ios::binary);
+    if (!f) {{
+        fprintf(stderr, "[TB] Error: Could not open input file: %s\\n", in_path);
+        return 1;
+    }}
+
+    f.seekg(0, std::ios::end);
+    size_t size = f.tellg();
+    f.seekg(0, std::ios::beg);
+    int n_floats = size / sizeof(float);
+
+    std::vector<float> input_data(n_floats);
+    f.read(reinterpret_cast<char*>(input_data.data()), size);
+    f.close();
+
+    printf("[TB] Loaded %d inputs from %s\\n", n_floats, in_path);
+    printf("[TB] Inference I/O ABI: input_m_axi=%d output_m_axi=%d weights_mode=embedded\\n", {1 if input_m_axi else 0}, {1 if output_m_axi else 0});
+
+{input_decl}{output_decl}
+{input_load}
+    printf("[TB] Running inference...\\n");
+    {top_name}({call_input}, {call_output});
+
+{output_capture}
+    printf("[TB] Received %zu outputs.\\n", output_data.size());
+
+    std::ofstream of(out_path, std::ios::binary);
+    if (!of) {{
+        fprintf(stderr, "[TB] Error: Could not open output file for writing: %s\\n", out_path);
+        return 3;
+    }}
+    of.write(reinterpret_cast<const char*>(output_data.data()), output_data.size() * sizeof(float));
+    of.close();
+
+    printf("[TB] Wrote %s\\n", out_path);
+    return 0;
+}}
+"""
+    elif mode in {"stream", "streamed"}:
         tb_text = f"""
 #include <cstdio>
 #include <cstdlib>

@@ -1,0 +1,22 @@
+# Runtime measurement status
+
+| section | Design | runtime_status | runtime_latency_ms_mean | runtime_throughput | runtime_accuracy | runtime_training_step_ms | runtime_energy_mj_estimated |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| inference | I0_baseline_fx16_embedded | not_run | — | — | — | — | — |
+| inference | I1_precision_fx8_embedded | not_run | — | — | — | — | — |
+| inference | I2_precision_fx24_embedded | not_run | — | — | — | — | — |
+| inference | I3_parallel_pe2 | not_run | — | — | — | — | — |
+| inference | I4_parallel_pe4 | not_run | — | — | — | — | — |
+| inference | I5_pipeline_latency_first | not_run | — | — | — | — | — |
+| inference | I6_pipeline_resource_first | not_run | — | — | — | — | — |
+| inference | I7_weight_import_m_axi | not_run | — | — | — | — | — |
+| inference | I8_deployable_bitstream_candidate | not_run | — | — | — | — | — |
+| inference | I9_board_runtime_candidate | not_run | — | — | — | — | — |
+| training | T0_sgd_tiled_m_axi | not_run | — | — | — | — | — |
+| training | T1_momentum_tiled_m_axi | not_run | — | — | — | — | — |
+| training | T3_cross_entropy_tiled_m_axi | not_run | — | — | — | — | — |
+| training | T4_tile32_m_axi | not_run | — | — | — | — | — |
+| training | T5_tile128_m_axi | not_run | — | — | — | — | — |
+| training | T6_accum_batch2_m_axi | not_run | — | — | — | — | — |
+| training | T7_deployable_training_bitstream | not_run | — | — | — | — | — |
+| training | T8_real_fpga_training_curve_candidate | not_run | — | — | — | — | — |

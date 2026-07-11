@@ -1,0 +1,62 @@
+# FPGAI deployable bitstream candidate compile plan
+
+set -u
+set -o pipefail
+FPGAI_EXPERIMENT_SETUP_DIR=${FPGAI_EXPERIMENT_SETUP_DIR:-paper_results/experiment_setup}
+FPGAI_COMPILE_LOG_DIR="$FPGAI_EXPERIMENT_SETUP_DIR/compile_logs"
+mkdir -p "$FPGAI_COMPILE_LOG_DIR"
+FPGAI_COMPILE_STATUS_TSV="$FPGAI_COMPILE_LOG_DIR/compile_status.tsv"
+printf 'order\tid\tstatus\tlog\n' > "$FPGAI_COMPILE_STATUS_TSV"
+FPGAI_COMPILE_FAILURES=0
+run_fpgai_compile() {
+  local order="$1"
+  local experiment_id="$2"
+  local configured_stage="$3"
+  local expected_claim_level="$4"
+  local project_out_dir="$5"
+  shift 5
+  local safe_id="${experiment_id//[^A-Za-z0-9_]/_}"
+  local log="$FPGAI_COMPILE_LOG_DIR/${order}_${safe_id}.log"
+  echo "[FPGAI][RUN] ${order} ${experiment_id}: $*"
+  "$@" 2>&1 | tee "$log"
+  local command_status=${PIPESTATUS[0]}
+  local artifact_status=0
+  if [ "$command_status" -eq 0 ]; then
+    python -m fpgai.paper.experiment_setup --validate-artifact "$project_out_dir" --configured-stage "$configured_stage" --expected-claim-level "$expected_claim_level" >> "$log" 2>&1
+    artifact_status=$?
+  fi
+  local status=$command_status
+  if [ "$status" -eq 0 ] && [ "$artifact_status" -ne 0 ]; then
+    status=$artifact_status
+  fi
+  printf '%s\t%s\t%s\t%s\n' "$order" "$experiment_id" "$status" "$log" >> "$FPGAI_COMPILE_STATUS_TSV"
+  if [ "$status" -ne 0 ]; then
+    echo "[FPGAI][WARN] ${experiment_id} failed with status ${status}; continuing to remaining paper rows."
+    FPGAI_COMPILE_FAILURES=$((FPGAI_COMPILE_FAILURES + 1))
+  fi
+}
+
+python -m fpgai.paper.experiment_setup paper_experiments/paper_experiment_matrix.yml --output-dir paper_results/experiment_setup || exit 1
+
+# Compile commands are generated from paper_experiments/paper_experiment_matrix.yml.
+# Board-runtime rows compile deployable packages only; real board execution is a separate measured step.
+# Rows that request bitstream/HWH/XSA/runtime package generation.
+
+# 08 I8_deployable_bitstream_candidate | inference | deployability | level_3_bitstream_package
+run_fpgai_compile 08 I8_deployable_bitstream_candidate bitstream_package level_3_bitstream_package build/paper_experiments/inference/I8_deployable_bitstream_candidate python -m fpgai.cli compile --config paper_experiments/inference/I8_deployable_bitstream_candidate.yml
+
+# 09 I9_board_runtime_candidate | inference | board_runtime | level_4_board_execution
+run_fpgai_compile 09 I9_board_runtime_candidate bitstream_package level_4_board_execution build/paper_experiments/inference/I9_board_runtime_candidate python -m fpgai.cli compile --config paper_experiments/inference/I9_board_runtime_candidate.yml
+
+# 17 T7_deployable_training_bitstream | training | deployability | level_3_bitstream_package
+run_fpgai_compile 17 T7_deployable_training_bitstream bitstream_package level_3_bitstream_package build/paper_experiments/training/T7_deployable_training_bitstream python -m fpgai.cli compile --config paper_experiments/training/T7_deployable_training_bitstream.yml
+
+# 18 T8_real_fpga_training_curve_candidate | training | board_runtime | level_4_board_execution
+run_fpgai_compile 18 T8_real_fpga_training_curve_candidate bitstream_package level_4_board_execution build/paper_experiments/training/T8_real_fpga_training_curve_candidate python -m fpgai.cli compile --config paper_experiments/training/T8_real_fpga_training_curve_candidate.yml
+
+echo "[FPGAI][SUMMARY] Compile status table: $FPGAI_COMPILE_STATUS_TSV"
+if [ "$FPGAI_COMPILE_FAILURES" -ne 0 ]; then
+  echo "[FPGAI][SUMMARY] $FPGAI_COMPILE_FAILURES paper compile row(s) failed. Inspect $FPGAI_COMPILE_LOG_DIR."
+  exit 1
+fi
+echo "[FPGAI][SUMMARY] All selected paper compile rows passed."

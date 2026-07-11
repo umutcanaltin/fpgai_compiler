@@ -1,0 +1,21 @@
+| order | id | section | group | configured_stage | expected_claim_level | command_valid | command |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 0 | I0_baseline_fx16_embedded | inference | baseline | vivado_implementation | level_2_vivado_implementation | True | python -m fpgai.cli compile --config paper_experiments/inference/I0_baseline_fx16_embedded.yml |
+| 1 | I1_precision_fx8_embedded | inference | precision | vivado_implementation | level_2_vivado_implementation | True | python -m fpgai.cli compile --config paper_experiments/inference/I1_precision_fx8_embedded.yml |
+| 2 | I2_precision_fx24_embedded | inference | precision | vivado_implementation | level_2_vivado_implementation | True | python -m fpgai.cli compile --config paper_experiments/inference/I2_precision_fx24_embedded.yml |
+| 3 | I3_parallel_pe2 | inference | parallelism | vivado_implementation | level_2_vivado_implementation | True | python -m fpgai.cli compile --config paper_experiments/inference/I3_parallel_pe2.yml |
+| 4 | I4_parallel_pe4 | inference | parallelism | vivado_implementation | level_2_vivado_implementation | True | python -m fpgai.cli compile --config paper_experiments/inference/I4_parallel_pe4.yml |
+| 5 | I5_pipeline_latency_first | inference | pipeline | vivado_implementation | level_2_vivado_implementation | True | python -m fpgai.cli compile --config paper_experiments/inference/I5_pipeline_latency_first.yml |
+| 6 | I6_pipeline_resource_first | inference | pipeline | vivado_implementation | level_2_vivado_implementation | True | python -m fpgai.cli compile --config paper_experiments/inference/I6_pipeline_resource_first.yml |
+| 7 | I7_weight_import_m_axi | inference | memory | vivado_implementation | level_2_vivado_implementation | True | python -m fpgai.cli compile --config paper_experiments/inference/I7_weight_import_m_axi.yml |
+| 8 | I8_deployable_bitstream_candidate | inference | deployability | bitstream_package | level_3_bitstream_package | True | python -m fpgai.cli compile --config paper_experiments/inference/I8_deployable_bitstream_candidate.yml |
+| 9 | I9_board_runtime_candidate | inference | board_runtime | bitstream_package | level_4_board_execution | True | python -m fpgai.cli compile --config paper_experiments/inference/I9_board_runtime_candidate.yml |
+| 10 | T0_sgd_tiled_m_axi | training | optimizer | vivado_implementation | level_2_vivado_implementation | True | python -m fpgai.cli compile --config paper_experiments/training/T0_sgd_tiled_m_axi.yml |
+| 11 | T1_momentum_tiled_m_axi | training | optimizer | vivado_implementation | level_2_vivado_implementation | True | python -m fpgai.cli compile --config paper_experiments/training/T1_momentum_tiled_m_axi.yml |
+| 12 | T2_adam_tiled_m_axi | training | optimizer | vivado_implementation | level_2_vivado_implementation | True | python -m fpgai.cli compile --config paper_experiments/training/T2_adam_tiled_m_axi.yml |
+| 13 | T3_cross_entropy_tiled_m_axi | training | loss | vivado_implementation | level_2_vivado_implementation | True | python -m fpgai.cli compile --config paper_experiments/training/T3_cross_entropy_tiled_m_axi.yml |
+| 14 | T4_tile32_m_axi | training | memory | vivado_implementation | level_2_vivado_implementation | True | python -m fpgai.cli compile --config paper_experiments/training/T4_tile32_m_axi.yml |
+| 15 | T5_tile128_m_axi | training | memory | vivado_implementation | level_2_vivado_implementation | True | python -m fpgai.cli compile --config paper_experiments/training/T5_tile128_m_axi.yml |
+| 16 | T6_accum_batch2_m_axi | training | batch_accumulation | vivado_implementation | level_2_vivado_implementation | True | python -m fpgai.cli compile --config paper_experiments/training/T6_accum_batch2_m_axi.yml |
+| 17 | T7_deployable_training_bitstream | training | deployability | bitstream_package | level_3_bitstream_package | True | python -m fpgai.cli compile --config paper_experiments/training/T7_deployable_training_bitstream.yml |
+| 18 | T8_real_fpga_training_curve_candidate | training | board_runtime | bitstream_package | level_4_board_execution | True | python -m fpgai.cli compile --config paper_experiments/training/T8_real_fpga_training_curve_candidate.yml |

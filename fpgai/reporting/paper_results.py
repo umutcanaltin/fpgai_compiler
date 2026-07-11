@@ -288,6 +288,213 @@ def _knob_value(contract: Mapping[str, Any], *names: str) -> str:
     return ""
 
 
+
+
+def _find_existing(paths: Sequence[Path]) -> Path | None:
+    for path in paths:
+        if path.exists():
+            return path
+    return None
+
+
+def _parse_xml_numbers(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        import xml.etree.ElementTree as ET
+
+        root = ET.parse(path).getroot()
+    except Exception:
+        return {}
+
+    values: dict[str, Any] = {}
+
+    def clean_tag(tag: str) -> str:
+        return tag.split('}', 1)[-1] if '}' in tag else tag
+
+    def number(text: Any) -> float | int | str:
+        return _as_number(text)
+
+    tag_map = {
+        'lut': 'hls_lut',
+        'ff': 'hls_ff',
+        'bram18k': 'hls_bram',
+        'bram_18k': 'hls_bram',
+        'dsp': 'hls_dsp',
+        'bestcaselatency': 'hls_latency_min',
+        'averagecaselatency': 'hls_latency_avg',
+        'worstcaselatency': 'hls_latency_max',
+        'intervalmin': 'hls_ii',
+        'intervalmax': 'hls_ii_max',
+        'estimatedclockperiod': 'hls_clock_period_ns',
+        'targetclockperiod': 'hls_target_clock_period_ns',
+    }
+    for elem in root.iter():
+        key = _norm_key(clean_tag(elem.tag))
+        mapped = tag_map.get(key)
+        if mapped and mapped not in values:
+            num = number(elem.text)
+            if num != '':
+                values[mapped] = num
+    return values
+
+
+def _parse_hls_reports(root: Path) -> dict[str, Any]:
+    report_json = _read_json(root / 'reports' / 'hls_synthesis_report.json')
+    values: dict[str, Any] = {}
+    xml_path = _find_existing([
+        root / 'hls' / 'fpgai_hls_proj' / 'sol1' / 'syn' / 'report' / 'deeplearn_csynth.xml',
+        root / 'hls' / 'fpgai_hls_proj' / 'sol1' / 'syn' / 'report' / 'csynth.xml',
+    ])
+    if xml_path is None:
+        report_dir = root / 'hls' / 'fpgai_hls_proj' / 'sol1' / 'syn' / 'report'
+        matches = sorted(report_dir.glob('*_csynth.xml')) if report_dir.exists() else []
+        xml_path = matches[0] if matches else None
+    if xml_path is not None:
+        values.update(_parse_xml_numbers(xml_path))
+        values['hls_report_source'] = str(xml_path)
+
+    # Text fallback for simple report summaries.
+    rpt_path = _find_existing([
+        root / 'hls' / 'fpgai_hls_proj' / 'sol1' / 'syn' / 'report' / 'csynth.rpt',
+        root / 'hls' / 'fpgai_hls_proj' / 'sol1' / 'syn' / 'report' / 'deeplearn_csynth.rpt',
+    ])
+    if rpt_path is not None and not values.get('hls_latency_max'):
+        try:
+            text = rpt_path.read_text(encoding='utf-8', errors='ignore')
+        except Exception:
+            text = ''
+        # Vitis report tables vary, so only use conservative key/value matches here.
+        patterns = {
+            'hls_latency_min': [r'Latency\s*\(cycles\).*?min\s*[:=]\s*([0-9.]+)', r'Best-caseLatency\D+([0-9.]+)'],
+            'hls_latency_max': [r'Latency\s*\(cycles\).*?max\s*[:=]\s*([0-9.]+)', r'Worst-caseLatency\D+([0-9.]+)'],
+            'hls_ii': [r'Interval\s*\(cycles\).*?min\s*[:=]\s*([0-9.]+)', r'Interval-min\D+([0-9.]+)'],
+            'hls_clock_period_ns': [r'Estimated\s+Clock\s+Period\s*[:=]\s*([0-9.]+)'],
+        }
+        for field, pats in patterns.items():
+            if values.get(field) not in (None, ''):
+                continue
+            for pat in pats:
+                m = re.search(pat, text, re.IGNORECASE | re.DOTALL)
+                if m:
+                    num = _as_number(m.group(1))
+                    if num != '':
+                        values[field] = num
+                        break
+        if values and 'hls_report_source' not in values:
+            values['hls_report_source'] = str(rpt_path)
+
+    # JSON values override only when they contain actual numeric data.
+    for target, keys in {
+        'hls_lut': ('lut', 'luts', 'LUT'),
+        'hls_ff': ('ff', 'ffs', 'FF'),
+        'hls_bram': ('bram', 'bram18', 'BRAM_18K'),
+        'hls_dsp': ('dsp', 'dsps', 'DSP'),
+        'hls_latency_min': ('latency_min', 'min_latency'),
+        'hls_latency_max': ('latency_max', 'max_latency'),
+        'hls_ii': ('ii', 'interval'),
+        'hls_clock_period_ns': ('clock_period_ns', 'estimated_clock_period_ns'),
+    }.items():
+        num = _find_number(report_json, *keys)
+        if num != '':
+            values[target] = num
+    if report_json and 'hls_status' not in values:
+        values['hls_status'] = _status(report_json, 'present')
+    elif values:
+        values['hls_status'] = 'passed'
+    return values
+
+
+def _parse_vivado_utilization(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        text = path.read_text(encoding='utf-8', errors='ignore')
+    except Exception:
+        return {}
+    values: dict[str, Any] = {}
+
+    def first_number_after(label_patterns: Sequence[str]) -> float | int | str:
+        for pat in label_patterns:
+            m = re.search(pat, text, re.IGNORECASE | re.MULTILINE)
+            if m:
+                num = _as_number(m.group(1))
+                if num != '':
+                    return num
+        return ''
+
+    values['vivado_lut'] = first_number_after([r'\|\s*CLB LUTs\*?\s*\|\s*([0-9,]+)', r'\|\s*Slice LUTs\s*\|\s*([0-9,]+)'])
+    values['vivado_ff'] = first_number_after([r'\|\s*CLB Registers\s*\|\s*([0-9,]+)', r'\|\s*Slice Registers\s*\|\s*([0-9,]+)'])
+    values['vivado_dsp'] = first_number_after([r'\|\s*DSPs\s*\|\s*([0-9,]+)', r'\|\s*DSP48E2\s*\|\s*([0-9,]+)'])
+    values['vivado_bram'] = first_number_after([r'\|\s*Block RAM Tile\s*\|\s*([0-9,.]+)', r'\|\s*RAMB36/FIFO\*?\s*\|\s*([0-9,.]+)'])
+    return {k: v for k, v in values.items() if v != ''}
+
+
+def _parse_vivado_timing(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        text = path.read_text(encoding='utf-8', errors='ignore')
+    except Exception:
+        return {}
+    values: dict[str, Any] = {}
+    # Prefer implemented Timing Details Setup line.
+    m = re.search(r'Setup\s*:\s*\d+\s+Failing Endpoints,\s*Worst Slack\s*([+-]?[0-9.]+)ns,\s*Total Violation\s*([+-]?[0-9.]+)ns', text, re.IGNORECASE)
+    if m:
+        values['vivado_wns'] = _as_number(m.group(1))
+        values['vivado_tns'] = _as_number(m.group(2))
+    else:
+        # Fallback to Design Timing Summary table first numeric columns.
+        m2 = re.search(r'WNS\(ns\).*?\n[-\s]*\n?\s*([+-]?[0-9.]+)\s+([+-]?[0-9.]+)', text, re.IGNORECASE | re.DOTALL)
+        if m2:
+            values['vivado_wns'] = _as_number(m2.group(1))
+            values['vivado_tns'] = _as_number(m2.group(2))
+    return values
+
+
+def _parse_vivado_power(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        text = path.read_text(encoding='utf-8', errors='ignore')
+    except Exception:
+        return {}
+    m = re.search(r'\|\s*Total On-Chip Power \(W\)\s*\|\s*([0-9.]+)', text, re.IGNORECASE)
+    if not m:
+        m = re.search(r'Total On-Chip Power[^0-9]*([0-9.]+)', text, re.IGNORECASE)
+    return {'vivado_power_w': _as_number(m.group(1))} if m else {}
+
+
+def _parse_vivado_reports(root: Path) -> dict[str, Any]:
+    report_json = _read_json(root / 'reports' / 'vivado_implementation_report.json')
+    bridge_reports = root / 'vivado_bridge' / 'reports'
+    values: dict[str, Any] = {}
+    values.update(_parse_vivado_utilization(bridge_reports / 'utilization_impl.rpt'))
+    values.update(_parse_vivado_timing(bridge_reports / 'timing_impl.rpt'))
+    values.update(_parse_vivado_power(bridge_reports / 'power_impl.rpt'))
+
+    for target, keys in {
+        'vivado_lut': ('lut', 'luts'),
+        'vivado_ff': ('ff', 'ffs'),
+        'vivado_bram': ('bram', 'bram18'),
+        'vivado_dsp': ('dsp', 'dsps'),
+        'vivado_wns': ('wns',),
+        'vivado_tns': ('tns',),
+        'vivado_power_w': ('power_w', 'total_power_w', 'total_on_chip_power_w'),
+    }.items():
+        num = _find_number(report_json, *keys)
+        if num != '':
+            values[target] = num
+
+    manifest = _read_json(root / 'manifest.json')
+    bridge = manifest.get('vivado_bridge') if isinstance(manifest.get('vivado_bridge'), Mapping) else {}
+    if bridge.get('vivado_impl_requested') is True and not values.get('vivado_implementation_status'):
+        values['vivado_implementation_status'] = 'passed' if values or bridge.get('ok') is True else 'requested'
+    elif report_json and not values.get('vivado_implementation_status'):
+        values['vivado_implementation_status'] = _status(report_json, 'present')
+    return values
+
+
 def build_master_result_row(out_dir: str | Path) -> dict[str, Any]:
     root = Path(out_dir)
     reports = _load_reports(root)
@@ -300,6 +507,8 @@ def build_master_result_row(out_dir: str | Path) -> dict[str, Any]:
     knob = reports["hardware_knob_contract"]
     hls = reports["hls_synthesis_validation"] or reports["hls_synthesis_report"]
     vivado = reports["vivado_implementation_validation"] or reports["vivado_implementation_report"]
+    parsed_hls = _parse_hls_reports(root)
+    parsed_vivado = _parse_vivado_reports(root)
     deployment = reports["deployment_package_validation"]
     runtime = reports["runtime_results"]
     training = reports["training_plan"]
@@ -380,24 +589,24 @@ def build_master_result_row(out_dir: str | Path) -> dict[str, Any]:
             "movement_validation_passed": movement.get("passed", ""),
             "runtime_sequence_commands": _join_sequence(runtime_sequence.get("sequence")),
             "runtime_buffer_count": len(buffers),
-            "hls_status": _status(hls, "not_run"),
-            "hls_lut": _find_number(hls, "lut", "luts"),
-            "hls_ff": _find_number(hls, "ff", "ffs"),
-            "hls_bram": _find_number(hls, "bram", "bram18"),
-            "hls_dsp": _find_number(hls, "dsp", "dsps"),
-            "hls_latency_min": _find_number(hls, "latency_min", "min_latency", "latencymin"),
-            "hls_latency_max": _find_number(hls, "latency_max", "max_latency", "latencymax"),
-            "hls_ii": _find_number(hls, "ii", "interval", "initiation_interval"),
-            "hls_clock_period_ns": _find_number(hls, "clock_period_ns", "target_clock_period_ns"),
+            "hls_status": _first_nonempty(parsed_hls.get("hls_status"), _status(hls, "not_run")),
+            "hls_lut": _first_nonempty(parsed_hls.get("hls_lut"), _find_number(hls, "lut", "luts")),
+            "hls_ff": _first_nonempty(parsed_hls.get("hls_ff"), _find_number(hls, "ff", "ffs")),
+            "hls_bram": _first_nonempty(parsed_hls.get("hls_bram"), _find_number(hls, "bram", "bram18")),
+            "hls_dsp": _first_nonempty(parsed_hls.get("hls_dsp"), _find_number(hls, "dsp", "dsps")),
+            "hls_latency_min": _first_nonempty(parsed_hls.get("hls_latency_min"), _find_number(hls, "latency_min", "min_latency", "latencymin")),
+            "hls_latency_max": _first_nonempty(parsed_hls.get("hls_latency_max"), _find_number(hls, "latency_max", "max_latency", "latencymax")),
+            "hls_ii": _first_nonempty(parsed_hls.get("hls_ii"), _find_number(hls, "ii", "interval", "initiation_interval")),
+            "hls_clock_period_ns": _first_nonempty(parsed_hls.get("hls_clock_period_ns"), _find_number(hls, "clock_period_ns", "target_clock_period_ns")),
             "vivado_project_status": _status(vivado_bd, "not_requested"),
-            "vivado_implementation_status": _status(vivado, "not_run"),
-            "vivado_lut": _find_number(vivado, "lut", "luts"),
-            "vivado_ff": _find_number(vivado, "ff", "ffs"),
-            "vivado_bram": _find_number(vivado, "bram", "bram18"),
-            "vivado_dsp": _find_number(vivado, "dsp", "dsps"),
-            "vivado_wns": _find_number(vivado, "wns"),
-            "vivado_tns": _find_number(vivado, "tns"),
-            "vivado_power_w": _find_number(vivado, "power_w", "total_power_w", "total_on_chip_power_w"),
+            "vivado_implementation_status": _first_nonempty(parsed_vivado.get("vivado_implementation_status"), _status(vivado, "not_run")),
+            "vivado_lut": _first_nonempty(parsed_vivado.get("vivado_lut"), _find_number(vivado, "lut", "luts")),
+            "vivado_ff": _first_nonempty(parsed_vivado.get("vivado_ff"), _find_number(vivado, "ff", "ffs")),
+            "vivado_bram": _first_nonempty(parsed_vivado.get("vivado_bram"), _find_number(vivado, "bram", "bram18")),
+            "vivado_dsp": _first_nonempty(parsed_vivado.get("vivado_dsp"), _find_number(vivado, "dsp", "dsps")),
+            "vivado_wns": _first_nonempty(parsed_vivado.get("vivado_wns"), _find_number(vivado, "wns")),
+            "vivado_tns": _first_nonempty(parsed_vivado.get("vivado_tns"), _find_number(vivado, "tns")),
+            "vivado_power_w": _first_nonempty(parsed_vivado.get("vivado_power_w"), _find_number(vivado, "power_w", "total_power_w", "total_on_chip_power_w")),
             "bitstream_status": _first_nonempty(vivado.get("bitstream_status"), deployment.get("bitstream_status"), "not_run"),
             "deployment_package_status": _status(deployment, "not_run"),
             "runtime_status": _status(runtime, "not_run"),

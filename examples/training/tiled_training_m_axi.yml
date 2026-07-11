@@ -17,10 +17,17 @@ targets:
     clocks:
     - name: pl_clk0
       target_mhz: 200
+toolchain:
+  vitis_hls:
+    settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
+    executable: vitis_hls
+  vivado:
+    settings64: /tools/Xilinx/Vivado/2023.2/settings64.sh
+    executable: vivado
 weights:
   mode: import_export
 memory:
-  weight_storage: bram
+  weight_storage: ddr
   activation_storage: bram
   gradient_storage: bram
   optimizer_state_storage: bram
@@ -30,6 +37,17 @@ data_movement:
     transport: ps_runtime
     tiled:
       enabled: true
+      tile_size: 64
+  weights:
+    import:
+      interface: m_axi
+      transport: ps_runtime
+      policy: tiled
+      tile_size: 64
+    export:
+      interface: m_axi
+      transport: ps_runtime
+      policy: tiled
       tile_size: 64
   labels:
     interface: m_axi
@@ -67,8 +85,8 @@ build:
   stages:
     cpp: true
     testbench: true
-    hls_project: false
-    hls_synthesis: false
+    hls_project: true
+    hls_synthesis: true
     vivado_project: false
     vivado_implementation: false
     bitstream: false

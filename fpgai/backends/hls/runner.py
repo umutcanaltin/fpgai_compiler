@@ -9,6 +9,8 @@ import subprocess
 import threading
 import time
 
+from fpgai.toolchain import build_xilinx_tool_command
+
 
 @dataclass
 class HLSRunResult:
@@ -66,16 +68,14 @@ def run_vitis_hls(
     timeout_sec_raw = env.get("FPGAI_VITIS_HLS_TIMEOUT_SEC", "").strip()
     timeout_sec = int(timeout_sec_raw) if timeout_sec_raw else None
 
-    if settings64:
-        cmd = (
-            f'source "{settings64}" && '
-            f'"{vitis_hls_exe}" -f "{tcl_path.name}"'
-        )
-        run_args = ["bash", "-lc", cmd]
-        command_str = f'bash -lc {shlex.quote(cmd)}'
-    else:
-        run_args = [vitis_hls_exe, "-f", tcl_path.name]
-        command_str = " ".join(shlex.quote(x) for x in run_args)
+    run_args, tool_info = build_xilinx_tool_command(
+        "vitis_hls",
+        ["-f", tcl_path.name],
+        executable=vitis_hls_exe,
+        settings64=settings64,
+        env=env,
+    )
+    command_str = str(tool_info.get("command") or " ".join(shlex.quote(str(x)) for x in run_args))
 
     start = time.time()
     last_heartbeat = start

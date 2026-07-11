@@ -1,0 +1,38 @@
+# Knob effect coverage summary
+
+| knob | effective | status | Design count |
+| --- | --- | --- | --- |
+| build.fit_policy | enforce | changed_or_clamped | 18 |
+| data_movement.weights.load.interface | m_axi | applied | 1 |
+| memory.activation_region_preference | ["BRAM", "URAM", "DDR"] | applied | 18 |
+| memory.allow_double_buffer | true | applied | 18 |
+| memory.weight_region_preference | ["BRAM", "URAM", "DDR"] | applied | 10 |
+| memory.weight_region_preference | ["DDR", "BRAM", "URAM"] | applied | 8 |
+| memory.weight_storage | bram | applied | 10 |
+| memory.weight_storage | ddr | applied | 8 |
+| optimization.parallel.array_partition_mode | cyclic | applied | 3 |
+| optimization.parallel.array_partition_mode | none | applied | 15 |
+| optimization.parallel.partition_factor | 1 | applied | 15 |
+| optimization.parallel.partition_factor | 2 | applied | 1 |
+| optimization.parallel.partition_factor | 4 | applied | 1 |
+| optimization.parallel.partition_factor | 8 | applied | 1 |
+| optimization.parallel.pe | 1 | applied | 15 |
+| optimization.parallel.pe | 2 | applied | 2 |
+| optimization.parallel.pe | 4 | applied | 1 |
+| optimization.parallel.simd | 1 | applied | 16 |
+| optimization.parallel.simd | 2 | applied | 1 |
+| optimization.parallel.simd | 4 | applied | 1 |
+| optimization.parallel.unroll_factor | 1 | applied | 15 |
+| optimization.parallel.unroll_factor | 2 | applied | 2 |
+| optimization.parallel.unroll_factor | 4 | applied | 1 |
+| optimization.parallel_policy | Balanced | applied | 18 |
+| optimization.pipeline.ii | 1 | applied | 8 |
+| optimization.pipeline.ii | 2 | changed_or_clamped | 10 |
+| optimization.pipeline.style | balanced | applied | 16 |
+| optimization.pipeline.style | balanced | changed_or_clamped | 2 |
+| optimization.tiling.conv | — | not_applicable | 18 |
+| optimization.tiling.dense | {"in": 64, "out": 16} | applied | 10 |
+| optimization.tiling.dense | {"in": 8, "out": 4} | applied | 8 |
+| optimization.tiling.layers | — | not_requested | 18 |
+| targets.platform.board | kv260 | applied | 18 |
+| targets.platform.clocks.0.target_mhz | 200 | applied | 18 |

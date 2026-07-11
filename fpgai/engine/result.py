@@ -219,6 +219,8 @@ class CompileResult:
         lines = ["Fit policy gate    : available"]
         for key, label in [
             ("policy", "policy"),
+            ("policy_source", "policy_source"),
+            ("requested_policy", "requested_policy"),
             ("board_fit_status", "board_fit_status"),
             ("board_fit_limiting_dimension", "limiting"),
             ("vivado_allowed_by_board_fit", "vivado_allowed_by_board_fit"),

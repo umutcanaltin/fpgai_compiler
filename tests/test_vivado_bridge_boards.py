@@ -81,6 +81,29 @@ def test_generate_vivado_bridge_uses_board_specific_ps(
     assert manifest["bitstream_requested"] is True
 
 
+def test_generate_vivado_bridge_can_request_impl_without_bitstream(tmp_path: Path) -> None:
+    artifact_dir = _minimal_hls_artifact(tmp_path)
+
+    result = generate_vivado_bridge_for_artifact(
+        artifact_dir,
+        board_name="kv260",
+        run_impl_default=True,
+        run_bitstream_default=False,
+    )
+
+    bridge = Path(result["vivado_bridge_dir"])
+    run_vivado = (bridge / "scripts" / "run_vivado.tcl").read_text(encoding="utf-8")
+    manifest = json.loads((bridge / "vivado_bridge_manifest.json").read_text(encoding="utf-8"))
+
+    assert manifest["vivado_impl_requested"] is True
+    assert manifest["bitstream_requested"] is False
+    assert "set run_impl 1" in run_vivado
+    assert "set run_bitstream 0" in run_vivado
+    assert "FPGAI_VIVADO_RUN_BITSTREAM" in run_vivado
+    assert "launch_runs impl_1 -to_step write_bitstream" in run_vivado
+    assert "if {$run_bitstream}" in run_vivado
+
+
 def test_unknown_vivado_board_fails_cleanly(tmp_path: Path) -> None:
     artifact_dir = _minimal_hls_artifact(tmp_path)
 
@@ -226,4 +249,4 @@ def test_vivado_bridge_runner_honors_fit_policy_gate_in_source() -> None:
     assert '"vivado_reports_present": False' in source
     assert "bridge.mkdir(parents=True, exist_ok=True)" in source
     assert '"vivado_ran": False' in source
-    assert '"bitstream_requested": bool(run_vivado_impl)' in source
+    assert '"bitstream_requested": bool(run_bitstream)' in source

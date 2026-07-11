@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="540" viewBox="0 0 900 540">
+<rect width="100%" height="100%" fill="white"/>
+<text x="32" y="34" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#111">Inference Vivado LUT by design</text>
+<text x="32" y="58" font-family="Arial, sans-serif" font-size="12" fill="#555">Implemented LUTs</text>
+<line x1="240" y1="77" x2="240" y2="425" stroke="#333" stroke-width="1"/>
+<text x="32" y="103" font-family="Arial, sans-serif" font-size="12" fill="#222">I0_baseline_fx16_embedded</text>
+<rect x="240" y="85" width="177.76" height="22" rx="3" fill="#4a6fa5"/>
+<text x="423.76" y="101" font-family="Arial, sans-serif" font-size="12" fill="#222">1.271e+04</text>
+<text x="32" y="137" font-family="Arial, sans-serif" font-size="12" fill="#222">I1_precision_fx8_embedded</text>
+<rect x="240" y="119" width="112.17" height="22" rx="3" fill="#4a6fa5"/>
+<text x="358.17" y="135" font-family="Arial, sans-serif" font-size="12" fill="#222">8019</text>
+<text x="32" y="171" font-family="Arial, sans-serif" font-size="12" fill="#222">I2_precision_fx24_embedded</text>
+<rect x="240" y="153" width="235.02" height="22" rx="3" fill="#4a6fa5"/>
+<text x="481.02" y="169" font-family="Arial, sans-serif" font-size="12" fill="#222">1.68e+04</text>
+<text x="32" y="205" font-family="Arial, sans-serif" font-size="12" fill="#222">I3_parallel_pe2</text>
+<rect x="240" y="187" width="555.36" height="22" rx="3" fill="#4a6fa5"/>
+<text x="801.36" y="203" font-family="Arial, sans-serif" font-size="12" fill="#222">3.97e+04</text>
+<text x="32" y="239" font-family="Arial, sans-serif" font-size="12" fill="#222">I4_parallel_pe4</text>
+<rect x="240" y="221" width="576.78" height="22" rx="3" fill="#4a6fa5"/>
+<text x="822.78" y="237" font-family="Arial, sans-serif" font-size="12" fill="#222">4.123e+04</text>
+<text x="32" y="273" font-family="Arial, sans-serif" font-size="12" fill="#222">I5_pipeline_latency_first</text>
+<rect x="240" y="255" width="620.00" height="22" rx="3" fill="#4a6fa5"/>
+<text x="866.00" y="271" font-family="Arial, sans-serif" font-size="12" fill="#222">4.432e+04</text>
+<text x="32" y="307" font-family="Arial, sans-serif" font-size="12" fill="#222">I6_pipeline_resource_first</text>
+<rect x="240" y="289" width="177.76" height="22" rx="3" fill="#4a6fa5"/>
+<text x="423.76" y="305" font-family="Arial, sans-serif" font-size="12" fill="#222">1.271e+04</text>
+<text x="32" y="341" font-family="Arial, sans-serif" font-size="12" fill="#222">I7_weight_import_m_axi</text>
+<rect x="240" y="323" width="311.25" height="22" rx="3" fill="#4a6fa5"/>
+<text x="557.25" y="339" font-family="Arial, sans-serif" font-size="12" fill="#222">2.225e+04</text>
+<text x="32" y="375" font-family="Arial, sans-serif" font-size="12" fill="#222">I8_deployable_bitstream_candidate</text>
+<rect x="240" y="357" width="177.76" height="22" rx="3" fill="#4a6fa5"/>
+<text x="423.76" y="373" font-family="Arial, sans-serif" font-size="12" fill="#222">1.271e+04</text>
+<text x="32" y="409" font-family="Arial, sans-serif" font-size="12" fill="#222">I9_board_runtime_candidate</text>
+<rect x="240" y="391" width="177.76" height="22" rx="3" fill="#4a6fa5"/>
+<text x="423.76" y="407" font-family="Arial, sans-serif" font-size="12" fill="#222">1.271e+04</text>
+</svg>

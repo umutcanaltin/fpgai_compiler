@@ -172,110 +172,186 @@ proc fpgai_connect_net_if_unconnected {src dst label} {
 
 
 def _bd_accelerator_tcl(top_name: str) -> str:
-    return f"""set hls_top_name "{top_name}"
+    # The external Vivado bridge is interface-adaptive.  Earlier bridge Tcl
+    # treated any HLS interface containing the word ``input`` as an AXI-Stream
+    # input, which incorrectly connected AXI DMA M_AXIS_MM2S to memory-mapped
+    # HLS ports such as m_axi_gmem_input.  The Tcl below separates AXI4 master
+    # memory interfaces from AXI-Stream interfaces before instantiating DMA.
+    tcl = r'''set hls_top_name "__TOP_NAME__"
 set hls_ip_defs [get_ipdefs -all "*$hls_top_name*"]
 puts "FPGAI-Vivado Candidate HLS IP defs for $hls_top_name: $hls_ip_defs"
-if {{[llength $hls_ip_defs] == 0}} {{
+if {[llength $hls_ip_defs] == 0} {
   puts "FPGAI-Vivado Available HLS-like IP defs: [get_ipdefs -all *hls*]"
   error "Could not find exported HLS IP for top=$hls_top_name in current IP catalog"
-}}
+}
 set hls_vlnv [lindex $hls_ip_defs 0]
 puts "FPGAI-Vivado Using HLS IP VLNV: $hls_vlnv"
-create_bd_cell -type ip -vlnv $hls_vlnv ${{hls_top_name}}_0
-set hls_cell ${{hls_top_name}}_0
+create_bd_cell -type ip -vlnv $hls_vlnv ${hls_top_name}_0
+set hls_cell ${hls_top_name}_0
 
-set hls_in [fpgai_first_intf $hls_cell {{in_stream in_r s_axis_in_r S_AXIS_IN_R *in_stream* *in_r* *input*}}]
-set hls_aux [fpgai_first_intf $hls_cell {{aux aux_stream s_axis_aux S_AXIS_AUX *aux* *target*}}]
-set hls_out [fpgai_first_intf $hls_cell {{out_stream out_r m_axis_out_r M_AXIS_OUT_R *out_stream* *out_r* *output*}}]
-puts "FPGAI-Vivado HLS stream interfaces: in=$hls_in aux=$hls_aux out=$hls_out"
+proc fpgai_intf_short_name {pin} {
+  return [string tolower [lindex [split $pin /] end]]
+}
 
-create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:* axi_dma_0
-if {{$hls_aux ne ""}} {{
-  create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:* axi_dma_aux_0
-}} else {{
-  puts "FPGAI-Vivado no aux AXIS interface detected; skipping auxiliary DMA."
-}}
+proc fpgai_is_hls_m_axi_intf {pin} {
+  set short [fpgai_intf_short_name $pin]
+  if {[string match "m_axi*" $short]} { return 1 }
+  if {[string match "*gmem*" $short]} { return 1 }
+  return 0
+}
+
+proc fpgai_is_hls_axis_input_intf {pin} {
+  if {[fpgai_is_hls_m_axi_intf $pin]} { return 0 }
+  set short [fpgai_intf_short_name $pin]
+  if {[string match "s_axis*" $short]} { return 1 }
+  if {[string match "*s_axis*" $short]} { return 1 }
+  if {$short eq "in_stream" || $short eq "in_r"} { return 1 }
+  if {[string match "*in_stream*" $short] || [string match "*in_r*" $short]} { return 1 }
+  return 0
+}
+
+proc fpgai_is_hls_axis_aux_intf {pin} {
+  if {[fpgai_is_hls_m_axi_intf $pin]} { return 0 }
+  set short [fpgai_intf_short_name $pin]
+  if {$short eq "aux" || $short eq "aux_stream" || $short eq "s_axis_aux"} { return 1 }
+  if {[string match "*aux*" $short] || [string match "*target*" $short]} { return 1 }
+  return 0
+}
+
+proc fpgai_is_hls_axis_output_intf {pin} {
+  if {[fpgai_is_hls_m_axi_intf $pin]} { return 0 }
+  set short [fpgai_intf_short_name $pin]
+  if {[string match "m_axis*" $short]} { return 1 }
+  if {[string match "*m_axis*" $short]} { return 1 }
+  if {$short eq "out_stream" || $short eq "out_r"} { return 1 }
+  if {[string match "*out_stream*" $short] || [string match "*out_r*" $short]} { return 1 }
+  return 0
+}
+
+set hls_m_axi_ports {}
+set hls_axis_in ""
+set hls_axis_aux ""
+set hls_axis_out ""
+foreach intf [get_bd_intf_pins -quiet "$hls_cell/*"] {
+  if {[fpgai_is_hls_m_axi_intf $intf]} {
+    lappend hls_m_axi_ports $intf
+  } elseif {$hls_axis_in eq "" && [fpgai_is_hls_axis_input_intf $intf]} {
+    set hls_axis_in $intf
+  } elseif {$hls_axis_aux eq "" && [fpgai_is_hls_axis_aux_intf $intf]} {
+    set hls_axis_aux $intf
+  } elseif {$hls_axis_out eq "" && [fpgai_is_hls_axis_output_intf $intf]} {
+    set hls_axis_out $intf
+  }
+}
+set use_dma [expr {$hls_axis_in ne "" && $hls_axis_out ne ""}]
+set use_aux_dma [expr {$use_dma && $hls_axis_aux ne ""}]
+set use_mem [expr {[llength $hls_m_axi_ports] > 0 || $use_dma}]
+puts "FPGAI-Vivado HLS m_axi interfaces: $hls_m_axi_ports"
+puts "FPGAI-Vivado HLS AXIS interfaces: in=$hls_axis_in aux=$hls_axis_aux out=$hls_axis_out use_dma=$use_dma"
+
 create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:* rst_ps_0_100M
 create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect:* axi_ctrl_interconnect
-create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect:* axi_mem_interconnect
+if {$use_mem} {
+  create_bd_cell -type ip -vlnv xilinx.com:ip:axi_interconnect:* axi_mem_interconnect
+}
+if {$use_dma} {
+  create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:* axi_dma_0
+  catch {set_property -dict [list CONFIG.c_include_sg {0} CONFIG.c_include_mm2s {1} CONFIG.c_include_s2mm {1}] [get_bd_cells axi_dma_0]} dma0_cfg_msg
+  puts "FPGAI-Vivado DMA0 config result: $dma0_cfg_msg"
+} else {
+  puts "FPGAI-Vivado no complete AXIS input/output pair detected; skipping main DMA."
+}
+if {$use_aux_dma} {
+  create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:* axi_dma_aux_0
+  catch {set_property -dict [list CONFIG.c_include_sg {0} CONFIG.c_include_mm2s {1} CONFIG.c_include_s2mm {0}] [get_bd_cells axi_dma_aux_0]} dmaaux_cfg_msg
+  puts "FPGAI-Vivado DMA aux config result: $dmaaux_cfg_msg"
+} else {
+  puts "FPGAI-Vivado no aux AXIS interface detected; skipping auxiliary DMA."
+}
 
-catch {{set_property -dict [list CONFIG.c_include_sg {{0}} CONFIG.c_include_mm2s {{1}} CONFIG.c_include_s2mm {{1}}] [get_bd_cells axi_dma_0]}} dma0_cfg_msg
-if {{$hls_aux ne ""}} {{
-  catch {{set_property -dict [list CONFIG.c_include_sg {{0}} CONFIG.c_include_mm2s {{1}} CONFIG.c_include_s2mm {{0}}] [get_bd_cells axi_dma_aux_0]}} dmaaux_cfg_msg
-}} else {{
-  set dmaaux_cfg_msg "skipped: no aux AXIS interface"
-}}
-puts "FPGAI-Vivado DMA0 config result: $dma0_cfg_msg"
-puts "FPGAI-Vivado DMA aux config result: $dmaaux_cfg_msg"
-
-set ctrl_mi_count [expr {{$hls_aux ne "" ? 3 : 2}}]
-set mem_si_count [expr {{$hls_aux ne "" ? 3 : 2}}]
-set_property -dict [list CONFIG.NUM_SI {{1}} CONFIG.NUM_MI $ctrl_mi_count] [get_bd_cells axi_ctrl_interconnect]
-set_property -dict [list CONFIG.NUM_SI $mem_si_count CONFIG.NUM_MI {{1}}] [get_bd_cells axi_mem_interconnect]
+set ctrl_mi_count [expr {1 + ($use_dma ? 1 : 0) + ($use_aux_dma ? 1 : 0)}]
+set_property -dict [list CONFIG.NUM_SI {1} CONFIG.NUM_MI $ctrl_mi_count] [get_bd_cells axi_ctrl_interconnect]
+if {$use_mem} {
+  set mem_si_count [expr {[llength $hls_m_axi_ports] + ($use_dma ? 2 : 0) + ($use_aux_dma ? 1 : 0)}]
+  if {$mem_si_count < 1} { set mem_si_count 1 }
+  set_property -dict [list CONFIG.NUM_SI $mem_si_count CONFIG.NUM_MI {1}] [get_bd_cells axi_mem_interconnect]
+}
 
 connect_bd_net $clk [get_bd_pins rst_ps_0_100M/slowest_sync_clk]
 connect_bd_net $rstn [get_bd_pins rst_ps_0_100M/ext_reset_in]
 set periph_aresetn [get_bd_pins rst_ps_0_100M/peripheral_aresetn]
 
-set aux_clk_pins {{}}
-if {{$hls_aux ne ""}} {{
-  set aux_clk_pins [get_bd_pins -quiet axi_dma_aux_0/*aclk]
-}}
-foreach pin [concat \\
-  [get_bd_pins -quiet axi_dma_0/*aclk] \\
-  $aux_clk_pins \\
-  [get_bd_pins -quiet axi_ctrl_interconnect/*ACLK] \\
-  [get_bd_pins -quiet axi_mem_interconnect/*ACLK] \\
-  [list [fpgai_first_pin $hls_cell {{ap_clk aclk ACLK}}]] \\
-] {{
-  if {{$pin ne ""}} {{ fpgai_connect_net_if_unconnected $clk $pin "accelerator clock fanout" }}
-}}
-set aux_reset_pins {{}}
-if {{$hls_aux ne ""}} {{
-  set aux_reset_pins [get_bd_pins -quiet axi_dma_aux_0/*aresetn]
-}}
-foreach pin [concat \\
-  [get_bd_pins -quiet axi_dma_0/*aresetn] \\
-  $aux_reset_pins \\
-  [get_bd_pins -quiet axi_ctrl_interconnect/*ARESETN] \\
-  [get_bd_pins -quiet axi_mem_interconnect/*ARESETN] \\
-  [list [fpgai_first_pin $hls_cell {{ap_rst_n aresetn ARESETN}}]] \\
-] {{
-  if {{$pin ne ""}} {{ fpgai_connect_net_if_unconnected $periph_aresetn $pin "accelerator reset fanout" }}
-}}
+set accel_clk_pins [list [fpgai_first_pin $hls_cell {ap_clk aclk ACLK}]]
+if {$use_dma} { set accel_clk_pins [concat $accel_clk_pins [get_bd_pins -quiet axi_dma_0/*aclk]] }
+if {$use_aux_dma} { set accel_clk_pins [concat $accel_clk_pins [get_bd_pins -quiet axi_dma_aux_0/*aclk]] }
+if {$use_mem} { set accel_clk_pins [concat $accel_clk_pins [get_bd_pins -quiet axi_mem_interconnect/*ACLK]] }
+set accel_clk_pins [concat $accel_clk_pins [get_bd_pins -quiet axi_ctrl_interconnect/*ACLK]]
+foreach pin $accel_clk_pins {
+  if {$pin ne ""} { fpgai_connect_net_if_unconnected $clk $pin "accelerator clock fanout" }
+}
+
+set accel_reset_pins [list [fpgai_first_pin $hls_cell {ap_rst_n aresetn ARESETN}]]
+if {$use_dma} { set accel_reset_pins [concat $accel_reset_pins [get_bd_pins -quiet axi_dma_0/*aresetn]] }
+if {$use_aux_dma} { set accel_reset_pins [concat $accel_reset_pins [get_bd_pins -quiet axi_dma_aux_0/*aresetn]] }
+if {$use_mem} { set accel_reset_pins [concat $accel_reset_pins [get_bd_pins -quiet axi_mem_interconnect/*ARESETN]] }
+set accel_reset_pins [concat $accel_reset_pins [get_bd_pins -quiet axi_ctrl_interconnect/*ARESETN]]
+foreach pin $accel_reset_pins {
+  if {$pin ne ""} { fpgai_connect_net_if_unconnected $periph_aresetn $pin "accelerator reset fanout" }
+}
 
 fpgai_connect_intf_required $ps_ctrl_axi [get_bd_intf_pins axi_ctrl_interconnect/S00_AXI] "PS control master to ctrl interconnect"
-set hls_ctrl [fpgai_first_intf $hls_cell {{s_axi_CTRL S_AXI_CTRL CTRL s_axi_control S_AXI_CONTROL *CTRL* *control*}}]
+set hls_ctrl [fpgai_first_intf $hls_cell {s_axi_CTRL S_AXI_CTRL CTRL s_axi_control S_AXI_CONTROL *CTRL* *control*}]
 fpgai_connect_intf_required [get_bd_intf_pins axi_ctrl_interconnect/M00_AXI] $hls_ctrl "control to HLS AXI-Lite"
-fpgai_connect_intf_required [get_bd_intf_pins axi_ctrl_interconnect/M01_AXI] [get_bd_intf_pins axi_dma_0/S_AXI_LITE] "control to main DMA AXI-Lite"
-if {{$hls_aux ne ""}} {{
-  fpgai_connect_intf_required [get_bd_intf_pins axi_ctrl_interconnect/M02_AXI] [get_bd_intf_pins axi_dma_aux_0/S_AXI_LITE] "control to aux DMA AXI-Lite"
-}} else {{
-  puts "FPGAI-Vivado skip aux DMA AXI-Lite connection: no aux AXIS interface"
-}}
+set ctrl_idx 1
+if {$use_dma} {
+  set ctrl_port [format "M%02d_AXI" $ctrl_idx]
+  fpgai_connect_intf_required [get_bd_intf_pins axi_ctrl_interconnect/$ctrl_port] [get_bd_intf_pins axi_dma_0/S_AXI_LITE] "control to main DMA AXI-Lite"
+  incr ctrl_idx
+}
+if {$use_aux_dma} {
+  set ctrl_port [format "M%02d_AXI" $ctrl_idx]
+  fpgai_connect_intf_required [get_bd_intf_pins axi_ctrl_interconnect/$ctrl_port] [get_bd_intf_pins axi_dma_aux_0/S_AXI_LITE] "control to aux DMA AXI-Lite"
+}
 
-fpgai_connect_intf_required [get_bd_intf_pins axi_dma_0/M_AXI_MM2S] [get_bd_intf_pins axi_mem_interconnect/S00_AXI] "main DMA MM2S to memory interconnect"
-fpgai_connect_intf_required [get_bd_intf_pins axi_dma_0/M_AXI_S2MM] [get_bd_intf_pins axi_mem_interconnect/S01_AXI] "main DMA S2MM to memory interconnect"
-if {{$hls_aux ne ""}} {{
-  fpgai_connect_intf_required [get_bd_intf_pins axi_dma_aux_0/M_AXI_MM2S] [get_bd_intf_pins axi_mem_interconnect/S02_AXI] "aux DMA MM2S to memory interconnect"
-}} else {{
-  puts "FPGAI-Vivado skip aux DMA memory connection: no aux AXIS interface"
-}}
-fpgai_connect_intf_required [get_bd_intf_pins axi_mem_interconnect/M00_AXI] $ps_mem_axi "memory interconnect to PS memory slave"
+if {$use_mem} {
+  set mem_idx 0
+  foreach hls_m_axi $hls_m_axi_ports {
+    set si_name [format "S%02d_AXI" $mem_idx]
+    fpgai_connect_intf_required $hls_m_axi [get_bd_intf_pins axi_mem_interconnect/$si_name] "HLS m_axi memory port to memory interconnect"
+    incr mem_idx
+  }
+  if {$use_dma} {
+    set si_name [format "S%02d_AXI" $mem_idx]
+    fpgai_connect_intf_required [get_bd_intf_pins axi_dma_0/M_AXI_MM2S] [get_bd_intf_pins axi_mem_interconnect/$si_name] "main DMA MM2S to memory interconnect"
+    incr mem_idx
+    set si_name [format "S%02d_AXI" $mem_idx]
+    fpgai_connect_intf_required [get_bd_intf_pins axi_dma_0/M_AXI_S2MM] [get_bd_intf_pins axi_mem_interconnect/$si_name] "main DMA S2MM to memory interconnect"
+    incr mem_idx
+  }
+  if {$use_aux_dma} {
+    set si_name [format "S%02d_AXI" $mem_idx]
+    fpgai_connect_intf_required [get_bd_intf_pins axi_dma_aux_0/M_AXI_MM2S] [get_bd_intf_pins axi_mem_interconnect/$si_name] "aux DMA MM2S to memory interconnect"
+    incr mem_idx
+  }
+  fpgai_connect_intf_required [get_bd_intf_pins axi_mem_interconnect/M00_AXI] $ps_mem_axi "memory interconnect to PS memory slave"
+} else {
+  puts "FPGAI-Vivado no HLS m_axi or AXIS DMA memory path detected."
+}
 
-fpgai_connect_intf_required [get_bd_intf_pins axi_dma_0/M_AXIS_MM2S] $hls_in "main DMA stream to HLS input"
-if {{$hls_aux ne ""}} {{
-  fpgai_connect_intf_required [get_bd_intf_pins axi_dma_aux_0/M_AXIS_MM2S] $hls_aux "aux DMA stream to HLS aux"
-}} else {{
-  puts "FPGAI-Vivado skip aux DMA stream connection: no aux AXIS interface"
-}}
-fpgai_connect_intf_required $hls_out [get_bd_intf_pins axi_dma_0/S_AXIS_S2MM] "HLS output to main DMA stream return"
+if {$use_dma} {
+  fpgai_connect_intf_required [get_bd_intf_pins axi_dma_0/M_AXIS_MM2S] $hls_axis_in "main DMA stream to HLS input"
+  fpgai_connect_intf_required $hls_axis_out [get_bd_intf_pins axi_dma_0/S_AXIS_S2MM] "HLS output to main DMA stream return"
+}
+if {$use_aux_dma} {
+  fpgai_connect_intf_required [get_bd_intf_pins axi_dma_aux_0/M_AXIS_MM2S] $hls_axis_aux "aux DMA stream to HLS aux"
+}
 
 assign_bd_address
 validate_bd_design
 save_bd_design
 puts "FPGAI-Vivado Full block design validated: $design_name"
-"""
+'''
+    return tcl.replace("__TOP_NAME__", top_name)
 
 def _create_zynq7000_bd_tcl(board_name: str, top_name: str) -> str:
     return f"""# Auto-generated FPGAI full Vivado block design.
@@ -368,12 +444,21 @@ def _create_bd_tcl(board_name: str, top_name: str, ps_type: str = "processing_sy
         return _create_zynqmp_bd_tcl(board_name, top_name)
     raise ValueError(f"Unsupported Vivado PS type for board {board_name}: {ps_type}")
 
-def _run_vivado_tcl(board: Dict[str, Any], top_name: str, run_impl_default: bool) -> str:
+def _run_vivado_tcl(
+    board: Dict[str, Any],
+    top_name: str,
+    run_impl_default: bool,
+    run_bitstream_default: bool | None = None,
+) -> str:
     run_impl = "1" if run_impl_default else "0"
+    if run_bitstream_default is None:
+        run_bitstream_default = run_impl_default
+    run_bitstream = "1" if run_bitstream_default else "0"
     board_part = board.get("board_part") or ""
     return rf'''# Auto-generated by FPGAI.
 # Creates a Vivado project, imports exported HLS IP, runs OOC IP reports, and
-# optionally builds a board-specific PS/DMA block design through bitstream/XSA.
+# optionally builds a board-specific PS/DMA block design through implementation
+# and, only when requested, bitstream/XSA generation.
 
 set script_dir [file normalize [file dirname [info script]]]
 set vivado_dir [file normalize [file join $script_dir ..]]
@@ -388,14 +473,18 @@ file mkdir $bit_dir
 set part "{board['part']}"
 set board_part "{board_part}"
 set run_impl {run_impl}
+set run_bitstream {run_bitstream}
 if {{[info exists ::env(FPGAI_VIVADO_RUN_IMPL)]}} {{
   set run_impl $::env(FPGAI_VIVADO_RUN_IMPL)
+}}
+if {{[info exists ::env(FPGAI_VIVADO_RUN_BITSTREAM)]}} {{
+  set run_bitstream $::env(FPGAI_VIVADO_RUN_BITSTREAM)
 }}
 set jobs [expr {{[info exists ::env(FPGAI_VIVADO_JOBS)] ? $::env(FPGAI_VIVADO_JOBS) : 4}}]
 
 puts "FPGAI-Vivado project_dir=$project_dir"
 puts "FPGAI-Vivado ip_repo=$ip_repo"
-puts "FPGAI-Vivado part=$part board_part=$board_part run_impl=$run_impl"
+puts "FPGAI-Vivado part=$part board_part=$board_part run_impl=$run_impl run_bitstream=$run_bitstream"
 
 create_project fpgai_vivado $project_dir -part $part -force
 if {{$board_part ne ""}} {{
@@ -457,7 +546,7 @@ puts "FPGAI-Vivado report_power result: $power_msg"
 close_design
 
 if {{$run_impl}} {{
-  puts "FPGAI-Vivado Starting full BD implementation/bitstream path"
+  puts "FPGAI-Vivado Starting full BD implementation path"
   source [file join $script_dir create_bd.tcl]
   set bd_files [get_files -quiet *.bd]
   if {{[llength $bd_files] == 0}} {{
@@ -482,7 +571,11 @@ if {{$run_impl}} {{
   catch {{report_power -file [file join $report_dir power_bd_synth.rpt]}} bd_synth_power_msg
   puts "FPGAI-Vivado BD synth report_power result: $bd_synth_power_msg"
 
-  launch_runs impl_1 -to_step write_bitstream -jobs $jobs
+  if {{$run_bitstream}} {{
+    launch_runs impl_1 -to_step write_bitstream -jobs $jobs
+  }} else {{
+    launch_runs impl_1 -jobs $jobs
+  }}
   wait_on_run impl_1
   open_run impl_1
   report_utilization -file [file join $report_dir utilization_impl.rpt]
@@ -490,10 +583,14 @@ if {{$run_impl}} {{
   catch {{report_power -file [file join $report_dir power_impl.rpt]}} impl_power_msg
   puts "FPGAI-Vivado impl report_power result: $impl_power_msg"
 
-  set bit_candidates [glob -nocomplain $project_dir/fpgai_vivado.runs/impl_1/*.bit]
-  puts "FPGAI-Vivado bit candidates: $bit_candidates"
-  foreach bit_file $bit_candidates {{ file copy -force $bit_file [file join $bit_dir [file tail $bit_file]] }}
-  write_hw_platform -fixed -include_bit -force -file [file join $bit_dir fpgai_bd.xsa]
+  if {{$run_bitstream}} {{
+    set bit_candidates [glob -nocomplain $project_dir/fpgai_vivado.runs/impl_1/*.bit]
+    puts "FPGAI-Vivado bit candidates: $bit_candidates"
+    foreach bit_file $bit_candidates {{ file copy -force $bit_file [file join $bit_dir [file tail $bit_file]] }}
+    write_hw_platform -fixed -include_bit -force -file [file join $bit_dir fpgai_bd.xsa]
+  }} else {{
+    puts "FPGAI-Vivado bitstream/XSA generation not requested"
+  }}
 }}
 
 puts "FPGAI-Vivado Vivado flow finished for top={top_name}"
@@ -1096,6 +1193,7 @@ def generate_vivado_bridge_for_artifact(
     artifact_dir: str | Path,
     board_name: str = "pynq_z2",
     run_impl_default: bool = False,
+    run_bitstream_default: bool | None = None,
 ) -> Dict[str, Any]:
     artifact = Path(artifact_dir).resolve()
     build_dir = artifact / "build"
@@ -1113,10 +1211,12 @@ def generate_vivado_bridge_for_artifact(
     reports_dir = out_dir / "reports"
     (out_dir / "hls_ip").mkdir(parents=True, exist_ok=True)
     reports_dir.mkdir(parents=True, exist_ok=True)
+    if run_bitstream_default is None:
+        run_bitstream_default = run_impl_default
 
     _write(scripts_dir / "export_hls_ip.tcl", _hls_export_tcl(hls_dir, out_dir, top_name, board["part"]))
     _write(scripts_dir / "create_bd.tcl", _create_bd_tcl(board["name"], top_name, board.get("ps_type", "processing_system7")))
-    _write(scripts_dir / "run_vivado.tcl", _run_vivado_tcl(board, top_name, run_impl_default))
+    _write(scripts_dir / "run_vivado.tcl", _run_vivado_tcl(board, top_name, run_impl_default, run_bitstream_default))
     _write(out_dir / "README_VIVADO.md", _readme(board, top_name))
 
     artifact = {
@@ -1143,7 +1243,7 @@ def generate_vivado_bridge_for_artifact(
         "hls_ip_exported": False,
         "vivado_synth_requested": True,
         "vivado_impl_requested": bool(run_impl_default),
-        "bitstream_requested": bool(run_impl_default),
+        "bitstream_requested": bool(run_bitstream_default),
         "reports_expected": [
             "utilization_synth.rpt",
             "timing_synth.rpt",
@@ -1177,12 +1277,18 @@ def generate_vivado_bridge_for_experiment(
     experiment_dir: str | Path,
     board_name: str = "pynq_z2",
     run_impl_default: bool = False,
+    run_bitstream_default: bool | None = None,
 ) -> List[Dict[str, Any]]:
     exp = Path(experiment_dir).resolve()
     rows: List[Dict[str, Any]] = []
     for art in _iter_artifacts(exp):
         try:
-            ev = generate_vivado_bridge_for_artifact(art, board_name=board_name, run_impl_default=run_impl_default)
+            ev = generate_vivado_bridge_for_artifact(
+                art,
+                board_name=board_name,
+                run_impl_default=run_impl_default,
+                run_bitstream_default=run_bitstream_default,
+            )
             ev["design"] = art.name
             ev["status"] = "generated"
         except Exception as exc:  # keep artifact-driven behavior across all records

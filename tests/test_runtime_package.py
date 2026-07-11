@@ -2056,3 +2056,430 @@ def test_movement_contract_allows_unused_weight_mode_handlers(tmp_path: Path) ->
     assert payload["passed"] is True
     assert "cpp_weight_import_mode_absent_when_not_in_sequence" not in payload["summary"].get("failed_check_names", [])
     assert "cpp_weight_export_mode_absent_when_not_in_sequence" not in payload["summary"].get("failed_check_names", [])
+
+
+def test_movement_contract_accepts_training_hybrid_m_axi_tensor_paths(tmp_path: Path) -> None:
+    from fpgai.reporting.data_movement import emit_movement_contract_validation
+
+    out_dir = tmp_path / "training_hybrid_m_axi_contract"
+    reports = out_dir / "reports"
+    hls_src = out_dir / "hls" / "src"
+    runtime_pkg = out_dir / "runtime_package"
+    reports.mkdir(parents=True)
+    hls_src.mkdir(parents=True)
+    runtime_pkg.mkdir(parents=True)
+
+    (hls_src / "deeplearn.cpp").write_text(
+        "\n".join(
+            [
+                "#include <hls_stream.h>",
+                "struct axis_t { unsigned int data; int keep; int strb; int last; };",
+                "#define FPGAI_TRAIN_INPUT_TILE_SIZE 64",
+                "#define FPGAI_TRAIN_LABEL_TILE_SIZE 64",
+                "#define FPGAI_TRAIN_OUTPUT_TILE_SIZE 64",
+                "void deeplearn(",
+                "  hls::stream<axis_t>& in,",
+                "  hls::stream<axis_t>& out,",
+                "  hls::stream<axis_t>& aux,",
+                "  ap_uint<32>* weights_mem,",
+                "  ap_uint<32>* input_mem,",
+                "  ap_uint<32>* label_mem,",
+                "  ap_uint<32>* output_mem,",
+                "  ap_uint<32>* gradients_mem,",
+                "  int mode) {",
+                "#pragma HLS INTERFACE axis port=in",
+                "#pragma HLS INTERFACE axis port=out",
+                "#pragma HLS INTERFACE axis port=aux",
+                "#pragma HLS INTERFACE m_axi port=weights_mem offset=slave bundle=gmem_weights",
+                "#pragma HLS INTERFACE m_axi port=input_mem offset=slave bundle=gmem_input",
+                "#pragma HLS INTERFACE m_axi port=label_mem offset=slave bundle=gmem_labels",
+                "#pragma HLS INTERFACE m_axi port=output_mem offset=slave bundle=gmem_output",
+                "#pragma HLS INTERFACE m_axi port=gradients_mem offset=slave bundle=gmem_gradients",
+                "  // FPGAI training tiled input import: PS DDR -> m_axi input_mem -> local activation tile.",
+                "  // FPGAI training tiled label import: PS DDR -> m_axi label_mem -> local label tile.",
+                "  // FPGAI training tiled output export: local output tile -> m_axi output_mem -> PS DDR.",
+                "  static act_t input_tile[FPGAI_TRAIN_INPUT_TILE_SIZE];",
+                "  static act_t label_tile[FPGAI_TRAIN_LABEL_TILE_SIZE];",
+                "  static act_t output_tile[FPGAI_TRAIN_OUTPUT_TILE_SIZE];",
+                "  static const int FPGAI_MODE_EXPORT_GRADIENTS = 8;",
+                "  static grad_wgt_t gradient_export_tile[FPGAI_GRADIENT_EXPORT_TILE_SIZE];",
+                "  float label = read_f32(aux);",
+                "  if (mode == FPGAI_MODE_EXPORT_GRADIENTS) gradients_mem[0] = 0;",
+                "  output_mem[0] = input_mem[0] + label_mem[0] + weights_mem[0];",
+                "}",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (reports / "data_movement_plan.json").write_text(
+        json.dumps(
+            {
+                "tensors": [
+                    {"role": "inputs", "requested": True, "interface": "m_axi", "transport": "ps_runtime", "policy": "tiled", "tile_size": 64},
+                    {"role": "outputs", "requested": True, "interface": "m_axi", "transport": "ps_runtime", "policy": "tiled", "tile_size": 64},
+                    {"role": "labels", "requested": True, "interface": "m_axi", "transport": "ps_runtime", "policy": "tiled", "tile_size": 64},
+                    {"role": "weights", "requested": True, "import_requested": True, "mutable": True, "interface": "m_axi", "transport": "ps_runtime", "policy": "tiled"},
+                    {"role": "gradients", "requested": True, "export_requested": True, "interface": "m_axi", "transport": "ps_runtime", "policy": "tiled"},
+                    {"role": "optimizer_state", "requested": False, "export_requested": False, "interface": "not_requested", "transport": "not_requested"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (reports / "ps_pl_transfer_plan.json").write_text(json.dumps({"requirements": {"axi_dma": False, "m_axi": True}}), encoding="utf-8")
+    (reports / "vivado_bd_validation.json").write_text(json.dumps({"status": "not_requested"}), encoding="utf-8")
+    (reports / "board_fit.json").write_text(json.dumps({"derived_requirements": {"interface_requirements": {"dma_count": 0, "m_axi_bundles": 5}}}), encoding="utf-8")
+    (runtime_pkg / "buffer_plan.json").write_text(
+        json.dumps({"buffers": [{"name": "labels"}, {"name": "weights"}, {"name": "gradients_mem"}]}),
+        encoding="utf-8",
+    )
+    (runtime_pkg / "package_manifest.json").write_text(
+        json.dumps(
+            {
+                "runtime_io": {
+                    "inputs": {"import": {"interface": "m_axi", "transport": "ps_runtime", "policy": "tiled", "resolved": "m_axi_import_tiled"}},
+                    "outputs": {"export": {"interface": "m_axi", "transport": "ps_runtime", "policy": "tiled", "resolved": "m_axi_export_tiled"}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = emit_movement_contract_validation(out_dir)
+    assert result["movement_contract_validation_status"] == "passed"
+    payload = json.loads((reports / "movement_contract_validation.json").read_text(encoding="utf-8"))
+    assert payload["passed"] is True
+    assert payload["summary"]["failed_checks"] == 0
+
+
+def test_training_m_axi_tile_alias_macros_are_emitted() -> None:
+    from fpgai.backends.hls.emit.top_train_cpp import _fpgai_insert_training_io_and_gradient_ports
+
+    source = "\n".join(
+        [
+            "using namespace fpgai;",
+            "void deeplearn(",
+            "  hls::stream<axis_t>& in,",
+            "  hls::stream<axis_t>& out,",
+            "  hls::stream<axis_t>& aux,",
+            "  int mode",
+            ") {",
+            "#pragma HLS INTERFACE s_axilite port=mode bundle=CTRL",
+            "#pragma HLS INTERFACE s_axilite port=return bundle=CTRL",
+            "  if (mode == 1) { return; }",
+            "}",
+        ]
+    )
+    cfg = {
+        "data_movement": {
+            "inputs": {"import": {"interface": "m_axi", "policy": "tiled", "transport": "ps_runtime"}},
+            "labels": {"import": {"interface": "m_axi", "policy": "tiled", "transport": "ps_runtime"}},
+            "outputs": {"export": {"interface": "m_axi", "policy": "tiled", "transport": "ps_runtime"}},
+            "gradients": {"export": {"interface": "m_axi", "policy": "tiled", "transport": "ps_runtime"}},
+        }
+    }
+
+    updated = _fpgai_insert_training_io_and_gradient_ports(source, raw_cfg=cfg)
+    assert "#define FPGAI_TRAIN_INPUT_TILE_SIZE 64" in updated
+    assert "#define FPGAI_INPUT_TILE_SIZE FPGAI_TRAIN_INPUT_TILE_SIZE" in updated
+    assert "#define FPGAI_TRAIN_LABEL_TILE_SIZE 64" in updated
+    assert "#define FPGAI_LABEL_TILE_SIZE FPGAI_TRAIN_LABEL_TILE_SIZE" in updated
+    assert "#define FPGAI_TRAIN_OUTPUT_TILE_SIZE 64" in updated
+    assert "#define FPGAI_OUTPUT_TILE_SIZE FPGAI_TRAIN_OUTPUT_TILE_SIZE" in updated
+
+
+def test_runtime_package_validation_passes_for_deployable_kv260_package(tmp_path: Path) -> None:
+    out_dir = tmp_path / "deployable_kv260"
+    hw = out_dir / "vivado_bridge" / "bitstream"
+    hls_src = out_dir / "hls" / "src"
+    hw.mkdir(parents=True)
+    hls_src.mkdir(parents=True)
+    (out_dir / "manifest.json").write_text('{"top_kernel_name": "deeplearn"}', encoding="utf-8")
+    (out_dir / "input.bin").write_bytes(b"\x00" * 16)
+    (out_dir / "output.bin").write_bytes(b"\x00" * 8)
+    (out_dir / "gradients_after.bin").write_bytes(b"\x00" * 12)
+    (hw / "fpgai_bd_wrapper.bit").write_bytes(b"bitstream")
+    (hw / "fpgai_bd_wrapper.hwh").write_text("hwh", encoding="utf-8")
+    (hw / "fpgai_bd.xsa").write_bytes(b"xsa")
+    (hls_src / "fpgai_params.cpp").write_text(
+        """
+namespace fpgai {
+const op0_wgt_t W0_init[2] = {1.0, 2.0};
+const op0_bias_t B0_init[1] = {0.0};
+}
+""",
+        encoding="utf-8",
+    )
+
+    result = emit_runtime_package(
+        out_dir,
+        board="kv260",
+        pipeline_mode="training_on_device",
+        top_name="deeplearn",
+        weights_mode="ddr_tiled_mutable",
+        build_stages={"vivado_project": True, "vivado_implementation": True, "bitstream": True, "runtime_package": True},
+        runtime_sequence={"sequence": [{"command": "run_training", "args": {"steps": 1}}, {"command": "export_gradients", "args": {}}]},
+    )
+
+    assert result["deployable_overlay_present"] is True
+    assert result["runtime_package_validation_status"] == "passed"
+    assert result["runtime_package_deployability_ready"] is True
+
+    package_dir = out_dir / "runtime_package"
+    validation = json.loads((package_dir / "runtime_package_validation.json").read_text(encoding="utf-8"))
+    reports_validation = json.loads((out_dir / "reports" / "runtime_package_validation.json").read_text(encoding="utf-8"))
+    manifest = json.loads((package_dir / "package_manifest.json").read_text(encoding="utf-8"))
+
+    assert validation["status"] == "passed"
+    assert validation["deployability_ready"] is True
+    assert validation["board_execution_claimed"] is False
+    assert reports_validation == validation
+    assert manifest["runtime_package_validation"]["status"] == "passed"
+    assert manifest["runtime_package_validation"]["deployability_ready"] is True
+    assert "runtime_package_validation_json" in manifest["files"]
+
+
+def test_runtime_package_validation_fails_missing_requested_bitstream(tmp_path: Path) -> None:
+    out_dir = tmp_path / "missing_bitstream"
+    out_dir.mkdir(parents=True)
+    (out_dir / "manifest.json").write_text('{}', encoding="utf-8")
+
+    result = emit_runtime_package(
+        out_dir,
+        board="kv260",
+        pipeline_mode="training_on_device",
+        top_name="deeplearn",
+        build_stages={"vivado_project": True, "vivado_implementation": True, "bitstream": True, "runtime_package": True},
+        runtime_sequence={"sequence": [{"command": "run_training", "args": {"steps": 1}}]},
+    )
+
+    assert result["runtime_package_validation_status"] == "failed"
+    assert result["runtime_package_deployability_ready"] is False
+    validation = json.loads((out_dir / "reports" / "runtime_package_validation.json").read_text(encoding="utf-8"))
+    hardware_checks = {row["name"]: row for row in validation["checks"]["hardware"]}
+    assert hardware_checks["hardware_bitstream_status_matches_request"]["status"] == "failed"
+    assert hardware_checks["hardware_xsa_status_matches_request"]["status"] == "failed"
+
+
+def test_runtime_package_validation_reports_static_boundary(tmp_path: Path) -> None:
+    out_dir = tmp_path / "boundary"
+    out_dir.mkdir(parents=True)
+    emit_runtime_package(out_dir, board="kv260", pipeline_mode="inference", top_name="deeplearn")
+    validation = json.loads((out_dir / "runtime_package" / "runtime_package_validation.json").read_text(encoding="utf-8"))
+    assert validation["board_execution_claimed"] is False
+    assert "does not execute on the FPGA board" in validation["truth_boundary"]
+    md = (out_dir / "reports" / "runtime_package_validation.md").read_text(encoding="utf-8")
+    assert "Runtime Package Validation" in md
+    assert "board_execution_claimed" in md
+
+
+def test_runtime_package_validation_accepts_label_mem_training_alias(tmp_path):
+    from fpgai.runtime.package_validation import emit_runtime_package_validation
+    import json
+
+    root = tmp_path / "build"
+    pkg = root / "runtime_package"
+    pkg.mkdir(parents=True)
+    (root / "reports").mkdir()
+
+    (pkg / "README_RUNTIME.md").write_text("runtime", encoding="utf-8")
+    (pkg / "runtime_api.py").write_text(
+        "def load_manifest(): pass\n"
+        "def load_buffer_plan(): pass\n"
+        "def allocate_runtime_buffers(): pass\n"
+        "def bind_backend(): pass\n"
+        "def run_sequence(): pass\n",
+        encoding="utf-8",
+    )
+    (pkg / "board_runtime.py").write_text(
+        "class FPGAIBoardRuntime: pass\n"
+        "class PynqDmaMmioBackend: pass\n"
+        "def create_pynq_backend(): pass\n"
+        "FPGAI_MODE_RUN_TRAINING = 2\n",
+        encoding="utf-8",
+    )
+    (pkg / "buffer_plan.json").write_text(json.dumps({"buffers": [
+        {"name": "input", "direction": "ps_to_pl", "words": 8, "bytes": 32},
+        {"name": "label_mem", "direction": "ps_to_pl", "words": 1, "bytes": 4},
+        {"name": "output", "direction": "pl_to_ps", "words": 1, "bytes": 4},
+    ]}), encoding="utf-8")
+    seq = {"sequence": [{"command": "run_training"}]}
+    (pkg / "run_sequence.json").write_text(json.dumps(seq), encoding="utf-8")
+    (pkg / "runtime_execution_plan.json").write_text(json.dumps({"sequence": [{"command": "run_training", "sync_before": ["input", "label_mem"], "sync_after": ["output"]}]}), encoding="utf-8")
+    manifest = {
+        "build_stages": {"bitstream": False, "vivado_implementation": False},
+        "hardware": {"deployable_overlay_present": False, "bitstream": {"present": False}, "hwh": {"present": False}, "xsa": {"present": False}},
+        "runtime_sequence": seq,
+        "files": {},
+        "runtime_api": {"functions": []},
+    }
+    (pkg / "package_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = emit_runtime_package_validation(root, pkg)
+    assert result["failed_count"] == 0
+    assert result["status"] == "passed"
+
+
+def test_runtime_package_validation_resolves_label_alias_in_execution_plan(tmp_path):
+    from fpgai.runtime.package_validation import emit_runtime_package_validation
+    import json
+
+    root = tmp_path / "build_alias_resolution"
+    pkg = root / "runtime_package"
+    pkg.mkdir(parents=True)
+    (root / "reports").mkdir()
+
+    (pkg / "README_RUNTIME.md").write_text("runtime", encoding="utf-8")
+    (pkg / "runtime_api.py").write_text(
+        "def load_manifest(): pass\n"
+        "def load_buffer_plan(): pass\n"
+        "def allocate_runtime_buffers(): pass\n"
+        "def bind_backend(): pass\n"
+        "def run_sequence(): pass\n",
+        encoding="utf-8",
+    )
+    (pkg / "board_runtime.py").write_text(
+        "class FPGAIBoardRuntime: pass\n"
+        "class PynqDmaMmioBackend: pass\n"
+        "def create_pynq_backend(): pass\n"
+        "FPGAI_MODE_RUN_TRAINING = 2\n",
+        encoding="utf-8",
+    )
+    (pkg / "buffer_plan.json").write_text(json.dumps({"buffers": [
+        {"name": "input", "direction": "ps_to_pl", "words": 8, "bytes": 32},
+        {"name": "label_mem", "direction": "ps_to_pl", "words": 1, "bytes": 4},
+        {"name": "output", "direction": "pl_to_ps", "words": 1, "bytes": 4},
+    ]}), encoding="utf-8")
+    seq = {"sequence": [{"command": "run_training"}]}
+    (pkg / "run_sequence.json").write_text(json.dumps(seq), encoding="utf-8")
+    (pkg / "runtime_execution_plan.json").write_text(json.dumps({
+        "sequence": [{"command": "run_training", "sync_before": ["input", "labels"], "sync_after": ["output"]}]
+    }), encoding="utf-8")
+    manifest = {
+        "build_stages": {"bitstream": False, "vivado_implementation": False},
+        "hardware": {"deployable_overlay_present": False, "bitstream": {"present": False}, "hwh": {"present": False}, "xsa": {"present": False}},
+        "runtime_sequence": seq,
+        "files": {},
+        "runtime_api": {"functions": []},
+    }
+    (pkg / "package_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = emit_runtime_package_validation(root, pkg)
+    validation = json.loads((pkg / "runtime_package_validation.json").read_text(encoding="utf-8"))
+    step_checks = [
+        row for row in validation["checks"]["buffers_and_sequence"]
+        if row["name"].startswith("execution_step_buffers_resolve")
+    ]
+    assert result["failed_count"] == 0
+    assert step_checks and step_checks[0]["status"] == "passed"
+    assert step_checks[0]["actual"]["resolved"]["labels"] == "label_mem"
+
+
+def test_runtime_package_validation_accepts_physical_m_axi_role_buffer_names(tmp_path):
+    from fpgai.runtime.package_validation import emit_runtime_package_validation
+    import json
+
+    root = tmp_path / "physical_names"
+    pkg = root / "runtime_package"
+    pkg.mkdir(parents=True)
+    (root / "reports").mkdir()
+    (pkg / "README_RUNTIME.md").write_text("runtime", encoding="utf-8")
+    (pkg / "runtime_api.py").write_text(
+        "def load_manifest(): pass\n"
+        "def load_buffer_plan(): pass\n"
+        "def allocate_runtime_buffers(): pass\n"
+        "def bind_backend(): pass\n"
+        "def run_sequence(): pass\n",
+        encoding="utf-8",
+    )
+    (pkg / "board_runtime.py").write_text(
+        "class FPGAIBoardRuntime: pass\n"
+        "class PynqDmaMmioBackend: pass\n"
+        "def create_pynq_backend(): pass\n"
+        "FPGAI_MODE_RUN_TRAINING = 2\n",
+        encoding="utf-8",
+    )
+    (pkg / "buffer_plan.json").write_text(json.dumps({"buffers": [
+        {"name": "input_mem", "direction": "ps_to_pl", "words": 8, "bytes": 32},
+        {"name": "label_mem", "direction": "ps_to_pl", "words": 1, "bytes": 4},
+        {"name": "output_mem", "direction": "pl_to_ps", "words": 1, "bytes": 4},
+        {"name": "gradients", "direction": "pl_to_ps", "words": 4, "bytes": 16},
+    ]}), encoding="utf-8")
+    seq = {"sequence": [{"command": "run_training"}, {"command": "export_gradients"}]}
+    (pkg / "run_sequence.json").write_text(json.dumps(seq), encoding="utf-8")
+    (pkg / "runtime_execution_plan.json").write_text(json.dumps({
+        "sequence": [
+            {"command": "run_training", "sync_before": ["input", "labels"], "sync_after": ["output"]},
+            {"command": "export_gradients", "sync_before": [], "sync_after": ["gradients_mem"]},
+        ]
+    }), encoding="utf-8")
+    manifest = {
+        "build_stages": {"bitstream": False, "vivado_implementation": False},
+        "hardware": {"deployable_overlay_present": False, "bitstream": {"present": False}, "hwh": {"present": False}, "xsa": {"present": False}},
+        "runtime_sequence": seq,
+        "files": {},
+        "runtime_api": {"functions": []},
+    }
+    (pkg / "package_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = emit_runtime_package_validation(root, pkg)
+    validation = json.loads((pkg / "runtime_package_validation.json").read_text(encoding="utf-8"))
+    assert result["failed_count"] == 0
+    assert validation["failed_checks"] == []
+
+
+def test_runtime_package_validation_accepts_zero_byte_manifest_file_entry(tmp_path: Path) -> None:
+    from fpgai.runtime.package_validation import emit_runtime_package_validation
+
+    root = tmp_path / "zero_byte_manifest_entry"
+    pkg = root / "runtime_package"
+    logs = pkg / "hls" / "logs"
+    logs.mkdir(parents=True)
+    (root / "reports").mkdir(parents=True)
+
+    (pkg / "README_RUNTIME.md").write_text("runtime", encoding="utf-8")
+    (pkg / "runtime_api.py").write_text(
+        "def load_manifest(): pass\n"
+        "def load_buffer_plan(): pass\n"
+        "def allocate_runtime_buffers(): pass\n"
+        "def bind_backend(): pass\n"
+        "def run_sequence(): pass\n",
+        encoding="utf-8",
+    )
+    (pkg / "board_runtime.py").write_text(
+        "class FPGAIBoardRuntime: pass\n"
+        "class PynqDmaMmioBackend: pass\n"
+        "def create_pynq_backend(): pass\n"
+        "FPGAI_MODE_RUN_TRAINING = 2\n",
+        encoding="utf-8",
+    )
+    (pkg / "buffer_plan.json").write_text(json.dumps({"buffers": [
+        {"name": "input", "direction": "ps_to_pl", "words": 1, "bytes": 4},
+        {"name": "output", "direction": "pl_to_ps", "words": 1, "bytes": 4},
+    ]}), encoding="utf-8")
+    (pkg / "run_sequence.json").write_text(json.dumps({"sequence": []}), encoding="utf-8")
+    (pkg / "runtime_execution_plan.json").write_text(json.dumps({"sequence": []}), encoding="utf-8")
+    (logs / "vitis_hls_stderr.log").write_bytes(b"")
+
+    manifest = {
+        "build_stages": {"bitstream": False, "vivado_implementation": False},
+        "hardware": {"deployable_overlay_present": False, "bitstream": {"present": False}, "hwh": {"present": False}, "xsa": {"present": False}},
+        "runtime_sequence": {"sequence": []},
+        "files": {
+            "hls_logs": [
+                {"package_path": "hls/logs/vitis_hls_stderr.log", "bytes": 0},
+            ],
+        },
+        "runtime_api": {"functions": []},
+    }
+    (pkg / "package_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    result = emit_runtime_package_validation(root, pkg)
+    validation = json.loads((pkg / "runtime_package_validation.json").read_text(encoding="utf-8"))
+    file_checks = {
+        row["name"]: row
+        for row in validation["checks"]["package_files"]
+    }
+
+    assert file_checks["manifest_file_entry_present:hls_logs"]["status"] == "passed"
+    assert result["failed_count"] == 0

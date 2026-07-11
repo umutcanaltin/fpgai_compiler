@@ -1,0 +1,143 @@
+# FPGAI inference HLS failure diagnostic
+Thu 09 Jul 2026 03:16:04 PM CEST
+
+
+================ build/paper_experiments/inference/I0_baseline_fx16_embedded ================
+
+## manifest HLS/Vivado status
+hls_ran: True
+hls_ok: False
+hls_returncode: 1
+vivado_implemented: None
+bitstream_generated: None
+bitstream_exists: None
+xsa_exists: None
+
+## vitis_hls_stderr.log
+
+## important stdout lines
+2:****** Vitis HLS - High-Level Synthesis from C, C++ and OpenCL v2023.2 (64-bit)
+9:source /tools/Xilinx/Vitis_HLS/2023.2/scripts/vitis_hls/hls.tcl -notrace
+10:INFO: [HLS 200-10] Running '/tools/Xilinx/Vitis_HLS/2023.2/bin/unwrapped/lnx64.o/vitis_hls'
+14:INFO: [HLS 200-2053] The vitis_hls executable is being deprecated. Consider using vitis-run --mode hls --tcl
+44:INFO: [HLS 200-1510] Running: csim_design -argv /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I0_baseline_fx16_embedded/input.bin /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I0_baseline_fx16_embedded/output.bin 
+45:INFO: [SIM 211-2] *************** CSIM start ***************
+46:INFO: [SIM 211-4] CSIM will launch GCC as the compiler.
+56:   Generating csim.exe
+71:@E Simulation failed: SIGSEGV.
+72:ERROR: [SIM 211-100] CSim failed with errors.
+73:INFO: [SIM 211-3] *************** CSIM finish ***************
+74:INFO: [HLS 200-111] Finished Command csim_design CPU user time: 19.88 seconds. CPU system time: 1.84 seconds. Elapsed time: 21.82 seconds; current allocated memory: 0.000 MB.
+83:INFO: [Common 17-206] Exiting vitis_hls at Thu Jul  9 13:20:17 2026...
+
+## generated top signature
+322:extern "C" void deeplearn(
+
+## testbench call
+12:extern "C" void deeplearn(hls::stream<axis_t>& in, hls::stream<axis_t>& out);
+144:    deeplearn(in_stream, out_stream);
+
+================ build/paper_experiments/inference/I1_precision_fx8_embedded ================
+
+## manifest HLS/Vivado status
+hls_ran: True
+hls_ok: False
+hls_returncode: 1
+vivado_implemented: None
+bitstream_generated: None
+bitstream_exists: None
+xsa_exists: None
+
+## vitis_hls_stderr.log
+
+## important stdout lines
+2:****** Vitis HLS - High-Level Synthesis from C, C++ and OpenCL v2023.2 (64-bit)
+9:source /tools/Xilinx/Vitis_HLS/2023.2/scripts/vitis_hls/hls.tcl -notrace
+10:INFO: [HLS 200-10] Running '/tools/Xilinx/Vitis_HLS/2023.2/bin/unwrapped/lnx64.o/vitis_hls'
+14:INFO: [HLS 200-2053] The vitis_hls executable is being deprecated. Consider using vitis-run --mode hls --tcl
+44:INFO: [HLS 200-1510] Running: csim_design -argv /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I1_precision_fx8_embedded/input.bin /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I1_precision_fx8_embedded/output.bin 
+45:INFO: [SIM 211-2] *************** CSIM start ***************
+46:INFO: [SIM 211-4] CSIM will launch GCC as the compiler.
+56:   Generating csim.exe
+71:@E Simulation failed: SIGSEGV.
+72:ERROR: [SIM 211-100] CSim failed with errors.
+73:INFO: [SIM 211-3] *************** CSIM finish ***************
+74:INFO: [HLS 200-111] Finished Command csim_design CPU user time: 19.53 seconds. CPU system time: 1.75 seconds. Elapsed time: 21.37 seconds; current allocated memory: 0.000 MB.
+83:INFO: [Common 17-206] Exiting vitis_hls at Thu Jul  9 13:33:25 2026...
+
+## generated top signature
+322:extern "C" void deeplearn(
+
+## testbench call
+12:extern "C" void deeplearn(hls::stream<axis_t>& in, hls::stream<axis_t>& out);
+144:    deeplearn(in_stream, out_stream);
+
+================ build/paper_experiments/inference/I3_parallel_pe2 ================
+
+## manifest HLS/Vivado status
+hls_ran: True
+hls_ok: False
+hls_returncode: 1
+vivado_implemented: None
+bitstream_generated: None
+bitstream_exists: None
+xsa_exists: None
+
+## vitis_hls_stderr.log
+
+## important stdout lines
+2:****** Vitis HLS - High-Level Synthesis from C, C++ and OpenCL v2023.2 (64-bit)
+9:source /tools/Xilinx/Vitis_HLS/2023.2/scripts/vitis_hls/hls.tcl -notrace
+10:INFO: [HLS 200-10] Running '/tools/Xilinx/Vitis_HLS/2023.2/bin/unwrapped/lnx64.o/vitis_hls'
+14:INFO: [HLS 200-2053] The vitis_hls executable is being deprecated. Consider using vitis-run --mode hls --tcl
+44:INFO: [HLS 200-1510] Running: csim_design -argv /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I3_parallel_pe2/input.bin /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I3_parallel_pe2/output.bin 
+45:INFO: [SIM 211-2] *************** CSIM start ***************
+46:INFO: [SIM 211-4] CSIM will launch GCC as the compiler.
+56:   Generating csim.exe
+71:@E Simulation failed: SIGSEGV.
+72:ERROR: [SIM 211-100] CSim failed with errors.
+73:INFO: [SIM 211-3] *************** CSIM finish ***************
+74:INFO: [HLS 200-111] Finished Command csim_design CPU user time: 19.02 seconds. CPU system time: 1.8 seconds. Elapsed time: 20.92 seconds; current allocated memory: 0.000 MB.
+83:INFO: [Common 17-206] Exiting vitis_hls at Thu Jul  9 13:44:58 2026...
+
+## generated top signature
+322:extern "C" void deeplearn(
+
+## testbench call
+12:extern "C" void deeplearn(hls::stream<axis_t>& in, hls::stream<axis_t>& out);
+144:    deeplearn(in_stream, out_stream);
+
+================ build/paper_experiments/inference/I8_deployable_bitstream_candidate ================
+
+## manifest HLS/Vivado status
+hls_ran: True
+hls_ok: False
+hls_returncode: 1
+vivado_implemented: None
+bitstream_generated: None
+bitstream_exists: None
+xsa_exists: None
+
+## vitis_hls_stderr.log
+
+## important stdout lines
+2:****** Vitis HLS - High-Level Synthesis from C, C++ and OpenCL v2023.2 (64-bit)
+9:source /tools/Xilinx/Vitis_HLS/2023.2/scripts/vitis_hls/hls.tcl -notrace
+10:INFO: [HLS 200-10] Running '/tools/Xilinx/Vitis_HLS/2023.2/bin/unwrapped/lnx64.o/vitis_hls'
+14:INFO: [HLS 200-2053] The vitis_hls executable is being deprecated. Consider using vitis-run --mode hls --tcl
+44:INFO: [HLS 200-1510] Running: csim_design -argv /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/input.bin /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I8_deployable_bitstream_candidate/output.bin 
+45:INFO: [SIM 211-2] *************** CSIM start ***************
+46:INFO: [SIM 211-4] CSIM will launch GCC as the compiler.
+56:   Generating csim.exe
+71:@E Simulation failed: SIGSEGV.
+72:ERROR: [SIM 211-100] CSim failed with errors.
+73:INFO: [SIM 211-3] *************** CSIM finish ***************
+74:INFO: [HLS 200-111] Finished Command csim_design CPU user time: 19.78 seconds. CPU system time: 1.88 seconds. Elapsed time: 21.83 seconds; current allocated memory: 0.000 MB.
+83:INFO: [Common 17-206] Exiting vitis_hls at Thu Jul  9 14:09:52 2026...
+
+## generated top signature
+322:extern "C" void deeplearn(
+
+## testbench call
+12:extern "C" void deeplearn(hls::stream<axis_t>& in, hls::stream<axis_t>& out);
+144:    deeplearn(in_stream, out_stream);

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import shlex
 import subprocess
@@ -15,6 +16,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from fpgai.backends.vivado import generate_vivado_bridge_for_experiment
 from fpgai.runtime.package import emit_runtime_package
+from fpgai.toolchain import build_xilinx_tool_command
 
 
 def _load_json(path: Path) -> Any:
@@ -69,6 +71,13 @@ def _clear_exported_ip(bridge: Path) -> None:
                 shutil.rmtree(path)
             else:
                 path.unlink()
+
+def _clear_bitstream_outputs(bridge: Path) -> None:
+    """Remove generated deployment artifacts when bitstream was not requested."""
+    bit_dir = bridge / "bitstream"
+    if bit_dir.exists():
+        shutil.rmtree(bit_dir)
+    bit_dir.mkdir(parents=True, exist_ok=True)
 
 def _mirror_hls_ip_to_bridge(bridge: Path) -> None:
     """Copy canonical Vitis HLS impl/ip contents into vivado_bridge/hls_ip.
@@ -175,60 +184,28 @@ def _tool_cfg_from_manifest(project_dir: Path, tool: str) -> Dict[str, Any]:
 
 
 def _resolved_tool_command(project_dir: Path, tool: str, args: List[str]) -> tuple[List[str], Dict[str, Any]]:
-    """Resolve Vivado/Vitis commands from manifest/YAML/env/PATH.
+    """Resolve Vivado/Vitis commands from manifest/YAML/env/PATH/common installs.
 
     Priority:
     1. manifest/resolved config toolchain.<tool>.settings64 + executable/exe/path
-    2. environment variables
-    3. PATH fallback
+    2. environment variables such as FPGAI_VIVADO_SETTINGS64 / FPGAI_VITIS_HLS_SETTINGS64
+    3. PATH
+    4. common Xilinx install roots such as /tools/Xilinx, /opt/Xilinx, ~/Xilinx
     """
     cfg = _tool_cfg_from_manifest(project_dir, tool)
-    env_prefix = "VIVADO" if tool == "vivado" else "VITIS_HLS"
     default_exe = "vivado" if tool == "vivado" else "vitis_hls"
+    executable = cfg.get("executable") or cfg.get("exe") or cfg.get("path") or default_exe
+    settings64 = cfg.get("settings64") or cfg.get("settings")
 
-    executable = (
-        cfg.get("executable")
-        or cfg.get("exe")
-        or cfg.get("path")
-        or os.environ.get(f"FPGAI_{env_prefix}_EXECUTABLE")
-        or os.environ.get(f"{env_prefix}_EXECUTABLE")
-        or os.environ.get(f"FPGAI_{env_prefix}")
-        or os.environ.get(env_prefix)
-        or default_exe
+    cmd, info = build_xilinx_tool_command(
+        tool,
+        args,
+        executable=str(executable) if executable else default_exe,
+        settings64=str(settings64) if settings64 else None,
     )
-    settings64 = (
-        cfg.get("settings64")
-        or cfg.get("settings")
-        or os.environ.get(f"FPGAI_{env_prefix}_SETTINGS64")
-        or os.environ.get(f"{env_prefix}_SETTINGS64")
-    )
-
-    executable = str(executable)
-    settings64 = str(settings64) if settings64 else ""
-
-    if settings64:
-        shell_cmd = "source {settings} && exec {exe} {args}".format(
-            settings=shlex.quote(settings64),
-            exe=shlex.quote(executable),
-            args=" ".join(shlex.quote(str(a)) for a in args),
-        )
-        cmd = ["bash", "-lc", shell_cmd]
-        resolved = shutil.which("bash")
-    else:
-        cmd = [executable] + list(args)
-        resolved = shutil.which(executable)
-
-    return cmd, {
-        "tool": tool,
-        "executable": executable,
-        "settings64": settings64 or None,
-        "uses_settings64": bool(settings64),
-        "launcher": cmd[0],
-        "resolved_launcher": resolved,
-        "path_available_without_settings": shutil.which(executable) is not None,
-        "source": "manifest_or_env" if (cfg or settings64 or executable != default_exe) else "path_default",
-    }
-
+    # Keep the existing report schema stable for callers/tests.
+    info["source"] = info.get("source") or ("manifest_or_env" if (cfg or settings64 or executable != default_exe) else "path_default")
+    return cmd, info
 
 def _same_path(src: Path, dst: Path) -> bool:
     """Return True when src and dst refer to the same filesystem path."""
@@ -286,6 +263,54 @@ def _write_md_report(path: Path, payload: Dict[str, Any], title: str) -> None:
         lines.extend(["", "## Artifact", f"- `{artifact}`"])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
+def _refresh_paper_verification_after_bridge(
+    reports_dir: Path,
+    impl_payload: Dict[str, Any],
+    bit_payload: Dict[str, Any],
+) -> None:
+    verification_json = reports_dir / "paper_verification.json"
+    paper_row_json = reports_dir / "paper_row.json"
+    verification_md = reports_dir / "paper_verification.md"
+    payload = _load_json(verification_json) or {}
+    if not isinstance(payload, dict) or not payload:
+        return
+
+    flags = payload.get("verification_flags")
+    if not isinstance(flags, dict):
+        flags = {}
+    flags["vivado_implemented"] = bool(impl_payload.get("claimed_success"))
+    flags["bitstream_generated"] = bool(bit_payload.get("claimed_success"))
+    payload["verification_flags"] = flags
+
+    allowed = payload.get("allowed_claims")
+    if not isinstance(allowed, dict):
+        allowed = {}
+    allowed["vivado_implementation"] = flags["vivado_implemented"]
+    allowed["bitstream"] = flags["bitstream_generated"]
+    payload["allowed_claims"] = allowed
+    _write_json(verification_json, payload)
+
+    row = _load_json(paper_row_json) or {}
+    if isinstance(row, dict):
+        row["vivado_implemented"] = flags["vivado_implemented"]
+        row["bitstream_generated"] = flags["bitstream_generated"]
+        _write_json(paper_row_json, row)
+
+    lines = [
+        "# Paper verification",
+        "",
+        f"- Pipeline mode: `{payload.get('pipeline_mode', 'inference')}`",
+        f"- Paper safe: `{str(bool(payload.get('paper_safe'))).lower()}`",
+        "",
+        "## Verification flags",
+    ]
+    for key, value in flags.items():
+        lines.append(f"- {key}: `{str(bool(value)).lower()}`")
+    lines += ["", "## Allowed claims"]
+    for key, value in allowed.items():
+        lines.append(f"- {key}: `{str(bool(value)).lower()}`")
+    verification_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
 
 def _sync_bridge_result_to_compile_output(artifact: Path, bridge: Path, row: Dict[str, Any]) -> None:
     """Synchronize successful external Vivado bridge evidence into the real build.
@@ -298,9 +323,16 @@ def _sync_bridge_result_to_compile_output(artifact: Path, bridge: Path, row: Dic
     if not compile_dir.exists():
         return
 
+    bitstream_requested = bool(row.get("bitstream_requested", row.get("vivado_impl_requested")))
+
     # Mirror only deployment/report-facing bridge outputs, not necessarily the full Vivado project.
     target_bridge = compile_dir / "vivado_bridge"
-    for subdir in ["bitstream", "reports", "logs", "scripts", "hls_ip"]:
+    subdirs = ["reports", "logs", "scripts", "hls_ip"]
+    if bitstream_requested:
+        subdirs.append("bitstream")
+    else:
+        _clear_bitstream_outputs(target_bridge)
+    for subdir in subdirs:
         _copy_dir_contents(bridge / subdir, target_bridge / subdir)
     for filename in ["vivado_bridge_manifest.json", "README_VIVADO.md"]:
         src = bridge / filename
@@ -313,9 +345,9 @@ def _sync_bridge_result_to_compile_output(artifact: Path, bridge: Path, row: Dic
     reports_dir = compile_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
 
-    bit = _first_existing_file(target_bridge, ["bitstream/*.bit", "project/**/*.bit"])
-    hwh = _first_existing_file(target_bridge, ["bitstream/*.hwh", "project/**/*.hwh"])
-    xsa = _first_existing_file(target_bridge, ["bitstream/*.xsa", "project/**/*.xsa"])
+    bit = _first_existing_file(target_bridge, ["bitstream/*.bit", "project/**/*.bit"]) if bitstream_requested else None
+    hwh = _first_existing_file(target_bridge, ["bitstream/*.hwh", "project/**/*.hwh"]) if bitstream_requested else None
+    xsa = _first_existing_file(target_bridge, ["bitstream/*.xsa", "project/**/*.xsa"]) if bitstream_requested else None
     util = _first_existing_file(target_bridge, ["reports/utilization_impl.rpt", "project/**/*utilization*impl*.rpt"])
     timing = _first_existing_file(target_bridge, ["reports/timing_impl.rpt", "project/**/*timing*impl*.rpt"])
     power = _first_existing_file(target_bridge, ["reports/power_impl.rpt", "project/**/*power*impl*.rpt"])
@@ -351,9 +383,9 @@ def _sync_bridge_result_to_compile_output(artifact: Path, bridge: Path, row: Dic
     bit_payload = {
         "format": "fpgai.bitstream_report.v1",
         "stage": "bitstream",
-        "requested": bool(row.get("vivado_impl_requested")),
-        "status": "passed" if vivado_ok and bit_ok else "failed",
-        "reason": "Bitstream/XSA artifacts were generated by the Vivado bridge." if vivado_ok and bit_ok else "Bitstream/XSA artifacts are missing after Vivado bridge run.",
+        "requested": bitstream_requested,
+        "status": "not_requested" if not bitstream_requested else ("passed" if vivado_ok and bit_ok else "failed"),
+        "reason": "Bitstream stage was not requested." if not bitstream_requested else ("Bitstream/XSA artifacts were generated by the Vivado bridge." if vivado_ok and bit_ok else "Bitstream/XSA artifacts are missing after Vivado bridge run."),
         "claimed_success": bool(vivado_ok and bit_ok),
         "requires_vivado_implementation_passed": True,
         "vivado_implementation_status": impl_payload["status"],
@@ -373,6 +405,7 @@ def _sync_bridge_result_to_compile_output(artifact: Path, bridge: Path, row: Dic
     _write_json(reports_dir / "bitstream_report.json", bit_payload)
     _write_md_report(reports_dir / "vivado_implementation_report.md", impl_payload, "Vivado implementation report")
     _write_md_report(reports_dir / "bitstream_report.md", bit_payload, "Bitstream report")
+    _refresh_paper_verification_after_bridge(reports_dir, impl_payload, bit_payload)
 
     # Refresh runtime package so package_manifest sees vivado_bridge/bitstream.
     try:
@@ -506,7 +539,7 @@ def _refresh_manifest(bridge: Path, updates: Dict[str, Any] | None = None) -> Di
     return man
 
 
-def _classify_vivado_failure(bridge_dir: Path, res: Dict[str, Any]) -> str:
+def _classify_vivado_failure(bridge_dir: Path, res: Dict[str, Any], *, run_bitstream: bool = False) -> str:
     """Classify common Vivado failures from generated text logs/reports."""
     text_parts: List[str] = [str(res.get("error") or "")]
 
@@ -545,7 +578,21 @@ def _classify_vivado_failure(bridge_dir: Path, res: Dict[str, Any]) -> str:
     if "route_design failed" in low:
         return "vivado_impl_failed_route_design"
 
-    if "write_bitstream" in low and "failed" in low:
+    if "modes of the interface pins" in low and "incompatible" in low:
+        return "vivado_bd_failed_interface_mode_mismatch"
+
+    if "connect_bd_intf_net" in low and "failed" in low:
+        return "vivado_bd_failed_interface_connection"
+
+    # Only classify as a bitstream failure when the bitstream stage was actually
+    # requested and the log ties the failure to the write_bitstream step.  Vivado
+    # scripts may contain the literal token `write_bitstream` even for
+    # implementation-only rows, and unrelated implementation failures may contain
+    # the word `failed`; those must not be mislabeled as bitstream failures.
+    if run_bitstream and (
+        re.search(r"write_bitstream[^\n]{0,240}(failed|error)", low)
+        or re.search(r"(failed|error)[^\n]{0,240}write_bitstream", low)
+    ):
         return "vivado_impl_failed_write_bitstream"
 
     if not bool(res.get("ok")):
@@ -560,11 +607,16 @@ def _run_for_artifact(
     export_hls_ip: bool,
     run_vivado_synth: bool,
     run_vivado_impl: bool,
+    run_bitstream: bool | None,
     timeout_sec: int | None,
     force_hls_export: bool = False,
 ) -> Dict[str, Any]:
     bridge = _bridge_dir(artifact)
     bridge.mkdir(parents=True, exist_ok=True)
+    if run_bitstream is None:
+        run_bitstream = run_vivado_impl
+    if not run_bitstream:
+        _clear_bitstream_outputs(bridge)
     row: Dict[str, Any] = {
         "design": artifact.name,
         "vivado_bridge_dir": bridge.as_posix(),
@@ -574,6 +626,7 @@ def _run_for_artifact(
         "hls_ip_export_returncode": None,
         "vivado_synth_requested": bool(run_vivado_synth or run_vivado_impl),
         "vivado_impl_requested": bool(run_vivado_impl),
+        "bitstream_requested": bool(run_bitstream),
         "vivado_ran": False,
         "vivado_ok": False,
         "vivado_returncode": None,
@@ -638,7 +691,7 @@ def _run_for_artifact(
             "component_xml_count": 0,
             "vivado_synth_requested": bool(run_vivado_synth or run_vivado_impl),
             "vivado_impl_requested": bool(run_vivado_impl),
-            "bitstream_requested": bool(run_vivado_impl),
+            "bitstream_requested": bool(run_bitstream),
             "vivado_ran": False,
             "vivado_ok": False,
             "vivado_returncode": None,
@@ -678,11 +731,12 @@ def _run_for_artifact(
                 env = os.environ.copy()
                 if run_vivado_impl:
                     env["FPGAI_VIVADO_RUN_IMPL"] = "1"
+                env["FPGAI_VIVADO_RUN_BITSTREAM"] = "1" if run_bitstream else "0"
                 cmd, tool_info = _resolved_tool_command(bridge.parent, "vivado", ["-mode", "batch", "-source", "scripts/run_vivado.tcl"])
                 res = _run_cmd(cmd, bridge, "vivado_build", timeout_sec, env=env)
                 res["resolved_tool"] = tool_info
 
-        failure_class = "" if bool(res.get("ok")) else _classify_vivado_failure(bridge, res)
+        failure_class = "" if bool(res.get("ok")) else _classify_vivado_failure(bridge, res, run_bitstream=bool(run_bitstream))
         if failure_class:
             res["failure_class"] = failure_class
             if not res.get("error"):
@@ -725,6 +779,111 @@ def _run_for_artifact(
     return row
 
 
+
+def run_vivado_bridge_flow(
+    experiment_or_build_dir: str | Path,
+    *,
+    board: str = "pynq_z2",
+    export_hls_ip: bool = False,
+    force_hls_export: bool = False,
+    run_vivado_synth: bool = False,
+    run_vivado_impl: bool = False,
+    run_bitstream: bool | None = None,
+    max_designs: Optional[int] = None,
+    timeout_sec: int | None = 3600,
+) -> Dict[str, Any]:
+    """Run the Vivado bridge flow for an experiment or direct build directory.
+
+    This is the shared product API used by both the CLI entry point and the
+    compiler orchestration path.  It preserves the existing bridge ownership:
+    Vivado bridge generation, HLS IP export/reuse, Vivado execution, report
+    synchronization, and runtime-package refresh stay in this backend module
+    instead of being duplicated in the compiler.
+    """
+    exp = Path(experiment_or_build_dir).resolve()
+    run_impl_default = bool(run_vivado_impl)
+    run_bitstream_default = bool(run_vivado_impl) if run_bitstream is None else bool(run_bitstream)
+
+    gen_rows = generate_vivado_bridge_for_experiment(
+        exp,
+        board_name=board,
+        run_impl_default=run_impl_default,
+        run_bitstream_default=run_bitstream_default,
+    )
+
+    run_rows: List[Dict[str, Any]] = []
+    tool_artifacts = _limited(_iter_artifacts(exp), max_designs)
+    requested_tool_run = bool(export_hls_ip or run_vivado_synth or run_vivado_impl)
+    if requested_tool_run:
+        for art in tool_artifacts:
+            try:
+                run_rows.append(_run_for_artifact(
+                    art,
+                    export_hls_ip=export_hls_ip or run_vivado_synth or run_vivado_impl,
+                    run_vivado_synth=run_vivado_synth,
+                    run_vivado_impl=run_vivado_impl,
+                    run_bitstream=run_bitstream_default,
+                    timeout_sec=timeout_sec,
+                    force_hls_export=force_hls_export,
+                ))
+            except Exception as exc:
+                run_rows.append({"design": art.name, "error": str(exc)})
+
+    out = exp / "vivado_bridge_run_artifacts.json"
+    payload: Dict[str, Any] = {"generated": gen_rows, "tool_runs": run_rows}
+    _write_json(out, payload)
+    payload["artifacts_json"] = out.as_posix()
+    payload["failed_rows"] = _vivado_bridge_failed_rows(
+        run_rows,
+        export_hls_ip=export_hls_ip,
+        run_vivado_synth=run_vivado_synth,
+        run_vivado_impl=run_vivado_impl,
+        run_bitstream=run_bitstream_default,
+    )
+    payload["ok"] = not payload["failed_rows"]
+    return payload
+
+
+def _vivado_bridge_failed_rows(
+    run_rows: List[Dict[str, Any]],
+    *,
+    export_hls_ip: bool,
+    run_vivado_synth: bool,
+    run_vivado_impl: bool,
+    run_bitstream: bool | None = None,
+) -> List[tuple[str, str]]:
+    failed_rows: List[tuple[str, str]] = []
+    requested_tool_run = bool(export_hls_ip or run_vivado_synth or run_vivado_impl)
+    if not requested_tool_run:
+        return failed_rows
+
+    for row in run_rows:
+        design = str(row.get("design", ""))
+        if row.get("error"):
+            failed_rows.append((design, str(row.get("error"))))
+            continue
+
+        if export_hls_ip or run_vivado_synth or run_vivado_impl:
+            if not row.get("hls_ip_export_ok", False):
+                failed_rows.append((design, str(row.get("hls_ip_export_error") or "HLS IP export failed")))
+                continue
+
+        if run_vivado_synth or run_vivado_impl:
+            if not row.get("vivado_ok", False):
+                failed_rows.append((design, str(row.get("vivado_error") or f"Vivado failed with returncode={row.get('vivado_returncode')}")))
+                continue
+
+        effective_run_bitstream = bool(run_vivado_impl) if run_bitstream is None else bool(run_bitstream)
+        if effective_run_bitstream:
+            if not row.get("bitstream_exists", False):
+                failed_rows.append((design, "Vivado implementation requested but bitstream was not produced"))
+                continue
+            if not row.get("xsa_exists", False):
+                failed_rows.append((design, "Vivado implementation requested but XSA was not produced"))
+                continue
+
+    return failed_rows
+
 def _cell(v: Any) -> str:
     if v is None:
         return ""
@@ -744,29 +903,20 @@ def main() -> int:
     ap.add_argument("--timeout-sec", type=int, default=3600, help="Timeout per tool command")
     args = ap.parse_args()
 
+    payload = run_vivado_bridge_flow(
+        args.experiment,
+        board=args.board,
+        export_hls_ip=args.export_hls_ip,
+        force_hls_export=args.force_hls_export,
+        run_vivado_synth=args.run_vivado_synth,
+        run_vivado_impl=args.run_vivado_impl,
+        max_designs=args.max_designs,
+        timeout_sec=args.timeout_sec,
+    )
     exp = Path(args.experiment).resolve()
-    run_impl_default = bool(args.run_impl_default or args.run_vivado_impl)
-
-    gen_rows = generate_vivado_bridge_for_experiment(exp, board_name=args.board, run_impl_default=run_impl_default)
-
-    run_rows: List[Dict[str, Any]] = []
-    tool_artifacts = _limited(_iter_artifacts(exp), args.max_designs)
-    if args.export_hls_ip or args.run_vivado_synth or args.run_vivado_impl:
-        for art in tool_artifacts:
-            try:
-                run_rows.append(_run_for_artifact(
-                    art,
-                    export_hls_ip=args.export_hls_ip or args.run_vivado_synth or args.run_vivado_impl,
-                    run_vivado_synth=args.run_vivado_synth,
-                    run_vivado_impl=args.run_vivado_impl,
-                    timeout_sec=args.timeout_sec,
-                    force_hls_export=args.force_hls_export,
-                ))
-            except Exception as exc:
-                run_rows.append({"design": art.name, "error": str(exc)})
-
-    out = exp / "vivado_bridge_run_artifacts.json"
-    _write_json(out, {"generated": gen_rows, "tool_runs": run_rows})
+    gen_rows = payload.get("generated", [])
+    run_rows = payload.get("tool_runs", [])
+    out = Path(str(payload.get("artifacts_json", exp / "vivado_bridge_run_artifacts.json")))
 
     print("# Automated Vivado bridge")
     print()
@@ -811,33 +961,7 @@ def main() -> int:
                 stderr=_cell(stderr_log),
             )
         )
-    requested_tool_run = bool(args.export_hls_ip or args.run_vivado_synth or args.run_vivado_impl)
-    failed_rows = []
-
-    if requested_tool_run:
-        for row in run_rows:
-            design = row.get("design", "")
-            if row.get("error"):
-                failed_rows.append((design, row.get("error")))
-                continue
-
-            if args.export_hls_ip or args.run_vivado_synth or args.run_vivado_impl:
-                if not row.get("hls_ip_export_ok", False):
-                    failed_rows.append((design, row.get("hls_ip_export_error") or "HLS IP export failed"))
-                    continue
-
-            if args.run_vivado_synth or args.run_vivado_impl:
-                if not row.get("vivado_ok", False):
-                    failed_rows.append((design, row.get("vivado_error") or f"Vivado failed with returncode={row.get('vivado_returncode')}"))
-                    continue
-
-            if args.run_vivado_impl:
-                if not row.get("bitstream_exists", False):
-                    failed_rows.append((design, "Vivado implementation requested but bitstream was not produced"))
-                    continue
-                if not row.get("xsa_exists", False):
-                    failed_rows.append((design, "Vivado implementation requested but XSA was not produced"))
-                    continue
+    failed_rows = payload.get("failed_rows", [])
 
     print()
     if failed_rows:

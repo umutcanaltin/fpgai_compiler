@@ -1,0 +1,80 @@
+# FPGAI inference paper compile plan
+
+set -u
+set -o pipefail
+FPGAI_EXPERIMENT_SETUP_DIR=${FPGAI_EXPERIMENT_SETUP_DIR:-paper_results/experiment_setup}
+FPGAI_COMPILE_LOG_DIR="$FPGAI_EXPERIMENT_SETUP_DIR/compile_logs"
+mkdir -p "$FPGAI_COMPILE_LOG_DIR"
+FPGAI_COMPILE_STATUS_TSV="$FPGAI_COMPILE_LOG_DIR/compile_status.tsv"
+printf 'order\tid\tstatus\tlog\n' > "$FPGAI_COMPILE_STATUS_TSV"
+FPGAI_COMPILE_FAILURES=0
+run_fpgai_compile() {
+  local order="$1"
+  local experiment_id="$2"
+  local configured_stage="$3"
+  local expected_claim_level="$4"
+  local project_out_dir="$5"
+  shift 5
+  local safe_id="${experiment_id//[^A-Za-z0-9_]/_}"
+  local log="$FPGAI_COMPILE_LOG_DIR/${order}_${safe_id}.log"
+  echo "[FPGAI][RUN] ${order} ${experiment_id}: $*"
+  "$@" 2>&1 | tee "$log"
+  local command_status=${PIPESTATUS[0]}
+  local artifact_status=0
+  if [ "$command_status" -eq 0 ]; then
+    python -m fpgai.paper.experiment_setup --validate-artifact "$project_out_dir" --configured-stage "$configured_stage" --expected-claim-level "$expected_claim_level" >> "$log" 2>&1
+    artifact_status=$?
+  fi
+  local status=$command_status
+  if [ "$status" -eq 0 ] && [ "$artifact_status" -ne 0 ]; then
+    status=$artifact_status
+  fi
+  printf '%s\t%s\t%s\t%s\n' "$order" "$experiment_id" "$status" "$log" >> "$FPGAI_COMPILE_STATUS_TSV"
+  if [ "$status" -ne 0 ]; then
+    echo "[FPGAI][WARN] ${experiment_id} failed with status ${status}; continuing to remaining paper rows."
+    FPGAI_COMPILE_FAILURES=$((FPGAI_COMPILE_FAILURES + 1))
+  fi
+}
+
+python -m fpgai.paper.experiment_setup paper_experiments/paper_experiment_matrix.yml --output-dir paper_results/experiment_setup || exit 1
+
+# Compile commands are generated from paper_experiments/paper_experiment_matrix.yml.
+# Board-runtime rows compile deployable packages only; real board execution is a separate measured step.
+# Inference section rows.
+
+# 00 I0_baseline_fx16_embedded | inference | baseline | level_2_vivado_implementation
+run_fpgai_compile 00 I0_baseline_fx16_embedded vivado_implementation level_2_vivado_implementation build/paper_experiments/inference/I0_baseline_fx16_embedded python -m fpgai.cli compile --config paper_experiments/inference/I0_baseline_fx16_embedded.yml
+
+# 01 I1_precision_fx8_embedded | inference | precision | level_2_vivado_implementation
+run_fpgai_compile 01 I1_precision_fx8_embedded vivado_implementation level_2_vivado_implementation build/paper_experiments/inference/I1_precision_fx8_embedded python -m fpgai.cli compile --config paper_experiments/inference/I1_precision_fx8_embedded.yml
+
+# 02 I2_precision_fx24_embedded | inference | precision | level_2_vivado_implementation
+run_fpgai_compile 02 I2_precision_fx24_embedded vivado_implementation level_2_vivado_implementation build/paper_experiments/inference/I2_precision_fx24_embedded python -m fpgai.cli compile --config paper_experiments/inference/I2_precision_fx24_embedded.yml
+
+# 03 I3_parallel_pe2 | inference | parallelism | level_2_vivado_implementation
+run_fpgai_compile 03 I3_parallel_pe2 vivado_implementation level_2_vivado_implementation build/paper_experiments/inference/I3_parallel_pe2 python -m fpgai.cli compile --config paper_experiments/inference/I3_parallel_pe2.yml
+
+# 04 I4_parallel_pe4 | inference | parallelism | level_2_vivado_implementation
+run_fpgai_compile 04 I4_parallel_pe4 vivado_implementation level_2_vivado_implementation build/paper_experiments/inference/I4_parallel_pe4 python -m fpgai.cli compile --config paper_experiments/inference/I4_parallel_pe4.yml
+
+# 05 I5_pipeline_latency_first | inference | pipeline | level_2_vivado_implementation
+run_fpgai_compile 05 I5_pipeline_latency_first vivado_implementation level_2_vivado_implementation build/paper_experiments/inference/I5_pipeline_latency_first python -m fpgai.cli compile --config paper_experiments/inference/I5_pipeline_latency_first.yml
+
+# 06 I6_pipeline_resource_first | inference | pipeline | level_2_vivado_implementation
+run_fpgai_compile 06 I6_pipeline_resource_first vivado_implementation level_2_vivado_implementation build/paper_experiments/inference/I6_pipeline_resource_first python -m fpgai.cli compile --config paper_experiments/inference/I6_pipeline_resource_first.yml
+
+# 07 I7_weight_import_m_axi | inference | memory | level_2_vivado_implementation
+run_fpgai_compile 07 I7_weight_import_m_axi vivado_implementation level_2_vivado_implementation build/paper_experiments/inference/I7_weight_import_m_axi python -m fpgai.cli compile --config paper_experiments/inference/I7_weight_import_m_axi.yml
+
+# 08 I8_deployable_bitstream_candidate | inference | deployability | level_3_bitstream_package
+run_fpgai_compile 08 I8_deployable_bitstream_candidate bitstream_package level_3_bitstream_package build/paper_experiments/inference/I8_deployable_bitstream_candidate python -m fpgai.cli compile --config paper_experiments/inference/I8_deployable_bitstream_candidate.yml
+
+# 09 I9_board_runtime_candidate | inference | board_runtime | level_4_board_execution
+run_fpgai_compile 09 I9_board_runtime_candidate bitstream_package level_4_board_execution build/paper_experiments/inference/I9_board_runtime_candidate python -m fpgai.cli compile --config paper_experiments/inference/I9_board_runtime_candidate.yml
+
+echo "[FPGAI][SUMMARY] Compile status table: $FPGAI_COMPILE_STATUS_TSV"
+if [ "$FPGAI_COMPILE_FAILURES" -ne 0 ]; then
+  echo "[FPGAI][SUMMARY] $FPGAI_COMPILE_FAILURES paper compile row(s) failed. Inspect $FPGAI_COMPILE_LOG_DIR."
+  exit 1
+fi
+echo "[FPGAI][SUMMARY] All selected paper compile rows passed."
