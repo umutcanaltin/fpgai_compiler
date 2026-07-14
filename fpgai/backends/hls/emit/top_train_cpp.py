@@ -662,13 +662,15 @@ def _inject_native_accumulated_modes_from_cpp(
         out.append(f"{indent}FPGAI_NATIVE_ACC_BATCH_COUNT = 0;")
         return out
 
-    def emit_grad_lines(indent: str) -> list[str]:
+    def emit_grad_lines(indent: str, *, accumulated: bool = False) -> list[str]:
         out = []
         for idx, p in enumerate(params):
             last = "true" if idx == len(params) - 1 else "false"
             total = p['w'] + p['b']
-            out.append(f"{indent}for (int i = 0; i < {p['w']}; ++i) {p['out']}[i] = (float){p['dw']}[i];")
-            out.append(f"{indent}for (int i = 0; i < {p['b']}; ++i) {p['out']}[{p['w']} + i] = (float){p['db']}[i];")
+            w_source = f"ACC_{p['dw']}" if accumulated else p['dw']
+            b_source = f"ACC_{p['db']}" if accumulated else p['db']
+            out.append(f"{indent}for (int i = 0; i < {p['w']}; ++i) {p['out']}[i] = (float){w_source}[i];")
+            out.append(f"{indent}for (int i = 0; i < {p['b']}; ++i) {p['out']}[{p['w']} + i] = (float){b_source}[i];")
             out.append(f"{indent}emit_stream_block<{total}>(out, {p['out']}, {last});")
         return out
 
@@ -704,7 +706,7 @@ def _inject_native_accumulated_modes_from_cpp(
         accum.append(f"    for (int i = 0; i < {p['w']}; ++i) ACC_{p['dw']}[i] += (acc_t){p['dw']}[i];")
         accum.append(f"    for (int i = 0; i < {p['b']}; ++i) ACC_{p['db']}[i] += (acc_t){p['db']}[i];")
     accum.append("    FPGAI_NATIVE_ACC_BATCH_COUNT += 1;")
-    accum.extend(emit_grad_lines("    "))
+    accum.extend(emit_grad_lines("    ", accumulated=True))
     accum.extend(["    return;", "  }", ""])
 
     update_marker = "\n  fpgai::sgd_update_"
@@ -741,6 +743,25 @@ def _inject_native_accumulated_modes_from_cpp(
     return cpp
 
 
+
+
+def _is_final_softmax_cross_entropy_case(
+    graph,
+    training_cfg: Dict[str, Any],
+) -> bool:
+    loss_cfg = (training_cfg.get("loss", {}) or {}) if isinstance(training_cfg, dict) else {}
+    loss_type = str(loss_cfg.get("type", "mse")).strip().lower().replace("-", "_")
+    if loss_type not in {"cross_entropy", "ce"}:
+        return False
+    if not getattr(graph, "ops", None):
+        return False
+    last_op = graph.ops[-1]
+    return bool(
+        last_op.op_type == "Softmax"
+        and last_op.outputs
+        and graph.outputs
+        and last_op.outputs[0] == graph.outputs[0]
+    )
 
 def emit_top_train_cpp(
     *,
@@ -804,11 +825,18 @@ def emit_top_train_cpp(
         )
     )
 
+    fused_final_softmax_cross_entropy = (
+        _is_final_softmax_cross_entropy_case(
+            graph,
+            training_cfg,
+        )
+    )
     bypass_final_softmax_backward = (
         _is_final_softmax_mse_case(
             graph,
             training_cfg,
         )
+        or fused_final_softmax_cross_entropy
     )
 
     input_name = graph.inputs[0]
@@ -1608,26 +1636,37 @@ def emit_top_train_cpp(
         lines.append("  }")
     elif loss_type in {"cross_entropy", "ce"}:
         lines.append("  // FPGAI cross_entropy loss kernel.")
-        lines.append("  // Labels are expected as one-hot/probability targets aligned with output logits.")
         lines.append("  loss_t loss_value = (loss_t)0;")
-        lines.append(f"  acc_t max_logit = (acc_t){final_buffer}[0];")
-        lines.append(f"  for (int i = 1; i < {output_size}; ++i) {{")
-        lines.append(f"    acc_t value = (acc_t){final_buffer}[i];")
-        lines.append("    if (value > max_logit) max_logit = value;")
-        lines.append("  }")
-        lines.append("  acc_t softmax_denom = (acc_t)0;")
-        lines.append(f"  for (int i = 0; i < {output_size}; ++i) {{")
-        lines.append(f"    softmax_denom += (acc_t)expf((float)((acc_t){final_buffer}[i] - max_logit));")
-        lines.append("  }")
-        lines.append(f"  for (int i = 0; i < {output_size}; ++i) {{")
-        lines.append(f"    acc_t exp_value = (acc_t)expf((float)((acc_t){final_buffer}[i] - max_logit));")
-        lines.append("    acc_t probability = exp_value / softmax_denom;")
-        lines.append("    acc_t target_value = (acc_t)target_buf[i];")
-        lines.append(f"    {final_gradient}[i] = (grad_act_t)(probability - target_value);")
-        lines.append("    if (target_value != (acc_t)0) {")
-        lines.append("      loss_value -= (loss_t)(target_value * (acc_t)logf((float)probability + 1.0e-7f));")
-        lines.append("    }")
-        lines.append("  }")
+        if fused_final_softmax_cross_entropy:
+            lines.append("  // Final graph output is already softmax probability; use fused dL/dlogits = p - target.")
+            lines.append(f"  for (int i = 0; i < {output_size}; ++i) {{")
+            lines.append(f"    acc_t probability = (acc_t){final_buffer}[i];")
+            lines.append("    acc_t target_value = (acc_t)target_buf[i];")
+            lines.append(f"    {final_gradient}[i] = (grad_act_t)(probability - target_value);")
+            lines.append("    if (target_value != (acc_t)0) {")
+            lines.append("      loss_value -= (loss_t)(target_value * (acc_t)logf((float)probability + 1.0e-7f));")
+            lines.append("    }")
+            lines.append("  }")
+        else:
+            lines.append("  // Labels are expected as one-hot/probability targets aligned with output logits.")
+            lines.append(f"  acc_t max_logit = (acc_t){final_buffer}[0];")
+            lines.append(f"  for (int i = 1; i < {output_size}; ++i) {{")
+            lines.append(f"    acc_t value = (acc_t){final_buffer}[i];")
+            lines.append("    if (value > max_logit) max_logit = value;")
+            lines.append("  }")
+            lines.append("  acc_t softmax_denom = (acc_t)0;")
+            lines.append(f"  for (int i = 0; i < {output_size}; ++i) {{")
+            lines.append(f"    softmax_denom += (acc_t)expf((float)((acc_t){final_buffer}[i] - max_logit));")
+            lines.append("  }")
+            lines.append(f"  for (int i = 0; i < {output_size}; ++i) {{")
+            lines.append(f"    acc_t exp_value = (acc_t)expf((float)((acc_t){final_buffer}[i] - max_logit));")
+            lines.append("    acc_t probability = exp_value / softmax_denom;")
+            lines.append("    acc_t target_value = (acc_t)target_buf[i];")
+            lines.append(f"    {final_gradient}[i] = (grad_act_t)(probability - target_value);")
+            lines.append("    if (target_value != (acc_t)0) {")
+            lines.append("      loss_value -= (loss_t)(target_value * (acc_t)logf((float)probability + 1.0e-7f));")
+            lines.append("    }")
+            lines.append("  }")
     else:
         lines.append(
             f"  for (int i = 0; i < {output_size}; ++i) "

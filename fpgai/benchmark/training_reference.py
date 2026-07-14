@@ -1271,6 +1271,26 @@ def _is_final_softmax_mse_case(
     )
 
 
+
+def _is_final_softmax_cross_entropy_case(
+    graph,
+    raw_config: Dict[str, Any],
+) -> bool:
+    training_config = (raw_config.get("training", {}) or {})
+    loss_config = (training_config.get("loss", {}) or {})
+    loss_type = str(loss_config.get("type", "mse")).strip().lower().replace("-", "_")
+    if loss_type not in {"cross_entropy", "ce"}:
+        return False
+    if not getattr(graph, "ops", None):
+        return False
+    last_op = graph.ops[-1]
+    return bool(
+        last_op.op_type == "Softmax"
+        and last_op.outputs
+        and graph.outputs
+        and last_op.outputs[0] == graph.outputs[0]
+    )
+
 def run_training_reference_step(
     *,
     graph,
@@ -1331,11 +1351,18 @@ def run_training_reference_step(
         _write_f32(tiled_inputs_ref_path, x_input.astype(np.float32))
         _write_f32(tiled_labels_ref_path, target.astype(np.float32))
 
+    fused_final_softmax_cross_entropy = (
+        _is_final_softmax_cross_entropy_case(
+            graph,
+            raw_cfg,
+        )
+    )
     bypass_final_softmax_backward = (
         _is_final_softmax_mse_case(
             graph,
             raw_cfg,
         )
+        or fused_final_softmax_cross_entropy
     )
 
     parameter_state: Dict[
@@ -1464,10 +1491,16 @@ def run_training_reference_step(
     cross_entropy_loss_ref_json = None
     dlogits_ref_path = None
     if loss_type in {"cross_entropy", "ce"}:
-        loss_before, output_gradient, softmax_ref = _cross_entropy_loss_and_grad(
-            prediction,
-            target.astype(np.float32),
-        )
+        if fused_final_softmax_cross_entropy:
+            softmax_ref = np.asarray(prediction, dtype=np.float32).reshape(-1)
+            target_ref = target.astype(np.float32).reshape(-1)
+            loss_before = float(-np.sum(target_ref * np.log(softmax_ref + np.float32(1.0e-7))))
+            output_gradient = (softmax_ref - target_ref).astype(np.float32)
+        else:
+            loss_before, output_gradient, softmax_ref = _cross_entropy_loss_and_grad(
+                prediction,
+                target.astype(np.float32),
+            )
         logits_ref_path = reference_dir / "logits_ref.bin"
         softmax_ref_path = reference_dir / "softmax_ref.bin"
         cross_entropy_loss_ref_json = reference_dir / "cross_entropy_loss_ref.json"
@@ -1899,10 +1932,15 @@ def run_training_reference_step(
     ]
 
     if loss_type in {"cross_entropy", "ce"}:
-        loss_after, _, _ = _cross_entropy_loss_and_grad(
-            prediction_after,
-            target.astype(np.float32),
-        )
+        if fused_final_softmax_cross_entropy:
+            probability_after = np.asarray(prediction_after, dtype=np.float32).reshape(-1)
+            target_after = target.astype(np.float32).reshape(-1)
+            loss_after = float(-np.sum(target_after * np.log(probability_after + np.float32(1.0e-7))))
+        else:
+            loss_after, _, _ = _cross_entropy_loss_and_grad(
+                prediction_after,
+                target.astype(np.float32),
+            )
     else:
         loss_after, _ = _mse_loss_and_grad(
             prediction_after,

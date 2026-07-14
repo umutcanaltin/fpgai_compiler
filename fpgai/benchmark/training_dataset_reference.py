@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, Tuple
 import numpy as np
 
 from fpgai.benchmark.training_reference import TrainingReferenceResult, run_training_reference_step
+from fpgai.numerics.fixed_emulation import quantize_array
 from fpgai.engine.training_graph_utils import (
     as_chw,
     as_numpy_numeric,
@@ -147,6 +148,136 @@ def _assign_flat_weights(
         raise RuntimeError(f"Dataset reference weight-layout mismatch: consumed {cursor}, got {np.asarray(flat).size}")
 
 
+
+
+def _precision_spec(raw_cfg: Dict[str, Any], path: tuple[str, ...], fallback: Dict[str, Any]) -> Dict[str, Any]:
+    node: Any = raw_cfg
+    for key in path:
+        if not isinstance(node, dict) or key not in node:
+            return dict(fallback)
+        node = node[key]
+    return dict(node) if isinstance(node, dict) else dict(fallback)
+
+
+def _hardware_domain_reference(
+    *,
+    raw_cfg: Dict[str, Any],
+    sample_gradients: np.ndarray,
+    weights_before: np.ndarray,
+    layout: list[tuple[str, str, str, str, tuple[int, ...], int]],
+    learning_rate: float,
+    out_dir: Path,
+) -> Dict[str, Any]:
+    """Emulate the declared fixed-point accumulation and SGD cast boundaries.
+
+    This reference intentionally preserves the float reference separately.  It
+    quantizes parameter roles, per-sample gradients, accumulator updates, the
+    averaged gradient, learning rate, update arithmetic, and final parameter
+    storage using the same role specifications emitted into HLS typedefs.
+    """
+    default_weight = {"type": "ap_fixed", "total_bits": 16, "int_bits": 6}
+    default_bias = {"type": "ap_fixed", "total_bits": 24, "int_bits": 10}
+    default_accum = {"type": "ap_fixed", "total_bits": 24, "int_bits": 10}
+    weight_spec = _precision_spec(raw_cfg, ("numerics", "defaults", "weight"), default_weight)
+    bias_spec = _precision_spec(raw_cfg, ("numerics", "defaults", "bias"), default_bias)
+    accum_spec = _precision_spec(raw_cfg, ("numerics", "defaults", "accum"), default_accum)
+    grad_weight_spec = _precision_spec(raw_cfg, ("numerics", "training", "grad_weight"), weight_spec)
+    grad_bias_spec = _precision_spec(raw_cfg, ("numerics", "training", "grad_bias"), bias_spec)
+    update_spec = _precision_spec(raw_cfg, ("numerics", "training", "update_accum"), accum_spec)
+
+    sample_gradients = np.asarray(sample_gradients, dtype=np.float32)
+    weights_before = np.asarray(weights_before, dtype=np.float32).reshape(-1)
+    q_grad = np.zeros(weights_before.shape, dtype=np.float32)
+    q_accum_sum = np.zeros(weights_before.shape, dtype=np.float32)
+    q_before = np.zeros(weights_before.shape, dtype=np.float32)
+    q_after = np.zeros(weights_before.shape, dtype=np.float32)
+    q_per_sample = np.zeros(sample_gradients.shape, dtype=np.float32)
+    q_accumulator_after = np.zeros(sample_gradients.shape, dtype=np.float32)
+    layer_map: list[dict[str, Any]] = []
+    lr_q = float(quantize_array(np.asarray([learning_rate], dtype=np.float32), update_spec, rounding="trunc")[0])
+
+    cursor = 0
+    for _op_name, _binding_kind, _binding_key, role, _shape, count in layout:
+        sl = slice(cursor, cursor + count)
+        layer_map.append({
+            "layer": _op_name, "role": role, "offset": cursor, "count": count,
+            "shape": list(_shape),
+        })
+        is_bias = role in {"bias", "beta"}
+        parameter_spec = bias_spec if is_bias else weight_spec
+        gradient_spec = grad_bias_spec if is_bias else grad_weight_spec
+        q_before[sl] = quantize_array(weights_before[sl], parameter_spec, rounding="trunc")
+        accumulator = np.zeros((count,), dtype=np.float32)
+        for sample_index, row in enumerate(sample_gradients):
+            per_sample = quantize_array(row[sl], gradient_spec, rounding="trunc")
+            accumulator = quantize_array(accumulator + per_sample, accum_spec, rounding="trunc")
+            q_per_sample[sample_index, sl] = per_sample
+            q_accumulator_after[sample_index, sl] = accumulator
+        q_accum_sum[sl] = accumulator
+        mean_gradient = quantize_array(accumulator / float(sample_gradients.shape[0]), gradient_spec, rounding="trunc")
+        q_grad[sl] = mean_gradient
+        product = quantize_array(lr_q * mean_gradient, accum_spec, rounding="trunc")
+        updated = quantize_array(q_before[sl] - product, accum_spec, rounding="trunc")
+        q_after[sl] = quantize_array(updated, parameter_spec, rounding="trunc")
+        cursor += count
+
+    if cursor != weights_before.size:
+        raise RuntimeError(f"Hardware-domain reference layout consumed {cursor} values, expected {weights_before.size}.")
+
+    root = Path(out_dir) / "hardware_domain"
+    root.mkdir(parents=True, exist_ok=True)
+    grads_path = root / "grads_ref.bin"
+    accum_path = root / "gradient_accumulated_pre_reduce_ref.bin"
+    reduced_path = root / "gradient_reduced_ref.bin"
+    before_path = root / "weights_before_ref.bin"
+    after_path = root / "weights_after_ref.bin"
+    _write_f32(grads_path, q_grad)
+    _write_f32(accum_path, q_accum_sum)
+    _write_f32(reduced_path, q_grad)
+    _write_f32(before_path, q_before)
+    _write_f32(after_path, q_after)
+    trace_root = root / "per_sample_trace"
+    trace_root.mkdir(parents=True, exist_ok=True)
+    per_sample_paths: list[str] = []
+    accumulator_paths: list[str] = []
+    for sample_index in range(sample_gradients.shape[0]):
+        sample_path = trace_root / f"per_sample_gradient_{sample_index:04d}_ref.bin"
+        accum_sample_path = trace_root / f"accumulator_after_{sample_index:04d}_ref.bin"
+        _write_f32(sample_path, q_per_sample[sample_index])
+        _write_f32(accum_sample_path, q_accumulator_after[sample_index])
+        per_sample_paths.append(str(sample_path))
+        accumulator_paths.append(str(accum_sample_path))
+    layer_map_path = trace_root / "parameter_layer_map.json"
+    layer_map_path.write_text(json.dumps({"schema_version": 1, "entries": layer_map}, indent=2) + "\n", encoding="utf-8")
+    summary = {
+        "artifact_kind": "fpgai_training_hardware_domain_reference",
+        "schema_version": 1,
+        "status": "available",
+        "rounding_emulation": "trunc",
+        "overflow_emulation": "range_clamp",
+        "gradient_reduction": "quantize_each_sample_accumulate_then_mean",
+        "learning_rate_quantized": lr_q,
+        "gradient_l2_norm": float(np.linalg.norm(q_grad)),
+        "weight_update_l2_norm": float(np.linalg.norm(q_after - q_before)),
+        "grads_ref_bin": str(grads_path),
+        "gradient_accumulated_pre_reduce_ref_bin": str(accum_path),
+        "gradient_reduced_ref_bin": str(reduced_path),
+        "weights_before_ref_bin": str(before_path),
+        "weights_after_ref_bin": str(after_path),
+        "per_sample_gradient_ref_bins": per_sample_paths,
+        "accumulator_after_ref_bins": accumulator_paths,
+        "parameter_layer_map_json": str(layer_map_path),
+        "precision": {
+            "weight": weight_spec, "bias": bias_spec, "accum": accum_spec,
+            "grad_weight": grad_weight_spec, "grad_bias": grad_bias_spec,
+            "update_accum": update_spec,
+        },
+    }
+    summary_path = root / "training_hardware_domain_reference.json"
+    summary_path.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    summary["summary_json"] = str(summary_path)
+    return summary
+
 def _cfg_with_zero_lr(raw_cfg: Dict[str, Any]) -> Dict[str, Any]:
     cfg = copy.deepcopy(raw_cfg)
     cfg.setdefault("training", {}).setdefault("optimizer", {})["learning_rate"] = 0.0
@@ -225,6 +356,14 @@ def run_training_dataset_reference(
 
     updated_graph = copy.deepcopy(graph)
     layout = _trainable_layout(updated_graph)
+    hardware_domain = _hardware_domain_reference(
+        raw_cfg=raw_cfg,
+        sample_gradients=gradient_matrix,
+        weights_before=weights_before,
+        layout=layout,
+        learning_rate=learning_rate,
+        out_dir=root,
+    )
     _assign_flat_weights(updated_graph, weights_after, layout)
 
     losses_after: list[float] = []
@@ -284,6 +423,7 @@ def run_training_dataset_reference(
         "grads_ref_bin": str(grads_path),
         "weights_before_ref_bin": str(weights_before_path),
         "weights_after_ref_bin": str(weights_after_path),
+        "hardware_domain_reference": hardware_domain,
     }
     summary_json = root / "training_dataset_reference.json"
     summary_txt = root / "training_dataset_reference.txt"

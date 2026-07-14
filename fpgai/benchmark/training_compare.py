@@ -313,6 +313,7 @@ def build_dataset_training_comparison(
     training_compare_result: TrainingCompareResult | None,
     execution_payload: Dict[str, Any] | None,
     reference_payload: Dict[str, Any] | None,
+    float_training_compare_result: TrainingCompareResult | None = None,
     limits: Dict[str, float] | None = None,
 ) -> Dict[str, Any]:
     """Build the canonical dataset-training comparison decision artifact.
@@ -346,8 +347,17 @@ def build_dataset_training_comparison(
         "weight_delta_comparison": None,
         "final_weight_comparison": None,
         "checks": [],
-        "reason": "Required HLS/reference comparison artifacts are unavailable.",
+        "reason": "Required HLS/hardware-domain reference comparison artifacts are unavailable.",
+        "decision_reference_domain": "hardware_fixed_point",
+        "float_reference_diagnostics": None,
     }
+    if float_training_compare_result is not None:
+        float_path = Path(float_training_compare_result.results_json)
+        if float_path.exists() and float_path.stat().st_size > 0:
+            try:
+                payload["float_reference_diagnostics"] = json.loads(float_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                payload["float_reference_diagnostics"] = {"status": "unavailable"}
     if training_compare_result is None:
         return payload
 
@@ -468,8 +478,306 @@ def build_dataset_training_comparison(
     payload["status"] = "passed" if passed else "failed_tolerance"
     failed = [item["name"] for item in checks if not item["passed"]]
     payload["reason"] = (
-        "HLS and dataset-wide software-reference training artifacts satisfy all execution and numeric checks."
+        "HLS and hardware-domain dataset training reference artifacts satisfy all execution and numeric checks."
         if passed
         else "Training comparison failed check(s): " + ", ".join(failed)
     )
     return payload
+
+
+def build_training_semantic_trace_report(
+    *,
+    hls_gradient_accumulated: Path | None,
+    hls_gradient_reduced: Path | None,
+    ref_gradient_accumulated: Path | None,
+    ref_gradient_reduced: Path | None,
+    hls_weights_before: Path | None,
+    hls_weights_after: Path | None,
+) -> Dict[str, Any]:
+    """Compare observable HLS training stages without inventing unavailable stages."""
+    payload: Dict[str, Any] = {
+        "artifact_kind": "fpgai_training_semantic_trace",
+        "schema_version": 1,
+        "status": "pending_trace",
+        "first_divergence_stage": None,
+        "stages": {},
+        "availability": {},
+        "reason": "Required semantic trace artifacts are unavailable.",
+    }
+
+    def compare_stage(name: str, ref_path: Path | None, hls_path: Path | None) -> None:
+        available = bool(ref_path and hls_path and ref_path.exists() and hls_path.exists())
+        payload["availability"][name] = {
+            "reference": str(ref_path) if ref_path else None,
+            "hls": str(hls_path) if hls_path else None,
+            "available": available,
+        }
+        if not available:
+            payload["stages"][name] = {"status": "not_available"}
+            return
+        ref = _read_f32(ref_path)  # type: ignore[arg-type]
+        got = _read_f32(hls_path)  # type: ignore[arg-type]
+        metrics = _metrics(ref, got)
+        metrics["status"] = "compared"
+        payload["stages"][name] = metrics
+
+    compare_stage("gradient_accumulated_pre_reduce", ref_gradient_accumulated, hls_gradient_accumulated)
+    compare_stage("gradient_reduced_export", ref_gradient_reduced, hls_gradient_reduced)
+
+    weights_available = bool(
+        hls_weights_before and hls_weights_after
+        and hls_weights_before.exists() and hls_weights_after.exists()
+    )
+    payload["availability"]["weight_update_postcast"] = {
+        "weights_before": str(hls_weights_before) if hls_weights_before else None,
+        "weights_after": str(hls_weights_after) if hls_weights_after else None,
+        "available": weights_available,
+    }
+    if weights_available:
+        before = _read_f32(hls_weights_before)  # type: ignore[arg-type]
+        after = _read_f32(hls_weights_after)  # type: ignore[arg-type]
+        n = min(before.size, after.size)
+        delta = after[:n] - before[:n]
+        payload["stages"]["weight_update_postcast"] = {
+            "status": "observed",
+            "count": int(n),
+            "l1_norm": float(np.sum(np.abs(delta))),
+            "l2_norm": float(np.linalg.norm(delta)),
+            "max_abs": float(np.max(np.abs(delta))) if n else 0.0,
+        }
+    else:
+        payload["stages"]["weight_update_postcast"] = {"status": "not_available"}
+
+    payload["stages"]["weight_update_precast"] = {
+        "status": "not_observable",
+        "reason": "The generated top currently exposes only post-cast parameter state.",
+    }
+
+    compared = [
+        name for name in ("gradient_accumulated_pre_reduce", "gradient_reduced_export")
+        if payload["stages"].get(name, {}).get("status") == "compared"
+    ]
+    if not compared:
+        return payload
+
+    payload["status"] = "available"
+    payload["reason"] = "Observable HLS gradient stages were compared with the hardware-domain reference."
+    # Diagnostic threshold only; this report identifies the first divergence and does not alter acceptance tolerances.
+    for name in compared:
+        stage = payload["stages"][name]
+        if float(stage.get("relative_l2", 0.0)) > 0.10 or (
+            bool(stage.get("cosine_reliable")) and float(stage.get("cosine", 1.0)) < 0.99
+        ):
+            payload["first_divergence_stage"] = name
+            break
+    if payload["first_divergence_stage"] is None:
+        payload["first_divergence_stage"] = "after_observable_gradient_stages"
+    return payload
+
+
+def build_training_per_sample_gradient_trace_report(
+    *,
+    hls_trace_root: Path | None,
+    ref_per_sample_paths: list[Path],
+    ref_accumulator_paths: list[Path],
+    parameter_layer_map_path: Path | None,
+) -> Dict[str, Any]:
+    """Compare per-sample gradients and accumulator snapshots stage by stage."""
+    payload: Dict[str, Any] = {
+        "artifact_kind": "fpgai_training_per_sample_gradient_trace",
+        "schema_version": 1,
+        "status": "pending_trace",
+        "first_divergent_sample": None,
+        "first_divergent_parameter_index": None,
+        "first_divergent_layer": None,
+        "first_divergent_role": None,
+        "samples": [],
+        "parameter_layer_map": None,
+        "reason": "Per-sample trace artifacts are unavailable.",
+    }
+    layer_entries: list[dict[str, Any]] = []
+    if parameter_layer_map_path and parameter_layer_map_path.exists():
+        layer_payload = json.loads(parameter_layer_map_path.read_text(encoding="utf-8"))
+        layer_entries = list(layer_payload.get("entries") or [])
+        payload["parameter_layer_map"] = str(parameter_layer_map_path)
+
+    def owner(index: int) -> tuple[str | None, str | None]:
+        for entry in layer_entries:
+            start = int(entry.get("offset", 0))
+            count = int(entry.get("count", 0))
+            if start <= index < start + count:
+                return str(entry.get("layer")), str(entry.get("role"))
+        return None, None
+
+    if hls_trace_root is None or not hls_trace_root.exists() or not ref_per_sample_paths:
+        return payload
+
+    compared = 0
+    for sample_index, ref_sample in enumerate(ref_per_sample_paths):
+        hls_sample = hls_trace_root / f"per_sample_gradient_{sample_index:04d}.bin"
+        hls_accum = hls_trace_root / f"accumulator_after_{sample_index:04d}.bin"
+        ref_accum = ref_accumulator_paths[sample_index] if sample_index < len(ref_accumulator_paths) else None
+        sample_payload: Dict[str, Any] = {"sample_index": sample_index}
+        if not (ref_sample.exists() and hls_sample.exists()):
+            sample_payload["gradient"] = {"status": "not_available"}
+            payload["samples"].append(sample_payload)
+            continue
+        ref = _read_f32(ref_sample)
+        got = _read_f32(hls_sample)
+        metrics = _metrics(ref, got)
+        metrics["status"] = "compared"
+        sample_payload["gradient"] = metrics
+        if ref_accum is not None and ref_accum.exists() and hls_accum.exists():
+            sample_payload["accumulator"] = {"status": "compared", **_metrics(_read_f32(ref_accum), _read_f32(hls_accum))}
+        else:
+            sample_payload["accumulator"] = {"status": "not_available"}
+        n = min(ref.size, got.size)
+        if n:
+            abs_err = np.abs(got[:n] - ref[:n])
+            idx = int(np.argmax(abs_err))
+            sample_payload["largest_error"] = {
+                "parameter_index": idx,
+                "reference_value": float(ref[idx]),
+                "hls_value": float(got[idx]),
+                "absolute_error": float(abs_err[idx]),
+                "layer": owner(idx)[0],
+                "role": owner(idx)[1],
+            }
+            divergent = float(metrics.get("relative_l2", 0.0)) > 0.10 or (
+                bool(metrics.get("cosine_reliable")) and float(metrics.get("cosine", 1.0)) < 0.99
+            )
+            if divergent and payload["first_divergent_sample"] is None:
+                layer, role = owner(idx)
+                payload["first_divergent_sample"] = sample_index
+                payload["first_divergent_parameter_index"] = idx
+                payload["first_divergent_layer"] = layer
+                payload["first_divergent_role"] = role
+        payload["samples"].append(sample_payload)
+        compared += 1
+
+    if compared:
+        payload["status"] = "available"
+        payload["reason"] = "Per-sample gradients and accumulator snapshots were compared with the hardware-domain reference."
+    return payload
+
+
+def build_training_gradient_layer_role_reports(
+    *,
+    hls_trace_root: Path | None,
+    ref_per_sample_paths: list[Path],
+    ref_accumulator_paths: list[Path],
+    parameter_layer_map_path: Path | None,
+    batch_size: int,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """Build layer/role metrics and bias-specific scale/recurrence diagnostics."""
+    base = {
+        "schema_version": 1,
+        "status": "pending_trace",
+        "reason": "Per-sample trace artifacts or parameter map are unavailable.",
+    }
+    by_layer: Dict[str, Any] = {
+        **base,
+        "artifact_kind": "fpgai_training_gradient_by_layer",
+        "layers": {},
+    }
+    by_role: Dict[str, Any] = {
+        **base,
+        "artifact_kind": "fpgai_training_gradient_by_role",
+        "roles": {},
+        "bias_trace": {"samples": []},
+    }
+    if hls_trace_root is None or not hls_trace_root.exists() or not ref_per_sample_paths:
+        return by_layer, by_role
+    if parameter_layer_map_path is None or not parameter_layer_map_path.exists():
+        return by_layer, by_role
+
+    entries = list(json.loads(parameter_layer_map_path.read_text(encoding="utf-8")).get("entries") or [])
+    if not entries:
+        return by_layer, by_role
+
+    layer_acc: dict[str, dict[str, list[np.ndarray]]] = {}
+    role_acc: dict[str, dict[str, list[np.ndarray]]] = {}
+    bias_samples: list[dict[str, Any]] = []
+
+    for sample_index, ref_path in enumerate(ref_per_sample_paths):
+        hls_path = hls_trace_root / f"per_sample_gradient_{sample_index:04d}.bin"
+        hls_acc_path = hls_trace_root / f"accumulator_after_{sample_index:04d}.bin"
+        ref_acc_path = ref_accumulator_paths[sample_index] if sample_index < len(ref_accumulator_paths) else None
+        if not (ref_path.exists() and hls_path.exists()):
+            continue
+        ref = _read_f32(ref_path)
+        got = _read_f32(hls_path)
+        sample_bias_ref: list[np.ndarray] = []
+        sample_bias_got: list[np.ndarray] = []
+        for entry in entries:
+            start = int(entry.get("offset", 0))
+            count = int(entry.get("count", 0))
+            if count <= 0:
+                continue
+            stop = start + count
+            layer = str(entry.get("layer", "unknown"))
+            role = str(entry.get("role", "unknown"))
+            r = ref[start:stop]
+            g = got[start:stop]
+            layer_acc.setdefault(layer, {}).setdefault(role, [[], []])[0].append(r)
+            layer_acc[layer][role][1].append(g)
+            role_acc.setdefault(role, {}).setdefault("all", [[], []])[0].append(r)
+            role_acc[role]["all"][1].append(g)
+            if role in {"bias", "beta"}:
+                sample_bias_ref.append(r)
+                sample_bias_got.append(g)
+        if sample_bias_ref:
+            r_bias = np.concatenate(sample_bias_ref)
+            g_bias = np.concatenate(sample_bias_got)
+            metrics = _metrics(r_bias, g_bias)
+            ratio = float(metrics["got_norm"] / metrics["ref_norm"]) if metrics["ref_norm"] > 0 else None
+            candidates = {
+                "one": 1.0,
+                "batch_size": float(batch_size),
+                "inverse_batch_size": (1.0 / float(batch_size)) if batch_size else None,
+            }
+            finite_candidates = {k: v for k, v in candidates.items() if v is not None}
+            best = min(finite_candidates, key=lambda k: abs((ratio if ratio is not None else 0.0) - finite_candidates[k])) if ratio is not None else None
+            recurrence = None
+            if ref_acc_path is not None and ref_acc_path.exists() and hls_acc_path.exists():
+                ref_acc = _read_f32(ref_acc_path)
+                hls_acc = _read_f32(hls_acc_path)
+                bias_indices: list[int] = []
+                for entry in entries:
+                    if str(entry.get("role")) in {"bias", "beta"}:
+                        start = int(entry.get("offset", 0)); count = int(entry.get("count", 0))
+                        bias_indices.extend(range(start, start + count))
+                idx = np.asarray(bias_indices, dtype=np.int64)
+                recurrence = _metrics(ref_acc[idx], hls_acc[idx]) if idx.size else None
+            bias_samples.append({
+                "sample_index": sample_index,
+                **metrics,
+                "hls_to_reference_norm_ratio": ratio,
+                "best_matching_scale": best,
+                "scale_candidates": finite_candidates,
+                "accumulator": recurrence,
+            })
+
+    def collapse(store: dict[str, dict[str, list[np.ndarray]]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for outer, inner in store.items():
+            result[outer] = {}
+            for role, pair in inner.items():
+                refs, gots = pair
+                if refs and gots:
+                    result[outer][role] = _metrics(np.concatenate(refs), np.concatenate(gots))
+        return result
+
+    by_layer["layers"] = collapse(layer_acc)
+    by_role["roles"] = collapse(role_acc)
+    by_role["bias_trace"] = {
+        "samples": bias_samples,
+        "dominant_scale_counts": {
+            name: sum(1 for item in bias_samples if item.get("best_matching_scale") == name)
+            for name in ("one", "batch_size", "inverse_batch_size")
+        },
+    }
+    by_layer["status"] = by_role["status"] = "available"
+    by_layer["reason"] = "Per-sample gradients were aggregated by layer and parameter role."
+    by_role["reason"] = "Per-sample gradients were aggregated by role with bias-specific scale diagnostics."
+    return by_layer, by_role

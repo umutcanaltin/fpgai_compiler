@@ -261,3 +261,279 @@ def test_dataset_training_comparison_is_pending_without_artifacts() -> None:
     )
     assert payload["status"] == "pending_comparison"
     assert payload["passed"] is False
+
+
+def test_dataset_training_reference_emits_hardware_domain_artifacts(tmp_path: Path) -> None:
+    import json
+    from fpgai.ir.graph import Graph
+    from fpgai.benchmark.training_dataset_reference import run_training_dataset_reference
+
+    graph = Graph("tiny_hw_domain_training")
+    graph.inputs = ["input"]
+    graph.outputs = ["output"]
+    graph.add_tensor("input", (1, 2))
+    graph.add_tensor("dense_out", (1, 2))
+    graph.add_tensor("output", (1, 2))
+    graph.constants["W"] = np.asarray([[0.1, -0.2], [0.3, 0.4]], dtype=np.float32)
+    graph.constants["B"] = np.zeros((2,), dtype=np.float32)
+    graph.add_op("Dense", ["input", "W", "B"], ["dense_out"], name="dense", attrs={"in_features": 2, "out_features": 2})
+    graph.add_op("Softmax", ["dense_out"], ["output"], name="softmax")
+
+    result = run_training_dataset_reference(
+        graph=graph,
+        raw_cfg={
+            "numerics": {
+                "defaults": {
+                    "weight": {"type": "ap_fixed", "total_bits": 12, "int_bits": 4},
+                    "bias": {"type": "ap_fixed", "total_bits": 12, "int_bits": 4},
+                    "accum": {"type": "ap_fixed", "total_bits": 18, "int_bits": 6},
+                },
+                "training": {
+                    "grad_weight": {"type": "ap_fixed", "total_bits": 12, "int_bits": 4},
+                    "grad_bias": {"type": "ap_fixed", "total_bits": 12, "int_bits": 4},
+                    "update_accum": {"type": "ap_fixed", "total_bits": 18, "int_bits": 6},
+                },
+            },
+            "training": {
+                "optimizer": {"type": "sgd", "learning_rate": 0.1},
+                "loss": {"type": "cross_entropy"},
+                "execution": {"train_steps": 1, "batch_size": 2, "batch_mode": "accumulated"},
+            },
+        },
+        out_dir=tmp_path,
+        inputs=np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+        targets=np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+    )
+    payload = json.loads(result.summary_json.read_text(encoding="utf-8"))
+    hw = payload["hardware_domain_reference"]
+    assert hw["status"] == "available"
+    assert Path(hw["grads_ref_bin"]).exists()
+    assert Path(hw["weights_before_ref_bin"]).exists()
+    assert Path(hw["weights_after_ref_bin"]).exists()
+    assert hw["gradient_reduction"] == "quantize_each_sample_accumulate_then_mean"
+
+
+def test_dataset_training_comparison_uses_hardware_domain_for_decision(tmp_path: Path) -> None:
+    import json
+    from types import SimpleNamespace
+    from fpgai.benchmark.training_compare import build_dataset_training_comparison
+
+    def metric():
+        return {
+            "mae": 0.0, "max_abs": 0.0, "cosine": 1.0,
+            "l2": 0.0, "relative_l2": 0.0, "ref_norm": 1.0,
+            "got_norm": 1.0, "max_ref_abs": 0.5, "max_got_abs": 0.5,
+            "low_energy_ref": False, "low_energy_got": False,
+            "cosine_reliable": True, "count": 4, "ref_count": 4, "got_count": 4,
+        }
+    hw_path = tmp_path / "hw.json"
+    hw_path.write_text(json.dumps({"grads": metric(), "weight_delta": metric(), "weights_after": metric()}), encoding="utf-8")
+    float_path = tmp_path / "float.json"
+    bad = metric(); bad["cosine"] = 0.2; bad["relative_l2"] = 2.0
+    float_path.write_text(json.dumps({"grads": bad, "weight_delta": bad, "weights_after": metric()}), encoding="utf-8")
+    summary = tmp_path / "summary.txt"; summary.write_text("ok", encoding="utf-8")
+
+    payload = build_dataset_training_comparison(
+        training_compare_result=SimpleNamespace(results_json=hw_path, summary_txt=summary),
+        float_training_compare_result=SimpleNamespace(results_json=float_path, summary_txt=summary),
+        execution_payload={"sample_count_requested": 2, "sample_count_executed": 2, "optimizer_update_calls": 1},
+        reference_payload={"sample_count": 2, "optimizer_updates": 1},
+    )
+    assert payload["status"] == "passed"
+    assert payload["decision_reference_domain"] == "hardware_fixed_point"
+    assert payload["float_reference_diagnostics"]["grads"]["cosine"] == 0.2
+
+
+def test_training_semantic_trace_report_identifies_first_gradient_divergence(tmp_path: Path) -> None:
+    from fpgai.benchmark.training_compare import build_training_semantic_trace_report
+
+    ref_sum = tmp_path / "ref_sum.bin"
+    hls_sum = tmp_path / "hls_sum.bin"
+    ref_reduced = tmp_path / "ref_reduced.bin"
+    hls_reduced = tmp_path / "hls_reduced.bin"
+    before = tmp_path / "before.bin"
+    after = tmp_path / "after.bin"
+
+    np.asarray([1.0, 2.0], dtype=np.float32).tofile(ref_sum)
+    np.asarray([1.0, 2.0], dtype=np.float32).tofile(hls_sum)
+    np.asarray([0.5, 1.0], dtype=np.float32).tofile(ref_reduced)
+    np.asarray([1.0, 0.0], dtype=np.float32).tofile(hls_reduced)
+    np.asarray([0.2, 0.4], dtype=np.float32).tofile(before)
+    np.asarray([0.1, 0.3], dtype=np.float32).tofile(after)
+
+    payload = build_training_semantic_trace_report(
+        hls_gradient_accumulated=hls_sum,
+        hls_gradient_reduced=hls_reduced,
+        ref_gradient_accumulated=ref_sum,
+        ref_gradient_reduced=ref_reduced,
+        hls_weights_before=before,
+        hls_weights_after=after,
+    )
+
+    assert payload["status"] == "available"
+    assert payload["first_divergence_stage"] == "gradient_reduced_export"
+    assert payload["stages"]["gradient_accumulated_pre_reduce"]["relative_l2"] == 0.0
+    assert payload["stages"]["weight_update_precast"]["status"] == "not_observable"
+
+
+def test_hardware_domain_reference_emits_gradient_semantic_stages(tmp_path: Path) -> None:
+    from fpgai.ir.graph import Graph
+    from fpgai.benchmark.training_dataset_reference import run_training_dataset_reference
+
+    graph = Graph("tiny_semantic_trace")
+    graph.inputs = ["input"]
+    graph.outputs = ["output"]
+    graph.add_tensor("input", (1, 2))
+    graph.add_tensor("dense_out", (1, 2))
+    graph.add_tensor("output", (1, 2))
+    graph.add_op(
+        "Dense", ["input"], ["dense_out"], name="dense0",
+        attrs={
+            "in_features": 2, "out_features": 2,
+            "weights": np.asarray([[0.1, -0.2], [0.3, 0.4]], dtype=np.float32),
+            "bias": np.zeros((2,), dtype=np.float32),
+        },
+    )
+    graph.add_op("Softmax", ["dense_out"], ["output"], name="softmax")
+
+    result = run_training_dataset_reference(
+        graph=graph,
+        raw_cfg={
+            "training": {
+                "optimizer": {"type": "sgd", "learning_rate": 0.1},
+                "loss": {"type": "cross_entropy"},
+                "execution": {"train_steps": 1, "batch_size": 2, "batch_mode": "accumulated"},
+            }
+        },
+        out_dir=tmp_path,
+        inputs=np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+        targets=np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+    )
+    payload = __import__("json").loads(result.summary_json.read_text(encoding="utf-8"))
+    hardware = payload["hardware_domain_reference"]
+    assert Path(hardware["gradient_accumulated_pre_reduce_ref_bin"]).exists()
+    assert Path(hardware["gradient_reduced_ref_bin"]).exists()
+
+
+def test_hardware_domain_reference_emits_per_sample_trace_and_layer_map(tmp_path: Path) -> None:
+    import json
+    from fpgai.ir.graph import Graph
+    from fpgai.benchmark.training_dataset_reference import run_training_dataset_reference
+
+    graph = Graph("tiny_per_sample_trace")
+    graph.inputs = ["input"]
+    graph.outputs = ["output"]
+    graph.add_tensor("input", (1, 2))
+    graph.add_tensor("dense_out", (1, 2))
+    graph.add_tensor("output", (1, 2))
+    graph.add_op(
+        "Dense", ["input"], ["dense_out"], name="dense0",
+        attrs={
+            "in_features": 2, "out_features": 2,
+            "weights": np.asarray([[0.1, -0.2], [0.3, 0.4]], dtype=np.float32),
+            "bias": np.zeros((2,), dtype=np.float32),
+        },
+    )
+    graph.add_op("Softmax", ["dense_out"], ["output"], name="softmax")
+
+    result = run_training_dataset_reference(
+        graph=graph,
+        raw_cfg={
+            "training": {
+                "optimizer": {"type": "sgd", "learning_rate": 0.1},
+                "loss": {"type": "cross_entropy"},
+                "execution": {"train_steps": 1, "batch_size": 2, "batch_mode": "accumulated"},
+            }
+        },
+        out_dir=tmp_path,
+        inputs=np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+        targets=np.asarray([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32),
+    )
+    payload = json.loads(result.summary_json.read_text(encoding="utf-8"))
+    hardware = payload["hardware_domain_reference"]
+    assert len(hardware["per_sample_gradient_ref_bins"]) == 2
+    assert len(hardware["accumulator_after_ref_bins"]) == 2
+    assert all(Path(value).exists() for value in hardware["per_sample_gradient_ref_bins"])
+    layer_map = json.loads(Path(hardware["parameter_layer_map_json"]).read_text(encoding="utf-8"))
+    assert layer_map["entries"][0]["layer"] == "dense0"
+    assert layer_map["entries"][0]["role"] == "weight"
+
+
+def test_per_sample_gradient_trace_reports_first_sample_and_layer(tmp_path: Path) -> None:
+    import json
+    from fpgai.benchmark.training_compare import build_training_per_sample_gradient_trace_report
+
+    hls = tmp_path / "hls"
+    ref = tmp_path / "ref"
+    hls.mkdir(); ref.mkdir()
+    np.asarray([1.0, 2.0, 0.0], dtype=np.float32).tofile(hls / "per_sample_gradient_0000.bin")
+    np.asarray([1.0, 0.0, 0.0], dtype=np.float32).tofile(ref / "per_sample_gradient_0000_ref.bin")
+    np.asarray([1.0, 2.0, 0.0], dtype=np.float32).tofile(hls / "accumulator_after_0000.bin")
+    np.asarray([1.0, 0.0, 0.0], dtype=np.float32).tofile(ref / "accumulator_after_0000_ref.bin")
+    layer_map = tmp_path / "layer_map.json"
+    layer_map.write_text(json.dumps({"entries": [
+        {"layer": "dense0", "role": "weight", "offset": 0, "count": 2},
+        {"layer": "dense0", "role": "bias", "offset": 2, "count": 1},
+    ]}), encoding="utf-8")
+
+    payload = build_training_per_sample_gradient_trace_report(
+        hls_trace_root=hls,
+        ref_per_sample_paths=[ref / "per_sample_gradient_0000_ref.bin"],
+        ref_accumulator_paths=[ref / "accumulator_after_0000_ref.bin"],
+        parameter_layer_map_path=layer_map,
+    )
+    assert payload["status"] == "available"
+    assert payload["first_divergent_sample"] == 0
+    assert payload["first_divergent_parameter_index"] == 1
+    assert payload["first_divergent_layer"] == "dense0"
+    assert payload["first_divergent_role"] == "weight"
+
+
+def test_gradient_layer_role_reports_isolate_bias_and_scale(tmp_path: Path) -> None:
+    import json
+    from fpgai.benchmark.training_compare import build_training_gradient_layer_role_reports
+
+    hls = tmp_path / "hls"; ref = tmp_path / "ref"
+    hls.mkdir(); ref.mkdir()
+    # two weights then one bias; HLS bias is batch-scaled by 2
+    np.asarray([1.0, 2.0, 0.4], dtype=np.float32).tofile(hls / "per_sample_gradient_0000.bin")
+    np.asarray([1.0, 2.0, 0.2], dtype=np.float32).tofile(ref / "per_sample_gradient_0000_ref.bin")
+    np.asarray([1.0, 2.0, 0.4], dtype=np.float32).tofile(hls / "accumulator_after_0000.bin")
+    np.asarray([1.0, 2.0, 0.2], dtype=np.float32).tofile(ref / "accumulator_after_0000_ref.bin")
+    layer_map = tmp_path / "layer_map.json"
+    layer_map.write_text(json.dumps({"entries": [
+        {"layer": "dense0", "role": "weight", "offset": 0, "count": 2},
+        {"layer": "dense0", "role": "bias", "offset": 2, "count": 1},
+    ]}), encoding="utf-8")
+
+    by_layer, by_role = build_training_gradient_layer_role_reports(
+        hls_trace_root=hls,
+        ref_per_sample_paths=[ref / "per_sample_gradient_0000_ref.bin"],
+        ref_accumulator_paths=[ref / "accumulator_after_0000_ref.bin"],
+        parameter_layer_map_path=layer_map,
+        batch_size=2,
+    )
+    assert by_layer["status"] == "available"
+    assert by_layer["layers"]["dense0"]["weight"]["mae"] == 0.0
+    assert by_layer["layers"]["dense0"]["bias"]["mae"] > 0.0
+    assert by_role["roles"]["bias"]["all"]["got_norm"] > by_role["roles"]["bias"]["all"]["ref_norm"]
+    assert by_role["bias_trace"]["samples"][0]["best_matching_scale"] == "batch_size"
+
+
+def test_compile_training_bias_report_uses_resolved_raw_config() -> None:
+    """Guard the full compiler integration path against out-of-scope config names."""
+    import ast
+    import inspect
+    import textwrap
+
+    from fpgai.engine.compiler import Compiler
+
+    tree = ast.parse(textwrap.dedent(inspect.getsource(Compiler._compile_training)))
+    loaded_names = {
+        node.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+    }
+
+    assert "raw_cfg" not in loaded_names
+    assert "raw" in loaded_names

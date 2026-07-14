@@ -248,9 +248,13 @@ def test_training_cross_entropy_generates_real_loss_kernel_and_reports(tmp_path:
     out_dir = Path(result.out_dir)
     source = (out_dir / "hls/src/deeplearn.cpp").read_text(encoding="utf-8")
     assert "FPGAI cross_entropy loss kernel" in source
-    assert "softmax_denom" in source
+    assert "Final graph output is already softmax probability" in source
     assert "probability - target_value" in source
     assert "logf((float)probability" in source
+    # This model already ends in Softmax, so cross-entropy must use the
+    # existing probabilities and bypass a second softmax normalization.
+    assert "softmax_denom" not in source
+    assert "fpgai::softmax_backward" not in source
 
     loss = json.loads((out_dir / "reports/training_loss_contract.json").read_text(encoding="utf-8"))
     assert loss["loss"]["type"] == "cross_entropy"

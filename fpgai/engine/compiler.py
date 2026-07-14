@@ -50,7 +50,7 @@ from fpgai.analysis.post_synthesis import run_post_synthesis_analysis
 from fpgai.analysis.training_resource_estimate import run_training_resource_estimate
 from fpgai.benchmark.training_reference import run_training_reference_step
 from fpgai.benchmark.training_dataset_reference import run_training_dataset_reference
-from fpgai.benchmark.training_compare import compare_training_artifacts, build_dataset_training_comparison
+from fpgai.benchmark.training_compare import compare_training_artifacts, build_dataset_training_comparison, build_training_semantic_trace_report, build_training_per_sample_gradient_trace_report, build_training_gradient_layer_role_reports
 from fpgai.util.fs import ensure_clean_dir, write_text
 from fpgai.numerics.precision_policy import (
     build_precision_layout,
@@ -2105,6 +2105,7 @@ class Compiler:
         ) if enable_reports else None
 
         training_compare_result = None
+        hardware_training_compare_result = None
         if hls_run is not None and hls_dir is not None:
             hls_grads = self._find_file_recursive(hls_dir, "grads.bin")
             hls_w_before = self._find_file_recursive(hls_dir, "weights_before.bin")
@@ -2120,6 +2121,22 @@ class Compiler:
                     hls_weights_after_bin=hls_w_after,
                 )
                 print("\n" + training_compare_result.summary_txt.read_text(encoding="utf-8") + "\n")
+                if training_dataset_available:
+                    reference_preview = json.loads(training_reference_result.summary_json.read_text(encoding="utf-8"))
+                    hardware_reference = reference_preview.get("hardware_domain_reference") or {}
+                    hardware_grads = Path(str(hardware_reference.get("grads_ref_bin", "")))
+                    hardware_before = Path(str(hardware_reference.get("weights_before_ref_bin", "")))
+                    hardware_after = Path(str(hardware_reference.get("weights_after_ref_bin", "")))
+                    if hardware_grads.exists() and hardware_before.exists() and hardware_after.exists():
+                        hardware_training_compare_result = compare_training_artifacts(
+                            out_dir=out_dir / "hardware_domain",
+                            ref_grads_bin=hardware_grads,
+                            ref_weights_before_bin=hardware_before,
+                            ref_weights_after_bin=hardware_after,
+                            hls_grads_bin=hls_grads,
+                            hls_weights_before_bin=hls_w_before,
+                            hls_weights_after_bin=hls_w_after,
+                        )
 
         if training_dataset_available:
             reference_payload = json.loads(training_reference_result.summary_json.read_text(encoding="utf-8"))
@@ -2130,7 +2147,8 @@ class Compiler:
                 else None
             )
             compare_payload = build_dataset_training_comparison(
-                training_compare_result=training_compare_result,
+                training_compare_result=hardware_training_compare_result,
+                float_training_compare_result=training_compare_result,
                 execution_payload=execution_payload,
                 reference_payload=reference_payload,
             )
@@ -2138,6 +2156,42 @@ class Compiler:
                 out_dir / "reports" / "training_dataset_comparison.json",
                 json.dumps(compare_payload, indent=2) + "\n",
             )
+            hardware_reference = reference_payload.get("hardware_domain_reference") or {}
+            semantic_trace_payload = build_training_semantic_trace_report(
+                hls_gradient_accumulated=(self._find_file_recursive(hls_dir, "gradient_accumulated_pre_reduce.bin") if hls_dir is not None else None),
+                hls_gradient_reduced=(self._find_file_recursive(hls_dir, "gradient_reduced_export.bin") if hls_dir is not None else None),
+                ref_gradient_accumulated=Path(str(hardware_reference.get("gradient_accumulated_pre_reduce_ref_bin", ""))) if hardware_reference.get("gradient_accumulated_pre_reduce_ref_bin") else None,
+                ref_gradient_reduced=Path(str(hardware_reference.get("gradient_reduced_ref_bin", ""))) if hardware_reference.get("gradient_reduced_ref_bin") else None,
+                hls_weights_before=(self._find_file_recursive(hls_dir, "weights_before.bin") if hls_dir is not None else None),
+                hls_weights_after=(self._find_file_recursive(hls_dir, "weights_after.bin") if hls_dir is not None else None),
+            )
+            write_text(
+                out_dir / "reports" / "training_gradient_semantics.json",
+                json.dumps(semantic_trace_payload, indent=2) + "\n",
+            )
+            hls_trace_root = None
+            if hls_dir is not None:
+                first_sample_trace = self._find_file_recursive(hls_dir, "per_sample_gradient_0000.bin")
+                hls_trace_root = first_sample_trace.parent if first_sample_trace is not None else None
+            per_sample_trace_payload = build_training_per_sample_gradient_trace_report(
+                hls_trace_root=hls_trace_root,
+                ref_per_sample_paths=[Path(str(value)) for value in (hardware_reference.get("per_sample_gradient_ref_bins") or [])],
+                ref_accumulator_paths=[Path(str(value)) for value in (hardware_reference.get("accumulator_after_ref_bins") or [])],
+                parameter_layer_map_path=(Path(str(hardware_reference.get("parameter_layer_map_json"))) if hardware_reference.get("parameter_layer_map_json") else None),
+            )
+            write_text(
+                out_dir / "reports" / "training_per_sample_gradient_trace.json",
+                json.dumps(per_sample_trace_payload, indent=2) + "\n",
+            )
+            by_layer_payload, by_role_payload = build_training_gradient_layer_role_reports(
+                hls_trace_root=hls_trace_root,
+                ref_per_sample_paths=[Path(str(value)) for value in (hardware_reference.get("per_sample_gradient_ref_bins") or [])],
+                ref_accumulator_paths=[Path(str(value)) for value in (hardware_reference.get("accumulator_after_ref_bins") or [])],
+                parameter_layer_map_path=(Path(str(hardware_reference.get("parameter_layer_map_json"))) if hardware_reference.get("parameter_layer_map_json") else None),
+                batch_size=int((raw.get("training", {}).get("execution", {}) or {}).get("batch_size", 1)),
+            )
+            write_text(out_dir / "reports" / "training_gradient_by_layer.json", json.dumps(by_layer_payload, indent=2) + "\n")
+            write_text(out_dir / "reports" / "training_gradient_by_role.json", json.dumps(by_role_payload, indent=2) + "\n")
             initial_loss = float(training_reference_result.loss_before)
             final_loss = float(training_reference_result.loss_after)
             loss_change = final_loss - initial_loss
@@ -2147,6 +2201,7 @@ class Compiler:
                 "schema_version": 1,
                 "execution_status": "passed" if (out_dir / "reports" / "training_dataset_execution.json").exists() else "not_available",
                 "numeric_validation_status": str(compare_payload.get("status", "pending_comparison")),
+                "numeric_validation_reference_domain": str(compare_payload.get("decision_reference_domain", "hardware_fixed_point")),
                 "sample_count": int(training_dataset_artifacts.get("sample_count") or 0),
                 "optimizer_updates": 1,
                 "initial_dataset_loss": initial_loss,

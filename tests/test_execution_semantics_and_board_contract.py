@@ -177,6 +177,11 @@ def test_native_batch_accumulation_generates_hls_modes_and_runtime_commands(tmp_
     assert "FPGAI accumulate_gradients runtime command" in source
     assert "FPGAI apply_accumulated_gradients runtime command" in source
     assert "FPGAI reset_accumulators runtime command" in source
+    # Mode 3 must export the persistent accumulated buffers, not the current
+    # sample dW/dB arrays. The dataset training testbench treats this stream as
+    # an accumulator snapshot and derives each sample contribution by differencing.
+    assert "(float)ACC_dW_" in source
+    assert "(float)ACC_dB_" in source
 
     batch = json.loads((out_dir / "reports/training_batch_accumulation.json").read_text(encoding="utf-8"))
     assert batch["hls_modes"]["accumulate_gradients"] == 3

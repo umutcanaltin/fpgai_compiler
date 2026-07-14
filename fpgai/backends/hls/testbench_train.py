@@ -546,6 +546,8 @@ int main(int argc, char** argv) {{
     }}
 
     std::vector<float> last_grads;
+    std::vector<float> accumulated_grads_before_reduce;
+    std::vector<float> previous_accumulator((size_t){int(weight_words)}, 0.0f);
     int total_train_calls = 0;
     int optimizer_update_calls = 0;
 
@@ -559,10 +561,24 @@ int main(int argc, char** argv) {{
                 push_record(aux_stream, target_data, target_words_per_record, rec);
 {train_record_mem_pack}                {top_name}(in_stream, out_stream, aux_stream, {movement_call_args}3);
                 last_grads = drain_exact(out_stream, {int(weight_words)}, "accum_grads");
+                std::vector<float> sample_gradient(last_grads.size(), 0.0f);
+                for (size_t gi = 0; gi < last_grads.size(); ++gi) {{
+                    sample_gradient[gi] = last_grads[gi] - previous_accumulator[gi];
+                }}
+                char sample_name[96];
+                char accum_name[96];
+                std::snprintf(sample_name, sizeof(sample_name), "per_sample_gradient_%04d.bin", rec);
+                std::snprintf(accum_name, sizeof(accum_name), "accumulator_after_%04d.bin", rec);
+                write_bin_both(out_dir, sample_name, sample_gradient);
+                write_bin_both(out_dir, accum_name, last_grads);
+                previous_accumulator = last_grads;
                 total_train_calls += 1;
             }}
+            accumulated_grads_before_reduce = last_grads;
+            write_bin_both(out_dir, "gradient_accumulated_pre_reduce.bin", accumulated_grads_before_reduce);
             {top_name}(in_stream, out_stream, aux_stream, {movement_call_args}4);
             last_grads = drain_exact(out_stream, {int(weight_words)}, "avg_grads");
+            write_bin_both(out_dir, "gradient_reduced_export.bin", last_grads);
             optimizer_update_calls += 1;
             if (convergence_smoke) {{
                 float epoch_loss = evaluate_loss();
@@ -588,6 +604,11 @@ int main(int argc, char** argv) {{
         std::exit(6);
     }}
     write_bin_both(out_dir, "grads.bin", last_grads);
+    if (accumulated_grads_before_reduce.empty()) {{
+        accumulated_grads_before_reduce = last_grads;
+        write_bin_both(out_dir, "gradient_accumulated_pre_reduce.bin", accumulated_grads_before_reduce);
+        write_bin_both(out_dir, "gradient_reduced_export.bin", last_grads);
+    }}
 
     {top_name}(in_stream, out_stream, aux_stream, {movement_call_args}1);
     std::vector<float> weights_after = drain_exact(out_stream, {int(weight_words)}, "weights_after");

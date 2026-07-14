@@ -2533,3 +2533,27 @@ final-weight, and execution-count checks. The learning-behavior report derives
 `numeric_validation_status` from this comparison status rather than from comparison-object
 presence. Missing or empty comparison artifacts produce `pending_comparison`; failed
 checks produce `failed_tolerance`; only complete passing checks produce `passed`.
+
+## P3D-F2.2 — hardware-domain dataset training reference
+
+- Added fixed-point dataset training reference artifacts using declared weight, bias, gradient, accumulator, and update precisions.
+- The reference quantizes each sample gradient, accumulates in the configured accumulator type, averages and casts to gradient storage, applies the quantized learning rate, and casts final parameters to their storage roles.
+- Dataset training validation now uses HLS-versus-hardware-domain metrics for the acceptance decision.
+- Float-reference comparison remains available as a secondary quantization diagnostic and does not independently fail hardware numerical validation.
+- Missing hardware-domain artifacts produce `pending_comparison`; tolerances were not relaxed.
+
+## P3D-F2.3 — Training semantic traceability
+
+Implemented observable stage-by-stage dataset training trace artifacts. The HLS testbench now exports the accumulated gradient before optimizer reduction and the reduced/exported gradient, while the hardware-domain reference emits matching stage artifacts. The compiler writes `reports/training_gradient_semantics.json` with stage metrics and the first observable divergence stage. Pre-cast update state is explicitly reported as not observable rather than inferred. Focused validation: 11 tests passed.
+
+## P3D-F2.4 — Per-sample and per-layer training gradient traceability
+
+- Added HLS CSim export of each accumulated-gradient snapshot and its derived per-sample fixed-point contribution.
+- Added hardware-domain reference artifacts for every per-sample gradient and accumulator state.
+- Added a parameter layer map with flat offsets, counts, shapes, and parameter roles.
+- Added `reports/training_per_sample_gradient_trace.json` with first divergent sample, parameter index, layer, role, values, and error.
+- Focused training dataset validation: 13 passed.
+
+## P3D-F2.5 bias-gradient semantics diagnostics
+
+Dataset-backed training validation now emits gradient comparisons aggregated by layer and parameter role. Bias gradients receive per-sample scale diagnostics against unity, batch-size, and inverse-batch-size hypotheses. These diagnostics are traceability artifacts and do not alter numerical acceptance tolerances.
