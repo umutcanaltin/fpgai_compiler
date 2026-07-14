@@ -81,29 +81,6 @@ def test_generate_vivado_bridge_uses_board_specific_ps(
     assert manifest["bitstream_requested"] is True
 
 
-def test_generate_vivado_bridge_can_request_impl_without_bitstream(tmp_path: Path) -> None:
-    artifact_dir = _minimal_hls_artifact(tmp_path)
-
-    result = generate_vivado_bridge_for_artifact(
-        artifact_dir,
-        board_name="kv260",
-        run_impl_default=True,
-        run_bitstream_default=False,
-    )
-
-    bridge = Path(result["vivado_bridge_dir"])
-    run_vivado = (bridge / "scripts" / "run_vivado.tcl").read_text(encoding="utf-8")
-    manifest = json.loads((bridge / "vivado_bridge_manifest.json").read_text(encoding="utf-8"))
-
-    assert manifest["vivado_impl_requested"] is True
-    assert manifest["bitstream_requested"] is False
-    assert "set run_impl 1" in run_vivado
-    assert "set run_bitstream 0" in run_vivado
-    assert "FPGAI_VIVADO_RUN_BITSTREAM" in run_vivado
-    assert "launch_runs impl_1 -to_step write_bitstream" in run_vivado
-    assert "if {$run_bitstream}" in run_vivado
-
-
 def test_unknown_vivado_board_fails_cleanly(tmp_path: Path) -> None:
     artifact_dir = _minimal_hls_artifact(tmp_path)
 
@@ -249,4 +226,76 @@ def test_vivado_bridge_runner_honors_fit_policy_gate_in_source() -> None:
     assert '"vivado_reports_present": False' in source
     assert "bridge.mkdir(parents=True, exist_ok=True)" in source
     assert '"vivado_ran": False' in source
-    assert '"bitstream_requested": bool(run_bitstream)' in source
+    assert '"bitstream_requested": bool(run_vivado_impl)' in source
+
+
+def test_board_fit_counts_physical_m_axi_roles_without_runtime_double_counting(tmp_path) -> None:
+    import json
+
+    from fpgai.reporting.hardware_feasibility import emit_board_fit_report
+
+    raw_config = {
+        "weights": {"mode": "import_export"},
+        "data_movement": {
+            "inputs": {"interface": "m_axi", "transport": "ps_runtime"},
+            "weights": {
+                "import": {"interface": "m_axi", "transport": "ps_runtime"},
+                "export": {"interface": "m_axi", "transport": "ps_runtime"},
+            },
+            "labels": {"interface": "m_axi", "transport": "ps_runtime"},
+            "outputs": {"interface": "m_axi", "transport": "ps_runtime"},
+            "gradients": {"export": {"interface": "m_axi", "transport": "ps_runtime"}},
+            "optimizer_state": {"export": {"interface": "m_axi", "transport": "ps_runtime"}},
+        },
+        "runtime": {"sequence": ["run_training", "export_gradients", "export_optimizer_state"]},
+        "build": {"stages": {"vivado_implementation": True}},
+    }
+
+    reports = tmp_path / "reports"
+    emit_board_fit_report(
+        reports,
+        resource_data={"totals": {"predicted_lut": 1000, "predicted_ff": 1000, "predicted_dsp": 4, "predicted_bram18": 4}},
+        timing_data={"target_clock_mhz": 100},
+        board="kv260",
+        part="xck26-sfvc784-2LV-c",
+        raw_config=raw_config,
+        build_stages={"vivado_project": True, "vivado_implementation": True, "bitstream": False},
+    )
+
+    payload = json.loads((reports / "board_fit.json").read_text(encoding="utf-8"))
+    iface = payload["derived_requirements"]["interface_requirements"]
+    assert iface["m_axi_bundles"] == 6
+    assert payload["interface_fit"]["checks"]["m_axi_bundles"]["status"] == "fits"
+    assert payload["status"] != "over_limit"
+    assert payload["vivado_implementation_allowed"] is True
+
+
+def test_board_fit_reports_interface_dimension_when_interface_is_over_limit(tmp_path) -> None:
+    import json
+
+    from fpgai.reporting.hardware_feasibility import emit_board_fit_report
+
+    raw_config = {
+        "data_movement": {
+            f"role{i}": {"interface": "m_axi", "transport": "ps_runtime"}
+            for i in range(9)
+        },
+        "build": {"stages": {"vivado_implementation": True}},
+    }
+
+    reports = tmp_path / "reports"
+    emit_board_fit_report(
+        reports,
+        resource_data={"totals": {"predicted_lut": 1000, "predicted_ff": 1000, "predicted_dsp": 4, "predicted_bram18": 4}},
+        timing_data={"target_clock_mhz": 100},
+        board="kv260",
+        part="xck26-sfvc784-2LV-c",
+        raw_config=raw_config,
+        build_stages={"vivado_project": True, "vivado_implementation": True, "bitstream": False},
+    )
+
+    payload = json.loads((reports / "board_fit.json").read_text(encoding="utf-8"))
+    assert payload["status"] == "over_limit"
+    assert payload["limiting_dimension"] == "m_axi_bundles"
+    assert payload["fit"]["limiting_dimension"] == "m_axi_bundles"
+    assert payload["vivado_implementation_allowed"] is False

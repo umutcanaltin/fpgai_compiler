@@ -1,0 +1,13 @@
+# Training numeric validation
+
+| Design | precision | numeric_validation_status | numeric_quality | gradient cosine | weight-after cosine | weight-delta cosine | gradient MAE | gradient max abs | weight-after MAE | weight-after max abs | initial_loss | final_loss | loss_delta | gradient_export_status | optimizer_state_status | batch_accumulation_status | training_tiled_io_status |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| T0_sgd_tiled_m_axi | fx16_6, grad fx24_10 | passed | passed | 1 | 1 | 0.9573 | 0.002081 | 0.01139 | 0.000665 | 0.00161 | 0.1308 | 0.1278 | -0.003028 | covered_by_training_gradient_compare | not_applicable | not_requested | not_requested |
+| T1_momentum_tiled_m_axi | fx16_6, grad fx24_10 | passed | passed | 1 | 1 | 0.9573 | 0.002081 | 0.01139 | 0.000665 | 0.00161 | 0.1308 | 0.1278 | -0.003028 | covered_by_training_gradient_compare | artifact_missing | not_requested | not_requested |
+| T2_adam_tiled_m_axi | fx16_6, grad fx24_10 | passed | passed | 1 | 0.9962 | 0.6845 | 0.002081 | 0.01139 | 0.01631 | 0.0324 | 0.1308 | 0.08728 | -0.04351 | covered_by_training_gradient_compare | generated_export_capture_supported | not_requested | not_requested |
+| T3_cross_entropy_tiled_m_axi | fx16_6, grad fx24_10 | passed | passed | 1 | 1 | 0.8835 | 0.001027 | 0.004856 | 0.000648 | 0.001823 | 0.5643 | 0.5623 | -0.001997 | covered_by_training_gradient_compare | not_applicable | not_requested | not_requested |
+| T4_tile32_m_axi | fx16_6, grad fx24_10 | passed | passed | 1 | 1 | 0.9573 | 0.002081 | 0.01139 | 0.000665 | 0.00161 | 0.1308 | 0.1278 | -0.003028 | covered_by_training_gradient_compare | not_applicable | not_requested | not_requested |
+| T5_tile128_m_axi | fx16_6, grad fx24_10 | passed | passed | 1 | 1 | 0.9573 | 0.002081 | 0.01139 | 0.000665 | 0.00161 | 0.1308 | 0.1278 | -0.003028 | covered_by_training_gradient_compare | not_applicable | not_requested | not_requested |
+| T6_accum_batch2_m_axi | fx16_6, grad fx24_10 | passed | passed | 1 | 1 | 0.9573 | 0.002081 | 0.01139 | 0.000665 | 0.00161 | 0.1308 | 0.1278 | -0.003028 | covered_by_training_gradient_compare | not_applicable | compared | not_requested |
+| T7_deployable_training_bitstream | fx16_6, grad fx24_10 | passed | passed | 1 | 1 | 0.9573 | 0.002081 | 0.01139 | 0.000665 | 0.00161 | 0.1308 | 0.1278 | -0.003028 | covered_by_training_gradient_compare | not_applicable | not_requested | not_requested |
+| T8_real_fpga_training_curve_candidate | fx16_6, grad fx24_10 | passed | passed | 1 | 1 | 0.9573 | 0.002081 | 0.01139 | 0.000665 | 0.00161 | 0.1308 | 0.1278 | -0.003028 | covered_by_training_gradient_compare | not_applicable | not_requested | not_requested |

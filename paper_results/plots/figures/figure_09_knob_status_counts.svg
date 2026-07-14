@@ -5,14 +5,14 @@
 <line x1="240" y1="77" x2="240" y2="221" stroke="#333" stroke-width="1"/>
 <text x="32" y="103" font-family="Arial, sans-serif" font-size="12" fill="#222">applied</text>
 <rect x="240" y="85" width="620.00" height="22" rx="3" fill="#4a6fa5"/>
-<text x="866.00" y="101" font-family="Arial, sans-serif" font-size="12" fill="#222">259</text>
+<text x="866.00" y="101" font-family="Arial, sans-serif" font-size="12" fill="#222">274</text>
 <text x="32" y="137" font-family="Arial, sans-serif" font-size="12" fill="#222">changed_or_clamped</text>
-<rect x="240" y="119" width="71.81" height="22" rx="3" fill="#4a6fa5"/>
-<text x="317.81" y="135" font-family="Arial, sans-serif" font-size="12" fill="#222">30</text>
+<rect x="240" y="119" width="70.15" height="22" rx="3" fill="#4a6fa5"/>
+<text x="316.15" y="135" font-family="Arial, sans-serif" font-size="12" fill="#222">31</text>
 <text x="32" y="171" font-family="Arial, sans-serif" font-size="12" fill="#222">not_applicable</text>
-<rect x="240" y="153" width="43.09" height="22" rx="3" fill="#4a6fa5"/>
-<text x="289.09" y="169" font-family="Arial, sans-serif" font-size="12" fill="#222">18</text>
+<rect x="240" y="153" width="42.99" height="22" rx="3" fill="#4a6fa5"/>
+<text x="288.99" y="169" font-family="Arial, sans-serif" font-size="12" fill="#222">19</text>
 <text x="32" y="205" font-family="Arial, sans-serif" font-size="12" fill="#222">not_requested</text>
-<rect x="240" y="187" width="43.09" height="22" rx="3" fill="#4a6fa5"/>
-<text x="289.09" y="203" font-family="Arial, sans-serif" font-size="12" fill="#222">18</text>
+<rect x="240" y="187" width="42.99" height="22" rx="3" fill="#4a6fa5"/>
+<text x="288.99" y="203" font-family="Arial, sans-serif" font-size="12" fill="#222">19</text>
 </svg>

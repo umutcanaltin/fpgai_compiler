@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="360" viewBox="0 0 900 360">
+<rect width="100%" height="100%" fill="white"/>
+<text x="32" y="34" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#111">Precision LUT saving versus fx16</text>
+<text x="32" y="58" font-family="Arial, sans-serif" font-size="12" fill="#555">LUT saving vs fx16 (%)</text>
+<line x1="240" y1="77" x2="240" y2="187" stroke="#333" stroke-width="1"/>
+<text x="32" y="103" font-family="Arial, sans-serif" font-size="12" fill="#222">I0_baseline_fx16_embedded</text>
+<rect x="240" y="85" width="0.00" height="22" rx="3" fill="#4a6fa5"/>
+<text x="246.00" y="101" font-family="Arial, sans-serif" font-size="12" fill="#222">0</text>
+<text x="32" y="137" font-family="Arial, sans-serif" font-size="12" fill="#222">I1_precision_fx8_embedded</text>
+<rect x="240" y="119" width="620.00" height="22" rx="3" fill="#4a6fa5"/>
+<text x="866.00" y="135" font-family="Arial, sans-serif" font-size="12" fill="#222">36.9</text>
+<text x="32" y="171" font-family="Arial, sans-serif" font-size="12" fill="#222">I2_precision_fx24_embedded</text>
+<rect x="240" y="153" width="-541.19" height="22" rx="3" fill="#4a6fa5"/>
+<text x="-295.19" y="169" font-family="Arial, sans-serif" font-size="12" fill="#222">-32.21</text>
+</svg>

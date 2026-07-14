@@ -10,6 +10,7 @@ def emit_csim_tcl(
     output_bin_path: str | None = None,
     weights_mode: str = "embedded",
     intermediate_dump: bool = False,
+    execution_record_path: str | None = None,
 ) -> str:
     normalized_mode = str(weights_mode).strip().lower()
     runtime_mode = normalized_mode in {"stream", "streamed", "ddr", "dma_ddr", "uram"}
@@ -22,7 +23,8 @@ def emit_csim_tcl(
     tb_cflags = f'-I${{INC_DIR}} -I${{LAYERS_INC_DIR}}{extra_cflags}'
 
     output_bin_path = output_bin_path or "output.bin"
-    csim_argv = f'{input_bin_path} {output_bin_path}'
+    execution_record_path = execution_record_path or 'hls_execution_record.json'
+    csim_argv = f'{input_bin_path} {output_bin_path} {execution_record_path}'
 
     runtime_add_files = ""
     if runtime_mode:

@@ -2481,3 +2481,55 @@ Truth boundary:
 
 - Sprint O proves parallelization and pipelining decisions are materialized in generated HLS source and are traceable in reports.
 - It does not claim real latency/resource improvement unless parsed HLS reports exist and `estimate_vs_hls.status == compared`.
+
+## P3D-D dataset metadata and quality hardening
+
+- Runtime buffer plans preserve logical dataset batch shapes while retaining flat physical word counts.
+- Dataset-backed `run_inference` uses the resolved sample count as its repeat count.
+- Numeric validation checks HLS dataset execution records for sample/invocation/output consistency.
+- Classification validation emits confusion-matrix and per-class-accuracy artifacts.
+- Focused P3D-D regression suite passed.
+
+## P3D-E torchvision dataset adapters
+
+- `validation.dataset.source: torchvision` supports `MNIST` and `FashionMNIST`.
+- Torch and torchvision are optional dependencies exposed through the `datasets` extra.
+- Dataset download is disabled unless YAML explicitly sets `download: true`.
+- Deterministic selection modes include `first`, `random`, and `balanced_per_class`.
+- Balanced selection records exact source indices and class distribution in `dataset_manifest.json`.
+- Preprocessing records normalization, flattening, optional channel insertion, and optional mean/std transforms.
+- Complete non-frozen configurations are provided for balanced 100-sample MNIST and FashionMNIST adapter validation.
+- FashionMNIST quality claims remain disallowed until a matching FashionMNIST-trained ONNX model is supplied.
+
+## P3D-F1 — Dataset-backed HLS training execution
+
+Status: implemented and focused-test validated.
+
+- Training compilation now consumes normalized `validation.dataset` inputs instead of dummy input data when a dataset is configured.
+- Classification labels are lowered to one-hot float32 target records matching the model output width; regression targets are preserved.
+- The generated training CSim testbench receives per-record input/target widths and reports dataset input records, target records, and records consumed.
+- A `reports/training_dataset_contract.json` artifact records sample count, record widths, input/target artifacts, and the current reference scope.
+- Current scope boundary: HLS training executes the configured dataset batch, while the software training reference remains a first-sample/single-step reference. Dataset-wide optimizer reference execution is scheduled for P3D-F2 and must precede dataset-wide training-correctness claims.
+
+## P3D-F2 — Dataset-wide training numerical validation
+
+- Dataset-backed accumulated SGD reference consumes every ordered sample.
+- Canonical training execution, comparison, and learning-behavior artifacts are emitted.
+- Initial/final dataset loss, gradient norms, and weight-update norm are reported.
+- Numerical correctness is independent from one-update loss direction; convergence is not claimed.
+
+### P3D-F2 v2 — training reference parameter binding repair
+
+- Dataset-wide training reference supports named tensors and direct operation-attribute parameters.
+- Removed the brittle requirement that Dense/Conv/BatchNorm parameters must be explicit op inputs.
+- Added regression coverage for attr-backed Dense parameters matching imported `dense0` models.
+- Focused training dataset validation: 5 passed.
+
+## P3D-F2.1 — Dataset training comparison validation
+
+Implemented canonical tolerance-based validation for dataset-backed training comparisons.
+`reports/training_dataset_comparison.json` now records complete gradient, weight-delta,
+final-weight, and execution-count checks. The learning-behavior report derives
+`numeric_validation_status` from this comparison status rather than from comparison-object
+presence. Missing or empty comparison artifacts produce `pending_comparison`; failed
+checks produce `failed_tolerance`; only complete passing checks produce `passed`.

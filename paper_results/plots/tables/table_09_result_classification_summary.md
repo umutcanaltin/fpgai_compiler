@@ -1,0 +1,8 @@
+# Result classification summary
+
+| Result classification | Comparison count | Metric row count | comparisons |
+| --- | --- | --- | --- |
+| strong_result | 2 | 18 | precision_fx8_vs_fx16, training_tile32_vs_tile64 |
+| expected_tradeoff | 9 | 81 | parallel_pe2_vs_pe1, parallel_pe4_vs_pe1, parallel_pe4_vs_pe2, pipeline_latency_first_vs_baseline, precision_fx24_vs_fx16, training_adam_vs_sgd, training_cross_entropy_vs_mse, training_tile128_vs_tile64, weight_import_m_axi_vs_embedded |
+| deployability_result | 1 | 9 | training_bitstream_vs_sgd |
+| no_observable_effect | 3 | 27 | pipeline_resource_first_vs_baseline, training_accum_batch2_vs_sgd, training_momentum_vs_sgd |

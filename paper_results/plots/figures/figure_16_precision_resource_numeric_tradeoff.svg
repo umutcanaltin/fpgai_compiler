@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="420" viewBox="0 0 900 420">
+<rect width="100%" height="100%" fill="white"/>
+<text x="32" y="34" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#111">Precision numeric-resource tradeoff</text>
+<text x="32" y="58" font-family="Arial, sans-serif" font-size="12" fill="#555">x=max abs error, y=Vivado LUT</text>
+<line x1="70" y1="80" x2="70" y2="360" stroke="#333"/>
+<line x1="70" y1="360" x2="860" y2="360" stroke="#333"/>
+<text x="70" y="400" font-family="Arial, sans-serif" font-size="12" fill="#444">max_abs_error</text>
+<text x="16" y="98" font-family="Arial, sans-serif" font-size="12" fill="#444" transform="rotate(-90 16,98)">vivado_lut</text>
+<path d="M 470.09 210.50 L 860.00 360.00 L 70.00 80.00" fill="none" stroke="#4a6fa5" stroke-width="3"/>
+<circle cx="470.09" cy="210.50" r="4" fill="#4a6fa5"/>
+<circle cx="860.00" cy="360.00" r="4" fill="#4a6fa5"/>
+<circle cx="70.00" cy="80.00" r="4" fill="#4a6fa5"/>
+<text x="70" y="384" font-family="Arial, sans-serif" font-size="12" fill="#444">x: 2.146e-05 → 0.9062</text>
+<text x="290" y="384" font-family="Arial, sans-serif" font-size="12" fill="#444">y: 8019 → 1.68e+04</text>
+</svg>

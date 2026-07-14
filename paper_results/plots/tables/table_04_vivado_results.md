@@ -14,6 +14,7 @@
 | inference | I9_board_runtime_candidate | passed | 12708 | 5 | 62.5 | 2.579 | 2.842 |
 | training | T0_sgd_tiled_m_axi | passed | 29370 | 15 | 17.5 | 2.896 | 2.941 |
 | training | T1_momentum_tiled_m_axi | passed | 29370 | 15 | 17.5 | 2.896 | 2.941 |
+| training | T2_adam_tiled_m_axi | passed | 30563 | 15 | 18 | 3.198 | 2.93 |
 | training | T3_cross_entropy_tiled_m_axi | passed | 34727 | 44 | 17.5 | 2.225 | 3.007 |
 | training | T4_tile32_m_axi | passed | 28989 | 15 | 17.5 | 3.115 | 2.925 |
 | training | T5_tile128_m_axi | passed | 29818 | 15 | 17.5 | 3.259 | 2.951 |

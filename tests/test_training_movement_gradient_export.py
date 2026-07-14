@@ -364,3 +364,38 @@ def test_optimizer_state_export_runtime_sequence_is_supported_for_training(tmp_p
     source = (out_dir / "hls/src/deeplearn.cpp").read_text(encoding="utf-8")
     assert "FPGAI_MODE_EXPORT_OPTIMIZER_STATE" in source
     assert "ap_uint<32>* optimizer_state_mem" in source
+
+
+def test_training_m_axi_testbench_sizes_label_and_output_buffers_from_runtime_records(tmp_path: Path) -> None:
+    from fpgai.backends.hls.testbench_train import emit_tb_train_cpp
+
+    tb_dir = tmp_path / "tb_dynamic_label_size"
+    tb_dir.mkdir()
+    raw_cfg = {
+        "data_movement": {
+            "inputs": {"interface": "m_axi", "transport": "ps_runtime", "tiled": {"enabled": True, "tile_size": 64}},
+            "labels": {"interface": "m_axi", "transport": "ps_runtime", "tiled": {"enabled": True, "tile_size": 64}},
+            "outputs": {"interface": "m_axi", "transport": "ps_runtime", "tiled": {"enabled": True, "tile_size": 64}},
+        }
+    }
+
+    emit_tb_train_cpp(
+        tb_dir,
+        graph=None,
+        top_name="deeplearn",
+        in_words=8,
+        out_words=0,
+        weights_mode="ddr_tiled_mutable",
+        weight_words=46,
+        preload_weights=[0.0] * 46,
+        training_cfg={"optimizer": {"learning_rate": 0.01}, "execution": {"train_steps": 1, "batch_size": 1}},
+        output_dir=str(tmp_path),
+        raw_cfg=raw_cfg,
+    )
+
+    tb_source = (tb_dir / "tb.cpp").read_text(encoding="utf-8")
+    assert "if (target_words_per_record <= 0) target_words_per_record = (int)target_data.size();" in tb_source
+    assert "std::vector<ap_uint<32> > label_mem((size_t)(target_words_per_record > 0 ? target_words_per_record : 1));" in tb_source
+    assert "std::vector<ap_uint<32> > output_mem((size_t)(target_words_per_record > 0 ? target_words_per_record : 1));" in tb_source
+    assert "std::vector<ap_uint<32> > label_mem(1);" not in tb_source
+    assert "std::vector<ap_uint<32> > output_mem(1);" not in tb_source

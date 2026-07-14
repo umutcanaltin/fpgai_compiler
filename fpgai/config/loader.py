@@ -200,6 +200,7 @@ TOP_LEVEL_SECTIONS_V1 = {
     "communication",
     "debug",
     "metadata",
+    "validation",
 }
 
 DEFAULT_NUMERIC_ROLES = {
@@ -891,6 +892,221 @@ def _validate_analysis_cfg(
     )
 
 
+def _validate_validation_cfg(
+    raw: Dict[str, Any],
+    issues: List[ConfigIssue],
+) -> None:
+    validation = raw.get("validation")
+    if validation is None:
+        return
+    if not isinstance(validation, dict):
+        issues.append(ConfigIssue("validation", "Expected a mapping"))
+        return
+
+    allowed_validation = {"task", "dataset", "decision_thresholds"}
+    for key in sorted(set(validation) - allowed_validation):
+        issues.append(
+            ConfigIssue(
+                f"validation.{key}",
+                f"Unknown validation field {key!r}",
+            )
+        )
+
+    task = validation.get("task")
+    if task is not None and task not in {"classification", "regression"}:
+        issues.append(
+            ConfigIssue(
+                "validation.task",
+                "Must be one of ['classification', 'regression']",
+            )
+        )
+
+    dataset = validation.get("dataset")
+    if dataset is None:
+        return
+    if not isinstance(dataset, dict):
+        issues.append(ConfigIssue("validation.dataset", "Expected a mapping"))
+        return
+
+    allowed_dataset = {
+        "source", "path", "inputs", "inputs_key", "labels_key",
+        "targets_key", "sample_shape", "dtype", "labels",
+        "labels_path", "labels_dtype", "targets", "targets_path",
+        "targets_dtype", "sample_selection", "name", "root", "split",
+        "download", "preprocessing",
+    }
+    for key in sorted(set(dataset) - allowed_dataset):
+        issues.append(
+            ConfigIssue(
+                f"validation.dataset.{key}",
+                f"Unknown dataset field {key!r}",
+            )
+        )
+
+    source = dataset.get("source")
+    if source is not None:
+        normalized = str(source).strip().lower().replace("-", "_")
+        if normalized not in {"npy", "npz", "binary", "bin", "raw_binary", "torchvision"}:
+            issues.append(
+                ConfigIssue(
+                    "validation.dataset.source",
+                    "Must be one of ['bin', 'binary', 'npy', 'npz', 'raw_binary', 'torchvision']",
+                )
+            )
+
+    normalized_source = str(source or "").strip().lower().replace("-", "_")
+    if normalized_source == "torchvision":
+        name = dataset.get("name")
+        if name not in {"MNIST", "FashionMNIST"}:
+            issues.append(ConfigIssue(
+                "validation.dataset.name",
+                "Must be one of ['FashionMNIST', 'MNIST']",
+            ))
+        split = dataset.get("split", "test")
+        if split not in {"train", "test"}:
+            issues.append(ConfigIssue(
+                "validation.dataset.split",
+                "Must be one of ['test', 'train']",
+            ))
+        download = dataset.get("download")
+        if download is not None and type(download) is not bool:
+            issues.append(ConfigIssue(
+                "validation.dataset.download",
+                "Expected a boolean",
+            ))
+        preprocessing = dataset.get("preprocessing")
+        if preprocessing is not None:
+            if not isinstance(preprocessing, dict):
+                issues.append(ConfigIssue("validation.dataset.preprocessing", "Expected a mapping"))
+            else:
+                allowed_preprocessing = {"normalize", "flatten", "add_channel_dim", "mean", "std"}
+                for key in sorted(set(preprocessing) - allowed_preprocessing):
+                    issues.append(ConfigIssue(
+                        f"validation.dataset.preprocessing.{key}",
+                        f"Unknown preprocessing field {key!r}",
+                    ))
+                for key in ("normalize", "flatten", "add_channel_dim"):
+                    value = preprocessing.get(key)
+                    if value is not None and type(value) is not bool:
+                        issues.append(ConfigIssue(
+                            f"validation.dataset.preprocessing.{key}",
+                            "Expected a boolean",
+                        ))
+                std = preprocessing.get("std")
+                if std is not None and (not isinstance(std, (int, float)) or isinstance(std, bool) or float(std) == 0.0):
+                    issues.append(ConfigIssue(
+                        "validation.dataset.preprocessing.std",
+                        "Expected a non-zero number",
+                    ))
+    else:
+        dataset_path = dataset.get("path", dataset.get("inputs"))
+        if not isinstance(dataset_path, str) or not dataset_path.strip():
+            issues.append(
+                ConfigIssue(
+                    "validation.dataset.path",
+                    "Missing or invalid dataset path",
+                )
+            )
+
+    selection = dataset.get("sample_selection")
+    if selection is not None:
+        if not isinstance(selection, dict):
+            issues.append(
+                ConfigIssue(
+                    "validation.dataset.sample_selection",
+                    "Expected a mapping",
+                )
+            )
+        else:
+            for key in sorted(set(selection) - {"offset", "count", "mode", "seed", "per_class_count"}):
+                issues.append(
+                    ConfigIssue(
+                        f"validation.dataset.sample_selection.{key}",
+                        f"Unknown sample selection field {key!r}",
+                    )
+                )
+            mode = selection.get("mode")
+            if mode is not None and str(mode).strip().lower().replace("-", "_") not in {"first", "random", "balanced", "balanced_per_class"}:
+                issues.append(ConfigIssue(
+                    "validation.dataset.sample_selection.mode",
+                    "Must be one of ['balanced', 'balanced_per_class', 'first', 'random']",
+                ))
+            seed = selection.get("seed")
+            if seed is not None and type(seed) is not int:
+                issues.append(ConfigIssue(
+                    "validation.dataset.sample_selection.seed",
+                    "Expected an integer",
+                ))
+            per_class_count = selection.get("per_class_count")
+            if per_class_count is not None and (type(per_class_count) is not int or per_class_count <= 0):
+                issues.append(ConfigIssue(
+                    "validation.dataset.sample_selection.per_class_count",
+                    "Expected a positive integer",
+                ))
+            offset = selection.get("offset")
+            count = selection.get("count")
+            if offset is not None and (type(offset) is not int or offset < 0):
+                issues.append(
+                    ConfigIssue(
+                        "validation.dataset.sample_selection.offset",
+                        "Expected a non-negative integer",
+                    )
+                )
+            if count is not None and (type(count) is not int or count <= 0):
+                issues.append(
+                    ConfigIssue(
+                        "validation.dataset.sample_selection.count",
+                        "Expected a positive integer",
+                    )
+                )
+
+    thresholds = validation.get("decision_thresholds")
+    if thresholds is not None:
+        if not isinstance(thresholds, dict):
+            issues.append(
+                ConfigIssue(
+                    "validation.decision_thresholds",
+                    "Expected a mapping",
+                )
+            )
+        else:
+            allowed_thresholds = {
+                "min_prediction_agreement",
+                "max_accuracy_drop_pct",
+            }
+            for key in sorted(set(thresholds) - allowed_thresholds):
+                issues.append(
+                    ConfigIssue(
+                        f"validation.decision_thresholds.{key}",
+                        f"Unknown decision threshold field {key!r}",
+                    )
+                )
+            agreement = thresholds.get("min_prediction_agreement")
+            if agreement is not None and (
+                not isinstance(agreement, (int, float))
+                or isinstance(agreement, bool)
+                or not 0.0 <= float(agreement) <= 1.0
+            ):
+                issues.append(
+                    ConfigIssue(
+                        "validation.decision_thresholds.min_prediction_agreement",
+                        "Expected a number between 0 and 1",
+                    )
+                )
+            drop = thresholds.get("max_accuracy_drop_pct")
+            if drop is not None and (
+                not isinstance(drop, (int, float))
+                or isinstance(drop, bool)
+                or float(drop) < 0.0
+            ):
+                issues.append(
+                    ConfigIssue(
+                        "validation.decision_thresholds.max_accuracy_drop_pct",
+                        "Expected a non-negative number",
+                    )
+                )
+
+
 def _validate_top_level_sections(
     raw: Dict[str, Any],
     issues: List[ConfigIssue],
@@ -1197,6 +1413,10 @@ def load_config(path: str) -> FPGAIConfig:
         issues,
     )
     _validate_analysis_cfg(
+        raw,
+        issues,
+    )
+    _validate_validation_cfg(
         raw,
         issues,
     )

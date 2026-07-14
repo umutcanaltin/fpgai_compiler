@@ -187,3 +187,13 @@ def test_compile_cpp_only_emits_sources_without_hls_run_script_and_records_manif
     assert runtime_manifest["build_stages"]["hls_project"] is False
     assert runtime_manifest["runtime_sequence"]["sequence"][0]["command"] == "run_inference"
     assert (out_dir / "runtime_package/run_sequence.json").exists()
+
+
+def test_resolve_runtime_sequence_defaults_to_import_then_inference_for_runtime_weights() -> None:
+    seq = _resolve_runtime_sequence(
+        {},
+        pipeline_mode="inference",
+        memory_semantics_mode="bram_import_export_full",
+    )
+    assert [entry["command"] for entry in seq["sequence"]] == ["import_weights", "run_inference"]
+    assert seq["explicit"] is False

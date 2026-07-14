@@ -1,0 +1,20 @@
+section,design_id,precision,numeric_validation_status,numeric_quality,paper_numeric_claim_allowed,max_abs_error,mae,rmse,cosine_similarity,gradient_cosine,weight_after_cosine,weight_delta_cosine,loss_validation_status
+inference,I0_baseline_fx16_embedded,fx16_6,failed_tolerance,failed_numeric_validation,false,0.45896291732788086,0.09160156267407768,0.1825762773761004,0.8394228491898975,,,,not_applicable
+inference,I1_precision_fx8_embedded,fx8_3,failed_tolerance,failed_numeric_validation,false,0.9062285423278809,0.1624957063434264,0.3000579583475164,0.31623442827312326,,,,not_applicable
+inference,I2_precision_fx24_embedded,fx24_10,passed,passed,true,2.1457672119140625e-05,4.2936565736169635e-06,9.463567235926423e-06,0.9999999997824109,,,,not_applicable
+inference,I3_parallel_pe2,fx16_6,failed_tolerance,failed_numeric_validation,false,0.45896291732788086,0.09160156267407768,0.1825762773761004,0.8394228491898975,,,,not_applicable
+inference,I4_parallel_pe4,fx16_6,failed_tolerance,failed_numeric_validation,false,0.45896291732788086,0.09160156267407768,0.1825762773761004,0.8394228491898975,,,,not_applicable
+inference,I5_pipeline_latency_first,fx16_6,failed_tolerance,failed_numeric_validation,false,0.45896291732788086,0.09160156267407768,0.1825762773761004,0.8394228491898975,,,,not_applicable
+inference,I6_pipeline_resource_first,fx16_6,failed_tolerance,failed_numeric_validation,false,0.45896291732788086,0.09160156267407768,0.1825762773761004,0.8394228491898975,,,,not_applicable
+inference,I7_weight_import_m_axi,fx16_6,failed_tolerance,failed_numeric_validation,false,0.45896291732788086,0.09160156267407768,0.1825762773761004,0.8394228491898975,,,,not_applicable
+inference,I8_deployable_bitstream_candidate,fx16_6,failed_tolerance,failed_numeric_validation,false,0.45896291732788086,0.09160156267407768,0.1825762773761004,0.8394228491898975,,,,not_applicable
+inference,I9_board_runtime_candidate,fx16_6,failed_tolerance,failed_numeric_validation,false,0.45896291732788086,0.09160156267407768,0.1825762773761004,0.8394228491898975,,,,not_applicable
+training,T0_sgd_tiled_m_axi,"fx16_6, grad fx24_10",passed,passed,true,,,,,0.9999946355819702,0.9999938011169434,0.9573166370391846,not_requested
+training,T1_momentum_tiled_m_axi,"fx16_6, grad fx24_10",passed,passed,true,,,,,0.9999946355819702,0.9999938011169434,0.9573166370391846,not_requested
+training,T2_adam_tiled_m_axi,"fx16_6, grad fx24_10",passed,passed,true,,,,,0.9999946355819702,0.9961696267127991,0.6845365166664124,not_requested
+training,T3_cross_entropy_tiled_m_axi,"fx16_6, grad fx24_10",passed,passed,true,,,,,0.9999816417694092,0.9999942779541016,0.8834608197212219,artifact_missing
+training,T4_tile32_m_axi,"fx16_6, grad fx24_10",passed,passed,true,,,,,0.9999946355819702,0.9999938011169434,0.9573166370391846,not_requested
+training,T5_tile128_m_axi,"fx16_6, grad fx24_10",passed,passed,true,,,,,0.9999946355819702,0.9999938011169434,0.9573166370391846,not_requested
+training,T6_accum_batch2_m_axi,"fx16_6, grad fx24_10",passed,passed,true,,,,,0.9999946355819702,0.9999938011169434,0.9573166370391846,not_requested
+training,T7_deployable_training_bitstream,"fx16_6, grad fx24_10",passed,passed,true,,,,,0.9999946355819702,0.9999938011169434,0.9573166370391846,not_requested
+training,T8_real_fpga_training_curve_candidate,"fx16_6, grad fx24_10",passed,passed,true,,,,,0.9999946355819702,0.9999938011169434,0.9573166370391846,not_requested

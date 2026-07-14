@@ -256,3 +256,154 @@ def test_paper_plot_generator_writes_captions_summary_and_gallery(tmp_path: Path
     manifest_md = (tmp_path / "paper_plots/paper_plot_manifest.md").read_text(encoding="utf-8")
     assert "## Narrative files" in manifest_md
     assert "table_08_result_comparisons" in manifest_md
+
+
+def test_paper_plot_generator_writes_expanded_comparisons_classifications_and_subsection(tmp_path: Path) -> None:
+    root = tmp_path / "build" / "paper_experiments"
+    baseline = _base_out(root / "inference", "I0_baseline_fx16_embedded", "inference")
+    fx24 = _base_out(root / "inference", "I2_precision_fx24_embedded", "inference")
+    pe4 = _base_out(root / "inference", "I4_parallel_pe4", "inference")
+    weight_import = _base_out(root / "inference", "I7_weight_import_m_axi", "inference")
+    sgd = _base_out(root / "training", "T0_sgd_tiled_m_axi", "training_on_device")
+    adam = _base_out(root / "training", "T2_adam_tiled_m_axi", "training_on_device")
+    tile128 = _base_out(root / "training", "T5_tile128_m_axi", "training_on_device")
+    bitstream = _base_out(root / "training", "T7_deployable_training_bitstream", "training_on_device")
+
+    _write_json(fx24 / "reports/hls_synthesis_report.json", {"status": "passed", "lut": 1800, "dsp": 13, "bram18": 8, "latency_max": 1240})
+    _write_json(fx24 / "reports/vivado_implementation_report.json", {"status": "passed", "lut": 2200, "dsp": 13, "bram18": 8, "wns": 0.9, "power_w": 2.2})
+    _write_json(pe4 / "reports/hls_synthesis_report.json", {"status": "passed", "lut": 3000, "dsp": 40, "bram18": 12, "latency_max": 700})
+    _write_json(pe4 / "reports/vivado_implementation_report.json", {"status": "passed", "lut": 3500, "dsp": 35, "bram18": 12, "wns": 0.7, "power_w": 2.5})
+    _write_json(weight_import / "reports/hls_synthesis_report.json", {"status": "passed", "lut": 1600, "dsp": 7, "bram18": 6, "latency_max": 1000})
+    _write_json(weight_import / "reports/vivado_implementation_report.json", {"status": "passed", "lut": 2100, "dsp": 7, "bram18": 7, "wns": 0.8, "power_w": 2.1})
+    _write_json(adam / "reports/hls_synthesis_report.json", {"status": "passed", "lut": 1700, "dsp": 7, "bram18": 7, "latency_max": 1234})
+    _write_json(adam / "reports/vivado_implementation_report.json", {"status": "passed", "lut": 1900, "dsp": 7, "bram18": 7, "wns": 1.0, "power_w": 2.1})
+    _write_json(tile128 / "reports/hls_synthesis_report.json", {"status": "passed", "lut": 1400, "dsp": 7, "bram18": 5, "latency_max": 1500})
+    _write_json(tile128 / "reports/vivado_implementation_report.json", {"status": "passed", "lut": 1600, "dsp": 7, "bram18": 5, "wns": 1.4, "power_w": 2.05})
+
+    manifest = generate_paper_plot_artifacts([tmp_path / "build"], output_dir=tmp_path / "paper_plots")
+
+    assert "paper_results_subsection_md" in manifest["narrative_files"]
+    comparison_path = tmp_path / "paper_plots" / "tables" / "table_08_result_comparisons.csv"
+    with comparison_path.open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    comparisons = {row["comparison"] for row in rows}
+    assert "precision_fx24_vs_fx16" in comparisons
+    assert "parallel_pe4_vs_pe1" in comparisons
+    assert "weight_import_m_axi_vs_embedded" in comparisons
+    assert "training_adam_vs_sgd" in comparisons
+    assert "training_tile128_vs_tile64" in comparisons
+    assert "training_bitstream_vs_sgd" in comparisons
+    assert {"result_classification", "artifact_status", "interpretation"}.issubset(rows[0].keys())
+    assert any(row["result_classification"] == "expected_tradeoff" for row in rows)
+    assert any(row["result_classification"] == "deployability_result" for row in rows)
+
+    summary_text = (tmp_path / "paper_plots" / "tables" / "table_09_result_classification_summary.md").read_text(encoding="utf-8")
+    assert "Result classification summary" in summary_text
+    assert "expected_tradeoff" in summary_text
+    subsection_text = (tmp_path / "paper_plots" / "paper_results_subsection.md").read_text(encoding="utf-8")
+    assert "Paper-ready results subsection draft" in subsection_text
+    assert "Claim boundary" in subsection_text
+
+
+def test_paper_plot_generator_writes_numeric_validation_tables_and_figures(tmp_path: Path) -> None:
+    root = tmp_path / "build" / "paper_experiments"
+    fx16 = _base_out(root / "inference", "I0_baseline_fx16_embedded", "inference")
+    fx8 = _base_out(root / "inference", "I1_precision_fx8_embedded", "inference")
+    sgd = _base_out(root / "training", "T0_sgd_tiled_m_axi", "training_on_device")
+
+    _write_json(
+        fx16 / "reports" / "numeric_validation.json",
+        {
+            "status": "passed",
+            "passed": True,
+            "reason": "inference output comparison artifacts were compared successfully",
+            "inference": {
+                "status": "passed",
+                "output_compare": {
+                    "status": "compared",
+                    "passed": True,
+                    "num_compared": 10,
+                    "mse": 1.0e-8,
+                    "mae": 2.0e-4,
+                    "max_abs_error": 8.0e-4,
+                    "cosine_similarity": 0.9999,
+                },
+            },
+            "paper_claim_allowed": {"numeric_correctness": True},
+        },
+    )
+    _write_json(
+        fx8 / "reports" / "numeric_validation.json",
+        {
+            "status": "passed",
+            "passed": True,
+            "reason": "inference output comparison artifacts were compared successfully",
+            "inference": {
+                "status": "passed",
+                "output_compare": {
+                    "status": "compared",
+                    "passed": True,
+                    "num_compared": 10,
+                    "mse": 4.0e-6,
+                    "mae": 1.2e-3,
+                    "max_abs_error": 3.4e-3,
+                    "cosine_similarity": 0.998,
+                },
+            },
+            "paper_claim_allowed": {"numeric_correctness": True},
+        },
+    )
+    _write_json(
+        sgd / "reports" / "numeric_validation.json",
+        {
+            "status": "passed",
+            "passed": True,
+            "reason": "training reference and generated/testbench comparison artifacts are available",
+            "training": {
+                "status": "passed",
+                "comparison": {
+                    "status": "compared",
+                    "grad_cosine": 0.997,
+                    "weight_after_cosine": 0.999,
+                    "weight_delta_cosine": 0.996,
+                    "grad_mae": 0.001,
+                    "grad_max_abs": 0.004,
+                    "weight_after_mae": 0.0005,
+                    "weight_after_max_abs": 0.002,
+                },
+            },
+            "gradient_export": {"status": "compared"},
+            "optimizer_state_validation": {"status": "not_requested"},
+            "batch_accumulation": {"status": "not_requested"},
+            "loss_validation": {"status": "compared", "initial_loss": 1.0, "final_loss": 0.8},
+            "training_tiled_io": {"status": "compared"},
+            "paper_claim_allowed": {"numeric_correctness": True},
+        },
+    )
+
+    manifest = generate_paper_plot_artifacts([tmp_path / "build"], output_dir=tmp_path / "paper_plots")
+
+    assert "figure_15_precision_numeric_error" in manifest["created_figures"]
+    assert "figure_16_precision_resource_numeric_tradeoff" in manifest["created_figures"]
+    assert "figure_17_training_gradient_fidelity" in manifest["created_figures"]
+    for rel in [
+        "data/numeric_validation_rows.csv",
+        "tables/table_10_numeric_validation_summary.csv",
+        "tables/table_11_inference_precision_numeric_tradeoff.md",
+        "tables/table_12_training_numeric_validation.md",
+        "tables/table_13_training_precision_numeric_tradeoff.md",
+    ]:
+        assert (tmp_path / "paper_plots" / rel).exists()
+
+    with (tmp_path / "paper_plots" / "data" / "numeric_validation_rows.csv").open(newline="", encoding="utf-8") as f:
+        rows = list(csv.DictReader(f))
+    by_design = {row["design_id"]: row for row in rows}
+    assert by_design["I1_precision_fx8_embedded"]["max_abs_error"] == "0.0034"
+    assert by_design["I1_precision_fx8_embedded"]["numeric_quality"] == "passed"
+    assert by_design["T0_sgd_tiled_m_axi"]["gradient_cosine"] == "0.997"
+    assert by_design["T0_sgd_tiled_m_axi"]["loss_delta"] == "-0.19999999999999996"
+
+    summary = (tmp_path / "paper_plots" / "paper_results_summary.md").read_text(encoding="utf-8")
+    assert "Numeric validation summary" in summary
+    subsection = (tmp_path / "paper_plots" / "paper_results_subsection.md").read_text(encoding="utf-8")
+    assert "Numeric behavior validation" in subsection

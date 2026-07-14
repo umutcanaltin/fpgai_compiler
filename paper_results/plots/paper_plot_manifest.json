@@ -1,7 +1,7 @@
 {
   "artifact_kind": "fpgai_paper_plot_artifacts",
   "claim_boundary": "Plots are generated only from existing report/runtime artifacts. Missing board-runtime latency, energy, and training-curve measurements are marked pending, not fabricated.",
-  "compile_output_count": 18,
+  "compile_output_count": 19,
   "created_figures": {
     "figure_00_plot_status": "paper_results/plots/figures/figure_00_plot_status.svg",
     "figure_01_inference_hls_latency": "paper_results/plots/figures/figure_01_inference_hls_latency.svg",
@@ -13,18 +13,28 @@
     "figure_11_training_vivado_dsp": "paper_results/plots/figures/figure_11_training_vivado_dsp.svg",
     "figure_12_all_hls_lut": "paper_results/plots/figures/figure_12_all_hls_lut.svg",
     "figure_13_all_vivado_power": "paper_results/plots/figures/figure_13_all_vivado_power.svg",
-    "figure_14_all_vivado_wns": "paper_results/plots/figures/figure_14_all_vivado_wns.svg"
+    "figure_14_all_vivado_wns": "paper_results/plots/figures/figure_14_all_vivado_wns.svg",
+    "figure_15_precision_numeric_error": "paper_results/plots/figures/figure_15_precision_numeric_error.svg",
+    "figure_16_precision_resource_numeric_tradeoff": "paper_results/plots/figures/figure_16_precision_resource_numeric_tradeoff.svg",
+    "figure_17_training_gradient_fidelity": "paper_results/plots/figures/figure_17_training_gradient_fidelity.svg",
+    "figure_18_inference_quality_vs_lut": "paper_results/plots/figures/figure_18_inference_quality_vs_lut.svg",
+    "figure_19_precision_decision_lut_saving": "paper_results/plots/figures/figure_19_precision_decision_lut_saving.svg",
+    "figure_20_error_vs_bram": "paper_results/plots/figures/figure_20_error_vs_bram.svg",
+    "figure_21_training_loss_delta": "paper_results/plots/figures/figure_21_training_loss_delta.svg",
+    "figure_22_training_update_vs_lut": "paper_results/plots/figures/figure_22_training_update_vs_lut.svg"
   },
   "data_files": {
     "board_training_curve_rows_csv": "paper_results/plots/data/board_training_curve_rows.csv",
     "hardware_knob_settings_csv": "paper_results/plots/data/hardware_knob_settings.csv",
     "inference_design_rows_csv": "paper_results/plots/data/inference_design_rows.csv",
+    "numeric_validation_rows_csv": "paper_results/plots/data/numeric_validation_rows.csv",
     "paper_plot_rows_csv": "paper_results/plots/data/paper_plot_rows.csv",
     "training_design_rows_csv": "paper_results/plots/data/training_design_rows.csv"
   },
   "narrative_files": {
     "figure_captions_md": "paper_results/plots/figure_captions.md",
     "paper_claims_from_artifacts_md": "paper_results/plots/paper_claims_from_artifacts.md",
+    "paper_results_subsection_md": "paper_results/plots/paper_results_subsection.md",
     "paper_results_summary_md": "paper_results/plots/paper_results_summary.md",
     "plot_gallery_html": "paper_results/plots/plot_gallery.html",
     "plot_gallery_md": "paper_results/plots/plot_gallery.md",
@@ -40,6 +50,8 @@
   "sections": {
     "inference": {
       "design_count": 10,
+      "numeric_passed_rows": 1,
+      "numeric_validation_rows": 10,
       "real_runtime_rows": 0,
       "required_real_measurements": [
         "runtime_latency_ms_mean",
@@ -50,7 +62,9 @@
       ]
     },
     "training": {
-      "design_count": 8,
+      "design_count": 9,
+      "numeric_passed_rows": 9,
+      "numeric_validation_rows": 9,
       "real_runtime_rows": 0,
       "real_training_curve_rows": 0,
       "required_real_measurements": [
@@ -66,42 +80,87 @@
     "table_01_experiment_overview": {
       "csv": "paper_results/plots/tables/table_01_experiment_overview.csv",
       "md": "paper_results/plots/tables/table_01_experiment_overview.md",
-      "row_count": "18"
+      "row_count": "19"
     },
     "table_02_design_knobs": {
       "csv": "paper_results/plots/tables/table_02_design_knobs.csv",
       "md": "paper_results/plots/tables/table_02_design_knobs.md",
-      "row_count": "325"
+      "row_count": "343"
     },
     "table_03_hls_results": {
       "csv": "paper_results/plots/tables/table_03_hls_results.csv",
       "md": "paper_results/plots/tables/table_03_hls_results.md",
-      "row_count": "18"
+      "row_count": "19"
     },
     "table_04_vivado_results": {
       "csv": "paper_results/plots/tables/table_04_vivado_results.csv",
       "md": "paper_results/plots/tables/table_04_vivado_results.md",
-      "row_count": "18"
+      "row_count": "19"
     },
     "table_05_runtime_status": {
       "csv": "paper_results/plots/tables/table_05_runtime_status.csv",
       "md": "paper_results/plots/tables/table_05_runtime_status.md",
-      "row_count": "18"
+      "row_count": "19"
     },
     "table_06_pending_measurements": {
       "csv": "paper_results/plots/tables/table_06_pending_measurements.csv",
       "md": "paper_results/plots/tables/table_06_pending_measurements.md",
-      "row_count": "72"
+      "row_count": "76"
     },
     "table_07_knob_effect_summary": {
       "csv": "paper_results/plots/tables/table_07_knob_effect_summary.csv",
       "md": "paper_results/plots/tables/table_07_knob_effect_summary.md",
-      "row_count": "34"
+      "row_count": "35"
     },
     "table_08_result_comparisons": {
       "csv": "paper_results/plots/tables/table_08_result_comparisons.csv",
       "md": "paper_results/plots/tables/table_08_result_comparisons.md",
-      "row_count": "45"
+      "row_count": "135"
+    },
+    "table_09_result_classification_summary": {
+      "csv": "paper_results/plots/tables/table_09_result_classification_summary.csv",
+      "md": "paper_results/plots/tables/table_09_result_classification_summary.md",
+      "row_count": "4"
+    },
+    "table_10_numeric_validation_summary": {
+      "csv": "paper_results/plots/tables/table_10_numeric_validation_summary.csv",
+      "md": "paper_results/plots/tables/table_10_numeric_validation_summary.md",
+      "row_count": "19"
+    },
+    "table_11_inference_precision_numeric_tradeoff": {
+      "csv": "paper_results/plots/tables/table_11_inference_precision_numeric_tradeoff.csv",
+      "md": "paper_results/plots/tables/table_11_inference_precision_numeric_tradeoff.md",
+      "row_count": "3"
+    },
+    "table_12_training_numeric_validation": {
+      "csv": "paper_results/plots/tables/table_12_training_numeric_validation.csv",
+      "md": "paper_results/plots/tables/table_12_training_numeric_validation.md",
+      "row_count": "9"
+    },
+    "table_13_training_precision_numeric_tradeoff": {
+      "csv": "paper_results/plots/tables/table_13_training_precision_numeric_tradeoff.csv",
+      "md": "paper_results/plots/tables/table_13_training_precision_numeric_tradeoff.md",
+      "row_count": "9"
+    },
+    "table_14_inference_task_quality_tradeoff": {
+      "csv": "paper_results/plots/tables/table_14_inference_task_quality_tradeoff.csv",
+      "md": "paper_results/plots/tables/table_14_inference_task_quality_tradeoff.md",
+      "row_count": "10"
+    },
+    "table_15_precision_decision_matrix": {
+      "csv": "paper_results/plots/tables/table_15_precision_decision_matrix.csv",
+      "md": "paper_results/plots/tables/table_15_precision_decision_matrix.md",
+      "row_count": "3"
+    },
+    "table_16_training_task_quality_tradeoff": {
+      "csv": "paper_results/plots/tables/table_16_training_task_quality_tradeoff.csv",
+      "md": "paper_results/plots/tables/table_16_training_task_quality_tradeoff.md",
+      "row_count": "9"
+    },
+    "table_17_training_precision_decision_matrix": {
+      "csv": "paper_results/plots/tables/table_17_training_precision_decision_matrix.csv",
+      "md": "paper_results/plots/tables/table_17_training_precision_decision_matrix.md",
+      "row_count": "9"
     }
   }
 }

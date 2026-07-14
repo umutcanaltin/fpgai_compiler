@@ -47,7 +47,7 @@ Training summary TXT : None
 Manifest             : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I7_weight_import_m_axi/manifest.json
 Pipeline mode        : inference
 Top kernel           : deeplearn
-Compile seconds      : 275.03622
+Compile seconds      : 272.449885
 ---------------------------------------------------
 Prediction artifacts:
   - Model profile JSON: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I7_weight_import_m_axi/reports/model_profile.json
@@ -132,8 +132,8 @@ Hardware knob contract: available
   - Report-only: 0
 ===================================================
 ---------------------------------------------------
-Captured stdout log : build/cli_logs/20260710_144442_730357_compile_stdout.log
-Captured stderr log : build/cli_logs/20260710_144442_730357_compile_stderr.log
+Captured stdout log : build/cli_logs/20260713_133147_133745_compile_stdout.log
+Captured stderr log : build/cli_logs/20260713_133147_133745_compile_stderr.log
 [OK] Wrote artifacts to: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I7_weight_import_m_axi
 {
   "checks": [

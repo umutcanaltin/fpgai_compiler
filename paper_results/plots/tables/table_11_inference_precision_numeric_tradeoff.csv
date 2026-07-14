@@ -1,0 +1,4 @@
+design_id,precision,hls_latency_max,vivado_lut,vivado_dsp,vivado_bram,vivado_power_w,numeric_validation_status,numeric_quality,max_abs_error,mae,rmse,cosine_similarity
+I0_baseline_fx16_embedded,fx16_6,329247,12708,5,62.5,2.842,failed_tolerance,failed_numeric_validation,0.45896291732788086,0.09160156267407768,0.1825762773761004,0.8394228491898975
+I1_precision_fx8_embedded,fx8_3,330920,8019,4,21,2.786,failed_tolerance,failed_numeric_validation,0.9062285423278809,0.1624957063434264,0.3000579583475164,0.31623442827312326
+I2_precision_fx24_embedded,fx24_10,329260,16801,13,84,2.88,passed,passed,2.1457672119140625e-05,4.2936565736169635e-06,9.463567235926423e-06,0.9999999997824109

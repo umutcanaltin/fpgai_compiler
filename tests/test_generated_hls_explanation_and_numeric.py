@@ -42,6 +42,37 @@ def test_numeric_validation_compares_inference_output_files(tmp_path: Path) -> N
     assert payload['inference']['output_compare']['cosine_similarity'] == pytest.approx(1.0)
 
 
+def test_numeric_validation_inference_failed_tolerance_is_explicit(tmp_path: Path) -> None:
+    inp = tmp_path / "inputs.bin"
+    ref = tmp_path / "outputs_ref.bin"
+    hw = tmp_path / "outputs_hw.bin"
+    _write_f32(inp, [1.0, 2.0])
+    _write_f32(ref, [1.0, 0.0])
+    _write_f32(hw, [1.5, 0.0])
+
+    artifacts = emit_numeric_validation_report(
+        tmp_path,
+        pipeline_mode="inference",
+        source_generated=True,
+        hls_ran=True,
+        hls_ok=True,
+        raw_config={"benchmark": {"compare": {"precision_aware": False, "max_abs_error": 0.01}}},
+        inference_reference_artifacts={
+            "inputs_bin": inp,
+            "outputs_ref": ref,
+            "outputs_hw": hw,
+        },
+    )
+    payload = json.loads(artifacts["numeric_validation_json"].read_text(encoding="utf-8"))
+
+    assert payload["status"] == "failed_tolerance"
+    assert payload["passed"] is False
+    assert payload["paper_claim_allowed"]["numeric_correctness"] is False
+    assert payload["inference"]["output_compare"]["status"] == "compared"
+    assert payload["inference"]["output_compare"]["passed"] is False
+    assert "max_abs_error" in payload["reason"]
+
+
 def _load_inference_config() -> dict:
     data = yaml.safe_load(Path('configs/examples/inference_compile.yml').read_text(encoding='utf-8'))
     assert isinstance(data, dict)
@@ -654,3 +685,609 @@ def test_parallel_pipeline_effect_records_not_requested_defaults_without_manual_
     assert report['resource_latency_hygiene']['unrequested_manual_claims'] == []
     assert report['parallelization']['dense_out_unroll']['status'] in {'not_requested', 'compiler_default'}
     assert report['hls_effect']['paper_safe_hls_claim'] is False
+
+
+def test_inference_reference_artifact_helper_uses_existing_hls_output_and_input_bin(tmp_path: Path, monkeypatch) -> None:
+    import sys
+    import types
+    import numpy as np
+    monkeypatch.setitem(
+        sys.modules,
+        "fpgai.toolchain",
+        types.SimpleNamespace(build_xilinx_tool_command=lambda *args, **kwargs: []),
+    )
+    from fpgai.engine.compiler import _emit_inference_reference_artifacts
+
+    out_dir = tmp_path / "inference_out"
+    out_dir.mkdir()
+    np.asarray([0.1, 0.2, 0.3, 0.4], dtype=np.float32).tofile(out_dir / "input.bin")
+    np.asarray([0.3, 0.7], dtype=np.float32).tofile(out_dir / "output.bin")
+
+    class _Meta:
+        def __init__(self, name: str, shape: list[int]) -> None:
+            self.name = name
+            self.shape = shape
+
+    class _Session:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def get_inputs(self):
+            return [_Meta("input", [1, 4])]
+
+        def get_outputs(self):
+            return [_Meta("output", [1, 2])]
+
+        def run(self, outputs, feed):
+            x = next(iter(feed.values()))
+            assert tuple(x.shape) == (1, 4)
+            return [np.asarray([[0.3, 0.7]], dtype=np.float32)]
+
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.SimpleNamespace(InferenceSession=_Session))
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"fake")
+
+    artifacts = _emit_inference_reference_artifacts(out_dir, model_path=model, hls_ok=True)
+
+    assert artifacts["status"] == "available"
+    assert Path(artifacts["outputs_ref"]).exists()
+    assert Path(artifacts["outputs_hw"]) == out_dir / "output.bin"
+
+
+def test_numeric_validation_inference_uses_precision_aware_limits(tmp_path: Path) -> None:
+    inp = tmp_path / "input.bin"
+    ref = tmp_path / "outputs_ref.bin"
+    hw = tmp_path / "output.bin"
+    _write_f32(inp, [1.0, 2.0])
+    _write_f32(ref, [1.0, 0.0])
+    # Error is too large for the historic 1e-3 threshold but acceptable for fx8_3
+    # precision-aware reporting (LSB = 2^-5, max limit >= 4 LSB = 0.125).
+    _write_f32(hw, [1.0625, 0.0])
+
+    artifacts = emit_numeric_validation_report(
+        tmp_path,
+        pipeline_mode="inference",
+        source_generated=True,
+        hls_ran=True,
+        hls_ok=True,
+        raw_config={
+            "numerics": {
+                "defaults": {
+                    "activation": {"total_bits": 8, "int_bits": 3},
+                },
+            },
+            "benchmark": {"compare": {"precision_aware": True}},
+        },
+        inference_reference_artifacts={
+            "inputs_bin": inp,
+            "outputs_ref": ref,
+            "outputs_hw": hw,
+        },
+    )
+    payload = json.loads(artifacts["numeric_validation_json"].read_text(encoding="utf-8"))
+
+    assert payload["status"] == "passed"
+    assert payload["paper_claim_allowed"]["numeric_correctness"] is True
+    compare = payload["inference"]["output_compare"]
+    assert compare["max_abs_error"] == pytest.approx(0.0625)
+    assert compare["limits"]["max_abs_error_limit"] >= 0.125
+
+
+def test_numeric_validation_emits_classification_decision_metrics(tmp_path: Path) -> None:
+    inp = tmp_path / "inputs.bin"
+    ref = tmp_path / "outputs_ref.bin"
+    hw = tmp_path / "outputs_hw.bin"
+    labels = tmp_path / "labels.txt"
+    _write_f32(inp, [0.0, 1.0])
+    # Two samples, three classes. Reference predicts [1, 2]; generated predicts [1, 0].
+    _write_f32(ref, [0.1, 0.8, 0.1, 0.1, 0.2, 0.7])
+    _write_f32(hw, [0.2, 0.7, 0.1, 0.6, 0.3, 0.1])
+    labels.write_text("1\n2\n", encoding="utf-8")
+
+    artifacts = emit_numeric_validation_report(
+        tmp_path,
+        pipeline_mode="inference",
+        source_generated=True,
+        raw_config={
+            "validation": {
+                "task": "classification",
+                "labels": str(labels),
+                "dataset": "sample_labels",
+                "decision_thresholds": {"max_accuracy_drop_pct": 60.0},
+            },
+            "benchmark": {"compare": {"precision_aware": False, "max_abs_error": 1.0, "min_cosine_similarity": 0.0}},
+        },
+        inference_reference_artifacts={"inputs_bin": inp, "outputs_ref": ref, "outputs_hw": hw},
+    )
+    payload = json.loads(artifacts["numeric_validation_json"].read_text(encoding="utf-8"))
+    task = payload["inference"]["task_quality"]
+
+    assert task["task"] == "classification"
+    assert task["status"] == "compared"
+    assert task["labels_status"] == "provided"
+    assert task["reference_top1_accuracy"] == pytest.approx(1.0)
+    assert task["generated_top1_accuracy"] == pytest.approx(0.5)
+    assert task["top1_accuracy_drop_pct"] == pytest.approx(-50.0)
+    assert task["prediction_agreement_vs_reference"] == pytest.approx(0.5)
+    assert task["decision_status"] in {"aggressive_compression", "acceptable_tradeoff", "not_recommended_for_quality"}
+
+
+def test_numeric_validation_emits_regression_decision_metrics(tmp_path: Path) -> None:
+    inp = tmp_path / "inputs.bin"
+    ref = tmp_path / "outputs_ref.bin"
+    hw = tmp_path / "outputs_hw.bin"
+    targets = tmp_path / "targets.csv"
+    _write_f32(inp, [0.0])
+    _write_f32(ref, [1.0, 2.0, 3.0])
+    _write_f32(hw, [1.1, 1.9, 3.2])
+    targets.write_text("1.0,2.0,3.0", encoding="utf-8")
+
+    artifacts = emit_numeric_validation_report(
+        tmp_path,
+        pipeline_mode="inference",
+        source_generated=True,
+        raw_config={
+            "validation": {
+                "task": "regression",
+                "targets": str(targets),
+                "decision_thresholds": {"max_mae_increase": 0.25, "max_rmse_increase": 0.25},
+            },
+            "benchmark": {"compare": {"precision_aware": False, "max_abs_error": 1.0, "min_cosine_similarity": 0.0}},
+        },
+        inference_reference_artifacts={"inputs_bin": inp, "outputs_ref": ref, "outputs_hw": hw},
+    )
+    payload = json.loads(artifacts["numeric_validation_json"].read_text(encoding="utf-8"))
+    task = payload["inference"]["task_quality"]
+
+    assert task["task"] == "regression"
+    assert task["targets_status"] == "provided"
+    assert task["target_mae_reference"] == pytest.approx(0.0)
+    assert task["target_mae_generated"] == pytest.approx((0.1 + 0.1 + 0.2) / 3, rel=1e-5)
+    assert task["mae_increase"] == pytest.approx(task["target_mae_generated"], rel=1e-5)
+    assert task["decision_status"] in {"recommended_quality", "acceptable_tradeoff", "aggressive_compression"}
+
+
+def test_numeric_validation_classifies_empty_generated_output_as_execution_artifact_invalid(tmp_path: Path) -> None:
+    ref = tmp_path / "ref.bin"
+    got = tmp_path / "got.bin"
+    import struct
+    ref.write_bytes(struct.pack("<ff", 0.25, 0.75))
+    got.write_bytes(b"")
+
+    artifacts = emit_numeric_validation_report(
+        tmp_path,
+        pipeline_mode="inference",
+        source_generated=True,
+        hls_ran=True,
+        hls_ok=True,
+        inference_reference_artifacts={"outputs_ref": ref, "outputs_hw": got},
+    )
+    payload = json.loads(artifacts["numeric_validation_json"].read_text(encoding="utf-8"))
+    assert payload["status"] == "execution_artifact_invalid"
+    assert payload["passed"] is False
+    assert payload["inference"]["output_compare"]["status"] == "empty_generated_output"
+    assert payload["inference"]["task_quality"]["decision_status"] != "recommended_quality"
+
+
+def test_dataset_npz_normalization_emits_manifest_and_selected_labels(tmp_path: Path) -> None:
+    import numpy as np
+    from fpgai.validation.dataset import emit_dataset_artifacts
+
+    dataset = tmp_path / "samples.npz"
+    np.savez(
+        dataset,
+        inputs=np.arange(20, dtype=np.float32).reshape(5, 4),
+        labels=np.asarray([0, 1, 2, 1, 0], dtype=np.int64),
+    )
+    out = tmp_path / "build"
+    artifacts = emit_dataset_artifacts(
+        out,
+        raw_config={
+            "validation": {
+                "task": "classification",
+                "dataset": {
+                    "source": "npz",
+                    "path": str(dataset),
+                    "inputs_key": "inputs",
+                    "labels_key": "labels",
+                    "sample_selection": {"offset": 1, "count": 3},
+                },
+            }
+        },
+    )
+
+    assert artifacts["status"] == "available"
+    assert artifacts["sample_count"] == 3
+    assert artifacts["input_shape"] == [4]
+    manifest = json.loads(Path(artifacts["manifest_path"]).read_text(encoding="utf-8"))
+    assert manifest["sample_count"] == 3
+    assert manifest["input_words_per_sample"] == 4
+    assert np.load(artifacts["labels_path"]).tolist() == [1, 2, 1]
+
+
+def test_inference_reference_artifacts_execute_normalized_dataset_batch(tmp_path: Path, monkeypatch) -> None:
+    import sys
+    import types
+    import numpy as np
+    monkeypatch.setitem(
+        sys.modules,
+        "fpgai.toolchain",
+        types.SimpleNamespace(build_xilinx_tool_command=lambda *args, **kwargs: []),
+    )
+    from fpgai.engine.compiler import _emit_inference_reference_artifacts
+
+    out = tmp_path / "out"
+    out.mkdir()
+    # Dataset-backed reference generation must use validation/dataset/inputs.bin
+    # and must not require a legacy root-level input.bin artifact.
+    assert not (out / "input.bin").exists()
+    # Simulate CSim output for three samples and two classes.
+    np.asarray([0.1, 0.9, 0.8, 0.2, 0.3, 0.7], dtype=np.float32).tofile(out / "output.bin")
+    dataset = tmp_path / "batch.npz"
+    np.savez(
+        dataset,
+        inputs=np.asarray([[1, 2, 3, 4], [4, 3, 2, 1], [1, 1, 1, 1]], dtype=np.float32),
+        labels=np.asarray([1, 0, 1], dtype=np.int64),
+    )
+
+    class _Meta:
+        def __init__(self, name: str, shape: list[object]) -> None:
+            self.name = name
+            self.shape = shape
+
+    class _Session:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def get_inputs(self):
+            return [_Meta("input", [None, 4])]
+
+        def get_outputs(self):
+            return [_Meta("output", [None, 2])]
+
+        def run(self, outputs, feed):
+            x = next(iter(feed.values()))
+            assert tuple(x.shape) == (3, 4)
+            return [np.asarray([[0.1, 0.9], [0.8, 0.2], [0.3, 0.7]], dtype=np.float32)]
+
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.SimpleNamespace(InferenceSession=_Session))
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"fake")
+    raw = {"validation": {"task": "classification", "dataset": {"source": "npz", "path": str(dataset)}}}
+
+    artifacts = _emit_inference_reference_artifacts(out, model_path=model, hls_ok=True, raw_config=raw)
+
+    assert artifacts["status"] == "available"
+    assert artifacts["sample_count"] == 3
+    assert artifacts["output_shape_per_sample"] == (2,)
+    assert Path(artifacts["outputs_ref"]).stat().st_size == 3 * 2 * 4
+    assert Path(artifacts["labels_path"]).exists()
+
+    report = emit_numeric_validation_report(
+        out,
+        pipeline_mode="inference",
+        source_generated=True,
+        hls_ran=True,
+        hls_ok=True,
+        raw_config=raw,
+        inference_reference_artifacts=artifacts,
+    )
+    payload = json.loads(report["numeric_validation_json"].read_text(encoding="utf-8"))
+    task = payload["inference"]["task_quality"]
+    assert task["sample_count"] == 3
+    assert task["labels_status"] == "provided"
+    assert task["prediction_agreement_vs_reference"] == pytest.approx(1.0)
+    assert task["reference_top1_accuracy"] == pytest.approx(1.0)
+    assert task["generated_top1_accuracy"] == pytest.approx(1.0)
+    assert task["decision_reason"] == "accuracy drop 0% is within the recommended threshold"
+
+
+def test_dataset_binary_requires_explicit_sample_shape(tmp_path: Path) -> None:
+    import numpy as np
+    from fpgai.validation.dataset import emit_dataset_artifacts
+
+    path = tmp_path / "inputs.bin"
+    np.arange(8, dtype=np.float32).tofile(path)
+    artifacts = emit_dataset_artifacts(
+        tmp_path / "out",
+        raw_config={"validation": {"dataset": {"source": "binary", "path": str(path)}}},
+    )
+    assert artifacts["status"] == "invalid"
+    assert "sample_shape" in artifacts["reason"]
+
+
+def test_inference_reference_artifacts_execute_unbatched_onnx_input_for_dataset(tmp_path: Path, monkeypatch) -> None:
+    import sys
+    import types
+    import numpy as np
+    monkeypatch.setitem(
+        sys.modules,
+        "fpgai.toolchain",
+        types.SimpleNamespace(build_xilinx_tool_command=lambda *args, **kwargs: []),
+    )
+    from fpgai.engine.compiler import _emit_inference_reference_artifacts
+
+    out = tmp_path / "out"
+    out.mkdir()
+    np.asarray([0.1, 0.9, 0.8, 0.2, 0.3, 0.7], dtype=np.float32).tofile(out / "output.bin")
+    dataset = tmp_path / "batch.npz"
+    np.savez(
+        dataset,
+        inputs=np.asarray([[1, 2, 3, 4], [4, 3, 2, 1], [1, 1, 1, 1]], dtype=np.float32),
+        labels=np.asarray([1, 0, 1], dtype=np.int64),
+    )
+
+    class _Meta:
+        def __init__(self, name: str, shape: list[object]) -> None:
+            self.name = name
+            self.shape = shape
+
+    class _Session:
+        def __init__(self, *args, **kwargs) -> None:
+            self.calls = 0
+
+        def get_inputs(self):
+            return [_Meta("input", [4])]
+
+        def get_outputs(self):
+            return [_Meta("output", [2])]
+
+        def run(self, outputs, feed):
+            x = next(iter(feed.values()))
+            assert tuple(x.shape) == (4,)
+            self.calls += 1
+            table = [
+                np.asarray([0.1, 0.9], dtype=np.float32),
+                np.asarray([0.8, 0.2], dtype=np.float32),
+                np.asarray([0.3, 0.7], dtype=np.float32),
+            ]
+            return [table[self.calls - 1]]
+
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.SimpleNamespace(InferenceSession=_Session))
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"fake")
+    raw = {"validation": {"task": "classification", "dataset": {"source": "npz", "path": str(dataset)}}}
+
+    artifacts = _emit_inference_reference_artifacts(out, model_path=model, hls_ok=True, raw_config=raw)
+
+    assert artifacts["status"] == "available"
+    assert artifacts["sample_count"] == 3
+    assert artifacts["output_shape_per_sample"] == (2,)
+    assert Path(artifacts["outputs_ref"]).stat().st_size == 3 * 2 * 4
+
+
+def test_inference_reference_artifacts_reshape_flat_dataset_sample_to_static_onnx_image_shape(tmp_path: Path, monkeypatch) -> None:
+    import sys
+    import types
+    import numpy as np
+
+    monkeypatch.setitem(
+        sys.modules,
+        "fpgai.toolchain",
+        types.SimpleNamespace(build_xilinx_tool_command=lambda *args, **kwargs: []),
+    )
+    from fpgai.engine.compiler import _emit_inference_reference_artifacts
+
+    out = tmp_path / "out"
+    out.mkdir()
+    np.asarray([0.1, 0.9, 0.8, 0.2], dtype=np.float32).tofile(out / "output.bin")
+    dataset = tmp_path / "batch.npz"
+    np.savez(
+        dataset,
+        inputs=np.asarray([[1, 2, 3, 4], [4, 3, 2, 1]], dtype=np.float32),
+        labels=np.asarray([1, 0], dtype=np.int64),
+    )
+
+    class _Meta:
+        def __init__(self, name: str, shape: list[object]) -> None:
+            self.name = name
+            self.shape = shape
+
+    class _Session:
+        def __init__(self, *args, **kwargs) -> None:
+            self.calls = 0
+
+        def get_inputs(self):
+            return [_Meta("input", [1, 1, 2, 2])]
+
+        def get_outputs(self):
+            return [_Meta("output", [1, 2])]
+
+        def run(self, outputs, feed):
+            x = next(iter(feed.values()))
+            assert tuple(x.shape) == (1, 1, 2, 2)
+            self.calls += 1
+            table = [
+                np.asarray([[0.1, 0.9]], dtype=np.float32),
+                np.asarray([[0.8, 0.2]], dtype=np.float32),
+            ]
+            return [table[self.calls - 1]]
+
+    monkeypatch.setitem(sys.modules, "onnxruntime", types.SimpleNamespace(InferenceSession=_Session))
+    model = tmp_path / "model.onnx"
+    model.write_bytes(b"fake")
+    raw = {"validation": {"task": "classification", "dataset": {"source": "npz", "path": str(dataset)}}}
+
+    artifacts = _emit_inference_reference_artifacts(out, model_path=model, hls_ok=True, raw_config=raw)
+
+    assert artifacts["status"] == "available"
+    assert artifacts["sample_count"] == 2
+    assert artifacts["output_shape_per_sample"] == (2,)
+    assert Path(artifacts["outputs_ref"]).stat().st_size == 2 * 2 * 4
+
+
+def test_dataset_numeric_validation_emits_execution_and_class_diagnostics(tmp_path: Path) -> None:
+    import json
+    import struct
+    from fpgai.validation.numeric import emit_numeric_validation_report
+
+    out = tmp_path / "dataset_numeric"
+    reports = out / "reports"
+    reports.mkdir(parents=True)
+    ref = out / "reference.bin"
+    got = out / "output.bin"
+    labels = out / "labels.npy"
+    import numpy as np
+    values = [0.0, 1.0, 0.0, 1.0, 0.0, 0.0]
+    ref.write_bytes(struct.pack("<6f", *values))
+    got.write_bytes(struct.pack("<6f", *values))
+    np.save(labels, np.asarray([1, 0], dtype=np.int64))
+    (reports / "hls_dataset_execution.json").write_text(json.dumps({
+        "sample_count_requested": 2,
+        "sample_count_executed": 2,
+        "inference_invocation_count": 2,
+        "output_values_per_sample": 3,
+        "generated_output_words": 6,
+        "weight_import_count": 0,
+        "weight_export_count": 0,
+    }), encoding="utf-8")
+
+    emit_numeric_validation_report(
+        out,
+        pipeline_mode="inference",
+        source_generated=True,
+        hls_ran=True,
+        hls_ok=True,
+        raw_config={"validation": {"task": "classification", "labels": str(labels), "dataset": {"source": "npz"}}},
+        inference_reference_artifacts={"outputs_ref": ref, "outputs_hw": got, "labels_path": labels},
+    )
+    payload = json.loads((reports / "numeric_validation.json").read_text())
+    task = payload["inference"]["task_quality"]
+    assert task["execution_validation"]["passed"] is True
+    assert Path(task["confusion_matrix_path"]).exists()
+    assert Path(task["per_class_accuracy_path"]).exists()
+    assert task["generated_per_class_accuracy"][0]["accuracy"] == 1.0
+
+
+def test_dataset_numeric_validation_rejects_incomplete_execution_record(tmp_path: Path) -> None:
+    import json
+    import struct
+    from fpgai.validation.numeric import emit_numeric_validation_report
+
+    out = tmp_path / "dataset_numeric_bad"
+    reports = out / "reports"
+    reports.mkdir(parents=True)
+    ref = out / "reference.bin"
+    got = out / "output.bin"
+    labels = out / "labels.npy"
+    import numpy as np
+    values = [0.0, 1.0, 1.0, 0.0]
+    ref.write_bytes(struct.pack("<4f", *values))
+    got.write_bytes(struct.pack("<4f", *values))
+    np.save(labels, np.asarray([1, 0], dtype=np.int64))
+    (reports / "hls_dataset_execution.json").write_text(json.dumps({
+        "sample_count_requested": 2,
+        "sample_count_executed": 1,
+        "inference_invocation_count": 1,
+        "output_values_per_sample": 2,
+        "generated_output_words": 2,
+    }), encoding="utf-8")
+
+    emit_numeric_validation_report(
+        out,
+        pipeline_mode="inference",
+        source_generated=True,
+        hls_ran=True,
+        hls_ok=True,
+        raw_config={"validation": {"task": "classification", "labels": str(labels), "dataset": {"source": "npz"}}},
+        inference_reference_artifacts={"outputs_ref": ref, "outputs_hw": got, "labels_path": labels},
+    )
+    payload = json.loads((reports / "numeric_validation.json").read_text())
+    task = payload["inference"]["task_quality"]
+    assert task["status"] == "execution_record_invalid"
+    assert task["execution_validation"]["passed"] is False
+
+
+def test_torchvision_mnist_balanced_selection_emits_provenance(tmp_path: Path, monkeypatch) -> None:
+    import sys
+    import types
+    import numpy as np
+    from fpgai.validation.dataset import emit_dataset_artifacts
+
+    class _FakeMNIST:
+        classes = [str(index) for index in range(10)]
+
+        def __init__(self, *, root: str, train: bool, download: bool) -> None:
+            assert train is False
+            assert download is False
+            self.data = np.arange(20 * 28 * 28, dtype=np.uint8).reshape(20, 28, 28)
+            self.targets = np.repeat(np.arange(10, dtype=np.int64), 2)
+
+    fake_torchvision = types.SimpleNamespace(
+        __version__="0.test",
+        datasets=types.SimpleNamespace(MNIST=_FakeMNIST, FashionMNIST=_FakeMNIST),
+    )
+    monkeypatch.setitem(sys.modules, "torchvision", fake_torchvision)
+
+    artifacts = emit_dataset_artifacts(
+        tmp_path / "out",
+        raw_config={
+            "validation": {
+                "task": "classification",
+                "dataset": {
+                    "source": "torchvision",
+                    "name": "MNIST",
+                    "root": str(tmp_path / "datasets"),
+                    "split": "test",
+                    "download": False,
+                    "sample_selection": {
+                        "mode": "balanced_per_class",
+                        "count": 10,
+                        "seed": 7,
+                        "per_class_count": 1,
+                    },
+                    "preprocessing": {
+                        "normalize": True,
+                        "flatten": True,
+                    },
+                },
+            }
+        },
+    )
+
+    assert artifacts["status"] == "available"
+    assert artifacts["sample_count"] == 10
+    assert artifacts["input_shape"] == [784]
+    labels = np.load(artifacts["labels_path"])
+    assert sorted(labels.tolist()) == list(range(10))
+    inputs = np.load(artifacts["inputs_path"])
+    assert inputs.shape == (10, 784)
+    assert float(inputs.min()) >= 0.0
+    assert float(inputs.max()) <= 1.0
+    manifest = json.loads(Path(artifacts["manifest_path"]).read_text(encoding="utf-8"))
+    assert manifest["source"] == "torchvision"
+    assert manifest["provenance"]["dataset_name"] == "MNIST"
+    assert manifest["provenance"]["split"] == "test"
+    assert manifest["provenance"]["download"] is False
+    assert manifest["selection"]["mode"] == "balanced_per_class"
+    assert manifest["class_distribution"] == {str(index): 1 for index in range(10)}
+
+
+def test_torchvision_adapter_reports_missing_optional_dependency(tmp_path: Path, monkeypatch) -> None:
+    import importlib
+    from fpgai.validation.dataset import emit_dataset_artifacts
+
+    original = importlib.import_module
+
+    def _import(name: str, *args, **kwargs):
+        if name == "torchvision":
+            raise ImportError("not installed")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib, "import_module", _import)
+    artifacts = emit_dataset_artifacts(
+        tmp_path / "out",
+        raw_config={
+            "validation": {
+                "dataset": {
+                    "source": "torchvision",
+                    "name": "MNIST",
+                    "root": str(tmp_path / "datasets"),
+                    "download": False,
+                }
+            }
+        },
+    )
+
+    assert artifacts["status"] == "invalid"
+    assert "optional 'datasets' dependencies" in artifacts["reason"]

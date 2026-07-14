@@ -47,7 +47,7 @@ Training summary TXT : None
 Manifest             : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I0_baseline_fx16_embedded/manifest.json
 Pipeline mode        : inference
 Top kernel           : deeplearn
-Compile seconds      : 355.264038
+Compile seconds      : 389.014538
 ---------------------------------------------------
 Prediction artifacts:
   - Model profile JSON: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I0_baseline_fx16_embedded/reports/model_profile.json
@@ -132,8 +132,8 @@ Hardware knob contract: available
   - Report-only: 0
 ===================================================
 ---------------------------------------------------
-Captured stdout log : build/cli_logs/20260711_214432_832011_compile_stdout.log
-Captured stderr log : build/cli_logs/20260711_214432_832011_compile_stderr.log
+Captured stdout log : build/cli_logs/20260713_103633_109257_compile_stdout.log
+Captured stderr log : build/cli_logs/20260713_103633_109257_compile_stderr.log
 [OK] Wrote artifacts to: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I0_baseline_fx16_embedded
 {
   "checks": [

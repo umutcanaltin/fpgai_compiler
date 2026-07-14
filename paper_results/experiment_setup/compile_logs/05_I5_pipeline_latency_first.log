@@ -47,7 +47,7 @@ Training summary TXT : None
 Manifest             : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I5_pipeline_latency_first/manifest.json
 Pipeline mode        : inference
 Top kernel           : deeplearn
-Compile seconds      : 405.130028
+Compile seconds      : 398.633633
 ---------------------------------------------------
 Prediction artifacts:
   - Model profile JSON: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I5_pipeline_latency_first/reports/model_profile.json
@@ -132,8 +132,8 @@ Hardware knob contract: available
   - Report-only: 0
 ===================================================
 ---------------------------------------------------
-Captured stdout log : build/cli_logs/20260710_134959_930483_compile_stdout.log
-Captured stderr log : build/cli_logs/20260710_134959_930483_compile_stderr.log
+Captured stdout log : build/cli_logs/20260713_123723_873034_compile_stdout.log
+Captured stderr log : build/cli_logs/20260713_123723_873034_compile_stderr.log
 [OK] Wrote artifacts to: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I5_pipeline_latency_first
 {
   "checks": [

@@ -1,0 +1,10 @@
+design_id,precision,training_decision_status,gradient_cosine,weight_delta_cosine,loss_delta,hls_latency_max,vivado_lut,vivado_dsp,vivado_bram,vivado_power_w
+T0_sgd_tiled_m_axi,"fx16_6, grad fx24_10",reference_aligned_training_step,0.9999946355819702,0.9573166370391846,-0.003028005361557007,951,29370,15,17.5,2.941
+T1_momentum_tiled_m_axi,"fx16_6, grad fx24_10",reference_aligned_training_step,0.9999946355819702,0.9573166370391846,-0.003028005361557007,951,29370,15,17.5,2.941
+T2_adam_tiled_m_axi,"fx16_6, grad fx24_10",aggressive_training_update,0.9999946355819702,0.6845365166664124,-0.04351005703210831,951,30563,15,18,2.93
+T3_cross_entropy_tiled_m_axi,"fx16_6, grad fx24_10",acceptable_training_tradeoff,0.9999816417694092,0.8834608197212219,-0.0019972920417785645,976,34727,44,17.5,3.007
+T4_tile32_m_axi,"fx16_6, grad fx24_10",reference_aligned_training_step,0.9999946355819702,0.9573166370391846,-0.003028005361557007,823,28989,15,17.5,2.925
+T5_tile128_m_axi,"fx16_6, grad fx24_10",reference_aligned_training_step,0.9999946355819702,0.9573166370391846,-0.003028005361557007,1207,29818,15,17.5,2.951
+T6_accum_batch2_m_axi,"fx16_6, grad fx24_10",reference_aligned_training_step,0.9999946355819702,0.9573166370391846,-0.003028005361557007,951,29370,15,17.5,2.941
+T7_deployable_training_bitstream,"fx16_6, grad fx24_10",reference_aligned_training_step,0.9999946355819702,0.9573166370391846,-0.003028005361557007,951,29370,15,17.5,2.941
+T8_real_fpga_training_curve_candidate,"fx16_6, grad fx24_10",reference_aligned_training_step,0.9999946355819702,0.9573166370391846,-0.003028005361557007,951,29370,15,17.5,2.941

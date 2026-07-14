@@ -307,3 +307,169 @@ def compare_training_artifacts(
         weight_after_mae=wa_m["mae"],
         weight_after_max_abs=wa_m["max_abs"],
     )
+
+def build_dataset_training_comparison(
+    *,
+    training_compare_result: TrainingCompareResult | None,
+    execution_payload: Dict[str, Any] | None,
+    reference_payload: Dict[str, Any] | None,
+    limits: Dict[str, float] | None = None,
+) -> Dict[str, Any]:
+    """Build the canonical dataset-training comparison decision artifact.
+
+    Raw comparison metrics are useful diagnostics, but their mere existence is
+    not a validation result. This adapter verifies that the required vectors
+    were compared completely, metrics are finite, configured tolerances pass,
+    and HLS/reference execution counts agree.
+    """
+    thresholds = {
+        "min_cosine_similarity": 0.99,
+        "max_gradient_mae": 0.01,
+        "max_gradient_max_abs": 0.05,
+        "max_weight_delta_mae": 0.001,
+        "max_weight_delta_max_abs": 0.01,
+        "max_final_weight_mae": 0.001,
+        "max_final_weight_max_abs": 0.01,
+        "max_relative_l2": 0.10,
+    }
+    if limits:
+        thresholds.update({str(k): float(v) for k, v in limits.items()})
+
+    payload: Dict[str, Any] = {
+        "artifact_kind": "fpgai_training_dataset_comparison",
+        "schema_version": 1,
+        "status": "pending_comparison",
+        "passed": False,
+        "limits": thresholds,
+        "execution_comparison": None,
+        "gradient_comparison": None,
+        "weight_delta_comparison": None,
+        "final_weight_comparison": None,
+        "checks": [],
+        "reason": "Required HLS/reference comparison artifacts are unavailable.",
+    }
+    if training_compare_result is None:
+        return payload
+
+    results_path = Path(training_compare_result.results_json)
+    if not results_path.exists() or results_path.stat().st_size == 0:
+        payload["reason"] = "Raw training comparison results are missing or empty."
+        return payload
+    try:
+        raw = json.loads(results_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        payload["reason"] = f"Raw training comparison results could not be read: {exc}"
+        return payload
+    if not isinstance(raw, dict) or not raw:
+        payload["reason"] = "Raw training comparison results contain no metrics."
+        return payload
+
+    required = {"grads", "weight_delta", "weights_after"}
+    missing = sorted(required.difference(raw))
+    if missing:
+        payload["reason"] = "Raw training comparison is missing sections: " + ", ".join(missing)
+        return payload
+
+    def finite(value: Any) -> bool:
+        try:
+            return bool(np.isfinite(float(value)))
+        except (TypeError, ValueError):
+            return False
+
+    checks: List[Dict[str, Any]] = []
+
+    def check(name: str, value: Any, limit: Any, passed: bool, metric: str) -> None:
+        checks.append({
+            "name": name,
+            "metric": metric,
+            "value": value,
+            "limit": limit,
+            "passed": bool(passed),
+        })
+
+    def validate_vector(section_name: str, metric: Dict[str, Any], *, mae_limit: float, max_abs_limit: float) -> Dict[str, Any]:
+        count = int(metric.get("count", 0) or 0)
+        ref_count = int(metric.get("ref_count", 0) or 0)
+        got_count = int(metric.get("got_count", 0) or 0)
+        count_ok = count > 0 and count == ref_count == got_count
+        check(f"{section_name}.vector_count", [ref_count, got_count], "equal_nonzero", count_ok, "count")
+
+        mae = metric.get("mae")
+        max_abs = metric.get("max_abs")
+        relative_l2 = metric.get("relative_l2")
+        cosine = metric.get("cosine")
+        cosine_reliable = bool(metric.get("cosine_reliable", False))
+
+        mae_ok = finite(mae) and float(mae) <= mae_limit
+        max_abs_ok = finite(max_abs) and float(max_abs) <= max_abs_limit
+        rel_ok = finite(relative_l2) and float(relative_l2) <= thresholds["max_relative_l2"]
+        cosine_ok = (not cosine_reliable) or (
+            finite(cosine) and float(cosine) >= thresholds["min_cosine_similarity"]
+        )
+        check(f"{section_name}.mae", mae, mae_limit, mae_ok, "mae")
+        check(f"{section_name}.max_abs", max_abs, max_abs_limit, max_abs_ok, "max_abs")
+        check(f"{section_name}.relative_l2", relative_l2, thresholds["max_relative_l2"], rel_ok, "relative_l2")
+        check(
+            f"{section_name}.cosine_similarity",
+            cosine,
+            thresholds["min_cosine_similarity"] if cosine_reliable else "not_required_low_energy",
+            cosine_ok,
+            "cosine_similarity",
+        )
+        return {
+            **metric,
+            "passed": bool(count_ok and mae_ok and max_abs_ok and rel_ok and cosine_ok),
+        }
+
+    payload["gradient_comparison"] = validate_vector(
+        "gradients",
+        dict(raw["grads"]),
+        mae_limit=thresholds["max_gradient_mae"],
+        max_abs_limit=thresholds["max_gradient_max_abs"],
+    )
+    payload["weight_delta_comparison"] = validate_vector(
+        "weight_delta",
+        dict(raw["weight_delta"]),
+        mae_limit=thresholds["max_weight_delta_mae"],
+        max_abs_limit=thresholds["max_weight_delta_max_abs"],
+    )
+    payload["final_weight_comparison"] = validate_vector(
+        "final_weights",
+        dict(raw["weights_after"]),
+        mae_limit=thresholds["max_final_weight_mae"],
+        max_abs_limit=thresholds["max_final_weight_max_abs"],
+    )
+
+    execution = execution_payload or {}
+    reference = reference_payload or {}
+    hls_samples = int(execution.get("sample_count_executed", execution.get("dataset_records_consumed", 0)) or 0)
+    requested_samples = int(execution.get("sample_count_requested", 0) or 0)
+    reference_samples = int(reference.get("sample_count", execution.get("reference_samples_executed", 0)) or 0)
+    hls_updates = int(execution.get("optimizer_update_calls", 0) or 0)
+    reference_updates = int(reference.get("optimizer_updates", 0) or 0)
+    sample_ok = requested_samples > 0 and requested_samples == hls_samples == reference_samples
+    update_ok = hls_updates > 0 and hls_updates == reference_updates
+    check("execution.sample_count", [requested_samples, hls_samples, reference_samples], "all_equal_nonzero", sample_ok, "count")
+    check("execution.optimizer_updates", [hls_updates, reference_updates], "equal_nonzero", update_ok, "count")
+    payload["execution_comparison"] = {
+        "sample_count_requested": requested_samples,
+        "hls_samples_executed": hls_samples,
+        "reference_samples_executed": reference_samples,
+        "hls_optimizer_updates": hls_updates,
+        "reference_optimizer_updates": reference_updates,
+        "passed": bool(sample_ok and update_ok),
+    }
+
+    payload["checks"] = checks
+    payload["raw_results_json"] = str(results_path)
+    payload["raw_summary_txt"] = str(training_compare_result.summary_txt)
+    passed = bool(checks) and all(bool(item["passed"]) for item in checks)
+    payload["passed"] = passed
+    payload["status"] = "passed" if passed else "failed_tolerance"
+    failed = [item["name"] for item in checks if not item["passed"]]
+    payload["reason"] = (
+        "HLS and dataset-wide software-reference training artifacts satisfy all execution and numeric checks."
+        if passed
+        else "Training comparison failed check(s): " + ", ".join(failed)
+    )
+    return payload

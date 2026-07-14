@@ -10,11 +10,11 @@ HLS project dir      : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler
 Host C++ dir         : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/training/T3_cross_entropy_tiled_m_axi/hostcpp
 ---------------------------------------------------
 HLS ran              : True
-HLS ok               : False
-HLS returncode       : 1
+HLS ok               : True
+HLS returncode       : 0
 HLS stdout log       : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/training/T3_cross_entropy_tiled_m_axi/hls/logs/vitis_hls_stdout.log
 HLS stderr log       : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/training/T3_cross_entropy_tiled_m_axi/hls/logs/vitis_hls_stderr.log
-HLS csynth report    : None
+HLS csynth report    : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/training/T3_cross_entropy_tiled_m_axi/hls/fpgai_hls_proj/sol1/syn/report/csynth.rpt
 ---------------------------------------------------
 Quant report dir     : None
 Quant metrics JSON   : None
@@ -47,7 +47,7 @@ Training summary TXT : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler
 Manifest             : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/training/T3_cross_entropy_tiled_m_axi/manifest.json
 Pipeline mode        : training_on_device
 Top kernel           : deeplearn
-Compile seconds      : 21.194009
+Compile seconds      : 164.834115
 ---------------------------------------------------
 Prediction artifacts:
   - Model profile JSON: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/training/T3_cross_entropy_tiled_m_axi/reports/model_profile.json
@@ -62,12 +62,15 @@ Prediction artifacts:
 ---------------------------------------------------
 HLS artifacts       : available
   - hls_ran: True
-  - hls_ok: False
-  - hls_returncode: 1
+  - hls_ok: True
+  - hls_returncode: 0
   - stdout_log: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/training/T3_cross_entropy_tiled_m_axi/hls/logs/vitis_hls_stdout.log
   - stderr_log: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/training/T3_cross_entropy_tiled_m_axi/hls/logs/vitis_hls_stderr.log
+  - csynth_report: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/training/T3_cross_entropy_tiled_m_axi/hls/fpgai_hls_proj/sol1/syn/report/csynth.rpt
   - artifact_metadata: hls_artifact_metadata.json
-  - hls_file_count: 61
+  - hls_file_count: 1546
+  - schedule_summary: hls_schedule_summary.json
+  - ii_comparison: hls_ii_comparison.json
 ---------------------------------------------------
 Fit policy gate    : available
   - policy: enforce
@@ -99,7 +102,7 @@ Runtime package     : created
   - bitstream_present: False
   - hwh_present: True
   - xsa_present: False
-  - file_count: 14
+  - file_count: 16
 ---------------------------------------------------
 Pipeline stages     :
   - load_config: done
@@ -114,7 +117,7 @@ Pipeline stages     :
   - generate_host_cpp: done
   - generate_cpp: done
   - generate_hls_project: done
-  - run_hls: failed
+  - run_hls: done
   - training_artifacts: done
   - vivado_project: done
   - bitstream: not_requested
@@ -129,8 +132,8 @@ Hardware knob contract: available
   - Report-only: 0
 ===================================================
 ---------------------------------------------------
-Captured stdout log : build/cli_logs/20260710_163004_730755_compile_stdout.log
-Captured stderr log : build/cli_logs/20260710_163004_730755_compile_stderr.log
+Captured stdout log : build/cli_logs/20260713_152920_532177_compile_stdout.log
+Captured stderr log : build/cli_logs/20260713_152920_532177_compile_stderr.log
 [OK] Wrote artifacts to: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/training/T3_cross_entropy_tiled_m_axi
 {
   "checks": [
@@ -145,9 +148,9 @@ Captured stderr log : build/cli_logs/20260710_163004_730755_compile_stderr.log
       "passed": true
     },
     {
-      "actual": false,
+      "actual": true,
       "name": "hls_ok",
-      "passed": false
+      "passed": true
     },
     {
       "actual": true,
@@ -155,16 +158,10 @@ Captured stderr log : build/cli_logs/20260710_163004_730755_compile_stderr.log
       "passed": true
     }
   ],
-  "claim_level": "level_0_compiler_artifact",
+  "claim_level": "level_2_vivado_implementation",
   "configured_stage": "vivado_implementation",
   "expected_claim_level": "level_2_vivado_implementation",
-  "failed_checks": [
-    {
-      "actual": false,
-      "name": "hls_ok",
-      "passed": false
-    }
-  ],
+  "failed_checks": [],
   "out_dir": "build/paper_experiments/training/T3_cross_entropy_tiled_m_axi",
-  "status": "failed"
+  "status": "passed"
 }

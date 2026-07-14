@@ -234,3 +234,95 @@ def test_named_clock_without_target_mhz_is_allowed(tmp_path):
     loaded = load_config(str(path))
     assert loaded.raw["targets"]["platform"]["clocks"][0]["name"] == "ap_clk"
     assert "target_mhz" not in loaded.raw["targets"]["platform"]["clocks"][0]
+
+
+def test_dataset_validation_section_is_accepted(tmp_path: Path) -> None:
+    model_path = tmp_path / "model.onnx"
+    model_path.touch()
+    dataset_path = tmp_path / "samples.npz"
+    dataset_path.touch()
+    raw = _base_config(model_path)
+    raw["validation"] = {
+        "task": "classification",
+        "dataset": {
+            "source": "npz",
+            "path": str(dataset_path),
+            "inputs_key": "inputs",
+            "labels_key": "labels",
+            "sample_selection": {"offset": 0, "count": 10},
+        },
+        "decision_thresholds": {
+            "min_prediction_agreement": 0.95,
+            "max_accuracy_drop_pct": 3.0,
+        },
+    }
+
+    cfg = load_config(str(_write_config(tmp_path, raw)))
+
+    assert cfg.raw["validation"]["task"] == "classification"
+    assert cfg.raw["validation"]["dataset"]["source"] == "npz"
+    assert cfg.raw["validation"]["dataset"]["sample_selection"]["count"] == 10
+
+
+def test_dataset_validation_rejects_unknown_source(tmp_path: Path) -> None:
+    model_path = tmp_path / "model.onnx"
+    model_path.touch()
+    raw = _base_config(model_path)
+    raw["validation"] = {
+        "task": "classification",
+        "dataset": {
+            "source": "unknown_dataset_provider",
+            "path": "unused",
+        },
+    }
+
+    with pytest.raises(ConfigError, match="validation.dataset.source"):
+        load_config(str(_write_config(tmp_path, raw)))
+
+
+def test_torchvision_dataset_validation_section_is_accepted_without_path(tmp_path: Path) -> None:
+    model_path = tmp_path / "model.onnx"
+    model_path.touch()
+    raw = _base_config(model_path)
+    raw["validation"] = {
+        "task": "classification",
+        "dataset": {
+            "source": "torchvision",
+            "name": "MNIST",
+            "root": "datasets",
+            "split": "test",
+            "download": False,
+            "sample_selection": {
+                "mode": "balanced_per_class",
+                "count": 100,
+                "seed": 42,
+                "per_class_count": 10,
+            },
+            "preprocessing": {
+                "normalize": True,
+                "flatten": True,
+            },
+        },
+    }
+
+    cfg = load_config(str(_write_config(tmp_path, raw)))
+    dataset = cfg.raw["validation"]["dataset"]
+    assert dataset["source"] == "torchvision"
+    assert dataset["name"] == "MNIST"
+    assert dataset["download"] is False
+    assert dataset["sample_selection"]["mode"] == "balanced_per_class"
+
+
+def test_torchvision_dataset_validation_rejects_invalid_name(tmp_path: Path) -> None:
+    model_path = tmp_path / "model.onnx"
+    model_path.touch()
+    raw = _base_config(model_path)
+    raw["validation"] = {
+        "dataset": {
+            "source": "torchvision",
+            "name": "CIFAR100",
+        },
+    }
+
+    with pytest.raises(ConfigError, match="validation.dataset.name"):
+        load_config(str(_write_config(tmp_path, raw)))

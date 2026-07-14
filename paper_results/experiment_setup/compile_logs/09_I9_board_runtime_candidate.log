@@ -47,7 +47,7 @@ Training summary TXT : None
 Manifest             : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I9_board_runtime_candidate/manifest.json
 Pipeline mode        : inference
 Top kernel           : deeplearn
-Compile seconds      : 392.217828
+Compile seconds      : 334.037183
 ---------------------------------------------------
 Prediction artifacts:
   - Model profile JSON: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I9_board_runtime_candidate/reports/model_profile.json
@@ -132,8 +132,8 @@ Hardware knob contract: available
   - Report-only: 0
 ===================================================
 ---------------------------------------------------
-Captured stdout log : build/cli_logs/20260710_152632_127760_compile_stdout.log
-Captured stderr log : build/cli_logs/20260710_152632_127760_compile_stderr.log
+Captured stdout log : build/cli_logs/20260713_141251_362986_compile_stdout.log
+Captured stderr log : build/cli_logs/20260713_141251_362986_compile_stderr.log
 [OK] Wrote artifacts to: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I9_board_runtime_candidate
 {
   "checks": [

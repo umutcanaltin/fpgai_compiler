@@ -49,7 +49,8 @@ except ModuleNotFoundError as exc:  # pragma: no cover
 from fpgai.analysis.post_synthesis import run_post_synthesis_analysis
 from fpgai.analysis.training_resource_estimate import run_training_resource_estimate
 from fpgai.benchmark.training_reference import run_training_reference_step
-from fpgai.benchmark.training_compare import compare_training_artifacts
+from fpgai.benchmark.training_dataset_reference import run_training_dataset_reference
+from fpgai.benchmark.training_compare import compare_training_artifacts, build_dataset_training_comparison
 from fpgai.util.fs import ensure_clean_dir, write_text
 from fpgai.numerics.precision_policy import (
     build_precision_layout,
@@ -62,6 +63,7 @@ from fpgai.analysis.hls_calibration_runner import run_hls_calibration
 from fpgai.util.binio import write_f32_bin
 from fpgai.runtime.package import emit_runtime_package
 from fpgai.validation.numeric import emit_numeric_validation_report
+from fpgai.validation.dataset import emit_dataset_artifacts
 from fpgai.paper.verification import emit_paper_verification_artifacts
 from fpgai.paper.experiment_artifacts import emit_experiment_artifact_reports
 from fpgai.backends.vivado.boards import get_board
@@ -130,6 +132,237 @@ def _runtime_weight_word_count(graph) -> int:
             total += int(weight_count) + int(bias_count)
     return int(total)
 
+
+
+def _normalise_onnx_shape(shape: Any, fallback_size: int) -> tuple[int, ...]:
+    dims: list[int] = []
+    unknown_index: int | None = None
+    known_product = 1
+    for idx, raw_dim in enumerate(shape or []):
+        try:
+            dim = int(raw_dim)
+        except Exception:
+            dim = -1
+        if dim > 0:
+            dims.append(dim)
+            known_product *= dim
+        else:
+            dims.append(1)
+            if unknown_index is None:
+                unknown_index = idx
+    if not dims:
+        return (int(fallback_size),)
+    if unknown_index is not None and fallback_size > 0 and known_product > 0 and fallback_size % known_product == 0:
+        dims[unknown_index] = max(1, int(fallback_size // known_product))
+    return tuple(int(max(1, dim)) for dim in dims)
+
+
+def _emit_inference_reference_artifacts(
+    out_dir: str | Path,
+    *,
+    model_path: str | Path | None,
+    hls_ok: bool | None,
+    raw_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Emit Python/ONNX reference output for the generated HLS CSim output.
+
+    This is deliberately an artifact-backed validation path: it only emits a
+    successful comparison candidate when an HLS CSim output file exists.  If
+    ONNX Runtime is unavailable, the model cannot be loaded, or the input shape
+    cannot be reconciled, the returned payload records the reason and
+    ``emit_numeric_validation_report`` keeps inference numeric status pending.
+    """
+
+    out = Path(out_dir)
+    input_bin = out / "input.bin"
+    output_bin = out / "output.bin"
+    ref_dir = out / "reference"
+    ref_output_bin = ref_dir / "outputs_ref.bin"
+    ref_output_npy = ref_dir / "outputs_ref.npy"
+    ref_input_npy = ref_dir / "inputs_ref.npy"
+    status: dict[str, Any] = {
+        "status": "not_run",
+        "reason": "inference reference generation did not run",
+        "inputs_bin": input_bin,
+        "outputs_hw": output_bin,
+        "outputs_ref": None,
+    }
+    if hls_ok is not True:
+        status["reason"] = "HLS CSim did not pass, so inference numeric reference comparison is pending."
+        return status
+
+    dataset_artifacts = emit_dataset_artifacts(out, raw_config=raw_config)
+    dataset_available = dataset_artifacts.get("status") == "available"
+    resolved_input_bin = (
+        Path(dataset_artifacts["inputs_bin"])
+        if dataset_available
+        else input_bin
+    )
+
+    if not resolved_input_bin.exists():
+        status["reason"] = f"input artifact missing: {resolved_input_bin}"
+        return status
+    if not output_bin.exists():
+        status["reason"] = f"HLS CSim output.bin missing: {output_bin}"
+        return status
+    if model_path in (None, ""):
+        status["reason"] = "model path missing; cannot run ONNX reference"
+        return status
+    try:
+        import onnxruntime as ort  # type: ignore
+    except Exception as exc:  # pragma: no cover - depends on optional runtime package
+        status["reason"] = f"onnxruntime unavailable: {exc}"
+        return status
+
+    try:
+        if dataset_available:
+            x = np.asarray(dataset_artifacts["inputs_array"], dtype=np.float32)
+            input_flat = x.reshape(-1)
+        else:
+            input_flat = np.fromfile(input_bin, dtype=np.float32)
+            x = None
+
+        sess = ort.InferenceSession(str(Path(model_path)), providers=["CPUExecutionProvider"])
+        inputs = sess.get_inputs()
+        outputs = sess.get_outputs()
+        if len(inputs) != 1:
+            status["reason"] = f"expected exactly one ONNX input, got {len(inputs)}"
+            return status
+        if len(outputs) != 1:
+            status["reason"] = f"expected exactly one ONNX output, got {len(outputs)}"
+            return status
+        input_meta = inputs[0]
+        output_meta = outputs[0]
+
+        if dataset_available:
+            sample_count = int(dataset_artifacts["sample_count"])
+            sample_shape = tuple(int(v) for v in dataset_artifacts["input_shape"])
+            if tuple(x.shape[1:]) != sample_shape:
+                status["reason"] = f"normalized dataset input shape {tuple(x.shape[1:])} does not match manifest {sample_shape}"
+                return status
+            model_shape = list(getattr(input_meta, "shape", None) or [])
+            sample_words = int(np.prod(sample_shape)) if sample_shape else 1
+
+            def _static_product(dims: list[Any]) -> int | None:
+                product = 1
+                for dim in dims:
+                    try:
+                        value = int(dim)
+                    except Exception:
+                        return None
+                    if value <= 0:
+                        return None
+                    product *= value
+                return product
+
+            full_product = _static_product(model_shape)
+            trailing_product = _static_product(model_shape[1:]) if model_shape else None
+            try:
+                leading_dim = int(model_shape[0]) if model_shape else None
+            except Exception:
+                leading_dim = None
+
+            # A dynamic leading dimension is a real dataset batch dimension when the
+            # remaining ONNX dimensions describe one normalized sample.
+            dynamic_batch = (
+                bool(model_shape)
+                and leading_dim in (None, -1, 0)
+                and trailing_product == sample_words
+            )
+
+            # A static leading dimension equal to the selected sample count can also
+            # consume the complete batch in one ONNX Runtime invocation.
+            full_static_batch = (
+                bool(model_shape)
+                and leading_dim == sample_count
+                and trailing_product == sample_words
+                and sample_count > 1
+            )
+
+            if dynamic_batch or full_static_batch:
+                model_sample_shape = tuple(int(v) for v in model_shape[1:])
+                batch_input = x.reshape((sample_count, *model_sample_shape)).astype(np.float32)
+                y_raw = sess.run([output_meta.name], {input_meta.name: batch_input})[0]
+                y_arr = np.asarray(y_raw, dtype=np.float32)
+                if y_arr.ndim == 1:
+                    y_arr = y_arr.reshape((sample_count, -1))
+            elif full_product == sample_words:
+                # The ONNX model has a fixed per-invocation shape. This covers both
+                # genuinely unbatched models such as [784] and static batch-one image
+                # models such as [1, 1, 28, 28]. Dataset storage may be flattened; the
+                # semantic compatibility requirement is equal element count.
+                model_sample_shape = tuple(int(v) for v in model_shape)
+                rows = []
+                for sample in x:
+                    sample_input = sample.reshape(model_sample_shape).astype(np.float32)
+                    rows.append(
+                        np.asarray(
+                            sess.run([output_meta.name], {input_meta.name: sample_input})[0],
+                            dtype=np.float32,
+                        ).reshape(1, -1)
+                    )
+                y_arr = np.concatenate(rows, axis=0)
+            elif leading_dim == 1 and trailing_product == sample_words:
+                # Defensive compatibility for static batch-one metadata where the
+                # complete shape could not otherwise be resolved.
+                model_sample_shape = tuple(int(v) for v in model_shape[1:])
+                rows = []
+                for sample in x:
+                    sample_input = sample.reshape((1, *model_sample_shape)).astype(np.float32)
+                    rows.append(
+                        np.asarray(
+                            sess.run([output_meta.name], {input_meta.name: sample_input})[0],
+                            dtype=np.float32,
+                        ).reshape(1, -1)
+                    )
+                y_arr = np.concatenate(rows, axis=0)
+            else:
+                status["reason"] = (
+                    f"normalized dataset sample shape {sample_shape} ({sample_words} values) is incompatible "
+                    f"with ONNX input shape {model_shape}"
+                )
+                return status
+            input_shape = tuple(int(v) for v in x.shape)
+            output_shape_per_sample = tuple(int(v) for v in y_arr.shape[1:])
+            y = y_arr.reshape(-1)
+        else:
+            input_shape = _normalise_onnx_shape(getattr(input_meta, "shape", None), int(input_flat.size))
+            expected = int(np.prod(input_shape)) if input_shape else int(input_flat.size)
+            if expected != int(input_flat.size):
+                status["reason"] = (
+                    f"input.bin word count {int(input_flat.size)} does not match ONNX input shape "
+                    f"{input_shape} ({expected} words)"
+                )
+                return status
+            x = input_flat.reshape(input_shape).astype(np.float32)
+            y = np.asarray(sess.run([output_meta.name], {input_meta.name: x})[0], dtype=np.float32).reshape(-1)
+            sample_count = 1
+            output_shape_per_sample = (int(y.size),)
+
+        ref_dir.mkdir(parents=True, exist_ok=True)
+        np.save(ref_input_npy, x)
+        np.save(ref_output_npy, y.reshape((sample_count, -1)) if dataset_available else y)
+        y.tofile(ref_output_bin)
+        status.update({
+            "status": "available",
+            "reason": "ONNX reference output generated from normalized dataset artifacts." if dataset_available else "ONNX reference output generated from the same input.bin used by HLS CSim.",
+            "inputs_bin": dataset_artifacts.get("inputs_bin") if dataset_available else input_bin,
+            "outputs_hw": output_bin,
+            "outputs_ref": ref_output_bin,
+            "outputs_ref_npy": ref_output_npy,
+            "inputs_ref_npy": ref_input_npy,
+            "input_shape": input_shape,
+            "output_words": int(y.size),
+            "sample_count": sample_count,
+            "output_shape_per_sample": output_shape_per_sample,
+            "dataset": {k: v for k, v in dataset_artifacts.items() if k != "inputs_array"},
+            "labels_path": dataset_artifacts.get("labels_path"),
+            "targets_path": dataset_artifacts.get("targets_path"),
+        })
+        return status
+    except Exception as exc:
+        status["reason"] = f"failed to generate ONNX reference output: {exc}"
+        return status
 
 
 _RUNTIME_COMMANDS = {
@@ -829,7 +1062,22 @@ def _resolve_runtime_sequence(
     explicit = _cfg_has_path(raw, "runtime.sequence")
     raw_sequence = _cfg_get(raw, "runtime.sequence", None)
     if raw_sequence is None:
-        raw_sequence = ["run_training"] if str(pipeline_mode).lower() == "training_on_device" else ["run_inference"]
+        if str(pipeline_mode).lower() == "training_on_device":
+            raw_sequence = ["run_training"]
+        else:
+            import_required = memory_semantics_mode in {
+                "bram_import_export_full",
+                "uram_import_export_full",
+                "ddr_tiled_mutable",
+                "ddr",
+                "dma_ddr",
+                "ddr_tiled",
+                "runtime_ddr",
+                "m_axi",
+                "external_ddr",
+                "uram",
+            }
+            raw_sequence = (["import_weights"] if import_required else []) + ["run_inference"]
     if not isinstance(raw_sequence, list) or not raw_sequence:
         raise ValueError("runtime.sequence must be a non-empty list of runtime commands.")
 
@@ -1289,6 +1537,20 @@ class Compiler:
         ) if enable_hls else None
         host_dir: Optional[Path] = self._emit_hostcpp(out_dir, g, top_name=top_name) if enable_host else None
         hls_run = self._maybe_run_vitis_hls(hls_dir, build_stages=build_stages) if enable_hls and hls_dir is not None else None
+        if training_dataset_available and hls_dir is not None:
+            multistep_summary = self._find_file_recursive(hls_dir, "training_multistep_summary.json")
+            if multistep_summary is not None:
+                canonical_summary = out_dir / "training_multistep_summary.json"
+                canonical_summary.write_bytes(multistep_summary.read_bytes())
+                execution_payload = json.loads(multistep_summary.read_text(encoding="utf-8"))
+                execution_payload.update({
+                    "artifact_kind": "fpgai_training_dataset_execution",
+                    "schema_version": 1,
+                    "sample_count_requested": int(training_dataset_artifacts.get("sample_count") or 0),
+                    "sample_count_executed": int(execution_payload.get("dataset_records_consumed", execution_payload.get("total_train_calls", 0))),
+                    "reference_samples_executed": int(training_dataset_artifacts.get("sample_count") or 0),
+                })
+                write_text(out_dir / "reports" / "training_dataset_execution.json", json.dumps(execution_payload, indent=2) + "\n")
         hls_calibration_result = run_hls_calibration(
             out_dir=out_dir,
             raw_cfg=raw,
@@ -1411,12 +1673,20 @@ class Compiler:
             hls_truth_artifacts=hls_truth_artifacts,
         ) if enable_reports else None
 
+        inference_reference_artifacts = _emit_inference_reference_artifacts(
+            out_dir,
+            model_path=getattr(self.cfg.model, "path", None),
+            hls_ok=(hls_run.ok if hls_run is not None else None),
+            raw_config=raw,
+        ) if enable_reports else None
+
         numeric_validation_artifacts = emit_numeric_validation_report(
             out_dir,
             pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
             source_generated=(hls_dir is not None),
             hls_ran=(hls_run is not None),
             hls_ok=(hls_run.ok if hls_run is not None else None),
+            inference_reference_artifacts=inference_reference_artifacts,
             raw_config=raw,
             runtime_sequence=runtime_sequence,
         ) if enable_reports else None
@@ -1734,14 +2004,70 @@ class Compiler:
             )
             print("\n" + training_estimate_result.summary_txt.read_text(encoding="utf-8") + "\n")
 
-        input_path = self._emit_dummy_input(out_dir, g)
-        target_path = self._emit_training_target(out_dir, g, raw)
-        x_input = np.fromfile(input_path, dtype=np.float32)
-        y_target = np.fromfile(target_path, dtype=np.float32)
+        training_dataset_artifacts = emit_dataset_artifacts(out_dir, raw_config=raw)
+        training_dataset_available = training_dataset_artifacts.get("status") == "available"
+        dataset_inputs_matrix = None
+        dataset_targets_matrix = None
+        if training_dataset_available:
+            input_path = Path(training_dataset_artifacts["inputs_bin"])
+            target_path = self._emit_training_dataset_target(
+                out_dir,
+                g,
+                raw,
+                training_dataset_artifacts,
+            )
+            all_inputs = np.fromfile(input_path, dtype=np.float32)
+            all_targets = np.fromfile(target_path, dtype=np.float32)
+            dataset_input_shape = tuple(
+                int(value) for value in (training_dataset_artifacts.get("input_shape") or ())
+            )
+            input_words_per_sample = int(
+                training_dataset_artifacts.get("input_words_per_sample")
+                or (np.prod(dataset_input_shape) if dataset_input_shape else 1)
+            )
+            sample_count = int(training_dataset_artifacts.get("sample_count") or 1)
+            output_words_per_sample = max(1, int(all_targets.size // max(1, sample_count)))
+            dataset_inputs_matrix = all_inputs.reshape(sample_count, input_words_per_sample)
+            dataset_targets_matrix = all_targets.reshape(sample_count, output_words_per_sample)
+            x_input = dataset_inputs_matrix[0]
+            y_target = dataset_targets_matrix[0]
+            training_dataset_contract = {
+                "artifact_kind": "fpgai_training_dataset_contract",
+                "schema_version": 1,
+                "status": "available",
+                "sample_count": sample_count,
+                "input_words_per_sample": input_words_per_sample,
+                "target_words_per_sample": output_words_per_sample,
+                "inputs_bin": str(input_path),
+                "targets_bin": str(target_path),
+                "reference_scope": "full_dataset_accumulated_update",
+                "reference_scope_reason": (
+                    "The software reference consumes the same ordered dataset records, "
+                    "averages accumulated gradients, and applies the same single SGD update."
+                ),
+            }
+            write_text(
+                out_dir / "reports" / "training_dataset_contract.json",
+                json.dumps(training_dataset_contract, indent=2) + "\n",
+            )
+        else:
+            input_path = self._emit_dummy_input(out_dir, g)
+            target_path = self._emit_training_target(out_dir, g, raw)
+            x_input = np.fromfile(input_path, dtype=np.float32)
+            y_target = np.fromfile(target_path, dtype=np.float32)
 
-        training_reference_result = run_training_reference_step(
-            graph=g, raw_cfg=raw, out_dir=out_dir, x_input=x_input, target=y_target
-        )
+        if training_dataset_available:
+            training_reference_result = run_training_dataset_reference(
+                graph=g,
+                raw_cfg=raw,
+                out_dir=out_dir,
+                inputs=dataset_inputs_matrix,
+                targets=dataset_targets_matrix,
+            )
+        else:
+            training_reference_result = run_training_reference_step(
+                graph=g, raw_cfg=raw, out_dir=out_dir, x_input=x_input, target=y_target
+            )
 
         hls_dir: Optional[Path] = self._emit_hls(
             out_dir,
@@ -1755,6 +2081,20 @@ class Compiler:
         ) if enable_hls else None
         host_dir: Optional[Path] = self._emit_hostcpp(out_dir, g, top_name=top_name) if enable_host else None
         hls_run = self._maybe_run_vitis_hls(hls_dir, build_stages=build_stages) if enable_hls and hls_dir is not None else None
+        if training_dataset_available and hls_dir is not None:
+            multistep_summary = self._find_file_recursive(hls_dir, "training_multistep_summary.json")
+            if multistep_summary is not None:
+                canonical_summary = out_dir / "training_multistep_summary.json"
+                canonical_summary.write_bytes(multistep_summary.read_bytes())
+                execution_payload = json.loads(multistep_summary.read_text(encoding="utf-8"))
+                execution_payload.update({
+                    "artifact_kind": "fpgai_training_dataset_execution",
+                    "schema_version": 1,
+                    "sample_count_requested": int(training_dataset_artifacts.get("sample_count") or 0),
+                    "sample_count_executed": int(execution_payload.get("dataset_records_consumed", execution_payload.get("total_train_calls", 0))),
+                    "reference_samples_executed": int(training_dataset_artifacts.get("sample_count") or 0),
+                })
+                write_text(out_dir / "reports" / "training_dataset_execution.json", json.dumps(execution_payload, indent=2) + "\n")
         hls_calibration_result = run_hls_calibration(
             out_dir=out_dir,
             raw_cfg=raw,
@@ -1780,6 +2120,74 @@ class Compiler:
                     hls_weights_after_bin=hls_w_after,
                 )
                 print("\n" + training_compare_result.summary_txt.read_text(encoding="utf-8") + "\n")
+
+        if training_dataset_available:
+            reference_payload = json.loads(training_reference_result.summary_json.read_text(encoding="utf-8"))
+            execution_path = out_dir / "reports" / "training_dataset_execution.json"
+            execution_payload = (
+                json.loads(execution_path.read_text(encoding="utf-8"))
+                if execution_path.exists()
+                else None
+            )
+            compare_payload = build_dataset_training_comparison(
+                training_compare_result=training_compare_result,
+                execution_payload=execution_payload,
+                reference_payload=reference_payload,
+            )
+            write_text(
+                out_dir / "reports" / "training_dataset_comparison.json",
+                json.dumps(compare_payload, indent=2) + "\n",
+            )
+            initial_loss = float(training_reference_result.loss_before)
+            final_loss = float(training_reference_result.loss_after)
+            loss_change = final_loss - initial_loss
+            loss_direction = "decreased" if loss_change < 0 else ("increased" if loss_change > 0 else "unchanged")
+            learning_payload = {
+                "artifact_kind": "fpgai_training_learning_behavior",
+                "schema_version": 1,
+                "execution_status": "passed" if (out_dir / "reports" / "training_dataset_execution.json").exists() else "not_available",
+                "numeric_validation_status": str(compare_payload.get("status", "pending_comparison")),
+                "sample_count": int(training_dataset_artifacts.get("sample_count") or 0),
+                "optimizer_updates": 1,
+                "initial_dataset_loss": initial_loss,
+                "final_dataset_loss": final_loss,
+                "loss_change": loss_change,
+                "loss_reduction": initial_loss - final_loss,
+                "loss_direction": loss_direction,
+                "learning_observed": bool(final_loss < initial_loss),
+                "convergence_claim": "not_evaluated",
+                "gradient_l1_norm": reference_payload.get("gradient_l1_norm"),
+                "gradient_l2_norm": reference_payload.get("gradient_l2_norm"),
+                "gradient_max_abs": reference_payload.get("gradient_max_abs"),
+                "weight_update_l2_norm": reference_payload.get("weight_update_l2_norm"),
+                "interpretation": (
+                    (
+                        "The HLS training operation satisfies the dataset-wide software-reference comparison checks. "
+                        if compare_payload.get("passed")
+                        else "The learning behavior is reported, but HLS/reference numerical equivalence is not yet validated. "
+                    )
+                    + "Loss direction is descriptive for this one-update workload and is not a convergence requirement."
+                ),
+            }
+            learning_json = out_dir / "reports" / "training_learning_behavior.json"
+            learning_md = out_dir / "reports" / "training_learning_behavior.md"
+            write_text(learning_json, json.dumps(learning_payload, indent=2) + "\n")
+            write_text(learning_md, "\n".join([
+                "# FPGAI training learning behavior",
+                "",
+                f"- Samples processed: {learning_payload['sample_count']}",
+                f"- Optimizer updates: {learning_payload['optimizer_updates']}",
+                f"- Initial dataset loss: {initial_loss:.9g}",
+                f"- Final dataset loss: {final_loss:.9g}",
+                f"- Loss direction: {loss_direction}",
+                f"- Gradient L2 norm: {learning_payload['gradient_l2_norm']}",
+                f"- Weight-update L2 norm: {learning_payload['weight_update_l2_norm']}",
+                f"- Numerical validation: {learning_payload['numeric_validation_status']}",
+                "- Convergence claim: not evaluated",
+                "",
+                learning_payload["interpretation"],
+                "",
+            ]))
 
         if enable_reports:
             hls_schedule_summary = self._emit_hls_schedule_summary(out_dir)
@@ -2406,6 +2814,68 @@ class Compiler:
             target[0] = 1.0
         write_f32_bin(p, target)
         return p
+
+    def _emit_training_dataset_target(
+        self,
+        out_dir: Path,
+        g,
+        raw: Dict[str, Any],
+        dataset_artifacts: Dict[str, Any],
+    ) -> Path:
+        """Materialize dataset labels/targets as the training target record stream.
+
+        Classification labels are lowered to one-hot float32 records matching the
+        model output width. Regression targets are preserved as float32 records.
+        """
+        dataset_dir = out_dir / "validation" / "dataset"
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+        target_path = dataset_dir / "training_targets.bin"
+
+        sample_count = int(dataset_artifacts.get("sample_count") or 1)
+        labels_path = dataset_artifacts.get("labels_path")
+        targets_path = dataset_artifacts.get("targets_path")
+
+        if targets_path:
+            targets = np.asarray(np.load(targets_path), dtype=np.float32)
+            if targets.shape[0] != sample_count:
+                raise ValueError(
+                    f"training dataset target count {targets.shape[0]} does not match sample_count {sample_count}"
+                )
+            write_f32_bin(target_path, targets.reshape(-1))
+            return target_path
+
+        if not labels_path:
+            raise ValueError(
+                "training dataset requires labels or targets; no labels_path/targets_path was emitted"
+            )
+
+        labels = np.asarray(np.load(labels_path), dtype=np.int64).reshape(-1)
+        if labels.size != sample_count:
+            raise ValueError(
+                f"training dataset label count {labels.size} does not match sample_count {sample_count}"
+            )
+
+        y_name = g.outputs[0]
+        y_spec = g.get_tensor(y_name)
+        out_words = 1
+        if y_spec is not None and getattr(y_spec, "shape", None):
+            shape = tuple(int(x) for x in y_spec.shape)
+            if len(shape) > 1 and shape[0] == 1:
+                shape = shape[1:]
+            out_words = int(np.prod(shape)) if shape else 1
+        if out_words <= 1:
+            raise ValueError(
+                "classification training dataset requires a model output width greater than one"
+            )
+        if np.any(labels < 0) or np.any(labels >= out_words):
+            raise ValueError(
+                f"training dataset labels must be in [0, {out_words - 1}]"
+            )
+
+        targets = np.zeros((sample_count, out_words), dtype=np.float32)
+        targets[np.arange(sample_count), labels] = 1.0
+        write_f32_bin(target_path, targets.reshape(-1))
+        return target_path
 
     def _find_file_recursive(self, root: Path, filename: str) -> Optional[Path]:
         for p in root.rglob(filename):
@@ -3145,7 +3615,18 @@ class Compiler:
                 ),
             )
 
-        input_bin = str((out_dir / "input.bin").resolve())
+        dataset_artifacts_for_hls = emit_dataset_artifacts(
+            out_dir,
+            raw_config=self.cfg.raw,
+        )
+        dataset_available_for_hls = dataset_artifacts_for_hls.get("status") == "available"
+        input_bin = str(
+            Path(dataset_artifacts_for_hls["inputs_bin"]).resolve()
+            if dataset_available_for_hls
+            else (out_dir / "input.bin").resolve()
+        )
+        hls_dataset_sample_count = int(dataset_artifacts_for_hls.get("sample_count") or 1)
+        hls_execution_record = str((out_dir / "reports" / "hls_dataset_execution.json").resolve())
 
         if pipeline_mode == "training_on_device":
             write_text(
@@ -3162,7 +3643,11 @@ class Compiler:
                 ),
             )
 
-            target_bin = str((out_dir / "target.bin").resolve())
+            target_bin = str(
+                (out_dir / "validation" / "dataset" / "training_targets.bin").resolve()
+                if dataset_available_for_hls
+                else (out_dir / "target.bin").resolve()
+            )
 
             def _try_numel_tensor(name: str) -> int:
                 if not name:
@@ -3282,8 +3767,16 @@ class Compiler:
                     src_dir,
                     graph=g,
                     top_name=top_name,
-                    in_words=int(np.fromfile(input_bin, dtype=np.float32).size),
-                    out_words=0,
+                    in_words=(
+                        int(dataset_artifacts_for_hls.get("input_words_per_sample") or 1)
+                        if dataset_available_for_hls
+                        else int(np.fromfile(input_bin, dtype=np.float32).size)
+                    ),
+                    out_words=(
+                        int(np.fromfile(target_bin, dtype=np.float32).size // max(1, hls_dataset_sample_count))
+                        if dataset_available_for_hls
+                        else 0
+                    ),
                     weights_mode=weights_mode,
                     weight_words=total_param_words,
                     preload_weights=[],
@@ -3344,8 +3837,9 @@ class Compiler:
                     out_words=out_words,
                     weights_mode=weights_mode,
                     weight_words=runtime_weight_words,
-                
-                    raw_cfg=self.cfg.raw,)
+                    raw_cfg=self.cfg.raw,
+                    sample_count=hls_dataset_sample_count,
+                )
 
             if emit_hls_project:
                 write_text(
@@ -3358,6 +3852,7 @@ class Compiler:
                         output_bin_path=str((out_dir / "output.bin").resolve()),
                         weights_mode=weights_mode,
                         intermediate_dump=intermediate_dump,
+                        execution_record_path=hls_execution_record,
                     ),
                 )
 

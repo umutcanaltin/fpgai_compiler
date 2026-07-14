@@ -18,11 +18,14 @@ def test_inference_ddr_tiled_testbench_passes_runtime_weight_buffer(tmp_path: Pa
     tb = (tmp_path / "tb.cpp").read_text(encoding="utf-8")
     assert '#include <ap_int.h>' in tb
     assert '#include "fpgai_params.h"' in tb
-    assert "const ap_uint<32>* weights_mem" in tb
+    assert "ap_uint<32>* weights_mem" in tb
+    assert "int mode" in tb
     assert "fpgai::fpgai_runtime_weight_word_count()" in tb
     assert "fpgai::fpgai_fill_runtime_weight_words(weights_mem.data(), actual_weight_words)" in tb
-    assert "deeplearn(in_stream, out_stream, weights_mem.data())" in tb
-    assert "deeplearn(in_stream, out_stream);" not in tb
+    assert "deeplearn(in_stream, out_stream, weights_mem.data(), 1);" in tb
+    assert "deeplearn(in_stream, out_stream, weights_mem.data(), 0);" in tb
+    assert tb.index("weights_mem.data(), 1)") < tb.index("weights_mem.data(), 0)")
+    assert "deeplearn(in_stream, out_stream, weights_mem.data());" not in tb
 
 
 def test_training_ddr_tiled_testbench_passes_runtime_weight_buffer(tmp_path: Path) -> None:
@@ -170,3 +173,113 @@ def test_inference_m_axi_testbench_escapes_c_string_newlines(tmp_path: Path) -> 
     assert 'Received %zu outputs.\\n", output_data.size());' in tb
     assert 'Could not open input file: %s\n", in_path);' not in tb
     assert 'printf("[TB] Running inference...\n");' not in tb
+
+
+def test_inference_runtime_weights_with_m_axi_io_uses_full_resolved_abi(tmp_path: Path) -> None:
+    emit_tb_cpp(
+        tmp_path,
+        top_name="deeplearn",
+        in_words=784,
+        out_words=10,
+        weights_mode="ddr",
+        weight_words=101770,
+        raw_cfg={
+            "data_movement": {
+                "inputs": {"interface": "m_axi", "transport": "ps_runtime", "tiled": {"enabled": False}},
+                "outputs": {"interface": "m_axi", "transport": "ps_runtime", "tiled": {"enabled": False}},
+            },
+            "numerics": {"defaults": {"activation": {"total_bits": 16, "int_bits": 6}}},
+        },
+    )
+
+    tb = (tmp_path / "tb.cpp").read_text(encoding="utf-8")
+    signature = "".join(tb[tb.index('extern "C" void deeplearn('):tb.index(');', tb.index('extern "C" void deeplearn('))].split())
+    assert "constap_uint<32>*input_mem,ap_uint<32>*output_mem,ap_uint<32>*weights_mem,intmode" in signature
+    assert "std::vector<ap_uint<32> > input_mem(784);" in tb
+    assert "std::vector<ap_uint<32> > output_mem(10);" in tb
+    assert "deeplearn(input_mem.data(), output_mem.data(), weights_mem.data(), 1);" in tb
+    assert "deeplearn(input_mem.data(), output_mem.data(), weights_mem.data(), 0);" in tb
+    assert tb.index("weights_mem.data(), 1)") < tb.index("weights_mem.data(), 0)")
+    assert "hls::stream<axis_t> in_stream;" not in tb
+    assert "hls::stream<axis_t> out_stream;" not in tb
+    assert "output_data.reserve(requested_samples * FPGAI_OUTPUT_VALUES);" in tb
+    assert "expected %d outputs, received %zu" in tb
+
+
+def test_inference_runtime_weight_m_axi_testbench_escapes_c_string_newlines(tmp_path: Path) -> None:
+    emit_tb_cpp(
+        tmp_path,
+        top_name="deeplearn",
+        in_words=784,
+        out_words=10,
+        weights_mode="ddr",
+        weight_words=101770,
+        raw_cfg={
+            "data_movement": {
+                "inputs": {"interface": "m_axi", "transport": "ps_runtime", "tiled": {"enabled": False}},
+                "outputs": {"interface": "m_axi", "transport": "ps_runtime", "tiled": {"enabled": False}},
+            },
+            "numerics": {"defaults": {"activation": {"total_bits": 16, "int_bits": 6}}},
+        },
+    )
+
+    tb = (tmp_path / "tb.cpp").read_text(encoding="utf-8")
+    assert 'weights_mode=runtime_import\\n", 1, 1);' in tb
+    assert 'DDR buffer...\\n", actual_weight_words);' in tb
+    assert 'Importing runtime weights...\\n");' in tb
+    assert 'Running inference sample %d/%d...\\n"' in tb
+    assert 'Received %zu outputs across %d samples.\\n"' in tb
+    assert 'Could not open output file for writing: %s\\n", out_path);' in tb
+    assert 'printf("[TB] Importing runtime weights...\n");' not in tb
+
+
+def test_inference_runtime_weight_dataset_batch_imports_once_and_runs_each_sample(tmp_path: Path) -> None:
+    emit_tb_cpp(
+        tmp_path,
+        top_name="deeplearn",
+        in_words=4,
+        out_words=2,
+        weights_mode="ddr",
+        weight_words=7,
+        sample_count=3,
+        raw_cfg={
+            "runtime": {"sequence": ["import_weights", "run_inference", "export_weights"]},
+            "data_movement": {
+                "inputs": {"interface": "m_axi", "policy": "full"},
+                "outputs": {"interface": "m_axi", "policy": "full"},
+            },
+        },
+    )
+
+    tb = (tmp_path / "tb.cpp").read_text(encoding="utf-8")
+    assert "const int requested_samples = 3;" in tb
+    assert "for (int sample_index = 0; sample_index < requested_samples; ++sample_index)" in tb
+    assert tb.count("weights_mem.data(), 1);") == 1
+    assert "weights_mem.data(), 0);" in tb
+    assert tb.count("weights_mem.data(), 2);") == 1
+    assert "output_data.reserve(requested_samples * FPGAI_OUTPUT_VALUES);" in tb
+    assert 'sample_count_requested' in tb
+    assert 'weight_import_count' in tb
+    assert 'weight_export_count' in tb
+    assert 'inference_invocation_count' in tb
+
+
+def test_inference_runtime_weight_dataset_batch_rejects_misaligned_input_count(tmp_path: Path) -> None:
+    emit_tb_cpp(
+        tmp_path,
+        top_name="deeplearn",
+        in_words=4,
+        out_words=2,
+        weights_mode="ddr",
+        weight_words=7,
+        sample_count=3,
+        raw_cfg={
+            "data_movement": {
+                "inputs": {"interface": "m_axi", "policy": "full"},
+                "outputs": {"interface": "m_axi", "policy": "full"},
+            }
+        },
+    )
+    tb = (tmp_path / "tb.cpp").read_text(encoding="utf-8")
+    assert "n_floats != requested_samples * sample_words" in tb
+    assert "return 5;" in tb

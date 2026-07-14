@@ -14,6 +14,7 @@
 | inference | I9_board_runtime_candidate | not_run | — | — | — | — | — |
 | training | T0_sgd_tiled_m_axi | not_run | — | — | — | — | — |
 | training | T1_momentum_tiled_m_axi | not_run | — | — | — | — | — |
+| training | T2_adam_tiled_m_axi | not_run | — | — | — | — | — |
 | training | T3_cross_entropy_tiled_m_axi | not_run | — | — | — | — | — |
 | training | T4_tile32_m_axi | not_run | — | — | — | — | — |
 | training | T5_tile128_m_axi | not_run | — | — | — | — | — |

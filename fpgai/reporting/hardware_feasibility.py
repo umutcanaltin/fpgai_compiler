@@ -501,8 +501,29 @@ def _movement_requested(raw_config: Dict[str, Any] | None) -> Dict[str, Any]:
     ddr_required = False
     reasons: list[str] = []
 
+    physical_m_axi_roles: set[str] = set()
+
+    def _role_from_prefix(prefix: str) -> str:
+        parts = [part for part in prefix.replace('[', '.').replace(']', '').split('.') if part]
+        if not parts:
+            return 'data_movement'
+        # data_movement.weights.import and data_movement.weights.export share the
+        # same generated weights_mem bundle. Likewise, runtime sequence commands
+        # should not add extra bundles when the explicit data_movement role is
+        # already present. Count physical top-level memory roles, not YAML leaves.
+        if parts[0] == 'data_movement' and len(parts) >= 2:
+            return parts[1]
+        return parts[-1]
+
+    def _add_m_axi_role(role: str, reason: str) -> None:
+        nonlocal ddr_required
+        normalized = str(role or 'data_movement').strip().lower().replace('-', '_')
+        physical_m_axi_roles.add(normalized)
+        ddr_required = True
+        reasons.append(reason)
+
     def visit(obj: Any, prefix: str = '') -> None:
-        nonlocal requires_dma, axi_stream_ports, m_axi_bundles, ddr_required
+        nonlocal requires_dma, axi_stream_ports, ddr_required
         if isinstance(obj, dict):
             iface = str(obj.get('interface', '') or '').strip().lower().replace('-', '_')
             transport = str(obj.get('transport', '') or '').strip().lower().replace('-', '_')
@@ -513,9 +534,7 @@ def _movement_requested(raw_config: Dict[str, Any] | None) -> Dict[str, Any]:
                 axi_stream_ports += 1
                 reasons.append(f'{prefix or "data_movement"}: requested AXI-stream/DMA movement')
             if iface == 'm_axi' or storage == 'ddr' or 'ddr' in mode:
-                m_axi_bundles += 1
-                ddr_required = True
-                reasons.append(f'{prefix or "data_movement"}: requested m_axi/DDR movement')
+                _add_m_axi_role(_role_from_prefix(prefix), f'{prefix or "data_movement"}: requested m_axi/DDR movement')
             for key, val in obj.items():
                 visit(val, f'{prefix}.{key}' if prefix else str(key))
         elif isinstance(obj, list):
@@ -526,21 +545,17 @@ def _movement_requested(raw_config: Dict[str, Any] | None) -> Dict[str, Any]:
 
     weights_mode = str(_cfg_get_nested(raw, 'weights.mode', _cfg_get_nested(raw, 'data_movement.ps_pl.weights.mode', '')) or '').strip().lower().replace('-', '_')
     if weights_mode in {'import', 'import_export', 'tiled', 'tiled_mutable'}:
-        m_axi_bundles += 1
-        ddr_required = ddr_required or weights_mode in {'tiled', 'tiled_mutable'}
-        reasons.append(f'weights.mode={weights_mode} requires runtime/external weight movement')
+        _add_m_axi_role('weights', f'weights.mode={weights_mode} requires runtime/external weight movement')
     if 'export_gradients' in runtime_commands:
-        m_axi_bundles += 1
-        reasons.append('runtime.sequence requests export_gradients')
+        _add_m_axi_role('gradients', 'runtime.sequence requests export_gradients')
     if 'export_optimizer_state' in runtime_commands:
-        m_axi_bundles += 1
-        reasons.append('runtime.sequence requests export_optimizer_state')
+        _add_m_axi_role('optimizer_state', 'runtime.sequence requests export_optimizer_state')
     if 'import_weights' in runtime_commands:
-        m_axi_bundles += 1
-        reasons.append('runtime.sequence requests import_weights')
+        _add_m_axi_role('weights', 'runtime.sequence requests import_weights')
     if 'export_weights' in runtime_commands:
-        m_axi_bundles += 1
-        reasons.append('runtime.sequence requests export_weights')
+        _add_m_axi_role('weights', 'runtime.sequence requests export_weights')
+
+    m_axi_bundles = len(physical_m_axi_roles)
 
     # Count one DMA IP for a bidirectional AXI-stream pair. Keep this tied only
     # to explicit movement requests so embedded inference does not pay for DMA.
@@ -808,11 +823,13 @@ def emit_board_fit_report(
     normalized_resources = _merge_requirement_resources(normalized_resources, derived_requirements)
     fit = classify_board_fit(normalized_resources, board=board, part=part)
     interface_fit = _classify_interface_requirements(derived_requirements, board=board, part=part)
-    if interface_fit.get("status") == "over_limit" and fit.get("status") != "over_limit":
+    if interface_fit.get("status") == "over_limit":
         fit = dict(fit)
+        interface_failures = list(interface_fit.get("failures") or [])
+        limiting_interface = str(interface_failures[0]) if interface_failures else "interfaces"
         fit["status"] = "over_limit"
-        fit["limiting_resource"] = fit.get("limiting_resource") or "interfaces"
-        fit["limiting_dimension"] = fit.get("limiting_dimension") or "interfaces"
+        fit["limiting_resource"] = limiting_interface
+        fit["limiting_dimension"] = limiting_interface
         fit["vivado_allowed"] = False
     stages = build_stages or {}
     vivado_implementation_allowed = bool(fit.get("vivado_allowed"))

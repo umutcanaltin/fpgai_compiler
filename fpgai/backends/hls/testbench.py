@@ -160,6 +160,7 @@ def emit_tb_cpp(
     weights_mode: str,
     weight_words: int = 0,
     raw_cfg: Mapping[str, Any] | None = None,
+    sample_count: int = 1,
 ) -> None:
     tb_path = tb_dir / "tb.cpp"
     mode = str(weights_mode).strip().lower()
@@ -172,6 +173,9 @@ def emit_tb_cpp(
 
     input_m_axi = _io_m_axi_requested(raw_cfg, "input")
     output_m_axi = _io_m_axi_requested(raw_cfg, "output")
+    requested_samples = max(1, int(sample_count))
+    runtime_sequence = _cfg_get(raw_cfg, "runtime.sequence", [])
+    export_requested = isinstance(runtime_sequence, list) and "export_weights" in [str(v).strip().lower() for v in runtime_sequence]
 
     if mode in {"embedded", "compile_time", "static", ""} and (input_m_axi or output_m_axi):
         input_arg = "const ap_uint<32>* input_mem" if input_m_axi else "hls::stream<axis_t>& in_stream"
@@ -228,6 +232,8 @@ int main(int argc, char** argv) {{
     const char* out_path = "output.bin";
     if (argc >= 2) in_path = argv[1];
     if (argc >= 3) out_path = argv[2];
+    const char* record_path = "hls_execution_record.json";
+    if (argc >= 4) record_path = argv[3];
 
     std::ifstream f(in_path, std::ios::binary);
     if (!f) {{
@@ -294,6 +300,8 @@ int main(int argc, char** argv) {{
     const char* out_path = "output.bin";
     if (argc >= 2) in_path = argv[1];
     if (argc >= 3) out_path = argv[2];
+    const char* record_path = "hls_execution_record.json";
+    if (argc >= 4) record_path = argv[3];
 
     std::ifstream f(in_path, std::ios::binary);
     if (!f) {{
@@ -351,6 +359,46 @@ int main(int argc, char** argv) {{
 }}
 """
     elif mode in {"ddr", "dma_ddr", "ddr_tiled", "runtime_ddr", "m_axi", "external_ddr", "uram"}:
+        input_arg = "const ap_uint<32>* input_mem" if input_m_axi else "hls::stream<axis_t>& in_stream"
+        output_arg = "ap_uint<32>* output_mem" if output_m_axi else "hls::stream<axis_t>& out_stream"
+        input_decl = f"    std::vector<ap_uint<32> > input_mem({max(1, int(in_words))});\n" if input_m_axi else "    hls::stream<axis_t> in_stream;\n"
+        output_decl = f"    std::vector<ap_uint<32> > output_mem({max(1, int(out_words))});\n" if output_m_axi else "    hls::stream<axis_t> out_stream;\n"
+        input_load = f"""    for (int index = 0; index < {max(1, int(in_words))}; ++index) {{
+        float value = (index < n_floats) ? input_data[index] : 0.0f;
+        input_mem[index] = fpgai_float_to_bits(value);
+    }}
+""" if input_m_axi else "    push_packed_activations(in_stream, input_data);\n"
+        output_capture = f"""    std::vector<float> output_data;
+    output_data.reserve({max(1, int(out_words))});
+    for (int index = 0; index < {max(1, int(out_words))}; ++index) {{
+        output_data.push_back(fpgai_bits_to_float(output_mem[index].to_uint()));
+    }}
+""" if output_m_axi else "    std::vector<float> output_data = read_packed_activations(out_stream, FPGAI_OUTPUT_VALUES);\n"
+        call_input = "input_mem.data()" if input_m_axi else "in_stream"
+        call_output = "output_mem.data()" if output_m_axi else "out_stream"
+        batch_input_load = (
+            "        for (int index = 0; index < sample_words; ++index) {\n"
+            "            input_mem[index] = fpgai_float_to_bits(sample_input[index]);\n"
+            "        }\n"
+            if input_m_axi
+            else "        push_packed_activations(in_stream, sample_input);\n"
+        )
+        batch_output_capture = (
+            "        for (int index = 0; index < FPGAI_OUTPUT_VALUES; ++index) {\n"
+            "            output_data.push_back(fpgai_bits_to_float(output_mem[index].to_uint()));\n"
+            "        }\n"
+            if output_m_axi
+            else (
+                "        std::vector<float> sample_output = read_packed_activations(out_stream, FPGAI_OUTPUT_VALUES);\n"
+                "        output_data.insert(output_data.end(), sample_output.begin(), sample_output.end());\n"
+            )
+        )
+        export_call = (
+            f'    printf("[TB] Exporting runtime weights...\\n");\n'
+            f'    {top_name}({call_input}, {call_output}, weights_mem.data(), 2);\n'
+            if export_requested
+            else ""
+        )
         tb_text = f"""
 #include <cstdio>
 #include <cstdlib>
@@ -365,18 +413,33 @@ using std::size_t;
 typedef ap_axis<32,0,0,0> axis_t;
 
 extern "C" void {top_name}(
-    hls::stream<axis_t>& in,
-    hls::stream<axis_t>& out,
-    const ap_uint<32>* weights_mem
+    {input_arg},
+    {output_arg},
+    ap_uint<32>* weights_mem,
+    int mode
 );
 
 {helpers}
+
+static unsigned int fpgai_float_to_bits(float value) {{
+    union {{ float f; unsigned int i; }} u;
+    u.f = value;
+    return u.i;
+}}
+
+static float fpgai_bits_to_float(unsigned int value) {{
+    union {{ unsigned int i; float f; }} u;
+    u.i = value;
+    return u.f;
+}}
 
 int main(int argc, char** argv) {{
     const char* in_path = "input.bin";
     const char* out_path = "output.bin";
     if (argc >= 2) in_path = argv[1];
     if (argc >= 3) out_path = argv[2];
+    const char* record_path = "hls_execution_record.json";
+    if (argc >= 4) record_path = argv[3];
 
     std::ifstream f(in_path, std::ios::binary);
     if (!f) {{
@@ -394,12 +457,15 @@ int main(int argc, char** argv) {{
     f.close();
 
     printf("[TB] Loaded %d inputs from %s\\n", n_floats, in_path);
-    printf("[TB] Precision AXIS packing: act_bits=%d act_int_bits=%d values_per_axis=%d\\n",
-           FPGAI_ACT_BITS, FPGAI_ACT_INT_BITS, FPGAI_ACT_PER_AXIS);
+    printf("[TB] Inference I/O ABI: input_m_axi=%d output_m_axi=%d weights_mode=runtime_import\\n", {1 if input_m_axi else 0}, {1 if output_m_axi else 0});
 
-    hls::stream<axis_t> in_stream;
-    hls::stream<axis_t> out_stream;
-
+{input_decl}{output_decl}
+    const int sample_words = {max(1, int(in_words))};
+    const int requested_samples = {requested_samples};
+    if (n_floats != requested_samples * sample_words) {{
+        fprintf(stderr, "[TB] Error: expected %d input floats for %d samples, received %d\\n", requested_samples * sample_words, requested_samples, n_floats);
+        return 5;
+    }}
     const int expected_weight_words = {int(weight_words)};
     const int actual_weight_words = fpgai::fpgai_runtime_weight_word_count();
     printf("[TB] Preparing %d runtime weight words in DDR buffer...\\n", actual_weight_words);
@@ -411,14 +477,45 @@ int main(int argc, char** argv) {{
     std::vector<ap_uint<32> > weights_mem(actual_weight_words);
     fpgai::fpgai_fill_runtime_weight_words(weights_mem.data(), actual_weight_words);
 
-    push_packed_activations(in_stream, input_data);
+    printf("[TB] Importing runtime weights...\\n");
+    {top_name}({call_input}, {call_output}, weights_mem.data(), 1);
 
-    printf("[TB] Running inference...\\n");
-    {top_name}(in_stream, out_stream, weights_mem.data());
+    std::vector<float> output_data;
+    output_data.reserve(requested_samples * FPGAI_OUTPUT_VALUES);
+    for (int sample_index = 0; sample_index < requested_samples; ++sample_index) {{
+        std::vector<float> sample_input(
+            input_data.begin() + sample_index * sample_words,
+            input_data.begin() + (sample_index + 1) * sample_words
+        );
+{batch_input_load}
+        printf("[TB] Running inference sample %d/%d...\\n", sample_index + 1, requested_samples);
+        {top_name}({call_input}, {call_output}, weights_mem.data(), 0);
+{batch_output_capture}
+    }}
+{export_call}
+    printf("[TB] Received %zu outputs across %d samples.\\n", output_data.size(), requested_samples);
 
-    std::vector<float> output_data = read_packed_activations(out_stream, FPGAI_OUTPUT_VALUES);
+    if ((int)output_data.size() != requested_samples * FPGAI_OUTPUT_VALUES) {{
+        fprintf(stderr, "[TB] Error: expected %d outputs, received %zu\\n", requested_samples * FPGAI_OUTPUT_VALUES, output_data.size());
+        return 4;
+    }}
 
-    printf("[TB] Received %zu outputs.\\n", output_data.size());
+    std::ofstream record(record_path);
+    if (!record) {{
+        fprintf(stderr, "[TB] Error: Could not open execution record for writing: %s\\n", record_path);
+        return 6;
+    }}
+    record << "{{\\n  \\\"artifact_kind\\\": \\\"fpgai_hls_dataset_execution\\\",\\n"
+           << "  \\\"schema_version\\\": 1,\\n"
+           << "  \\\"sample_count_requested\\\": " << requested_samples << ",\\n"
+           << "  \\\"sample_count_executed\\\": " << requested_samples << ",\\n"
+           << "  \\\"input_values_per_sample\\\": " << sample_words << ",\\n"
+           << "  \\\"output_values_per_sample\\\": " << FPGAI_OUTPUT_VALUES << ",\\n"
+           << "  \\\"generated_output_words\\\": " << output_data.size() << ",\\n"
+           << "  \\\"weight_import_count\\\": 1,\\n"
+           << "  \\\"weight_export_count\\\": {1 if export_requested else 0},\\n"
+           << "  \\\"inference_invocation_count\\\": " << requested_samples << "\\n}}\\n";
+    record.close();
 
     std::ofstream of(out_path, std::ios::binary);
     if (!of) {{
@@ -453,6 +550,8 @@ int main(int argc, char** argv) {{
     const char* out_path = "output.bin";
     if (argc >= 2) in_path = argv[1];
     if (argc >= 3) out_path = argv[2];
+    const char* record_path = "hls_execution_record.json";
+    if (argc >= 4) record_path = argv[3];
 
     std::ifstream f(in_path, std::ios::binary);
     if (!f) {{

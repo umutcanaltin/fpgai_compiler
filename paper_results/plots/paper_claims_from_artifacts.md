@@ -3,54 +3,168 @@
 These claims are generated only from existing FPGAI reports and runtime artifacts.
 
 ## Supported current claims
-- HLS synthesis metrics are available for `18` frozen paper row(s).
-- Vivado implementation metrics are available for `18` frozen paper row(s).
+- HLS synthesis metrics are available for `19` frozen paper row(s).
+- Vivado implementation metrics are available for `19` frozen paper row(s).
+- Numeric-validation rows are available for `19` frozen paper row(s), with `10` row(s) marked passed.
 - Deployable bitstream candidate rows are present for at least `2` design(s), subject to runtime-package validation tables.
 - Real board latency, energy, and FPGA training curves remain pending until board-runtime CSV/report artifacts are imported.
 
-## Computed pairwise result statements
-- HLS latency cycles: I1_precision_fx8_embedded increased by 0.51% versus I0_baseline_fx16_embedded (delta 1673).
-- HLS LUT: I1_precision_fx8_embedded decreased by 6.70% versus I0_baseline_fx16_embedded (delta -1312).
-- HLS DSP: I1_precision_fx8_embedded decreased by 42.86% versus I0_baseline_fx16_embedded (delta -3).
-- HLS BRAM: I1_precision_fx8_embedded decreased by 60.00% versus I0_baseline_fx16_embedded (delta -69).
-- Vivado LUT: I1_precision_fx8_embedded decreased by 36.90% versus I0_baseline_fx16_embedded (delta -4689).
-- Vivado DSP: I1_precision_fx8_embedded decreased by 20.00% versus I0_baseline_fx16_embedded (delta -1).
-- Vivado BRAM: I1_precision_fx8_embedded decreased by 66.40% versus I0_baseline_fx16_embedded (delta -41.5).
-- Power W: I1_precision_fx8_embedded decreased by 1.97% versus I0_baseline_fx16_embedded (delta -0.056).
-- WNS ns: I1_precision_fx8_embedded decreased by 28.11% versus I0_baseline_fx16_embedded (delta -0.725).
-- HLS latency cycles: I3_parallel_pe2 decreased by 29.67% versus I0_baseline_fx16_embedded (delta -9.77e+04).
-- HLS LUT: I3_parallel_pe2 increased by 91.24% versus I0_baseline_fx16_embedded (delta 1.786e+04).
-- HLS DSP: I3_parallel_pe2 increased by 157.14% versus I0_baseline_fx16_embedded (delta 11).
-- HLS BRAM: I3_parallel_pe2 increased by 21.74% versus I0_baseline_fx16_embedded (delta 25).
-- Vivado LUT: I3_parallel_pe2 increased by 212.42% versus I0_baseline_fx16_embedded (delta 2.699e+04).
-- Vivado DSP: I3_parallel_pe2 increased by 140.00% versus I0_baseline_fx16_embedded (delta 7).
-- Vivado BRAM: I3_parallel_pe2 increased by 13.60% versus I0_baseline_fx16_embedded (delta 8.5).
-- Power W: I3_parallel_pe2 increased by 2.89% versus I0_baseline_fx16_embedded (delta 0.082).
-- WNS ns: I3_parallel_pe2 decreased by 76.19% versus I0_baseline_fx16_embedded (delta -1.965).
-- HLS latency cycles: I8_deployable_bitstream_candidate changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
-- HLS LUT: I8_deployable_bitstream_candidate changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
-- HLS DSP: I8_deployable_bitstream_candidate changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
-- HLS BRAM: I8_deployable_bitstream_candidate changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
-- Vivado LUT: I8_deployable_bitstream_candidate changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
-- Vivado DSP: I8_deployable_bitstream_candidate changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
-- Vivado BRAM: I8_deployable_bitstream_candidate changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
-- Power W: I8_deployable_bitstream_candidate changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
-- WNS ns: I8_deployable_bitstream_candidate changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
-- HLS latency cycles: T4_tile32_m_axi decreased by 13.46% versus T0_sgd_tiled_m_axi (delta -128).
-- HLS LUT: T4_tile32_m_axi decreased by 0.12% versus T0_sgd_tiled_m_axi (delta -76).
-- HLS DSP: T4_tile32_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
-- HLS BRAM: T4_tile32_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
-- Vivado LUT: T4_tile32_m_axi decreased by 1.30% versus T0_sgd_tiled_m_axi (delta -381).
-- Vivado DSP: T4_tile32_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
-- Vivado BRAM: T4_tile32_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
-- Power W: T4_tile32_m_axi decreased by 0.54% versus T0_sgd_tiled_m_axi (delta -0.016).
-- WNS ns: T4_tile32_m_axi increased by 7.56% versus T0_sgd_tiled_m_axi (delta 0.219).
-- HLS latency cycles: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
-- HLS LUT: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
-- HLS DSP: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
-- HLS BRAM: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
-- Vivado LUT: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
-- Vivado DSP: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
-- Vivado BRAM: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
-- Power W: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
-- WNS ns: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+## Result classification boundary
+- `strong_result`: `2` comparison(s), `18` metric row(s).
+- `expected_tradeoff`: `9` comparison(s), `81` metric row(s).
+- `deployability_result`: `1` comparison(s), `9` metric row(s).
+- `no_observable_effect`: `3` comparison(s), `27` metric row(s).
+
+## Representative computed result statements
+- `strong_result` — HLS latency cycles: I1_precision_fx8_embedded increased by 0.51% versus I0_baseline_fx16_embedded (delta 1673).
+- `expected_tradeoff` — HLS latency cycles: I2_precision_fx24_embedded changed by 0.00% versus I0_baseline_fx16_embedded (delta 13).
+- `expected_tradeoff` — HLS latency cycles: I3_parallel_pe2 decreased by 29.67% versus I0_baseline_fx16_embedded (delta -9.77e+04).
+- `expected_tradeoff` — HLS latency cycles: I4_parallel_pe4 decreased by 47.25% versus I0_baseline_fx16_embedded (delta -1.556e+05).
+- `expected_tradeoff` — HLS latency cycles: I4_parallel_pe4 decreased by 25.00% versus I3_parallel_pe2 (delta -5.788e+04).
+- `expected_tradeoff` — HLS latency cycles: I7_weight_import_m_axi decreased by 30.48% versus I0_baseline_fx16_embedded (delta -1.004e+05).
+- `expected_tradeoff` — HLS latency cycles: I5_pipeline_latency_first increased by 3.99% versus I0_baseline_fx16_embedded (delta 1.315e+04).
+- `no_observable_effect` — HLS latency cycles: I6_pipeline_resource_first changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
+- `no_observable_effect` — HLS latency cycles: T1_momentum_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `expected_tradeoff` — HLS latency cycles: T2_adam_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `expected_tradeoff` — HLS latency cycles: T3_cross_entropy_tiled_m_axi increased by 2.63% versus T0_sgd_tiled_m_axi (delta 25).
+- `strong_result` — HLS latency cycles: T4_tile32_m_axi decreased by 13.46% versus T0_sgd_tiled_m_axi (delta -128).
+- `expected_tradeoff` — HLS latency cycles: T5_tile128_m_axi increased by 26.92% versus T0_sgd_tiled_m_axi (delta 256).
+- `no_observable_effect` — HLS latency cycles: T6_accum_batch2_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `deployability_result` — HLS latency cycles: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+
+## Full metric-level comparisons
+- `strong_result` `precision_fx8_vs_fx16` — HLS latency cycles: I1_precision_fx8_embedded increased by 0.51% versus I0_baseline_fx16_embedded (delta 1673).
+- `strong_result` `precision_fx8_vs_fx16` — HLS LUT: I1_precision_fx8_embedded decreased by 6.70% versus I0_baseline_fx16_embedded (delta -1312).
+- `strong_result` `precision_fx8_vs_fx16` — HLS DSP: I1_precision_fx8_embedded decreased by 42.86% versus I0_baseline_fx16_embedded (delta -3).
+- `strong_result` `precision_fx8_vs_fx16` — HLS BRAM: I1_precision_fx8_embedded decreased by 60.00% versus I0_baseline_fx16_embedded (delta -69).
+- `strong_result` `precision_fx8_vs_fx16` — Vivado LUT: I1_precision_fx8_embedded decreased by 36.90% versus I0_baseline_fx16_embedded (delta -4689).
+- `strong_result` `precision_fx8_vs_fx16` — Vivado DSP: I1_precision_fx8_embedded decreased by 20.00% versus I0_baseline_fx16_embedded (delta -1).
+- `strong_result` `precision_fx8_vs_fx16` — Vivado BRAM: I1_precision_fx8_embedded decreased by 66.40% versus I0_baseline_fx16_embedded (delta -41.5).
+- `strong_result` `precision_fx8_vs_fx16` — Power W: I1_precision_fx8_embedded decreased by 1.97% versus I0_baseline_fx16_embedded (delta -0.056).
+- `strong_result` `precision_fx8_vs_fx16` — WNS ns: I1_precision_fx8_embedded decreased by 28.11% versus I0_baseline_fx16_embedded (delta -0.725).
+- `expected_tradeoff` `precision_fx24_vs_fx16` — HLS latency cycles: I2_precision_fx24_embedded changed by 0.00% versus I0_baseline_fx16_embedded (delta 13).
+- `expected_tradeoff` `precision_fx24_vs_fx16` — HLS LUT: I2_precision_fx24_embedded increased by 9.57% versus I0_baseline_fx16_embedded (delta 1873).
+- `expected_tradeoff` `precision_fx24_vs_fx16` — HLS DSP: I2_precision_fx24_embedded increased by 85.71% versus I0_baseline_fx16_embedded (delta 6).
+- `expected_tradeoff` `precision_fx24_vs_fx16` — HLS BRAM: I2_precision_fx24_embedded increased by 31.30% versus I0_baseline_fx16_embedded (delta 36).
+- `expected_tradeoff` `precision_fx24_vs_fx16` — Vivado LUT: I2_precision_fx24_embedded increased by 32.21% versus I0_baseline_fx16_embedded (delta 4093).
+- `expected_tradeoff` `precision_fx24_vs_fx16` — Vivado DSP: I2_precision_fx24_embedded increased by 160.00% versus I0_baseline_fx16_embedded (delta 8).
+- `expected_tradeoff` `precision_fx24_vs_fx16` — Vivado BRAM: I2_precision_fx24_embedded increased by 34.40% versus I0_baseline_fx16_embedded (delta 21.5).
+- `expected_tradeoff` `precision_fx24_vs_fx16` — Power W: I2_precision_fx24_embedded increased by 1.34% versus I0_baseline_fx16_embedded (delta 0.038).
+- `expected_tradeoff` `precision_fx24_vs_fx16` — WNS ns: I2_precision_fx24_embedded decreased by 74.84% versus I0_baseline_fx16_embedded (delta -1.93).
+- `expected_tradeoff` `parallel_pe2_vs_pe1` — HLS latency cycles: I3_parallel_pe2 decreased by 29.67% versus I0_baseline_fx16_embedded (delta -9.77e+04).
+- `expected_tradeoff` `parallel_pe2_vs_pe1` — HLS LUT: I3_parallel_pe2 increased by 91.24% versus I0_baseline_fx16_embedded (delta 1.786e+04).
+- `expected_tradeoff` `parallel_pe2_vs_pe1` — HLS DSP: I3_parallel_pe2 increased by 157.14% versus I0_baseline_fx16_embedded (delta 11).
+- `expected_tradeoff` `parallel_pe2_vs_pe1` — HLS BRAM: I3_parallel_pe2 increased by 21.74% versus I0_baseline_fx16_embedded (delta 25).
+- `expected_tradeoff` `parallel_pe2_vs_pe1` — Vivado LUT: I3_parallel_pe2 increased by 212.42% versus I0_baseline_fx16_embedded (delta 2.699e+04).
+- `expected_tradeoff` `parallel_pe2_vs_pe1` — Vivado DSP: I3_parallel_pe2 increased by 140.00% versus I0_baseline_fx16_embedded (delta 7).
+- `expected_tradeoff` `parallel_pe2_vs_pe1` — Vivado BRAM: I3_parallel_pe2 increased by 13.60% versus I0_baseline_fx16_embedded (delta 8.5).
+- `expected_tradeoff` `parallel_pe2_vs_pe1` — Power W: I3_parallel_pe2 increased by 2.89% versus I0_baseline_fx16_embedded (delta 0.082).
+- `expected_tradeoff` `parallel_pe2_vs_pe1` — WNS ns: I3_parallel_pe2 decreased by 76.19% versus I0_baseline_fx16_embedded (delta -1.965).
+- `expected_tradeoff` `parallel_pe4_vs_pe1` — HLS latency cycles: I4_parallel_pe4 decreased by 47.25% versus I0_baseline_fx16_embedded (delta -1.556e+05).
+- `expected_tradeoff` `parallel_pe4_vs_pe1` — HLS LUT: I4_parallel_pe4 increased by 143.74% versus I0_baseline_fx16_embedded (delta 2.813e+04).
+- `expected_tradeoff` `parallel_pe4_vs_pe1` — HLS DSP: I4_parallel_pe4 increased by 842.86% versus I0_baseline_fx16_embedded (delta 59).
+- `expected_tradeoff` `parallel_pe4_vs_pe1` — HLS BRAM: I4_parallel_pe4 increased by 56.52% versus I0_baseline_fx16_embedded (delta 65).
+- `expected_tradeoff` `parallel_pe4_vs_pe1` — Vivado LUT: I4_parallel_pe4 increased by 224.46% versus I0_baseline_fx16_embedded (delta 2.852e+04).
+- `expected_tradeoff` `parallel_pe4_vs_pe1` — Vivado DSP: I4_parallel_pe4 increased by 660.00% versus I0_baseline_fx16_embedded (delta 33).
+- `expected_tradeoff` `parallel_pe4_vs_pe1` — Vivado BRAM: I4_parallel_pe4 increased by 45.60% versus I0_baseline_fx16_embedded (delta 28.5).
+- `expected_tradeoff` `parallel_pe4_vs_pe1` — Power W: I4_parallel_pe4 increased by 5.42% versus I0_baseline_fx16_embedded (delta 0.154).
+- `expected_tradeoff` `parallel_pe4_vs_pe1` — WNS ns: I4_parallel_pe4 decreased by 6.86% versus I0_baseline_fx16_embedded (delta -0.177).
+- `expected_tradeoff` `parallel_pe4_vs_pe2` — HLS latency cycles: I4_parallel_pe4 decreased by 25.00% versus I3_parallel_pe2 (delta -5.788e+04).
+- `expected_tradeoff` `parallel_pe4_vs_pe2` — HLS LUT: I4_parallel_pe4 increased by 27.45% versus I3_parallel_pe2 (delta 1.027e+04).
+- `expected_tradeoff` `parallel_pe4_vs_pe2` — HLS DSP: I4_parallel_pe4 increased by 266.67% versus I3_parallel_pe2 (delta 48).
+- `expected_tradeoff` `parallel_pe4_vs_pe2` — HLS BRAM: I4_parallel_pe4 increased by 28.57% versus I3_parallel_pe2 (delta 40).
+- `expected_tradeoff` `parallel_pe4_vs_pe2` — Vivado LUT: I4_parallel_pe4 increased by 3.86% versus I3_parallel_pe2 (delta 1531).
+- `expected_tradeoff` `parallel_pe4_vs_pe2` — Vivado DSP: I4_parallel_pe4 increased by 216.67% versus I3_parallel_pe2 (delta 26).
+- `expected_tradeoff` `parallel_pe4_vs_pe2` — Vivado BRAM: I4_parallel_pe4 increased by 28.17% versus I3_parallel_pe2 (delta 20).
+- `expected_tradeoff` `parallel_pe4_vs_pe2` — Power W: I4_parallel_pe4 increased by 2.46% versus I3_parallel_pe2 (delta 0.072).
+- `expected_tradeoff` `parallel_pe4_vs_pe2` — WNS ns: I4_parallel_pe4 increased by 291.21% versus I3_parallel_pe2 (delta 1.788).
+- `expected_tradeoff` `weight_import_m_axi_vs_embedded` — HLS latency cycles: I7_weight_import_m_axi decreased by 30.48% versus I0_baseline_fx16_embedded (delta -1.004e+05).
+- `expected_tradeoff` `weight_import_m_axi_vs_embedded` — HLS LUT: I7_weight_import_m_axi increased by 54.48% versus I0_baseline_fx16_embedded (delta 1.066e+04).
+- `expected_tradeoff` `weight_import_m_axi_vs_embedded` — HLS DSP: I7_weight_import_m_axi changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
+- `expected_tradeoff` `weight_import_m_axi_vs_embedded` — HLS BRAM: I7_weight_import_m_axi increased by 4.35% versus I0_baseline_fx16_embedded (delta 5).
+- `expected_tradeoff` `weight_import_m_axi_vs_embedded` — Vivado LUT: I7_weight_import_m_axi increased by 75.09% versus I0_baseline_fx16_embedded (delta 9543).
+- `expected_tradeoff` `weight_import_m_axi_vs_embedded` — Vivado DSP: I7_weight_import_m_axi changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
+- `expected_tradeoff` `weight_import_m_axi_vs_embedded` — Vivado BRAM: I7_weight_import_m_axi increased by 13.60% versus I0_baseline_fx16_embedded (delta 8.5).
+- `expected_tradeoff` `weight_import_m_axi_vs_embedded` — Power W: I7_weight_import_m_axi increased by 1.86% versus I0_baseline_fx16_embedded (delta 0.053).
+- `expected_tradeoff` `weight_import_m_axi_vs_embedded` — WNS ns: I7_weight_import_m_axi decreased by 72.00% versus I0_baseline_fx16_embedded (delta -1.857).
+- `expected_tradeoff` `pipeline_latency_first_vs_baseline` — HLS latency cycles: I5_pipeline_latency_first increased by 3.99% versus I0_baseline_fx16_embedded (delta 1.315e+04).
+- `expected_tradeoff` `pipeline_latency_first_vs_baseline` — HLS LUT: I5_pipeline_latency_first increased by 90.75% versus I0_baseline_fx16_embedded (delta 1.776e+04).
+- `expected_tradeoff` `pipeline_latency_first_vs_baseline` — HLS DSP: I5_pipeline_latency_first increased by 57.14% versus I0_baseline_fx16_embedded (delta 4).
+- `expected_tradeoff` `pipeline_latency_first_vs_baseline` — HLS BRAM: I5_pipeline_latency_first increased by 9.57% versus I0_baseline_fx16_embedded (delta 11).
+- `expected_tradeoff` `pipeline_latency_first_vs_baseline` — Vivado LUT: I5_pipeline_latency_first increased by 248.78% versus I0_baseline_fx16_embedded (delta 3.162e+04).
+- `expected_tradeoff` `pipeline_latency_first_vs_baseline` — Vivado DSP: I5_pipeline_latency_first increased by 60.00% versus I0_baseline_fx16_embedded (delta 3).
+- `expected_tradeoff` `pipeline_latency_first_vs_baseline` — Vivado BRAM: I5_pipeline_latency_first increased by 2.40% versus I0_baseline_fx16_embedded (delta 1.5).
+- `expected_tradeoff` `pipeline_latency_first_vs_baseline` — Power W: I5_pipeline_latency_first increased by 4.57% versus I0_baseline_fx16_embedded (delta 0.13).
+- `expected_tradeoff` `pipeline_latency_first_vs_baseline` — WNS ns: I5_pipeline_latency_first decreased by 85.65% versus I0_baseline_fx16_embedded (delta -2.209).
+- `no_observable_effect` `pipeline_resource_first_vs_baseline` — HLS latency cycles: I6_pipeline_resource_first changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
+- `no_observable_effect` `pipeline_resource_first_vs_baseline` — HLS LUT: I6_pipeline_resource_first changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
+- `no_observable_effect` `pipeline_resource_first_vs_baseline` — HLS DSP: I6_pipeline_resource_first changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
+- `no_observable_effect` `pipeline_resource_first_vs_baseline` — HLS BRAM: I6_pipeline_resource_first changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
+- `no_observable_effect` `pipeline_resource_first_vs_baseline` — Vivado LUT: I6_pipeline_resource_first changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
+- `no_observable_effect` `pipeline_resource_first_vs_baseline` — Vivado DSP: I6_pipeline_resource_first changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
+- `no_observable_effect` `pipeline_resource_first_vs_baseline` — Vivado BRAM: I6_pipeline_resource_first changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
+- `no_observable_effect` `pipeline_resource_first_vs_baseline` — Power W: I6_pipeline_resource_first changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
+- `no_observable_effect` `pipeline_resource_first_vs_baseline` — WNS ns: I6_pipeline_resource_first changed by 0.00% versus I0_baseline_fx16_embedded (delta 0).
+- `no_observable_effect` `training_momentum_vs_sgd` — HLS latency cycles: T1_momentum_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_momentum_vs_sgd` — HLS LUT: T1_momentum_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_momentum_vs_sgd` — HLS DSP: T1_momentum_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_momentum_vs_sgd` — HLS BRAM: T1_momentum_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_momentum_vs_sgd` — Vivado LUT: T1_momentum_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_momentum_vs_sgd` — Vivado DSP: T1_momentum_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_momentum_vs_sgd` — Vivado BRAM: T1_momentum_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_momentum_vs_sgd` — Power W: T1_momentum_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_momentum_vs_sgd` — WNS ns: T1_momentum_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `expected_tradeoff` `training_adam_vs_sgd` — HLS latency cycles: T2_adam_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `expected_tradeoff` `training_adam_vs_sgd` — HLS LUT: T2_adam_tiled_m_axi increased by 4.23% versus T0_sgd_tiled_m_axi (delta 2618).
+- `expected_tradeoff` `training_adam_vs_sgd` — HLS DSP: T2_adam_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `expected_tradeoff` `training_adam_vs_sgd` — HLS BRAM: T2_adam_tiled_m_axi increased by 9.09% versus T0_sgd_tiled_m_axi (delta 4).
+- `expected_tradeoff` `training_adam_vs_sgd` — Vivado LUT: T2_adam_tiled_m_axi increased by 4.06% versus T0_sgd_tiled_m_axi (delta 1193).
+- `expected_tradeoff` `training_adam_vs_sgd` — Vivado DSP: T2_adam_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `expected_tradeoff` `training_adam_vs_sgd` — Vivado BRAM: T2_adam_tiled_m_axi increased by 2.86% versus T0_sgd_tiled_m_axi (delta 0.5).
+- `expected_tradeoff` `training_adam_vs_sgd` — Power W: T2_adam_tiled_m_axi decreased by 0.37% versus T0_sgd_tiled_m_axi (delta -0.011).
+- `expected_tradeoff` `training_adam_vs_sgd` — WNS ns: T2_adam_tiled_m_axi increased by 10.43% versus T0_sgd_tiled_m_axi (delta 0.302).
+- `expected_tradeoff` `training_cross_entropy_vs_mse` — HLS latency cycles: T3_cross_entropy_tiled_m_axi increased by 2.63% versus T0_sgd_tiled_m_axi (delta 25).
+- `expected_tradeoff` `training_cross_entropy_vs_mse` — HLS LUT: T3_cross_entropy_tiled_m_axi increased by 16.47% versus T0_sgd_tiled_m_axi (delta 1.02e+04).
+- `expected_tradeoff` `training_cross_entropy_vs_mse` — HLS DSP: T3_cross_entropy_tiled_m_axi increased by 152.38% versus T0_sgd_tiled_m_axi (delta 32).
+- `expected_tradeoff` `training_cross_entropy_vs_mse` — HLS BRAM: T3_cross_entropy_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `expected_tradeoff` `training_cross_entropy_vs_mse` — Vivado LUT: T3_cross_entropy_tiled_m_axi increased by 18.24% versus T0_sgd_tiled_m_axi (delta 5357).
+- `expected_tradeoff` `training_cross_entropy_vs_mse` — Vivado DSP: T3_cross_entropy_tiled_m_axi increased by 193.33% versus T0_sgd_tiled_m_axi (delta 29).
+- `expected_tradeoff` `training_cross_entropy_vs_mse` — Vivado BRAM: T3_cross_entropy_tiled_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `expected_tradeoff` `training_cross_entropy_vs_mse` — Power W: T3_cross_entropy_tiled_m_axi increased by 2.24% versus T0_sgd_tiled_m_axi (delta 0.066).
+- `expected_tradeoff` `training_cross_entropy_vs_mse` — WNS ns: T3_cross_entropy_tiled_m_axi decreased by 23.17% versus T0_sgd_tiled_m_axi (delta -0.671).
+- `strong_result` `training_tile32_vs_tile64` — HLS latency cycles: T4_tile32_m_axi decreased by 13.46% versus T0_sgd_tiled_m_axi (delta -128).
+- `strong_result` `training_tile32_vs_tile64` — HLS LUT: T4_tile32_m_axi decreased by 0.12% versus T0_sgd_tiled_m_axi (delta -76).
+- `strong_result` `training_tile32_vs_tile64` — HLS DSP: T4_tile32_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `strong_result` `training_tile32_vs_tile64` — HLS BRAM: T4_tile32_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `strong_result` `training_tile32_vs_tile64` — Vivado LUT: T4_tile32_m_axi decreased by 1.30% versus T0_sgd_tiled_m_axi (delta -381).
+- `strong_result` `training_tile32_vs_tile64` — Vivado DSP: T4_tile32_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `strong_result` `training_tile32_vs_tile64` — Vivado BRAM: T4_tile32_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `strong_result` `training_tile32_vs_tile64` — Power W: T4_tile32_m_axi decreased by 0.54% versus T0_sgd_tiled_m_axi (delta -0.016).
+- `strong_result` `training_tile32_vs_tile64` — WNS ns: T4_tile32_m_axi increased by 7.56% versus T0_sgd_tiled_m_axi (delta 0.219).
+- `expected_tradeoff` `training_tile128_vs_tile64` — HLS latency cycles: T5_tile128_m_axi increased by 26.92% versus T0_sgd_tiled_m_axi (delta 256).
+- `expected_tradeoff` `training_tile128_vs_tile64` — HLS LUT: T5_tile128_m_axi increased by 0.05% versus T0_sgd_tiled_m_axi (delta 29).
+- `expected_tradeoff` `training_tile128_vs_tile64` — HLS DSP: T5_tile128_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `expected_tradeoff` `training_tile128_vs_tile64` — HLS BRAM: T5_tile128_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `expected_tradeoff` `training_tile128_vs_tile64` — Vivado LUT: T5_tile128_m_axi increased by 1.53% versus T0_sgd_tiled_m_axi (delta 448).
+- `expected_tradeoff` `training_tile128_vs_tile64` — Vivado DSP: T5_tile128_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `expected_tradeoff` `training_tile128_vs_tile64` — Vivado BRAM: T5_tile128_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `expected_tradeoff` `training_tile128_vs_tile64` — Power W: T5_tile128_m_axi increased by 0.34% versus T0_sgd_tiled_m_axi (delta 0.01).
+- `expected_tradeoff` `training_tile128_vs_tile64` — WNS ns: T5_tile128_m_axi increased by 12.53% versus T0_sgd_tiled_m_axi (delta 0.363).
+- `no_observable_effect` `training_accum_batch2_vs_sgd` — HLS latency cycles: T6_accum_batch2_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_accum_batch2_vs_sgd` — HLS LUT: T6_accum_batch2_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_accum_batch2_vs_sgd` — HLS DSP: T6_accum_batch2_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_accum_batch2_vs_sgd` — HLS BRAM: T6_accum_batch2_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_accum_batch2_vs_sgd` — Vivado LUT: T6_accum_batch2_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_accum_batch2_vs_sgd` — Vivado DSP: T6_accum_batch2_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_accum_batch2_vs_sgd` — Vivado BRAM: T6_accum_batch2_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_accum_batch2_vs_sgd` — Power W: T6_accum_batch2_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `no_observable_effect` `training_accum_batch2_vs_sgd` — WNS ns: T6_accum_batch2_m_axi changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `deployability_result` `training_bitstream_vs_sgd` — HLS latency cycles: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `deployability_result` `training_bitstream_vs_sgd` — HLS LUT: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `deployability_result` `training_bitstream_vs_sgd` — HLS DSP: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `deployability_result` `training_bitstream_vs_sgd` — HLS BRAM: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `deployability_result` `training_bitstream_vs_sgd` — Vivado LUT: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `deployability_result` `training_bitstream_vs_sgd` — Vivado DSP: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `deployability_result` `training_bitstream_vs_sgd` — Vivado BRAM: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `deployability_result` `training_bitstream_vs_sgd` — Power W: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).
+- `deployability_result` `training_bitstream_vs_sgd` — WNS ns: T7_deployable_training_bitstream changed by 0.00% versus T0_sgd_tiled_m_axi (delta 0).

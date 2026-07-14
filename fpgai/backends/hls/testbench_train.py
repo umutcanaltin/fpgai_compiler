@@ -195,9 +195,18 @@ def emit_tb_train_cpp(
     output_mem_extern_arg = "    ap_uint<32>* output_mem,\n" if output_m_axi_tiled_requested else ""
     gradient_mem_extern_arg = "    ap_uint<32>* gradients_mem,\n" if gradient_export_requested else ""
     optimizer_state_mem_extern_arg = "    ap_uint<32>* optimizer_state_mem,\n" if optimizer_state_export_requested else ""
-    input_mem_decl = f"    std::vector<ap_uint<32> > input_mem({max(1, int(in_words))});\n" if input_m_axi_tiled_requested else ""
-    label_mem_decl = f"    std::vector<ap_uint<32> > label_mem({max(1, int(out_words))});\n" if label_m_axi_tiled_requested else ""
-    output_mem_decl = f"    std::vector<ap_uint<32> > output_mem({max(1, int(out_words))});\n" if output_m_axi_tiled_requested else ""
+    # m_axi training input/label/output buffers must be sized from the runtime record
+    # width, not only from compile-time graph metadata. Some training paths pass
+    # out_words=0 while target.bin still contains a non-empty label vector; allocating
+    # label_mem from out_words would make CSim fail before the hardware behavior is tested.
+    input_mem_decl = ""
+    label_mem_decl = ""
+    output_mem_decl = ""
+    dynamic_movement_mem_decl = (
+        ("    std::vector<ap_uint<32> > input_mem((size_t)(input_words_per_record > 0 ? input_words_per_record : 1));\n" if input_m_axi_tiled_requested else "")
+        + ("    std::vector<ap_uint<32> > label_mem((size_t)(target_words_per_record > 0 ? target_words_per_record : 1));\n" if label_m_axi_tiled_requested else "")
+        + ("    std::vector<ap_uint<32> > output_mem((size_t)(target_words_per_record > 0 ? target_words_per_record : 1));\n" if output_m_axi_tiled_requested else "")
+    )
     gradient_mem_decl = f"    std::vector<ap_uint<32> > gradients_mem({int(weight_words)});\n" if gradient_export_requested else ""
     optimizer_state_mem_decl = f"    std::vector<ap_uint<32> > optimizer_state_mem({optimizer_state_words});\n" if optimizer_state_export_requested else ""
     # Keep this argument order aligned with the final generated training top wrappers in
@@ -472,7 +481,7 @@ int main(int argc, char** argv) {{
     int target_words_per_record = {int(out_words)};
     if (target_words_per_record <= 0) target_words_per_record = (int)target_data.size();
 
-    hls::stream<axis_t> in_stream;
+{dynamic_movement_mem_decl}    hls::stream<axis_t> in_stream;
     hls::stream<axis_t> out_stream;
     hls::stream<axis_t> aux_stream;
 {weight_mem_decl}{input_mem_decl}{label_mem_decl}{output_mem_decl}{gradient_mem_decl}{optimizer_state_mem_decl}
@@ -600,7 +609,19 @@ int main(int argc, char** argv) {{
     summary += "  \\\"optimizer_location\\\": \\\"" + std::string({str(accumulated_batch).lower()} ? "hls_top_accumulated_optimizer" : "hls_top_step_optimizer") + "\\\",\\n";
     summary += "  \\\"weight_words\\\": " + std::to_string({int(weight_words)}) + ",\\n";
     summary += "  \\\"in_words\\\": " + std::to_string({int(in_words)}) + ",\\n";
-    summary += "  \\\"out_words\\\": " + std::to_string({int(out_words)}) + "\\n";
+    int dataset_input_records = input_words_per_record > 0 ? ((int)input_data.size() / input_words_per_record) : 0;
+    int dataset_target_records = target_words_per_record > 0 ? ((int)target_data.size() / target_words_per_record) : 0;
+    summary += "  \\\"out_words\\\": " + std::to_string({int(out_words)}) + ",\\n";
+    summary += "  \\\"dataset_input_records\\\": " + std::to_string(dataset_input_records) + ",\\n";
+    summary += "  \\\"dataset_target_records\\\": " + std::to_string(dataset_target_records) + ",\\n";
+    summary += "  \\\"dataset_records_consumed\\\": " + std::to_string(total_train_calls) + ",\\n";
+    summary += "  \\\"initial_loss\\\": " + std::string(convergence_smoke ? std::to_string(initial_loss) : "null") + ",\\n";
+    summary += "  \\\"final_loss\\\": " + std::string(convergence_smoke && !epoch_losses.empty() ? std::to_string(epoch_losses.back()) : "null") + ",\\n";
+    float grad_l1 = 0.0f; float grad_l2_sq = 0.0f; float grad_max_abs = 0.0f;
+    for (float value : last_grads) {{ float av = value < 0.0f ? -value : value; grad_l1 += av; grad_l2_sq += value * value; if (av > grad_max_abs) grad_max_abs = av; }}
+    summary += "  \\\"gradient_l1_norm\\\": " + std::to_string(grad_l1) + ",\\n";
+    summary += "  \\\"gradient_l2_norm\\\": " + std::to_string(std::sqrt(grad_l2_sq)) + ",\\n";
+    summary += "  \\\"gradient_max_abs\\\": " + std::to_string(grad_max_abs) + "\\n";
     summary += "}}\\n";
     write_text_file(join_path(out_dir, "training_multistep_summary.json"), summary);
     if (!(out_dir.empty() || out_dir == ".")) {{

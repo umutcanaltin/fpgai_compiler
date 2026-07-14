@@ -1,30 +1,33 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="900" height="456" viewBox="0 0 900 456">
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="498" viewBox="0 0 900 498">
 <rect width="100%" height="100%" fill="white"/>
 <text x="32" y="34" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#111">Training Vivado LUT by design</text>
 <text x="32" y="58" font-family="Arial, sans-serif" font-size="12" fill="#555">Implemented LUTs</text>
-<line x1="240" y1="77" x2="240" y2="357" stroke="#333" stroke-width="1"/>
+<line x1="240" y1="77" x2="240" y2="391" stroke="#333" stroke-width="1"/>
 <text x="32" y="103" font-family="Arial, sans-serif" font-size="12" fill="#222">T0_sgd_tiled_m_axi</text>
 <rect x="240" y="85" width="524.36" height="22" rx="3" fill="#4a6fa5"/>
 <text x="770.36" y="101" font-family="Arial, sans-serif" font-size="12" fill="#222">2.937e+04</text>
 <text x="32" y="137" font-family="Arial, sans-serif" font-size="12" fill="#222">T1_momentum_tiled_m_axi</text>
 <rect x="240" y="119" width="524.36" height="22" rx="3" fill="#4a6fa5"/>
 <text x="770.36" y="135" font-family="Arial, sans-serif" font-size="12" fill="#222">2.937e+04</text>
-<text x="32" y="171" font-family="Arial, sans-serif" font-size="12" fill="#222">T3_cross_entropy_tiled_m_axi</text>
-<rect x="240" y="153" width="620.00" height="22" rx="3" fill="#4a6fa5"/>
-<text x="866.00" y="169" font-family="Arial, sans-serif" font-size="12" fill="#222">3.473e+04</text>
-<text x="32" y="205" font-family="Arial, sans-serif" font-size="12" fill="#222">T4_tile32_m_axi</text>
-<rect x="240" y="187" width="517.56" height="22" rx="3" fill="#4a6fa5"/>
-<text x="763.56" y="203" font-family="Arial, sans-serif" font-size="12" fill="#222">2.899e+04</text>
-<text x="32" y="239" font-family="Arial, sans-serif" font-size="12" fill="#222">T5_tile128_m_axi</text>
-<rect x="240" y="221" width="532.36" height="22" rx="3" fill="#4a6fa5"/>
-<text x="778.36" y="237" font-family="Arial, sans-serif" font-size="12" fill="#222">2.982e+04</text>
-<text x="32" y="273" font-family="Arial, sans-serif" font-size="12" fill="#222">T6_accum_batch2_m_axi</text>
-<rect x="240" y="255" width="524.36" height="22" rx="3" fill="#4a6fa5"/>
-<text x="770.36" y="271" font-family="Arial, sans-serif" font-size="12" fill="#222">2.937e+04</text>
-<text x="32" y="307" font-family="Arial, sans-serif" font-size="12" fill="#222">T7_deployable_training_bitstream</text>
+<text x="32" y="171" font-family="Arial, sans-serif" font-size="12" fill="#222">T2_adam_tiled_m_axi</text>
+<rect x="240" y="153" width="545.66" height="22" rx="3" fill="#4a6fa5"/>
+<text x="791.66" y="169" font-family="Arial, sans-serif" font-size="12" fill="#222">3.056e+04</text>
+<text x="32" y="205" font-family="Arial, sans-serif" font-size="12" fill="#222">T3_cross_entropy_tiled_m_axi</text>
+<rect x="240" y="187" width="620.00" height="22" rx="3" fill="#4a6fa5"/>
+<text x="866.00" y="203" font-family="Arial, sans-serif" font-size="12" fill="#222">3.473e+04</text>
+<text x="32" y="239" font-family="Arial, sans-serif" font-size="12" fill="#222">T4_tile32_m_axi</text>
+<rect x="240" y="221" width="517.56" height="22" rx="3" fill="#4a6fa5"/>
+<text x="763.56" y="237" font-family="Arial, sans-serif" font-size="12" fill="#222">2.899e+04</text>
+<text x="32" y="273" font-family="Arial, sans-serif" font-size="12" fill="#222">T5_tile128_m_axi</text>
+<rect x="240" y="255" width="532.36" height="22" rx="3" fill="#4a6fa5"/>
+<text x="778.36" y="271" font-family="Arial, sans-serif" font-size="12" fill="#222">2.982e+04</text>
+<text x="32" y="307" font-family="Arial, sans-serif" font-size="12" fill="#222">T6_accum_batch2_m_axi</text>
 <rect x="240" y="289" width="524.36" height="22" rx="3" fill="#4a6fa5"/>
 <text x="770.36" y="305" font-family="Arial, sans-serif" font-size="12" fill="#222">2.937e+04</text>
-<text x="32" y="341" font-family="Arial, sans-serif" font-size="12" fill="#222">T8_real_fpga_training_curve_candid</text>
+<text x="32" y="341" font-family="Arial, sans-serif" font-size="12" fill="#222">T7_deployable_training_bitstream</text>
 <rect x="240" y="323" width="524.36" height="22" rx="3" fill="#4a6fa5"/>
 <text x="770.36" y="339" font-family="Arial, sans-serif" font-size="12" fill="#222">2.937e+04</text>
+<text x="32" y="375" font-family="Arial, sans-serif" font-size="12" fill="#222">T8_real_fpga_training_curve_candid</text>
+<rect x="240" y="357" width="524.36" height="22" rx="3" fill="#4a6fa5"/>
+<text x="770.36" y="373" font-family="Arial, sans-serif" font-size="12" fill="#222">2.937e+04</text>
 </svg>

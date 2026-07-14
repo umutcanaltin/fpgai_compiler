@@ -1,0 +1,189 @@
+version: 1
+project:
+  name: mnist_balanced10_dataset_training
+  out_dir: build/examples/training/mnist_balanced10_dataset_training
+  clean: true
+pipeline:
+  mode: training_on_device
+  outputs:
+    top_kernel_name: deeplearn
+training:
+  debug:
+    dump_intermediates: false
+  optimizer:
+    type: sgd
+    learning_rate: 0.005
+  loss:
+    type: cross_entropy
+  cache:
+    store_forward_activations: true
+    store_pre_activations: true
+    store_pool_indices: true
+    gradient_checkpointing: false
+    store_step_snapshots: true
+  estimator:
+    enabled: true
+    include_forward: true
+    include_backward_input: true
+    include_backward_params: true
+    include_update: true
+    include_buffers: true
+  phase_overrides: {}
+  batch:
+    size: 10
+    epochs: 1
+    convergence_smoke: true
+    loss_eval_records: 10
+  execution:
+    train_steps: 1
+    batch_size: 10
+    batch_mode: accumulated
+    epochs: 1
+    convergence_smoke: true
+    loss_eval_records: 10
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+operators:
+  supported:
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true
+model:
+  format: onnx
+  path: models/suite/mlp_mnist.onnx
+numerics:
+  defaults:
+    activation:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 12
+    weight:
+      type: ap_fixed
+      total_bits: 20
+      int_bits: 8
+    bias:
+      type: ap_fixed
+      total_bits: 32
+      int_bits: 16
+    accum:
+      type: ap_fixed
+      total_bits: 40
+      int_bits: 20
+  training:
+    grad:
+      type: ap_fixed
+      total_bits: 32
+      int_bits: 16
+    grad_accum:
+      type: ap_fixed
+      total_bits: 40
+      int_bits: 20
+    master_weight:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+    optimizer_state:
+      type: ap_fixed
+      total_bits: 32
+      int_bits: 16
+analysis:
+  quantization_report:
+    enabled: true
+    seed: 0
+  design_space:
+    enabled: true
+    print_terminal_summary: true
+    recommendation:
+      require_prediction_match: false
+      min_cosine: 0.95
+    performance:
+      baseline_cpu_latency_ms: 1.0
+  precision_sweep:
+    enabled: false
+data_movement:
+  ps_pl:
+    compression:
+      enabled: true
+    weights:
+      mode: embedded
+backends:
+  hls:
+    enabled: true
+    vitis:
+      enabled: true
+      mode: csim
+      exe: vitis_hls
+  host_cpp:
+    enabled: true
+debug:
+  verbose: false
+toolchain:
+  vitis_hls:
+    enabled: true
+    root: /tools/Xilinx/Vitis_HLS/2023.2
+    settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
+    install_dir: /tools/Xilinx/Vitis_HLS/2023.2
+benchmark:
+  enabled: true
+  fail_on_mismatch: false
+  seed: 0
+  compare:
+    atol: 0.25
+    rtol: 0.25
+    max_abs_error: 0.25
+    mean_abs_error: 0.1
+    rmse: 0.12
+    require_argmax_match: false
+    min_cosine_similarity: 0.9
+  intermediate:
+    enabled: true
+    fail_on_layer_mismatch: false
+    stop_on_first_bad_layer: false
+memory:
+  weight_storage: bram
+  activation_storage: bram
+  gradient_storage: bram
+  optimizer_state_storage: bram
+validation:
+  task: classification
+  dataset:
+    source: torchvision
+    name: MNIST
+    root: datasets/torchvision
+    split: test
+    download: false
+    sample_selection:
+      mode: balanced_per_class
+      count: 10
+      seed: 42
+      per_class_count: 1
+    preprocessing:
+      normalize: true
+      flatten: true
+      add_channel_dim: false
+  decision_thresholds:
+    min_prediction_agreement: 0.9
+    max_accuracy_drop_pct: 5.0
+metadata:
+  example:
+    purpose: P3D-F dataset-backed HLS training execution mechanism
+    claim_scope: compiler mechanism only; model may be untrained

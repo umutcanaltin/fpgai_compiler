@@ -356,13 +356,15 @@ def _runtime_buffer_entry(
     dtype: str = "float32",
     required_for_modes: list[int] | None = None,
     source: str | None = None,
+    logical_shape: list[int] | None = None,
 ) -> dict[str, Any]:
     resolved_words = max(1, int(words or 1))
     return {
         "name": name,
         "role": role,
         "dtype": dtype,
-        "shape": [resolved_words],
+        "shape": list(logical_shape or [resolved_words]),
+        "physical_words": resolved_words,
         "words": resolved_words,
         "bytes": resolved_words * 4,
         "direction": direction,
@@ -406,8 +408,40 @@ def _emit_runtime_buffer_plans(
         for c in commands
     )
 
-    input_words = _file_word_count(root / "input.bin") or 1
+    dataset_manifest_path = root / "validation" / "dataset" / "dataset_manifest.json"
+    dataset_manifest: dict[str, Any] = {}
+    if dataset_manifest_path.exists():
+        try:
+            loaded = json.loads(dataset_manifest_path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                dataset_manifest = loaded
+        except Exception:
+            dataset_manifest = {}
+    dataset_sample_count = max(1, int(dataset_manifest.get("sample_count") or 1))
+    dataset_input_shape = [int(v) for v in dataset_manifest.get("input_shape_per_sample", []) if int(v) > 0]
+    dataset_input_words_per_sample = int(dataset_manifest.get("input_words_per_sample") or 0)
+
+    input_words = (
+        _file_word_count(root / "validation" / "dataset" / "inputs.bin")
+        or _file_word_count(root / "input.bin")
+        or 1
+    )
     output_words = _file_word_count(root / "output.bin") or 1
+    output_values_per_sample = (
+        output_words // dataset_sample_count
+        if dataset_sample_count > 1 and output_words % dataset_sample_count == 0
+        else output_words
+    )
+    input_logical_shape = (
+        [dataset_sample_count, *dataset_input_shape]
+        if dataset_manifest and dataset_input_shape
+        else [input_words]
+    )
+    output_logical_shape = (
+        [dataset_sample_count, output_values_per_sample]
+        if dataset_sample_count > 1
+        else [output_words]
+    )
     gradient_words = (
         _file_word_count(root / "gradients_after.bin")
         or _file_word_count(root / "gradients_export.bin")
@@ -429,6 +463,7 @@ def _emit_runtime_buffer_plans(
             words=input_words,
             required_for_modes=[2, 3] if is_training else [],
             source="inputs/input.bin",
+            logical_shape=input_logical_shape,
         ),
         _runtime_buffer_entry(
             "output",
@@ -437,6 +472,7 @@ def _emit_runtime_buffer_plans(
             words=output_words,
             required_for_modes=[2, 3] if is_training else [],
             source="outputs/output.bin",
+            logical_shape=output_logical_shape,
         ),
     ]
 
@@ -493,10 +529,19 @@ def _emit_runtime_buffer_plans(
         "schema_version": 1,
         "package_kind": "fpgai_runtime_buffer_plan",
         "truth_boundary": "Generated buffer allocation/binding metadata only; real board execution still requires deployed Vivado/bitstream artifacts.",
+        "dataset": {
+            "enabled": bool(dataset_manifest),
+            "sample_count": dataset_sample_count,
+            "input_words_per_sample": dataset_input_words_per_sample or None,
+            "output_values_per_sample": output_values_per_sample,
+        },
         "buffers": list(by_name.values()),
     }
 
     mode_map = {
+        "run_inference": 0,
+        "import_weights": 1,
+        "export_weights": 2,
         "run_training": 2,
         "accumulate_gradients": 3,
         "apply_accumulated_gradients": 4,
@@ -514,6 +559,8 @@ def _emit_runtime_buffer_plans(
         capture: str | None = None
         if command == "import_weights":
             sync_before.append("weights")
+        elif command == "export_weights":
+            sync_after.append("weights")
         elif command == "run_training":
             sync_before.extend(["input", "labels"])
             sync_after.append("output")
@@ -528,6 +575,8 @@ def _emit_runtime_buffer_plans(
         elif command == "run_inference":
             sync_before.append("input")
             sync_after.append("output")
+            if dataset_sample_count > 1:
+                args["repeat"] = dataset_sample_count
         execution_items.append(
             {
                 "command": command,
@@ -1288,6 +1337,45 @@ def emit_runtime_package(
 
     root = Path(out_dir).resolve()
     package_dir = root / "runtime_package"
+
+    # Vivado/bitstream stages may refresh an already-created runtime package by
+    # calling this function with only ``out_dir``. Preserve the compiler-resolved
+    # runtime contract before replacing the package directory, otherwise the
+    # second packaging pass would silently erase the execution sequence and
+    # related metadata.
+    previous_payload: dict[str, Any] = {}
+    previous_manifest = package_dir / "package_manifest.json"
+    if previous_manifest.exists():
+        try:
+            loaded = json.loads(previous_manifest.read_text(encoding="utf-8"))
+            if isinstance(loaded, Mapping):
+                previous_payload = dict(loaded)
+        except (OSError, json.JSONDecodeError):
+            previous_payload = {}
+
+    if board is None:
+        board = previous_payload.get("board")
+    if pipeline_mode is None:
+        pipeline_mode = previous_payload.get("pipeline_mode")
+    if top_name is None:
+        top_name = previous_payload.get("top_name")
+    if weights_mode is None:
+        prior_weights = previous_payload.get("runtime_weights", {})
+        if isinstance(prior_weights, Mapping):
+            weights_mode = prior_weights.get("weights_mode")
+    if hls_artifacts is None:
+        prior_hls = previous_payload.get("hls_artifacts", {})
+        if isinstance(prior_hls, Mapping):
+            hls_artifacts = dict(prior_hls)
+    if build_stages is None:
+        prior_stages = previous_payload.get("build_stages", {})
+        if isinstance(prior_stages, Mapping):
+            build_stages = dict(prior_stages)
+    if runtime_sequence is None:
+        prior_sequence = previous_payload.get("runtime_sequence", {})
+        if isinstance(prior_sequence, Mapping):
+            runtime_sequence = dict(prior_sequence)
+
     if package_dir.exists():
         shutil.rmtree(package_dir)
     package_dir.mkdir(parents=True, exist_ok=True)

@@ -2483,3 +2483,82 @@ def test_runtime_package_validation_accepts_zero_byte_manifest_file_entry(tmp_pa
 
     assert file_checks["manifest_file_entry_present:hls_logs"]["status"] == "passed"
     assert result["failed_count"] == 0
+
+
+def test_runtime_package_dataset_batch_preserves_logical_shapes_and_repeat(tmp_path: Path) -> None:
+    import json
+    import numpy as np
+    from fpgai.runtime.package import emit_runtime_package
+
+    out = tmp_path / "dataset_batch"
+    dataset_dir = out / "validation" / "dataset"
+    dataset_dir.mkdir(parents=True)
+    np.zeros((10, 784), dtype=np.float32).tofile(dataset_dir / "inputs.bin")
+    np.zeros((100,), dtype=np.float32).tofile(out / "output.bin")
+    (dataset_dir / "dataset_manifest.json").write_text(json.dumps({
+        "sample_count": 10,
+        "input_shape_per_sample": [784],
+        "input_words_per_sample": 784,
+    }), encoding="utf-8")
+
+    emit_runtime_package(
+        out,
+        pipeline_mode="inference",
+        runtime_sequence={"sequence": [{"command": "run_inference", "args": {"repeat": 1}}]},
+    )
+
+    plan = json.loads((out / "runtime_package" / "buffer_plan.json").read_text())
+    buffers = {item["name"]: item for item in plan["buffers"]}
+    assert buffers["input"]["shape"] == [10, 784]
+    assert buffers["input"]["physical_words"] == 7840
+    assert buffers["output"]["shape"] == [10, 10]
+    assert buffers["output"]["physical_words"] == 100
+
+    execution = json.loads((out / "runtime_package" / "runtime_execution_plan.json").read_text())
+    assert execution["sequence"][0]["args"]["repeat"] == 10
+
+
+def test_runtime_package_dataset_refresh_preserves_sequence_modes_and_repeat(tmp_path: Path) -> None:
+    import json
+    import numpy as np
+    from fpgai.runtime.package import emit_runtime_package
+
+    out = tmp_path / "dataset_refresh"
+    dataset_dir = out / "validation" / "dataset"
+    dataset_dir.mkdir(parents=True)
+    np.zeros((10, 784), dtype=np.float32).tofile(dataset_dir / "inputs.bin")
+    np.zeros((100,), dtype=np.float32).tofile(out / "output.bin")
+    (dataset_dir / "dataset_manifest.json").write_text(json.dumps({
+        "sample_count": 10,
+        "input_shape_per_sample": [784],
+        "input_words_per_sample": 784,
+    }), encoding="utf-8")
+
+    emit_runtime_package(
+        out,
+        pipeline_mode="inference",
+        weights_mode="bram_import_export_full",
+        runtime_sequence={"sequence": [
+            {"command": "import_weights"},
+            {"command": "run_inference", "args": {"repeat": 1}},
+            {"command": "export_weights"},
+        ]},
+    )
+
+    # Simulate the post-Vivado refresh that only knows the output directory.
+    emit_runtime_package(out)
+
+    execution = json.loads((out / "runtime_package" / "runtime_execution_plan.json").read_text())
+    assert [item["command"] for item in execution["sequence"]] == [
+        "import_weights", "run_inference", "export_weights"
+    ]
+    assert [item["mode"] for item in execution["sequence"]] == [1, 0, 2]
+    assert execution["sequence"][0]["sync_before"] == ["weights"]
+    assert execution["sequence"][1]["args"]["repeat"] == 10
+    assert execution["sequence"][1]["sync_after"] == ["output"]
+    assert execution["sequence"][2]["sync_after"] == ["weights"]
+
+    plan = json.loads((out / "runtime_package" / "buffer_plan.json").read_text())
+    buffers = {item["name"]: item for item in plan["buffers"]}
+    assert buffers["input"]["shape"] == [10, 784]
+    assert buffers["output"]["shape"] == [10, 10]

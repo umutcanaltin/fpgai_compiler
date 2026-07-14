@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="420" viewBox="0 0 900 420">
+<rect width="100%" height="100%" fill="white"/>
+<text x="32" y="34" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#111">Training update-resource decision</text>
+<text x="32" y="58" font-family="Arial, sans-serif" font-size="12" fill="#555">x=weight-delta cosine, y=Vivado LUT</text>
+<line x1="70" y1="80" x2="70" y2="360" stroke="#333"/>
+<line x1="70" y1="360" x2="860" y2="360" stroke="#333"/>
+<text x="70" y="400" font-family="Arial, sans-serif" font-size="12" fill="#444">weight_delta_cosine</text>
+<text x="16" y="98" font-family="Arial, sans-serif" font-size="12" fill="#444" transform="rotate(-90 16,98)">vivado_lut</text>
+<path d="M 860.00 341.41 L 860.00 341.41 L 70.00 283.19 L 646.11 80.00 L 860.00 360.00 L 860.00 319.55 L 860.00 341.41 L 860.00 341.41 L 860.00 341.41" fill="none" stroke="#4a6fa5" stroke-width="3"/>
+<circle cx="860.00" cy="341.41" r="4" fill="#4a6fa5"/>
+<circle cx="860.00" cy="341.41" r="4" fill="#4a6fa5"/>
+<circle cx="70.00" cy="283.19" r="4" fill="#4a6fa5"/>
+<circle cx="646.11" cy="80.00" r="4" fill="#4a6fa5"/>
+<circle cx="860.00" cy="360.00" r="4" fill="#4a6fa5"/>
+<circle cx="860.00" cy="319.55" r="4" fill="#4a6fa5"/>
+<circle cx="860.00" cy="341.41" r="4" fill="#4a6fa5"/>
+<circle cx="860.00" cy="341.41" r="4" fill="#4a6fa5"/>
+<circle cx="860.00" cy="341.41" r="4" fill="#4a6fa5"/>
+<text x="70" y="384" font-family="Arial, sans-serif" font-size="12" fill="#444">x: 0.6845 → 0.9573</text>
+<text x="290" y="384" font-family="Arial, sans-serif" font-size="12" fill="#444">y: 2.899e+04 → 3.473e+04</text>
+</svg>

@@ -47,7 +47,7 @@ Training summary TXT : None
 Manifest             : /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I1_precision_fx8_embedded/manifest.json
 Pipeline mode        : inference
 Top kernel           : deeplearn
-Compile seconds      : 331.629423
+Compile seconds      : 366.345087
 ---------------------------------------------------
 Prediction artifacts:
   - Model profile JSON: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I1_precision_fx8_embedded/reports/model_profile.json
@@ -132,8 +132,8 @@ Hardware knob contract: available
   - Report-only: 0
 ===================================================
 ---------------------------------------------------
-Captured stdout log : build/cli_logs/20260711_220230_993746_compile_stdout.log
-Captured stderr log : build/cli_logs/20260711_220230_993746_compile_stderr.log
+Captured stdout log : build/cli_logs/20260713_105559_983365_compile_stdout.log
+Captured stderr log : build/cli_logs/20260713_105559_983365_compile_stderr.log
 [OK] Wrote artifacts to: /home/umutcanaltin/Desktop/github_projects/fpgai_compiler/build/paper_experiments/inference/I1_precision_fx8_embedded
 {
   "checks": [

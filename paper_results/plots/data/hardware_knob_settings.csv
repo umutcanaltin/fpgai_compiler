@@ -216,6 +216,24 @@ training,T1_momentum_tiled_m_axi,memory.allow_double_buffer,compiler_default,,tr
 training,T1_momentum_tiled_m_axi,targets.platform.board,manual_yaml,kv260,kv260,applied,board registry; board_fit.json; Vivado bridge board selection when requested
 training,T1_momentum_tiled_m_axi,targets.platform.clocks.0.target_mhz,manual_yaml,200,200.0,applied,compile_plan.clock_mhz; timing_prediction.json; board_fit.json clock classification; HLS/Vivado clock when backend is enabled
 training,T1_momentum_tiled_m_axi,build.fit_policy,manual_yaml,block_over_limit,enforce,changed_or_clamped,board-fit reporting now; fit_policy_gate manifest decision; Vivado/bitstream gating decision
+training,T2_adam_tiled_m_axi,optimization.parallel_policy,policy_preset,,Balanced,applied,planner.policy; compile_plan.notes.parallel_policy
+training,T2_adam_tiled_m_axi,optimization.parallel.pe,manual_yaml,1,1,applied,planner.policy.pe; layer_plan.architecture.parallelism.pe; Dense output unroll / Conv output-channel unroll; generated HLS template args and artifact comments
+training,T2_adam_tiled_m_axi,optimization.parallel.simd,manual_yaml,1,1,applied,planner.policy.simd; layer_plan.architecture.parallelism.simd; Dense input unroll / Conv input-channel unroll; generated HLS template args and artifact comments
+training,T2_adam_tiled_m_axi,optimization.parallel.unroll_factor,manual_yaml,1,1,applied,planner.policy.unroll_factor; elementwise activation unroll; FPGAI_ACT_UNROLL macro
+training,T2_adam_tiled_m_axi,optimization.parallel.partition_factor,manual_yaml,1,1,applied,planner.policy.partition_factor; layer_plan.architecture.partitioning.factor; input/output/weight/gradient partition targets; generated HLS template args and ARRAY_PARTITION factors
+training,T2_adam_tiled_m_axi,optimization.parallel.array_partition_mode,manual_yaml,none,none,applied,planner.policy.array_partition_mode; layer_plan.architecture.partitioning.mode; HLS ARRAY_PARTITION mode where supported
+training,T2_adam_tiled_m_axi,optimization.pipeline.style,manual_yaml,balanced,balanced,applied,planner.pipeline_style; layer_plan.architecture.pipeline.style; pipeline II lowering; generated HLS artifact comments
+training,T2_adam_tiled_m_axi,optimization.pipeline.ii,manual_yaml,1,1,applied,planner.pipeline_ii; layer_plan.pipeline_ii; FPGAI_PIPELINE_II macro / HLS template args
+training,T2_adam_tiled_m_axi,optimization.tiling.dense,policy_preset,,"{""in"": 8, ""out"": 4}",applied,planner dense tile selection; layer_plan.architecture.tiling; dense_tiling_codegen rewrite when Dense layers are present
+training,T2_adam_tiled_m_axi,optimization.tiling.conv,policy_preset,,,not_applicable,planner conv tile selection; layer_plan.architecture.tiling; conv_tiling_codegen rewrite when Conv layers are present
+training,T2_adam_tiled_m_axi,optimization.tiling.layers,policy_preset,,,not_requested,planner layer-specific tile selection; layer_plan.architecture.tiling for matching layer names
+training,T2_adam_tiled_m_axi,memory.weight_storage,manual_yaml,ddr,ddr,applied,memory plan; weight storage pragmas; embedded/stream/runtime weight path selection
+training,T2_adam_tiled_m_axi,memory.weight_region_preference,compiler_default,,"[""DDR"", ""BRAM"", ""URAM""]",applied,planner memory policy; layer_plan.memory.weight_region
+training,T2_adam_tiled_m_axi,memory.activation_region_preference,compiler_default,,"[""BRAM"", ""URAM"", ""DDR""]",applied,planner memory policy; layer_plan.memory.activation_region
+training,T2_adam_tiled_m_axi,memory.allow_double_buffer,compiler_default,,true,applied,planner buffering policy; layer_plan.memory.double_buffer
+training,T2_adam_tiled_m_axi,targets.platform.board,manual_yaml,kv260,kv260,applied,board registry; board_fit.json; Vivado bridge board selection when requested
+training,T2_adam_tiled_m_axi,targets.platform.clocks.0.target_mhz,manual_yaml,100,100.0,applied,compile_plan.clock_mhz; timing_prediction.json; board_fit.json clock classification; HLS/Vivado clock when backend is enabled
+training,T2_adam_tiled_m_axi,build.fit_policy,manual_yaml,block_over_limit,enforce,changed_or_clamped,board-fit reporting now; fit_policy_gate manifest decision; Vivado/bitstream gating decision
 training,T3_cross_entropy_tiled_m_axi,optimization.parallel_policy,policy_preset,,Balanced,applied,planner.policy; compile_plan.notes.parallel_policy
 training,T3_cross_entropy_tiled_m_axi,optimization.parallel.pe,manual_yaml,1,1,applied,planner.policy.pe; layer_plan.architecture.parallelism.pe; Dense output unroll / Conv output-channel unroll; generated HLS template args and artifact comments
 training,T3_cross_entropy_tiled_m_axi,optimization.parallel.simd,manual_yaml,1,1,applied,planner.policy.simd; layer_plan.architecture.parallelism.simd; Dense input unroll / Conv input-channel unroll; generated HLS template args and artifact comments
