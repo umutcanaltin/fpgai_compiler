@@ -2557,3 +2557,236 @@ Implemented observable stage-by-stage dataset training trace artifacts. The HLS 
 ## P3D-F2.5 bias-gradient semantics diagnostics
 
 Dataset-backed training validation now emits gradient comparisons aggregated by layer and parameter role. Bias gradients receive per-sample scale diagnostics against unity, batch-size, and inverse-batch-size hypotheses. These diagnostics are traceability artifacts and do not alter numerical acceptance tolerances.
+
+## P3D-F2.8 — operation-level fixed-point training reference
+
+- Replaced the former output-only gradient quantization approximation with an operation-level hardware-domain reference for the supported Dense training path.
+- The reference now mirrors generated HLS cast boundaries for Dense forward accumulation, activation storage, polynomial Softmax, fused Softmax-cross-entropy gradients, Dense backward-input accumulation, parameter-gradient storage, batch accumulation, reduction, and SGD parameter casting.
+- The float reference remains available as a separate ideal-arithmetic diagnostic.
+- Unsupported operators fail explicitly and are recorded as a fallback reason rather than being silently presented as exact hardware-domain validation.
+- Focused validation: 16 dataset-training tests passed; related execution/gradient tests passed where optional dependencies were available.
+
+## P3D-F2.9 — exported-vector semantics and exact ap_fixed cast emulation
+
+- Hardware-domain training reference now emulates the generated default `ap_fixed<W,I>` cast semantics as AP_TRN plus AP_WRAP instead of truncation-toward-zero plus saturation.
+- Negative fixed-point values therefore follow two's-complement low-bit removal, and overflow wraps in the declared storage width exactly as the generated HLS typedefs specify.
+- The SGD reference now mirrors the generated expression cast order: learning rate and gradient cast to accumulator type, multiplication in the expression domain, one final accumulator cast, then parameter-storage cast.
+- Dataset training acceptance now validates the initial parameter export before interpreting weight-delta agreement.
+- The canonical comparison records explicit vector contracts for reduced gradients and before/after parameter snapshots.
+- No numeric tolerance was relaxed.
+
+## P3D-F2.9a — inference/training compile-path isolation
+
+- Removed an accidental training-dataset execution block from `_compile_inference`; the block referenced training-only locals and caused inference compilation to fail with `NameError` when HLS source generation was enabled.
+- Consolidated canonical dataset-training execution publication in `_emit_training_dataset_execution_report`, which is called only by the training compile path.
+- Added regression coverage proving AXI-stream tiled inference compiles successfully and does not emit `training_dataset_execution.json`.
+- This is a source-ownership repair; no numerical tolerance, hardware interface, or generated training semantics changed.
+
+## P3D-F3A — memory residency and movement separation
+
+Implementation status: completed and focused-test validated.
+
+Changes:
+
+- Corrected `MemoryPlan` weight layouts so full-preload BRAM/URAM weights remain `raw` full tensors; only externally resident DDR weights are marked `tiled`.
+- Added explicit residency, source/destination residency, local staging, movement, mutability, write-back, lifetime, and representation-status fields to tensor movement entries.
+- Added `memory_residency_contract.json` and `.md` through the existing data-movement report owner.
+- Clarified that full `m_axi` preload does not imply DDR-resident compute.
+- Recorded that gradient and optimizer-state placement is still aggregate configuration rather than tensor-level IR state.
+
+Focused validation:
+
+- New focused tests: `4 passed`.
+- Data-movement/memory-residency report tests: `17 passed`.
+- Wider available memory/runtime suite: `100 passed, 12 skipped`; three unrelated example-suite tests could not run because the uploaded source archive intentionally omitted the `examples/` directory.
+
+Scientific relevance:
+
+This contract creates a formal distinction between residency and movement, which is required for later FPGAI IR contributions, memory/data-movement ablations, and fair comparison of preload, tiled-DDR, streaming, and on-chip architectures.
+
+## P3D-F3B — canonical multi-epoch dataset-training schedule
+
+Implementation status: implemented and source/focused-test validated. HLS CSim integration still requires a user tool run before the mechanism is marked CSim-validated for the target example.
+
+Mechanism:
+
+- Added one `TrainingExecutionSchedule` owner shared by the training plan, generated HLS testbench, float dataset reference, hardware-domain fixed-point reference, comparison reports, and learning-behavior reports.
+- Canonical public controls are `training.batch.size`, `epochs`, `mode`, `shuffle`, `seed`, `drop_last`, and optional `max_updates`.
+- `training.execution.train_steps` remains a deprecated compatibility alias for an explicit optimizer-update cap; it is no longer interpreted as an epoch count.
+- Epoch shuffling uses a deterministic LCG/Fisher-Yates schedule that can be reproduced in Python and generated C++ without implementation-specific random engines.
+- Multi-epoch execution separately records unique dataset records, total record visits, forward/backward calls, optimizer updates, batches per epoch, and completed epochs.
+- The accumulated-gradient baseline is reset for every batch, fixing stale cross-batch per-sample trace subtraction.
+- HLS CSim emits batch and epoch curves plus per-epoch parameter checkpoints. The compiler republishes these through canonical report paths and inventories checkpoint artifacts.
+- Float and operation-level fixed-point references execute the same epoch/batch/order schedule and retain the exact P3D-F2 one-update behavior as the default compatibility case.
+
+Artifacts:
+
+- `reports/training_epoch_curve_hls.csv`
+- `reports/training_batch_curve_hls.csv`
+- `reports/training_dataset_execution.json` schema v2
+- `training_dataset_reference/training_epoch_curve.csv`
+- `training_dataset_reference/hardware_domain/training_epoch_curve.csv`
+- HLS CSim `checkpoints/epoch_XXXX_weights.bin`
+
+Current claim boundary:
+
+- This sprint implements deterministic multi-epoch orchestration, CSim artifact generation, software/fixed-point reference execution, and comparison-count semantics.
+- It does not yet establish training convergence, generalization, real-board training, checkpoint resume, or board-measured energy/latency.
+- HLS loss curves record the configured evaluation subset; reference curves evaluate the complete normalized dataset. These scopes must not be merged without labels in paper plots.
+
+Focused validation available in this source environment:
+
+- Multi-epoch schedule/reference/testbench/report tests: passed.
+- Relevant training, movement, and configuration-materialization selection: 58 passed, 19 skipped; two unrelated tests require the omitted repository `examples/` tree.
+
+## P3D-F3B.2 — sweep failure reporting and retry semantics
+
+Implementation status: implemented and focused-test validated.
+
+- `sweep run` now returns a non-zero process status when any design point fails.
+- Failed design points are summarized in the terminal with the generated config, log paths, and a compact stderr/stdout tail.
+- Failed points are retryable under resume; only designs whose latest attempt passed are considered complete.
+- `results.jsonl` remains the append-only attempt history, while `results.json` and `results.csv` expose the latest attempt for each design.
+- Re-running an already successful sweep no longer appends synthetic `already_completed` records or inflates the design count.
+- `results.json` schema v2 records `attempt_count` and `attempt_history_jsonl` separately from the unique-design `result_count`.
+- The documented multi-epoch sweep command includes the mandatory explicit output directory.
+
+Focused validation:
+
+- Result-store and sweep-runner retry tests: 5 passed.
+- CLI source syntax validation: passed.
+- Full CLI integration remains to be executed in the user environment where ONNX Runtime is available.
+
+
+## P3D-F3C — dataset/model compatibility and experiment validity gate
+
+Implementation status: implemented and focused-test validated; full three-point HLS sweep requires the user tool environment.
+
+- Localized the failed multi-epoch sweep to a 784-word MNIST dataset being paired with the generic 8-word MLP model.
+- Added `reports/training_dataset_model_contract.json` and `.md` through the existing dataset-validation owner.
+- The gate records model input/output shapes, dataset record shapes, scalar word counts, supervision compatibility, label range, input statistics, warnings, and a conservative claim scope.
+- Training compilation now fails before reference matrix multiplication or HLS generation when the normalized dataset is incompatible with the imported graph.
+- All-zero or single-class datasets remain usable for mechanism smoke testing but are explicitly classified as `mechanism_smoke_only`.
+- Renewed the balanced MNIST training example to canonical `training.batch.*` and `training.validation.*` keys; removed duplicate deprecated `training.execution.*` fields.
+- Renewed the multi-epoch sweep to inherit the balanced torchvision MNIST example and matching `models/suite/mlp_mnist.onnx`; it no longer overrides the dataset with the synthetic `validation_data/mnist_samples.npz`.
+- The existing sweep filename is retained for compatibility, but its description and claim scope now state that the current 10-sample experiment is a learning smoke, not convergence or generalization evidence.
+
+Focused validation:
+
+- Dataset/model contract and dataset artifact tests: 4 passed.
+- Sweep/base-example contract test: 1 passed.
+
+## P3D-F3D learning-result integrity
+
+Multi-epoch training reports now expose canonical execution counts, epoch-level classification accuracy, and domain-separated HLS, operation-level fixed-point, and float-reference learning results. The headline learning decision uses the hardware-fixed-point domain. Sweep records expose the resolved compile `out_dir` directly. The current balanced ten-sample workload remains classified as a small-sample learning smoke experiment rather than a convergence/generalization result.
+
+## P3D-F3D.1 — sweep artifact contract
+
+- Generated sweep configurations now use absolute per-design output directories.
+- Sweep success requires both command success and any declared canonical artifacts.
+- `results.json` records artifact-validation status, resolved output directory, and missing artifacts.
+- The multi-epoch training sweep requires its manifest and canonical training reports before a design is considered passed.
+
+## P3D-F3D.2 — HLS CSim codegen and stage-status repair
+
+- Fixed unresolved Python template placeholders in the generated multi-epoch accuracy C++ block.
+- Added generated-source validation for the accuracy evaluation call.
+- HLS result classification now distinguishes CSim and Csynth stage status instead of relying only on the Vitis process return code.
+- Internal `csim_design` failures now set `hls_ok=false`, an effective non-zero HLS return code, and an explicit failure stage/reason.
+- Strict paper-sweep artifact validation remains enabled.
+
+### P3D-F3D.3 — target-free inference mode for training kernels
+
+- Repaired the generated training top so embedded/on-chip mode `0` emits forward predictions and returns before consuming target data.
+- Multi-epoch accuracy evaluation no longer blocks on an empty auxiliary target stream.
+- Training/loss/backward modes retain supervised target consumption.
+- Added generated-source ordering regression coverage; no empty-stream-read suppression flag is used.
+
+## P3D-F3E — fair batch-size and optimizer-budget ablations
+
+Implementation status: implemented at the sweep/schema/reporting level; HLS execution remains to be run in the user tool environment.
+
+- Added an explicit `analysis.kind=training_learning_ablation` experiment contract to the existing sweep runner/report writer.
+- The equal-exposure sweep records fixed epochs/record visits while allowing optimizer-update count to vary with batch size.
+- Added `configs/sweeps/training_batch_equal_update_budget.yml`, which holds the optimizer budget at six updates for batch sizes 2, 5, and 10 while recording the resulting difference in record exposure.
+- Added canonical `training.batch.max_updates` materialization; no deprecated `training.execution.train_steps` key is introduced.
+- Added paper-facing `training_learning_ablation_summary.csv`, `.md`, and `training_claim_eligibility.json` artifacts.
+- Summaries expose batch size, requested epochs/update cap, executed record visits, optimizer updates, domain-separated loss/accuracy, numerical validation, claim scope, board fit, and confounders.
+- Small-sample workloads remain ineligible for convergence/generalization claims even when numerical validation passes.
+- No standalone collector script was added; the existing sweep report owner generates the artifacts.
+
+## P3D-F3E.1 — strict and paired batch-ablation reporting
+
+- Added a strict equal-sample-exposure matrix for batch sizes 2, 5, and 10 at three epochs.
+- Classified primary comparison rows separately from duration controls.
+- Added loss reduction per record visit and per optimizer update, visits per update, and statistical-readiness metadata.
+- Added paired descriptive reporting that keeps equal-exposure and equal-update-budget claims separate.
+- Current small-sample, single-seed results remain ineligible for statistical, convergence, and generalization claims.
+- Focused validation: 45 tests passed.
+
+### P3D-F3E.1a — paired-summary legacy compatibility
+
+- Repaired paired batch-ablation rendering when a partner experiment was generated by
+  the earlier P3D-F3E schema and does not contain `comparison_role` or normalized/statistical columns.
+- Legacy rows are normalized conservatively; existing experiment results do not need to be rerun.
+- Regression validation: paired-report focused tests pass.
+
+## P3D-F3F1 — held-out dataset contract
+
+- Added `validation.training_validation.dataset` using the existing canonical dataset loader.
+- Added separate held-out normalization artifacts under `validation/held_out_dataset/`.
+- Added enforced train/held-out non-overlap validation using source indices.
+- Added canonical split JSON/Markdown reports with dataset hashes and class distributions.
+- Claim scope remains mechanism-only; HLS pre/post-training evaluation follows in P3D-F3F2.
+
+## P3D-F3F1a — Held-out validation schema ownership repair
+
+- Added `validation.training_validation` to the top-level configuration validator.
+- Reused the canonical `validation.dataset` schema validation for the nested held-out dataset.
+- Nested validation issues are reported under `validation.training_validation.dataset.*`.
+- Added acceptance and invalid-provider regression coverage.
+- Validation: 67 adjacent tests passed.
+
+## P3D-F3F2 — Held-out HLS evaluation
+
+Implementation status: implemented, awaiting real Vitis HLS validation.
+
+- Added separate held-out target materialization.
+- Added held-out dataset arguments to training CSim Tcl.
+- Added target-free HLS inference before and after training.
+- Added held-out loss, accuracy, correct-count, prediction, and curve artifacts.
+- Added canonical compiler publication under `reports/`.
+- Claim scope remains mechanism-only; no statistical generalization claim is enabled.
+- Validation: 69 focused/adjacent tests passed.
+
+## P3D-F4A — optimizer ownership and path-specific support status
+
+- Audited SGD, Momentum, and Adam across compiler contracts, HLS generation, single-step references, dataset-wide multi-epoch references, optimizer-state capture, and tests.
+- Corrected broad optimizer `implemented` reporting to path-specific support status.
+- SGD is classified as end-to-end multi-epoch implemented; Momentum and Adam remain partial because the canonical dataset-wide reference is currently SGD-only.
+- Added validation for stateful optimizer storage and optimizer coefficient ranges.
+- Validation: 50 adjacent tests passed in the reconstructed accepted baseline.
+
+## P3D-F4B/C — dataset-wide Momentum execution
+
+- Extended the existing canonical dataset training reference with persistent Momentum velocity across batches and epochs.
+- Added operation-level fixed-point Momentum state/update semantics using configured `optimizer_state`, `update_accum`, accumulator, gradient, and parameter precisions.
+- Added initial/final optimizer-state reference artifacts for both float and hardware domains.
+- Updated optimizer support reporting: Momentum multi-epoch reference is implemented; HLS end-to-end status remains partial pending real Vitis validation.
+- Added a compact `mnist_balanced10_momentum_training.yml` HLS validation example with mode-9 optimizer-state export.
+- Adam remains explicitly rejected by the dataset-wide reference until two-state and step-counter semantics are implemented.
+
+## P3D-F4C.1 — Live Momentum update-path repair
+
+- Diagnosed real HLS mode-9 velocity export as correctly sized but all zero.
+- Generated source showed both accumulated mode-4 and direct update paths still invoked `sgd_update_*_tiled`.
+- Added a final Momentum generated-source guard that replaces surviving typed/tiled SGD calls with updates to the same persistent velocity arrays exported by mode 9.
+- Added unresolved-SGD failure detection and exact tiled-call regression coverage.
+- Local adjacent validation: 53 passed, 16 skipped; real Vitis HLS state-vector comparison remains required.
+
+## P3D-F4C.2 — Canonical optimizer-state layout
+
+- Repaired Momentum mode-9 export ordering.
+- Export now follows canonical generated parameter order rather than state declaration order.
+- Added generated-source regression for W/B interleaving and explicit offset comments.
+- Momentum HLS support remains partial until a clean Vitis HLS rerun validates the unpermuted state vector.

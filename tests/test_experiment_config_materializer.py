@@ -158,3 +158,24 @@ def test_materializer_canonicalizes_memory_first_policy(tmp_path: Path):
 
     data = yaml.safe_load(out.read_text())
     assert data["optimization"]["parallel_policy"] == "Memory-First"
+
+
+def test_multi_epoch_training_sweep_uses_matching_real_mnist_base_contract() -> None:
+    config_path = Path("configs/sweeps/training_multi_epoch_convergence.yml")
+    data = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    defaults = data["defaults"]
+
+    assert defaults["base_config_path"] == "examples/training/mnist_balanced10_dataset_training.yml"
+    assert defaults["config_path"] == "examples/training/mnist_balanced10_dataset_training.yml"
+    assert defaults["model_path"] == "models/suite/mlp_mnist.onnx"
+    assert "dataset_path" not in defaults
+    assert "validation_data/mnist_samples.npz" not in config_path.read_text(encoding="utf-8")
+
+    base = yaml.safe_load(
+        Path(defaults["base_config_path"]).read_text(encoding="utf-8")
+    )
+    assert base["model"]["path"] == "models/suite/mlp_mnist.onnx"
+    assert base["validation"]["dataset"]["source"] == "torchvision"
+    assert base["validation"]["dataset"]["name"] == "MNIST"
+    assert base["validation"]["dataset"]["sample_selection"]["mode"] == "balanced_per_class"
+    assert "execution" not in base["training"]

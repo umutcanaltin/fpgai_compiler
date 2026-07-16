@@ -56,7 +56,8 @@ CANONICAL_KEYS: Tuple[KeySpec, ...] = (
     KeySpec("codegen.readability", "Generated C++ readability level", ("generated_cpp_readability",)),
     KeySpec("training.optimizer", "Training optimizer", ("training_optimizer_loss", "numeric_validation"), prefix=True),
     KeySpec("training.loss", "Training loss", ("training_optimizer_loss", "numeric_validation"), prefix=True),
-    KeySpec("training.batch", "Training batch controls", ("numeric_validation.batch_accumulation",), prefix=True),
+    KeySpec("training.batch", "Training batch and epoch schedule", ("numeric_validation.batch_accumulation", "training_dataset_execution"), prefix=True),
+    KeySpec("training.validation", "Training execution validation and learning-curve controls", ("training_dataset_execution", "training_learning_behavior"), prefix=True),
     KeySpec("training.accumulation", "Gradient accumulation controls", ("numeric_validation.batch_accumulation",), prefix=True),
     KeySpec("toolchain.vitis_hls", "Vitis HLS tool execution/import", ("hls_truth_artifacts",), prefix=True),
     KeySpec("toolchain.vivado", "Vivado tool execution/import", ("vivado_truth_artifacts",), prefix=True),
@@ -171,6 +172,34 @@ DEPRECATED_ALIASES: Dict[str, Dict[str, str]] = {
     "training.execution.epochs": {
         "replacement": "training.batch.epochs",
         "reason": "Execution-era training controls should move under canonical grouped training controls.",
+    },
+    "training.execution.train_steps": {
+        "replacement": "training.batch.max_updates",
+        "reason": "An explicit optimizer-update cap belongs to the canonical batch schedule and is not an epoch count.",
+    },
+    "training.execution.batch_mode": {
+        "replacement": "training.batch.mode",
+        "reason": "Epoch and mini-batch scheduling belongs under training.batch.",
+    },
+    "training.execution.shuffle": {
+        "replacement": "training.batch.shuffle",
+        "reason": "Dataset ordering belongs under the canonical training.batch schedule.",
+    },
+    "training.execution.seed": {
+        "replacement": "training.batch.seed",
+        "reason": "Dataset ordering belongs under the canonical training.batch schedule.",
+    },
+    "training.execution.drop_last": {
+        "replacement": "training.batch.drop_last",
+        "reason": "Partial-batch behavior belongs under the canonical training.batch schedule.",
+    },
+    "training.execution.convergence_smoke": {
+        "replacement": "training.validation.convergence_smoke",
+        "reason": "Learning-curve evaluation belongs under training.validation.",
+    },
+    "training.execution.loss_eval_records": {
+        "replacement": "training.validation.loss_eval_records",
+        "reason": "Learning-curve evaluation belongs under training.validation.",
     },
 }
 

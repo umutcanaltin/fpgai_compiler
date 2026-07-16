@@ -201,19 +201,27 @@ def make_memory_plan(g, descriptors: List[LayerDescriptor], compile_plan: Compil
                 policy_name=policy_name,
                 notes=cnotes,
             )
+            # Residency and movement are independent decisions.  A runtime
+            # full-preload path may use an m_axi transfer while the complete
+            # parameter tensor is still resident in local BRAM/URAM during
+            # compute.  Only external-DDR execution uses a tiled tensor layout
+            # and an optional tile-level double buffer.
+            external_tiled = region == "DDR"
             placements.append(
                 TensorPlacement(
                     tensor_name=pname,
                     kind="weight",
                     region=region,
-                    layout="tiled" if lp.weight_mode != "embedded" else "raw",
+                    layout="tiled" if external_tiled else "raw",
                     size_bytes=size_bytes,
-                    double_buffer=allow_double_buffer and lp.weight_mode in ("stream", "ddr"),
+                    double_buffer=allow_double_buffer and external_tiled,
                     producer=None,
                     consumer=lp.node_name,
                     notes={
                         "policy_name": policy_name,
                         "weight_mode": lp.weight_mode,
+                        "residency": "external_ddr" if external_tiled else "pl_on_chip",
+                        "local_staging": "tile_buffer" if external_tiled else "full_tensor",
                         "partition_factor": lp.notes.get("partition_factor"),
                         "partition_mode": lp.notes.get("partition_mode"),
                         "reason": "layer_parameter",

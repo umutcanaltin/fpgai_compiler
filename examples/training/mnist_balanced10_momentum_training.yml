@@ -1,7 +1,7 @@
 version: 1
 project:
-  name: mnist_balanced10_dataset_training
-  out_dir: build/examples/training/mnist_balanced10_dataset_training
+  name: mnist_balanced10_momentum_training
+  out_dir: build/examples/training/mnist_balanced10_momentum_training
   clean: true
 pipeline:
   mode: training_on_device
@@ -11,8 +11,9 @@ training:
   debug:
     dump_intermediates: false
   optimizer:
-    type: sgd
+    type: momentum
     learning_rate: 0.005
+    momentum: 0.9
   loss:
     type: cross_entropy
   cache:
@@ -31,7 +32,7 @@ training:
   phase_overrides: {}
   batch:
     size: 10
-    epochs: 1
+    epochs: 2
     mode: accumulated
     shuffle: false
     seed: 42
@@ -118,6 +119,11 @@ analysis:
   precision_sweep:
     enabled: false
 data_movement:
+  optimizer_state:
+    export:
+      interface: m_axi
+      transport: ps_runtime
+      policy: full
   ps_pl:
     compression:
       enabled: true
@@ -183,5 +189,5 @@ validation:
     max_accuracy_drop_pct: 5.0
 metadata:
   example:
-    purpose: P3D-F fast dataset-backed HLS training mechanism and numerical-equivalence validation
+    purpose: P3D-F4B/C multi-epoch Momentum state persistence and HLS optimizer-state validation
     claim_scope: compiler mechanism and fixed-point numerical validation only; not convergence or generalization

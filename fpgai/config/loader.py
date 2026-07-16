@@ -903,7 +903,7 @@ def _validate_validation_cfg(
         issues.append(ConfigIssue("validation", "Expected a mapping"))
         return
 
-    allowed_validation = {"task", "dataset", "decision_thresholds"}
+    allowed_validation = {"task", "dataset", "decision_thresholds", "training_validation"}
     for key in sorted(set(validation) - allowed_validation):
         issues.append(
             ConfigIssue(
@@ -911,6 +911,33 @@ def _validate_validation_cfg(
                 f"Unknown validation field {key!r}",
             )
         )
+
+    training_validation = validation.get("training_validation")
+    if training_validation is not None:
+        if not isinstance(training_validation, dict):
+            issues.append(ConfigIssue("validation.training_validation", "Expected a mapping"))
+        else:
+            allowed_training_validation = {"dataset"}
+            for key in sorted(set(training_validation) - allowed_training_validation):
+                issues.append(
+                    ConfigIssue(
+                        f"validation.training_validation.{key}",
+                        f"Unknown training validation field {key!r}",
+                    )
+                )
+            if "dataset" in training_validation:
+                nested_issues: List[ConfigIssue] = []
+                _validate_validation_cfg(
+                    {"validation": {"dataset": training_validation.get("dataset")}},
+                    nested_issues,
+                )
+                for issue in nested_issues:
+                    path = issue.path.replace(
+                        "validation.dataset",
+                        "validation.training_validation.dataset",
+                        1,
+                    )
+                    issues.append(ConfigIssue(path, issue.message))
 
     task = validation.get("task")
     if task is not None and task not in {"classification", "regression"}:

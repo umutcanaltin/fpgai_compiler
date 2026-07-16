@@ -338,18 +338,25 @@ def build_dataset_training_comparison(
 
     payload: Dict[str, Any] = {
         "artifact_kind": "fpgai_training_dataset_comparison",
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "pending_comparison",
         "passed": False,
         "limits": thresholds,
         "execution_comparison": None,
         "gradient_comparison": None,
+        "initial_weight_comparison": None,
         "weight_delta_comparison": None,
         "final_weight_comparison": None,
         "checks": [],
         "reason": "Required HLS/hardware-domain reference comparison artifacts are unavailable.",
         "decision_reference_domain": "hardware_fixed_point",
         "float_reference_diagnostics": None,
+        "vector_contracts": {
+            "gradients": "mode 4 reduced gradients after batch accumulation and before accumulator reset",
+            "weights_before": "mode 1 parameter export immediately before any training call",
+            "weights_after": "mode 1 parameter export after the final optimizer update in the resolved schedule",
+            "weight_delta": "final weights_after minus initial weights_before in the same parameter-storage domain",
+        },
     }
     if float_training_compare_result is not None:
         float_path = Path(float_training_compare_result.results_json)
@@ -374,7 +381,7 @@ def build_dataset_training_comparison(
         payload["reason"] = "Raw training comparison results contain no metrics."
         return payload
 
-    required = {"grads", "weight_delta", "weights_after"}
+    required = {"grads", "weights_before", "weight_delta", "weights_after"}
     missing = sorted(required.difference(raw))
     if missing:
         payload["reason"] = "Raw training comparison is missing sections: " + ", ".join(missing)
@@ -437,6 +444,12 @@ def build_dataset_training_comparison(
         mae_limit=thresholds["max_gradient_mae"],
         max_abs_limit=thresholds["max_gradient_max_abs"],
     )
+    payload["initial_weight_comparison"] = validate_vector(
+        "initial_weights",
+        dict(raw["weights_before"]),
+        mae_limit=thresholds["max_final_weight_mae"],
+        max_abs_limit=thresholds["max_final_weight_max_abs"],
+    )
     payload["weight_delta_comparison"] = validate_vector(
         "weight_delta",
         dict(raw["weight_delta"]),
@@ -452,22 +465,34 @@ def build_dataset_training_comparison(
 
     execution = execution_payload or {}
     reference = reference_payload or {}
-    hls_samples = int(execution.get("sample_count_executed", execution.get("dataset_records_consumed", 0)) or 0)
     requested_samples = int(execution.get("sample_count_requested", 0) or 0)
+    hls_dataset_samples = int(execution.get("dataset_input_records", requested_samples) or 0)
     reference_samples = int(reference.get("sample_count", execution.get("reference_samples_executed", 0)) or 0)
+    hls_records = int(execution.get("dataset_records_consumed", execution.get("sample_count_executed", 0)) or 0)
+    reference_records = int(reference.get("records_consumed", reference_samples) or 0)
     hls_updates = int(execution.get("optimizer_update_calls", 0) or 0)
     reference_updates = int(reference.get("optimizer_updates", 0) or 0)
-    sample_ok = requested_samples > 0 and requested_samples == hls_samples == reference_samples
+    hls_epochs = int(execution.get("epochs_completed", 1) or 0)
+    reference_epochs = int(reference.get("epochs_completed", 1) or 0)
+    sample_ok = requested_samples > 0 and requested_samples == hls_dataset_samples == reference_samples
+    records_ok = hls_records > 0 and hls_records == reference_records
     update_ok = hls_updates > 0 and hls_updates == reference_updates
-    check("execution.sample_count", [requested_samples, hls_samples, reference_samples], "all_equal_nonzero", sample_ok, "count")
+    epoch_ok = hls_epochs > 0 and hls_epochs == reference_epochs
+    check("execution.dataset_sample_count", [requested_samples, hls_dataset_samples, reference_samples], "all_equal_nonzero", sample_ok, "count")
+    check("execution.records_consumed", [hls_records, reference_records], "equal_nonzero", records_ok, "count")
     check("execution.optimizer_updates", [hls_updates, reference_updates], "equal_nonzero", update_ok, "count")
+    check("execution.epochs_completed", [hls_epochs, reference_epochs], "equal_nonzero", epoch_ok, "count")
     payload["execution_comparison"] = {
         "sample_count_requested": requested_samples,
-        "hls_samples_executed": hls_samples,
-        "reference_samples_executed": reference_samples,
+        "hls_dataset_samples": hls_dataset_samples,
+        "reference_dataset_samples": reference_samples,
+        "hls_records_consumed": hls_records,
+        "reference_records_consumed": reference_records,
         "hls_optimizer_updates": hls_updates,
         "reference_optimizer_updates": reference_updates,
-        "passed": bool(sample_ok and update_ok),
+        "hls_epochs_completed": hls_epochs,
+        "reference_epochs_completed": reference_epochs,
+        "passed": bool(sample_ok and records_ok and update_ok and epoch_ok),
     }
 
     payload["checks"] = checks

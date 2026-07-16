@@ -1,4 +1,4 @@
-name: training_multi_epoch_convergence
+name: training_batch_equal_update_budget
 command_template: PYTHONPATH=. python -B main.py compile --config {config_path}
 required_artifacts:
 - manifest.json
@@ -85,7 +85,7 @@ defaults:
   partition_factor: 2
   learning_rate: 0.005
   loss_type: cross_entropy
-  epochs: 2
+  epochs: 3
   batch_size: 2
   batch_mode: accumulated
   shuffle: true
@@ -94,27 +94,27 @@ defaults:
   convergence_smoke: true
   loss_eval_records: 10
   dump_intermediates: true
+  max_updates: 6
 design_points:
-- name: training_mlp_embedded_2epoch_b2
-  epochs: 2
-  batch_size: 2
-  seed: 42
-  comparison_role: duration_control
-- name: training_mlp_embedded_3epoch_b2
+- name: training_mlp_equal_updates6_b2
   epochs: 3
   batch_size: 2
+  max_updates: 6
   seed: 42
-  comparison_role: primary_comparison
-- name: training_mlp_embedded_3epoch_b5
+- name: training_mlp_equal_updates6_b5
   epochs: 3
   batch_size: 5
+  max_updates: 6
   seed: 42
-  comparison_role: primary_comparison
-description: Deterministic multi-epoch learning-smoke sweep on the balanced real MNIST
-  subset; not a convergence/generalization claim.
-claim_scope: HLS CSim and reference learning behavior only; real FPGA, convergence,
-  and generalization remain separate validation stages.
+- name: training_mlp_equal_updates6_b10
+  epochs: 6
+  batch_size: 10
+  max_updates: 6
+  seed: 42
+description: Deterministic small-sample training ablation with an equal six-update
+  optimizer budget and intentionally different record exposure.
+claim_scope: Mechanism-level equal-update-budget comparison only; not convergence/generalization
+  or real-FPGA evidence.
 analysis:
   kind: training_learning_ablation
-  comparison_basis: equal_sample_exposure
-  primary_epochs: 3
+  comparison_basis: equal_update_budget

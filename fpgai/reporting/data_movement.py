@@ -153,6 +153,198 @@ def _movement_cfg_for_role(raw_config: Mapping[str, Any] | None, role: str) -> d
     return cfg
 
 
+
+def _cfg_value(raw_config: Mapping[str, Any] | None, *parts: str, default: Any = None) -> Any:
+    node: Any = raw_config or {}
+    for part in parts:
+        if not isinstance(node, Mapping) or part not in node:
+            return default
+        node = node[part]
+    return node
+
+
+def _storage_for_role(
+    raw_config: Mapping[str, Any] | None,
+    role: str,
+    placement: dict[str, Any] | None,
+) -> str:
+    """Resolve physical residency separately from transfer configuration."""
+    role_u = role.lower()
+    placed = str((placement or {}).get("storage") or "").strip().lower().replace("-", "_")
+    if placed:
+        return placed
+
+    paths: dict[str, list[tuple[str, ...]]] = {
+        "weights": [
+            ("memory", "storage", "weights"),
+            ("memory", "weight_storage"),
+            ("training", "storage", "weights"),
+        ],
+        "activations": [
+            ("memory", "storage", "activations"),
+            ("memory", "activation_storage"),
+            ("training", "storage", "activations"),
+        ],
+        "gradients": [
+            ("training", "storage", "gradients"),
+            ("memory", "storage", "gradients"),
+            ("memory", "gradient_storage"),
+        ],
+        "optimizer_state": [
+            ("training", "storage", "optimizer_state"),
+            ("memory", "storage", "optimizer_state"),
+            ("memory", "optimizer_state_storage"),
+        ],
+    }
+    for path in paths.get(role_u, []):
+        value = _cfg_value(raw_config, *path, default=None)
+        if value is not None and not isinstance(value, Mapping):
+            text = str(value).strip().lower().replace("-", "_")
+            aliases = {
+                "block": "bram",
+                "block_ram": "bram",
+                "ultra": "uram",
+                "ultra_ram": "uram",
+                "external": "ddr",
+                "external_ddr": "ddr",
+                "host": "ps_or_host_memory",
+            }
+            return aliases.get(text, text)
+
+    if role_u in {"inputs", "outputs", "labels"}:
+        return "ps_or_host_memory"
+    if role_u == "weights":
+        return "bram"
+    return "bram"
+
+
+def _residency_contract_fields(
+    *,
+    role: str,
+    storage: str,
+    interface: str,
+    policy: str,
+    pipeline_mode: str,
+    weights_mode: str,
+    import_requested: bool,
+    export_requested: bool,
+    placement: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Describe residency, movement, mutability, and lifetime as separate axes.
+
+    This is intentionally a compiler contract.  It does not claim that Vivado
+    placed a buffer in the requested memory primitive or that board transfers
+    have executed successfully.
+    """
+    role_u = role.lower()
+    storage_u = str(storage or "").strip().lower().replace("-", "_")
+    interface_u = _normalise(interface)
+    policy_u = _normalise(policy, "full") or "full"
+    training = pipeline_mode == "training_on_device"
+    has_tensor_placement = placement is not None
+
+    if role_u == "weights":
+        if weights_mode in {"ddr_tiled", "ddr_tiled_mutable", "tiled", "tiled_mutable"} or storage_u == "ddr":
+            primary_residency = "external_ddr"
+            source_residency = "external_ddr"
+            local_staging = "tile_buffer"
+            movement_semantics = "tiled_fetch_and_writeback" if export_requested else "tiled_fetch"
+        elif weights_mode in {"bram_import_full", "bram_import_export_full", "uram_import_full", "uram_import_export_full", "import", "import_export"} or (interface_u == "m_axi" and policy_u == "full"):
+            primary_residency = "pl_on_chip"
+            source_residency = "external_ddr"
+            local_staging = "full_tensor_replica"
+            movement_semantics = "full_preload_and_export" if export_requested else "full_preload"
+        else:
+            primary_residency = "pl_on_chip"
+            source_residency = "compile_time_constants"
+            local_staging = "full_tensor_static"
+            movement_semantics = "compile_time_embedding"
+        compute_mutated = bool(training)
+        runtime_replaceable = bool(import_requested)
+        lifetime = "runtime_training_session" if training else "design_or_runtime_session"
+    elif role_u in {"inputs", "labels"}:
+        primary_residency = "ps_or_host_memory"
+        source_residency = "ps_or_host_memory"
+        local_staging = "pl_tile_buffer" if policy_u == "tiled" else "pl_stream_or_input_buffer"
+        movement_semantics = f"{interface_u or 'internal'}_{policy_u}_import"
+        compute_mutated = False
+        runtime_replaceable = True
+        lifetime = "one_training_record" if role_u == "labels" else "one_model_invocation"
+    elif role_u == "outputs":
+        primary_residency = "ps_or_host_memory"
+        source_residency = "pl_compute_output"
+        local_staging = "pl_tile_buffer" if policy_u == "tiled" else "pl_stream_or_output_buffer"
+        movement_semantics = f"{interface_u or 'internal'}_{policy_u}_export"
+        compute_mutated = True
+        runtime_replaceable = False
+        lifetime = "one_model_invocation"
+    elif role_u == "activations":
+        primary_residency = "external_ddr" if storage_u == "ddr" else "pl_on_chip"
+        source_residency = "pl_compute_pipeline"
+        local_staging = "tile_buffer" if storage_u == "ddr" else "full_or_layer_local_buffer"
+        movement_semantics = "internal_activation_spill_reload" if storage_u == "ddr" else "internal_on_chip_reuse"
+        compute_mutated = True
+        runtime_replaceable = False
+        lifetime = "forward_backward_step" if training else "inference_invocation"
+    elif role_u == "gradients":
+        primary_residency = "external_ddr" if storage_u == "ddr" else "pl_on_chip"
+        source_residency = "pl_backward_pipeline"
+        local_staging = "tile_or_accumulator_buffer" if storage_u == "ddr" else "gradient_accumulator"
+        movement_semantics = f"internal_accumulate_then_{interface_u}_{policy_u}_export" if export_requested else "internal_accumulate"
+        compute_mutated = True
+        runtime_replaceable = False
+        lifetime = "batch_accumulation_window"
+    elif role_u == "optimizer_state":
+        primary_residency = "external_ddr" if storage_u == "ddr" else "pl_on_chip"
+        source_residency = "runtime_initial_state"
+        local_staging = "tile_or_state_buffer" if storage_u == "ddr" else "optimizer_state_buffer"
+        movement_semantics = f"internal_update_then_{interface_u}_{policy_u}_export" if export_requested else "internal_persistent_state"
+        compute_mutated = bool(training)
+        runtime_replaceable = False
+        lifetime = "runtime_training_session"
+    else:
+        primary_residency = "unknown"
+        source_residency = "unknown"
+        local_staging = "unknown"
+        movement_semantics = "unknown"
+        compute_mutated = False
+        runtime_replaceable = False
+        lifetime = "unknown"
+
+    return {
+        "primary_residency": primary_residency,
+        "source_or_destination_residency": source_residency,
+        "local_staging": local_staging,
+        "movement_semantics": movement_semantics,
+        "compute_mutated": bool(compute_mutated),
+        "runtime_replaceable": bool(runtime_replaceable),
+        "writeback_required": bool(compute_mutated and primary_residency == "external_ddr") or bool(export_requested),
+        "lifetime": lifetime,
+        "representation_status": "tensor_level_memory_plan" if has_tensor_placement else "aggregate_config_or_runtime_contract",
+    }
+
+
+def _write_residency_md(path: Path, payload: Mapping[str, Any]) -> None:
+    rows = payload.get("tensor_classes", []) if isinstance(payload.get("tensor_classes", []), list) else []
+    lines = [
+        "# Memory residency and movement contract",
+        "",
+        "Residency, movement, mutability, and lifetime are independent compiler axes.",
+        "",
+        "| tensor class | primary residency | source/destination | local staging | movement | compute-mutated | lifetime | representation |",
+        "|---|---|---|---|---|---:|---|---|",
+    ]
+    for row in rows:
+        lines.append(
+            "| {role} | `{primary_residency}` | `{source_or_destination_residency}` | `{local_staging}` | `{movement_semantics}` | `{compute_mutated}` | `{lifetime}` | `{representation_status}` |".format(**row)
+        )
+    limitations = payload.get("limitations", []) if isinstance(payload.get("limitations", []), list) else []
+    if limitations:
+        lines.extend(["", "## Current implementation boundaries"])
+        lines.extend(f"- {item}" for item in limitations)
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 def _edge_dict(edge: Any) -> dict[str, Any]:
     if isinstance(edge, Mapping):
         return dict(edge)
@@ -275,7 +467,7 @@ def _tensor_entry(
         commands, role=role_u, pipeline_mode=pipeline_mode, weights_mode=weights_mode
     )
     cfg = _movement_cfg_for_role(raw_config, role_u)
-    storage = str((placement or {}).get("storage") or cfg.get("storage") or ("embedded" if role_u == "weights" and weights_mode in {"embedded", "bram_static"} else "host" if role_u in {"inputs", "outputs", "labels"} else "bram")).lower()
+    storage = _storage_for_role(raw_config, role_u, placement)
     interface = _normalise(cfg.get("interface") or (edge or {}).get("interface"))
     transport = _normalise(cfg.get("transport") or (edge or {}).get("transport"))
 
@@ -317,6 +509,18 @@ def _tensor_entry(
         policy = "tiled"
     tile_size = _cfg_tile_size(cfg, 64) if tiled else None
 
+    residency = _residency_contract_fields(
+        role=role_u,
+        storage=storage,
+        interface=interface,
+        policy=policy,
+        pipeline_mode=pipeline_mode,
+        weights_mode=weights_mode,
+        import_requested=bool(import_requested),
+        export_requested=bool(export_requested),
+        placement=placement,
+    )
+
     return {
         "role": role_u,
         "tensor_name": (placement or edge or {}).get("tensor_name", role_u),
@@ -329,11 +533,12 @@ def _tensor_entry(
         "tile_size": tile_size,
         "size_bytes": int((placement or edge or {}).get("size_bytes") or 0),
         "transfer_bytes": int((edge or {}).get("transfer_bytes") or (placement or {}).get("size_bytes") or 0),
-        "mutable": bool(mutable),
+        "mutable": bool(mutable or residency["compute_mutated"] or residency["runtime_replaceable"]),
         "import_requested": bool(import_requested),
         "export_requested": bool(export_requested),
         "requested": bool(requested),
         "affects_board_fit": bool(requested and interface not in {"embedded", "internal", "none", "not_requested"}),
+        **residency,
         "runtime_modes": [
             {"command": command, "mode": _RUNTIME_MODE_NUMBERS.get(command)}
             for command in sorted(commands)
@@ -427,6 +632,51 @@ def emit_data_movement_reports(
         },
     }
 
+    placement_kinds = sorted({str(getattr(item, "kind", "")).strip().lower() for item in (getattr(memory_plan, "placements", []) or []) if getattr(item, "kind", None)})
+    training_state_tensor_level = {"gradient", "optimizer_state"}.issubset(set(placement_kinds))
+    residency_payload = {
+        "schema_version": 1,
+        "artifact_kind": "memory_residency_contract",
+        "status": "available",
+        "pipeline_mode": pipeline,
+        "weights_mode": wm,
+        "axes": {
+            "residency": "where the authoritative tensor/state lives during compute",
+            "movement": "how data reaches or leaves that residency",
+            "mutability": "whether compute or runtime commands may change the state",
+            "lifetime": "the interval over which the state must persist",
+        },
+        "tensor_classes": tensor_rows,
+        "checks": {
+            "residency_and_movement_are_separate": all(bool(row.get("primary_residency")) and bool(row.get("movement_semantics")) for row in tensor_rows),
+            "ddr_weight_residency_uses_tiled_movement": not any(
+                row.get("role") == "weights"
+                and row.get("primary_residency") == "external_ddr"
+                and row.get("policy") != "tiled"
+                for row in tensor_rows
+            ),
+            "full_preload_is_classified_as_on_chip_compute_residency": not any(
+                row.get("role") == "weights"
+                and row.get("movement_semantics") in {"full_preload", "full_preload_and_export"}
+                and row.get("primary_residency") != "pl_on_chip"
+                for row in tensor_rows
+            ),
+            "training_state_has_tensor_level_memory_plan_entries": bool(training_state_tensor_level),
+        },
+        "limitations": [
+            "HOST/PS placements are logical endpoints; they do not by themselves prove a specific physical PS-DDR allocation.",
+            "BRAM/URAM placement is a compiler request until generated HLS bindings and synthesis reports confirm the realized primitive.",
+            "External-DDR execution is a paper-safe runtime claim only after generated HLS, Vivado implementation, and physical-board validation pass.",
+            *(
+                []
+                if pipeline != "training_on_device" or training_state_tensor_level
+                else [
+                    "Gradients and optimizer state are currently represented by aggregate training storage fields rather than tensor-level MemoryPlan placements; the scientific IR sprint must promote them to explicit state objects."
+                ]
+            ),
+        ],
+    }
+
     transfers = []
     for row in tensor_rows:
         if row.get("requested"):
@@ -470,8 +720,12 @@ def emit_data_movement_reports(
 
     data_json = reports_dir / "data_movement_plan.json"
     transfer_json = reports_dir / "ps_pl_transfer_plan.json"
+    residency_json = reports_dir / "memory_residency_contract.json"
+    residency_md = reports_dir / "memory_residency_contract.md"
     data_json.write_text(json.dumps(data_payload, indent=2, sort_keys=True), encoding="utf-8")
     transfer_json.write_text(json.dumps(transfer_payload, indent=2, sort_keys=True), encoding="utf-8")
+    residency_json.write_text(json.dumps(residency_payload, indent=2, sort_keys=True), encoding="utf-8")
+    _write_residency_md(residency_md, residency_payload)
     _write_md(
         reports_dir / "data_movement_plan.md",
         "Data movement plan",
@@ -490,6 +744,8 @@ def emit_data_movement_reports(
         "data_movement_plan_md": str(reports_dir / "data_movement_plan.md"),
         "ps_pl_transfer_plan_json": str(transfer_json),
         "ps_pl_transfer_plan_md": str(reports_dir / "ps_pl_transfer_plan.md"),
+        "memory_residency_contract_json": str(residency_json),
+        "memory_residency_contract_md": str(residency_md),
     }
 
 

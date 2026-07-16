@@ -16,6 +16,8 @@ def emit_csim_train_tcl(
     target_bin_path: str,
     weights_mode: str = "embedded",
     intermediate_dump: bool = False,
+    held_out_input_bin_path: str | None = None,
+    held_out_target_bin_path: str | None = None,
 ) -> str:
     """Emit the Vitis HLS TCL script for training CSim/Csynth.
 
@@ -55,6 +57,8 @@ def emit_csim_train_tcl(
     target_arg = _tcl_quote(str(Path(target_bin_path).resolve()))
     preload_arg = _tcl_quote(str(preload_bin_path))
     output_arg = _tcl_quote(output_dir)
+    held_out_input_arg = _tcl_quote(str(Path(held_out_input_bin_path).resolve())) if held_out_input_bin_path else "__FPGAI_NO_HELD_OUT__"
+    held_out_target_arg = _tcl_quote(str(Path(held_out_target_bin_path).resolve())) if held_out_target_bin_path else "__FPGAI_NO_HELD_OUT__"
 
     return f"""\
 open_project -reset fpgai_hls_proj
@@ -92,7 +96,8 @@ set_part {part}
 create_clock -period 5.0 -name default
 
 # argv[1]=input.bin argv[2]=target.bin argv[3]=runtime preload weights argv[4]=output dir
-csim_design -clean -argv "{input_arg} {target_arg} {preload_arg} {output_arg}"
+# argv[5]=held-out input.bin argv[6]=held-out target.bin
+csim_design -clean -argv "{input_arg} {target_arg} {preload_arg} {output_arg} {held_out_input_arg} {held_out_target_arg}"
 csynth_design
 export_design -format ip_catalog -description "FPGAI Neural Network Training" -vendor "fpgai" -version "1.0"
 exit

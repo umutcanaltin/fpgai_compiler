@@ -106,3 +106,29 @@ FPGAI has fully validated scalable DDR-resident large-network execution across t
 2. Run selected compile-level examples for DDR-tiled inference/training.
 3. Confirm generated HLS source, memory semantics report, runtime package metadata, and HLS/Vivado artifacts for those selected examples.
 4. Only after physical-board execution should runtime result counts move above zero.
+
+## P3D-F3A clarification: residency is not movement
+
+The compiler now treats the following as separate axes:
+
+- **Residency**: where the authoritative tensor or state lives while compute is performed.
+- **Movement**: how the tensor reaches or leaves that residency (`compile_time`, AXI stream, full `m_axi` preload, or tiled `m_axi`).
+- **Mutability**: whether accelerator computation or runtime commands may change the tensor.
+- **Lifetime**: whether the state persists for one invocation, one accumulation window, one epoch, or the runtime training session.
+
+This distinction prevents the following incorrect interpretation:
+
+> Any weight tensor transferred through DDR is a DDR-resident weight tensor.
+
+A BRAM/URAM full-preload design reads its initial payload from external DDR, but its complete working copy is on chip during compute. A DDR-tiled design keeps the authoritative parameter tensor in external memory and uses only a local tile buffer. These are different hardware architectures and must remain different in the IR, generated source, reports, and paper experiments.
+
+The same model applies independently to:
+
+- weights and biases,
+- model inputs and labels,
+- intermediate activations,
+- parameter gradients,
+- optimizer state,
+- outputs and exported checkpoints.
+
+`reports/memory_residency_contract.json` now records these axes for every tensor class. The report also records an explicit current limitation: gradients and optimizer state are still represented through aggregate training storage fields rather than tensor-level `MemoryPlan` objects. Promoting those states into the scientific FPGAI IR remains a planned IR sprint.

@@ -326,3 +326,56 @@ def test_torchvision_dataset_validation_rejects_invalid_name(tmp_path: Path) -> 
 
     with pytest.raises(ConfigError, match="validation.dataset.name"):
         load_config(str(_write_config(tmp_path, raw)))
+
+
+def test_training_validation_dataset_section_is_accepted(tmp_path: Path) -> None:
+    model_path = tmp_path / "model.onnx"
+    model_path.touch()
+    raw = _base_config(model_path)
+    raw["validation"] = {
+        "dataset": {
+            "source": "torchvision",
+            "name": "MNIST",
+            "root": "datasets",
+            "split": "train",
+            "download": False,
+            "sample_selection": {"offset": 0, "count": 50},
+            "preprocessing": {"normalize": True, "flatten": True},
+        },
+        "training_validation": {
+            "dataset": {
+                "source": "torchvision",
+                "name": "MNIST",
+                "root": "datasets",
+                "split": "train",
+                "download": False,
+                "sample_selection": {"offset": 1000, "count": 20},
+                "preprocessing": {"normalize": True, "flatten": True},
+            }
+        },
+    }
+
+    cfg = load_config(str(_write_config(tmp_path, raw)))
+    held_out = cfg.raw["validation"]["training_validation"]["dataset"]
+    assert held_out["source"] == "torchvision"
+    assert held_out["sample_selection"]["offset"] == 1000
+
+
+def test_training_validation_dataset_reuses_dataset_schema_validation(tmp_path: Path) -> None:
+    model_path = tmp_path / "model.onnx"
+    model_path.touch()
+    raw = _base_config(model_path)
+    raw["validation"] = {
+        "training_validation": {
+            "dataset": {
+                "source": "torchvision",
+                "name": "CIFAR100",
+            }
+        }
+    }
+
+    with pytest.raises(
+        ConfigError,
+        match="validation.training_validation.dataset.name",
+    ):
+        load_config(str(_write_config(tmp_path, raw)))

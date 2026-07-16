@@ -8,6 +8,7 @@ import json
 import os
 import shlex
 import subprocess
+import re
 import time
 
 import yaml
@@ -16,7 +17,11 @@ from dataclasses import replace
 from .design_matrix import DesignPoint, expand_design_matrix, load_sweep_config, render_template
 from .config_materializer import materialize_design_config
 from .result_store import ResultStore, get_git_commit
-from .report_writer import write_summary_markdown
+from .report_writer import (
+    write_paired_training_batch_ablation_reports,
+    write_summary_markdown,
+    write_training_learning_ablation_reports,
+)
 
 
 def _safe_name(name: str) -> str:
@@ -53,11 +58,65 @@ def _extract_metrics_from_paths(paths: Iterable[str | Path]) -> Dict[str, Any]:
     return metrics
 
 
+def _resolve_compile_output_dir(
+    *,
+    repo_root: Path,
+    recorded_out_dir: str | Path | None,
+    stdout: str,
+) -> Path | None:
+    """Resolve the actual compiler output directory for artifact validation.
+
+    The materialized project.out_dir is the primary contract.  The compiler's
+    terminal summary is accepted as a secondary source because older configs or
+    workflow wrappers may normalize the path before compilation.
+    """
+
+    candidates: list[Path] = []
+    match = re.search(r"^\[OK\] Wrote artifacts to:\s*(.+?)\s*$", stdout or "", re.MULTILINE)
+    if match:
+        candidates.append(Path(match.group(1).strip()))
+    if recorded_out_dir:
+        candidates.append(Path(recorded_out_dir))
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        path = candidate if candidate.is_absolute() else repo_root / candidate
+        path = path.resolve()
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        if path.exists():
+            return path
+    return None
+
+
+def _validate_required_artifacts(
+    out_dir: Path | None,
+    required_artifacts: Sequence[str],
+) -> Dict[str, Any]:
+    """Validate canonical experiment artifacts relative to the compile output."""
+
+    required = [str(item).strip().lstrip("/") for item in required_artifacts if str(item).strip()]
+    if not required:
+        return {"status": "not_requested", "required": [], "missing": [], "resolved_out_dir": str(out_dir) if out_dir else None}
+    if out_dir is None:
+        return {"status": "failed", "required": required, "missing": required, "resolved_out_dir": None}
+    missing = [item for item in required if not (out_dir / item).exists()]
+    return {
+        "status": "passed" if not missing else "failed",
+        "required": required,
+        "missing": missing,
+        "resolved_out_dir": str(out_dir),
+    }
+
+
 def _assign_design_artifact_out_dir(
     config_path: str | Path,
     *,
     experiment_dir: str | Path,
     design_name: str,
+    repo_root: str | Path | None = None,
 ) -> Dict[str, Any]:
     """Make project.out_dir unique and inside the experiment directory.
 
@@ -83,7 +142,11 @@ def _assign_design_artifact_out_dir(
         data["project"] = project
 
     safe = _safe_name(design_name)
-    artifact_dir = Path(experiment_dir) / "artifacts" / safe
+    root = Path(repo_root or Path.cwd())
+    experiment_path = Path(experiment_dir)
+    if not experiment_path.is_absolute():
+        experiment_path = root / experiment_path
+    artifact_dir = (experiment_path / "artifacts" / safe).resolve()
     build_dir = artifact_dir / "build"
     previous = project.get("out_dir")
 
@@ -111,6 +174,8 @@ class SweepRunner:
         timeout_sec: int | None = None,
         materialize_configs: Mapping[str, Any] | None = None,
         command_template: str | None = None,
+        required_artifacts: Sequence[str] | None = None,
+        analysis_config: Mapping[str, Any] | None = None,
     ) -> None:
         self.store = ResultStore(experiment_dir)
         self.repo_root = Path(repo_root or os.getcwd())
@@ -120,19 +185,37 @@ class SweepRunner:
         self.timeout_sec = timeout_sec
         self.materialize_configs = dict(materialize_configs or {})
         self.command_template = command_template
+        self.required_artifacts = [str(item) for item in (required_artifacts or [])]
+        self.analysis_config = dict(analysis_config or {})
 
     def run_points(self, points: Sequence[DesignPoint]) -> Dict[str, Any]:
         points = [self._materialize_point_config(point) for point in points]
         completed = self.store.completed_design_names() if self.resume else set()
         for point in points:
             if point.name in completed:
-                self.store.append_record(self._record_for_skipped(point, "already_completed"))
+                # A resumed sweep keeps the existing successful record as the
+                # canonical result.  Do not append synthetic "already complete"
+                # attempts, which previously inflated result counts.
                 continue
             record = self._run_one(point)
             self.store.append_record(record)
         self.store.materialize()
         payload = json.loads(self.store.results_path.read_text(encoding="utf-8"))
         write_summary_markdown(self.store.experiment_dir, payload)
+        if str(self.analysis_config.get("kind") or "") == "training_learning_ablation":
+            write_training_learning_ablation_reports(
+                self.store.experiment_dir, payload, self.analysis_config
+            )
+            paired = self.analysis_config.get("paired_experiment_dirs")
+            if isinstance(paired, Mapping) and paired:
+                resolved = {}
+                for basis, raw_path in paired.items():
+                    path = Path(str(raw_path))
+                    resolved[str(basis)] = path if path.is_absolute() else self.repo_root / path
+                write_paired_training_batch_ablation_reports(
+                    self.store.experiment_dir,
+                    resolved,
+                )
         return payload
 
 
@@ -170,6 +253,7 @@ class SweepRunner:
                 out_path,
                 experiment_dir=self.store.experiment_dir,
                 design_name=point.name,
+                repo_root=self.repo_root,
             )
             if artifact_info:
                 report.setdefault("applied", {})["project_out_dir"] = "project.out_dir"
@@ -228,6 +312,7 @@ class SweepRunner:
             record["artifact_dir"] = materialized.get("artifact_dir")
         if materialized.get("project_out_dir"):
             record["project_out_dir"] = materialized.get("project_out_dir")
+            record["out_dir"] = materialized.get("project_out_dir")
         return record
 
     def _record_for_skipped(self, point: DesignPoint, reason: str) -> Dict[str, Any]:
@@ -265,6 +350,22 @@ class SweepRunner:
             stdout_path.write_text(proc.stdout or "", encoding="utf-8")
             stderr_path.write_text(proc.stderr or "", encoding="utf-8")
             status = "passed" if proc.returncode == 0 else "failed"
+            resolved_out_dir = _resolve_compile_output_dir(
+                repo_root=self.repo_root,
+                recorded_out_dir=base.get("out_dir"),
+                stdout=proc.stdout or "",
+            )
+            artifact_validation = _validate_required_artifacts(
+                resolved_out_dir,
+                self.required_artifacts,
+            )
+            if resolved_out_dir is not None:
+                base["out_dir"] = str(resolved_out_dir)
+                base["project_out_dir"] = str(resolved_out_dir)
+            base["artifact_validation"] = artifact_validation
+            if proc.returncode == 0 and artifact_validation.get("status") == "failed":
+                status = "failed"
+
             metric_paths = []
             # Look for metrics in explicit parameter paths first.
             for key in ["metrics_json", "calibration_json", "estimate_vs_hls_json"]:
@@ -274,6 +375,9 @@ class SweepRunner:
             base.update({"status": status, "returncode": proc.returncode, "duration_sec": duration, "metrics": metrics})
             if proc.returncode != 0:
                 base["error"] = f"command failed with returncode {proc.returncode}"
+            elif artifact_validation.get("status") == "failed":
+                missing = ", ".join(artifact_validation.get("missing") or [])
+                base["error"] = f"required artifact validation failed; missing: {missing}"
             return base
         except subprocess.TimeoutExpired as exc:
             duration = time.time() - start
@@ -303,6 +407,8 @@ def run_sweep_config(
     out_dir = Path(experiment_dir or Path("experiments") / name)
     materialize_cfg = config.get("materialize_configs") or config.get("generated_configs") or {}
     command_template = config.get("command_template") or (config.get("defaults") or {}).get("command_template")
+    required_artifacts = config.get("required_artifacts") or []
+    analysis_config = config.get("analysis") or {}
     runner = SweepRunner(
         out_dir,
         dry_run=dry_run,
@@ -310,5 +416,7 @@ def run_sweep_config(
         timeout_sec=timeout_sec,
         materialize_configs=materialize_cfg,
         command_template=str(command_template) if command_template else None,
+        required_artifacts=required_artifacts,
+        analysis_config=analysis_config,
     )
     return runner.run_points(points)

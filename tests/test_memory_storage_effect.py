@@ -1206,3 +1206,35 @@ def test_training_weight_initialization_mode_expands_to_static_or_import() -> No
                 "training": {"weight_initialization": {"mode": "xavier"}},
             }
         )
+
+
+def test_runtime_full_preload_keeps_local_weight_layout_raw() -> None:
+    plan_cfg = _compile_plan("bram")
+    plan_cfg.layer_plans[0].weight_mode = "stream"
+    plan_cfg.notes["allow_double_buffer"] = True
+
+    plan = make_memory_plan(_graph(), [_descriptor()], plan_cfg)
+    weights = [placement for placement in plan.placements if placement.kind == "weight"]
+
+    assert weights
+    assert {placement.region for placement in weights} == {"BRAM"}
+    assert {placement.layout for placement in weights} == {"raw"}
+    assert all(placement.double_buffer is False for placement in weights)
+    assert all(placement.notes["residency"] == "pl_on_chip" for placement in weights)
+    assert all(placement.notes["local_staging"] == "full_tensor" for placement in weights)
+
+
+def test_external_ddr_weight_residency_uses_tiled_layout() -> None:
+    plan_cfg = _compile_plan("ddr")
+    plan_cfg.layer_plans[0].weight_mode = "ddr"
+    plan_cfg.notes["allow_double_buffer"] = True
+
+    plan = make_memory_plan(_graph(), [_descriptor()], plan_cfg)
+    weights = [placement for placement in plan.placements if placement.kind == "weight"]
+
+    assert weights
+    assert {placement.region for placement in weights} == {"DDR"}
+    assert {placement.layout for placement in weights} == {"tiled"}
+    assert all(placement.double_buffer is True for placement in weights)
+    assert all(placement.notes["residency"] == "external_ddr" for placement in weights)
+    assert all(placement.notes["local_staging"] == "tile_buffer" for placement in weights)

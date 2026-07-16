@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import importlib
 import json
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -231,17 +232,274 @@ def _load_source(dataset_cfg: dict[str, Any], *, base_dir: Path) -> tuple[np.nda
     return inputs, labels, targets, source, path, {}
 
 
+
+def _tensor_word_count(shape: Any) -> int:
+    """Return the static number of scalar values represented by a tensor shape."""
+    dims = tuple(int(value) for value in (shape or ()))
+    if not dims:
+        return 0
+    count = 1
+    for value in dims:
+        if value <= 0:
+            return 0
+        count *= value
+    return int(count)
+
+
+def emit_dataset_model_contract(
+    out_dir: str | Path,
+    *,
+    graph: Any,
+    dataset_artifacts: dict[str, Any],
+    require_supervision: bool = False,
+) -> dict[str, Any]:
+    """Validate normalized dataset records against the imported FPGAI graph.
+
+    The generated HLS testbench consumes flattened records. Therefore semantic
+    compatibility requires equal scalar word counts; the original logical shapes
+    are still recorded so future layout-aware lowering can strengthen this gate.
+    The function emits its report before callers raise on incompatibility, which
+    keeps failed experiment points diagnosable and traceable.
+    """
+    reports_dir = Path(out_dir) / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    json_path = reports_dir / "training_dataset_model_contract.json"
+    markdown_path = reports_dir / "training_dataset_model_contract.md"
+
+    checks: list[dict[str, Any]] = []
+    warnings: list[str] = []
+
+    def add_check(name: str, passed: bool, detail: str) -> None:
+        checks.append({"name": name, "passed": bool(passed), "detail": str(detail)})
+
+    dataset_status = str(dataset_artifacts.get("status") or "unknown")
+    if dataset_status != "available":
+        payload = {
+            "artifact_kind": "fpgai_training_dataset_model_contract",
+            "schema_version": 1,
+            "status": "not_available",
+            "reason": str(dataset_artifacts.get("reason") or "dataset artifacts are unavailable"),
+            "checks": checks,
+            "warnings": warnings,
+        }
+        json_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        markdown_path.write_text(
+            "# Training dataset/model contract\n\n"
+            f"- Status: `not_available`\n"
+            f"- Reason: {payload['reason']}\n",
+            encoding="utf-8",
+        )
+        return payload | {"json_path": json_path, "markdown_path": markdown_path}
+
+    graph_inputs = list(getattr(graph, "inputs", []) or [])
+    graph_outputs = list(getattr(graph, "outputs", []) or [])
+    add_check(
+        "single_model_input",
+        len(graph_inputs) == 1,
+        f"model input count={len(graph_inputs)}; dataset training currently requires exactly one input",
+    )
+    add_check(
+        "single_model_output",
+        len(graph_outputs) == 1,
+        f"model output count={len(graph_outputs)}; dataset training currently requires exactly one output",
+    )
+
+    input_name = graph_inputs[0] if len(graph_inputs) == 1 else None
+    output_name = graph_outputs[0] if len(graph_outputs) == 1 else None
+    input_spec = graph.get_tensor(input_name) if input_name is not None else None
+    output_spec = graph.get_tensor(output_name) if output_name is not None else None
+    model_input_shape = tuple(int(v) for v in (getattr(input_spec, "shape", None) or ()))
+    model_output_shape = tuple(int(v) for v in (getattr(output_spec, "shape", None) or ()))
+    model_input_words = _tensor_word_count(model_input_shape)
+    model_output_words = _tensor_word_count(model_output_shape)
+
+    dataset_input_shape = tuple(int(v) for v in (dataset_artifacts.get("input_shape") or ()))
+    dataset_input_words = int(
+        dataset_artifacts.get("input_words_per_sample")
+        or _tensor_word_count(dataset_input_shape)
+    )
+    input_compatible = model_input_words > 0 and dataset_input_words == model_input_words
+    add_check(
+        "input_word_count",
+        input_compatible,
+        (
+            f"dataset sample shape={list(dataset_input_shape)} ({dataset_input_words} words); "
+            f"model input {input_name!r} shape={list(model_input_shape)} ({model_input_words} words)"
+        ),
+    )
+
+    sample_count = int(dataset_artifacts.get("sample_count") or 0)
+    inputs_path_value = dataset_artifacts.get("inputs_path")
+    input_stats: dict[str, Any] = {}
+    if inputs_path_value:
+        inputs_path = Path(str(inputs_path_value))
+        if inputs_path.exists():
+            inputs = np.asarray(np.load(inputs_path, allow_pickle=False), dtype=np.float32)
+            flat = inputs.reshape(-1)
+            input_stats = {
+                "minimum": float(np.min(flat)) if flat.size else None,
+                "maximum": float(np.max(flat)) if flat.size else None,
+                "mean": float(np.mean(flat)) if flat.size else None,
+                "standard_deviation": float(np.std(flat)) if flat.size else None,
+                "nonzero_fraction": float(np.count_nonzero(flat) / flat.size) if flat.size else 0.0,
+            }
+            if flat.size and float(np.std(flat)) == 0.0:
+                warnings.append("dataset inputs have zero variance")
+            if flat.size and int(np.count_nonzero(flat)) == 0:
+                warnings.append("dataset inputs are all zero")
+
+    labels_path_value = dataset_artifacts.get("labels_path")
+    targets_path_value = dataset_artifacts.get("targets_path")
+    labels_summary: dict[str, Any] = {"status": "not_provided"}
+    targets_summary: dict[str, Any] = {"status": "not_provided"}
+    supervision_available = False
+
+    if labels_path_value:
+        labels_path = Path(str(labels_path_value))
+        if labels_path.exists():
+            labels = np.asarray(np.load(labels_path, allow_pickle=False), dtype=np.int64).reshape(-1)
+            classes, counts = np.unique(labels, return_counts=True)
+            labels_summary = {
+                "status": "provided",
+                "count": int(labels.size),
+                "minimum": int(labels.min()) if labels.size else None,
+                "maximum": int(labels.max()) if labels.size else None,
+                "class_count": int(classes.size),
+                "class_distribution": {str(int(k)): int(v) for k, v in zip(classes, counts)},
+            }
+            supervision_available = labels.size == sample_count
+            add_check(
+                "label_count",
+                labels.size == sample_count,
+                f"label count={labels.size}; selected sample count={sample_count}",
+            )
+            label_range_ok = (
+                labels.size > 0
+                and model_output_words > 1
+                and bool(np.all(labels >= 0))
+                and bool(np.all(labels < model_output_words))
+            )
+            add_check(
+                "label_range",
+                label_range_ok,
+                (
+                    f"label range={labels_summary['minimum']}..{labels_summary['maximum']}; "
+                    f"model output width={model_output_words}"
+                ),
+            )
+            if classes.size <= 1:
+                warnings.append("classification labels contain only one class")
+
+    if targets_path_value:
+        targets_path = Path(str(targets_path_value))
+        if targets_path.exists():
+            targets = np.asarray(np.load(targets_path, allow_pickle=False), dtype=np.float32)
+            target_words = int(np.prod(targets.shape[1:])) if targets.ndim > 1 else 1
+            targets_summary = {
+                "status": "provided",
+                "shape": [int(v) for v in targets.shape],
+                "target_words_per_sample": target_words,
+            }
+            target_count_ok = targets.ndim > 0 and int(targets.shape[0]) == sample_count
+            target_width_ok = target_words == model_output_words
+            add_check(
+                "target_count",
+                target_count_ok,
+                f"target record count={int(targets.shape[0]) if targets.ndim else 0}; selected sample count={sample_count}",
+            )
+            add_check(
+                "target_word_count",
+                target_width_ok,
+                f"target words per sample={target_words}; model output width={model_output_words}",
+            )
+            supervision_available = target_count_ok and target_width_ok
+
+    if require_supervision:
+        add_check(
+            "supervision_available",
+            supervision_available,
+            "training datasets require labels or targets compatible with the model output",
+        )
+
+    passed = all(bool(item["passed"]) for item in checks)
+    if "dataset inputs are all zero" in warnings or "classification labels contain only one class" in warnings:
+        claim_scope = "mechanism_smoke_only"
+    elif sample_count < 100:
+        claim_scope = "small_sample_learning_smoke_only"
+    else:
+        claim_scope = "learning_evaluation_candidate_requires_held_out_validation"
+
+    failed_details = [str(item["detail"]) for item in checks if not bool(item["passed"])]
+    reason = (
+        "Dataset records are compatible with the imported FPGAI graph."
+        if passed
+        else "Dataset/model compatibility failed: " + "; ".join(failed_details)
+    )
+    payload = {
+        "artifact_kind": "fpgai_training_dataset_model_contract",
+        "schema_version": 1,
+        "status": "compatible" if passed else "incompatible",
+        "reason": reason,
+        "model": {
+            "input_name": input_name,
+            "input_shape": list(model_input_shape),
+            "input_words": model_input_words,
+            "output_name": output_name,
+            "output_shape": list(model_output_shape),
+            "output_words": model_output_words,
+        },
+        "dataset": {
+            "sample_count": sample_count,
+            "input_shape_per_sample": list(dataset_input_shape),
+            "input_words_per_sample": dataset_input_words,
+            "source": str(dataset_artifacts.get("source") or "unknown"),
+            "input_statistics": input_stats,
+            "labels": labels_summary,
+            "targets": targets_summary,
+        },
+        "compatibility_basis": "flattened_scalar_word_count",
+        "claim_scope": claim_scope,
+        "checks": checks,
+        "warnings": warnings,
+    }
+    json_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    lines = [
+        "# Training dataset/model contract",
+        "",
+        f"- Status: `{payload['status']}`",
+        f"- Reason: {reason}",
+        f"- Compatibility basis: `{payload['compatibility_basis']}`",
+        f"- Claim scope: `{claim_scope}`",
+        f"- Model input: `{input_name}` `{list(model_input_shape)}` / `{model_input_words}` words",
+        f"- Dataset sample: `{list(dataset_input_shape)}` / `{dataset_input_words}` words",
+        f"- Model output: `{output_name}` `{list(model_output_shape)}` / `{model_output_words}` words",
+        "",
+        "## Checks",
+        "",
+    ]
+    for item in checks:
+        marker = "PASS" if item["passed"] else "FAIL"
+        lines.append(f"- `{marker}` `{item['name']}` — {item['detail']}")
+    if warnings:
+        lines.extend(["", "## Warnings", ""])
+        lines.extend(f"- {warning}" for warning in warnings)
+    lines.append("")
+    markdown_path.write_text("\n".join(lines), encoding="utf-8")
+    return payload | {"json_path": json_path, "markdown_path": markdown_path}
+
 def emit_dataset_artifacts(
     out_dir: str | Path,
     *,
     raw_config: dict[str, Any] | None,
     base_dir: str | Path | None = None,
+    dataset_config: dict[str, Any] | None = None,
+    artifact_subdir: str = "dataset",
 ) -> dict[str, Any]:
     raw = raw_config or {}
     validation = raw.get("validation", {}) if isinstance(raw, dict) else {}
     if not isinstance(validation, dict):
         validation = {}
-    dataset_cfg = validation.get("dataset")
+    dataset_cfg = dataset_config if isinstance(dataset_config, dict) else validation.get("dataset")
     if not isinstance(dataset_cfg, dict):
         return DatasetArtifacts(
             status="not_configured", source="not_provided", sample_count=0, input_shape=(),
@@ -250,7 +508,7 @@ def emit_dataset_artifacts(
         ).as_dict()
 
     out = Path(out_dir)
-    root = out / "validation" / "dataset"
+    root = out / "validation" / str(artifact_subdir)
     root.mkdir(parents=True, exist_ok=True)
     try:
         inputs, labels, targets, source, source_path, provenance = _load_source(
@@ -346,3 +604,124 @@ def emit_dataset_artifacts(
             input_shape=(), inputs_path=None, labels_path=None, targets_path=None,
             manifest_path=manifest_path, summary_path=None, reason=str(exc),
         ).as_dict()
+
+def emit_training_validation_dataset_artifacts(
+    out_dir: str | Path,
+    *,
+    raw_config: dict[str, Any] | None,
+    base_dir: str | Path | None = None,
+) -> dict[str, Any]:
+    """Normalize an optional held-out dataset without creating a second loader.
+
+    Configuration owner: ``validation.training_validation.dataset``.
+    The returned artifact schema matches :func:`emit_dataset_artifacts`, while
+    files are written below ``validation/held_out_dataset``.
+    """
+    raw = raw_config or {}
+    validation = raw.get("validation", {}) if isinstance(raw, dict) else {}
+    training_validation = validation.get("training_validation", {}) if isinstance(validation, dict) else {}
+    dataset_cfg = training_validation.get("dataset") if isinstance(training_validation, dict) else None
+    if not isinstance(dataset_cfg, dict):
+        return DatasetArtifacts(
+            status="not_configured", source="not_provided", sample_count=0, input_shape=(),
+            inputs_path=None, labels_path=None, targets_path=None, manifest_path=None,
+            summary_path=None, reason="validation.training_validation.dataset is not configured",
+        ).as_dict()
+    return emit_dataset_artifacts(
+        out_dir, raw_config=raw, base_dir=base_dir, dataset_config=dataset_cfg,
+        artifact_subdir="held_out_dataset",
+    )
+
+
+def _manifest_digest(path: Path | None) -> str | None:
+    if path is None or not path.exists():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def emit_training_validation_split_contract(
+    out_dir: str | Path,
+    *,
+    training_artifacts: dict[str, Any],
+    validation_artifacts: dict[str, Any],
+) -> dict[str, Any]:
+    """Publish a deterministic train/held-out split contract.
+
+    Non-overlap is checked from source identity plus selected source indices.
+    Different source files are treated as independently owned splits.
+    """
+    out = Path(out_dir)
+    reports = out / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+
+    def load_manifest(artifacts: dict[str, Any]) -> dict[str, Any]:
+        value = artifacts.get("manifest_path")
+        path = Path(value) if value else None
+        if path is None or not path.exists():
+            return {}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    train_manifest = load_manifest(training_artifacts)
+    valid_manifest = load_manifest(validation_artifacts)
+    train_status = str(training_artifacts.get("status") or "not_configured")
+    valid_status = str(validation_artifacts.get("status") or "not_configured")
+
+    train_source = str(train_manifest.get("source_path") or "")
+    valid_source = str(valid_manifest.get("source_path") or "")
+    train_indices = {int(v) for v in train_manifest.get("sample_indices", [])}
+    valid_indices = {int(v) for v in valid_manifest.get("sample_indices", [])}
+    same_source = bool(train_source and valid_source and Path(train_source).resolve() == Path(valid_source).resolve())
+    overlap = sorted(train_indices.intersection(valid_indices)) if same_source else []
+
+    if train_status != "available":
+        status = "not_available"
+        reason = "training dataset is not available"
+    elif valid_status != "available":
+        status = "not_configured" if valid_status == "not_configured" else "invalid"
+        reason = str(validation_artifacts.get("reason") or "held-out dataset is not available")
+    elif overlap:
+        status = "incompatible"
+        reason = f"training and held-out selections overlap at {len(overlap)} source record(s)"
+    else:
+        status = "compatible"
+        reason = "training and held-out dataset selections are disjoint"
+
+    payload = {
+        "artifact_kind": "fpgai_training_validation_split_contract",
+        "schema_version": 1,
+        "status": status,
+        "reason": reason,
+        "claim_scope": "held_out_validation_mechanism" if status == "compatible" else "not_available",
+        "training": {
+            "sample_count": int(training_artifacts.get("sample_count") or 0),
+            "source_path": train_source or None,
+            "sample_indices": sorted(train_indices),
+            "class_distribution": train_manifest.get("class_distribution", {}),
+            "manifest_sha256": _manifest_digest(Path(training_artifacts["manifest_path"])) if training_artifacts.get("manifest_path") else None,
+        },
+        "validation": {
+            "sample_count": int(validation_artifacts.get("sample_count") or 0),
+            "source_path": valid_source or None,
+            "sample_indices": sorted(valid_indices),
+            "class_distribution": valid_manifest.get("class_distribution", {}),
+            "manifest_sha256": _manifest_digest(Path(validation_artifacts["manifest_path"])) if validation_artifacts.get("manifest_path") else None,
+        },
+        "same_source": same_source,
+        "overlap_count": len(overlap),
+        "overlap_indices": overlap,
+        "statistical_generalization_claim": False,
+    }
+    json_path = reports / "training_validation_split_contract.json"
+    md_path = reports / "training_validation_split_contract.md"
+    json_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    md_path.write_text("\n".join([
+        "# FPGAI training/held-out validation split contract", "",
+        f"- Status: `{status}`",
+        f"- Training samples: `{payload['training']['sample_count']}`",
+        f"- Held-out samples: `{payload['validation']['sample_count']}`",
+        f"- Same source: `{same_source}`",
+        f"- Overlap count: `{len(overlap)}`",
+        f"- Claim scope: `{payload['claim_scope']}`",
+        "- Statistical generalization claim: `False`", "",
+    ]), encoding="utf-8")
+    return payload | {"json_path": str(json_path), "markdown_path": str(md_path)}

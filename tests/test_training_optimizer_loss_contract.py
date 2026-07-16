@@ -161,10 +161,24 @@ def test_training_momentum_optimizer_generates_real_update_kernel_and_reports(tm
     assert "FPGAI_MOMENTUM_B_" in source
     assert "V = momentum * V - learning_rate * dParam" in source
     assert "fpgai::sgd_update_wgt_typed" not in source
+    assert "fpgai::sgd_update_wgt_tiled<" not in source
+    assert "fpgai::sgd_update_bias_tiled<" not in source
+    mode4_start = source.index("if (mode == FPGAI_MODE_APPLY_ACCUMULATED_GRADIENTS || mode == 4)")
+    mode4_end = source.index("return;", mode4_start)
+    mode4 = source[mode4_start:mode4_end]
+    assert "FPGAI live Momentum optimizer update" in mode4
+    assert "FPGAI_MOMENTUM_W_dense0[i] =" in mode4
+    assert "FPGAI_MOMENTUM_B_dense0[i] =" in mode4
     opt = json.loads((out_dir / "reports/training_optimizer_state.json").read_text(encoding="utf-8"))
     assert opt["optimizer"]["type"] == "momentum"
     assert opt["optimizer"]["hls_update_status"] == "implemented"
     assert opt["optimizer"]["numeric_validation_status"] == "implemented"
+    assert opt["optimizer"]["support_status"]["generated_hls_update"] == "implemented"
+    assert opt["optimizer"]["support_status"]["single_step_numeric_validation"] == "implemented"
+    assert opt["optimizer"]["support_status"]["dataset_multi_epoch_reference"] == "implemented"
+    assert opt["optimizer"]["support_status"]["dataset_multi_epoch_hls"] == "implemented"
+    assert opt["optimizer"]["support_status"]["end_to_end_multi_epoch_validation"] == "implemented"
+    assert opt["optimizer"]["support_status"]["board_runtime_validation"] == "not_validated"
     assert opt["optimizer_state"]["required"] is True
 
 
@@ -195,6 +209,9 @@ def test_training_adam_optimizer_generates_real_update_kernel_and_reports(tmp_pa
     assert opt["optimizer"]["type"] == "adam"
     assert opt["optimizer"]["hls_update_status"] == "implemented"
     assert opt["optimizer"]["numeric_validation_status"] == "implemented"
+    assert opt["optimizer"]["support_status"]["generated_hls_update"] == "implemented"
+    assert opt["optimizer"]["support_status"]["dataset_multi_epoch_reference"] == "not_implemented"
+    assert opt["optimizer"]["support_status"]["end_to_end_multi_epoch_validation"] == "partial"
     assert opt["optimizer"]["beta1"] == 0.9
     assert opt["optimizer"]["beta2"] == 0.999
     assert opt["optimizer_state"]["required"] is True
@@ -310,3 +327,60 @@ def test_training_mse_does_not_emit_cross_entropy_loss_kernel_or_validation(tmp_
     assert "cross_entropy_loss_ref.json" not in source
     assert numeric["loss_validation"]["status"] == "not_requested"
     assert numeric["loss_validation"]["loss_type"] == "mse"
+
+
+def test_training_top_mode_zero_emits_prediction_before_target_read(tmp_path: Path) -> None:
+    raw = copy.deepcopy(_load_training_config())
+    raw.setdefault("project", {})["out_dir"] = str(tmp_path / "training_mode_zero_inference")
+    _cpp_only(raw)
+
+    result = _compile_raw(raw, tmp_path)
+    source = (Path(result.out_dir) / "hls/src/deeplearn.cpp").read_text(encoding="utf-8")
+
+    mode_zero = source.index("if (mode == 0)")
+    target_read = source.index("target_buf[i] = (act_t)read_f32(aux)")
+    assert mode_zero < target_read
+    between = source[mode_zero:target_read]
+    assert "write_f32(out" in between
+    assert "return;" in between
+
+
+def test_stateful_optimizer_rejects_none_storage(tmp_path: Path) -> None:
+    raw = copy.deepcopy(_load_training_config())
+    raw.setdefault("project", {})["out_dir"] = str(tmp_path / "momentum_without_state")
+    raw.setdefault("pipeline", {})["mode"] = "training_on_device"
+    raw.setdefault("training", {}).setdefault("optimizer", {})["type"] = "momentum"
+    raw["training"].setdefault("storage", {})["optimizer_state"] = "none"
+    _cpp_only(raw)
+
+    with pytest.raises(ValueError, match="requires persistent optimizer state"):
+        _compile_raw(raw, tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("optimizer_type", "field", "value", "message"),
+    [
+        ("momentum", "momentum", 1.0, "0 <= momentum < 1"),
+        ("adam", "beta1", 1.0, "0 <= beta1 < 1"),
+        ("adam", "beta2", -0.1, "0 <= beta2 < 1"),
+        ("adam", "epsilon", -1.0e-8, "epsilon must be positive"),
+    ],
+)
+def test_optimizer_parameter_ranges_are_validated(
+    tmp_path: Path,
+    optimizer_type: str,
+    field: str,
+    value: float,
+    message: str,
+) -> None:
+    raw = copy.deepcopy(_load_training_config())
+    raw.setdefault("project", {})["out_dir"] = str(tmp_path / f"invalid_{optimizer_type}_{field}")
+    raw.setdefault("pipeline", {})["mode"] = "training_on_device"
+    optimizer = raw.setdefault("training", {}).setdefault("optimizer", {})
+    optimizer["type"] = optimizer_type
+    optimizer[field] = value
+    raw["training"].setdefault("storage", {})["optimizer_state"] = "bram"
+    _cpp_only(raw)
+
+    with pytest.raises(ValueError, match=message):
+        _compile_raw(raw, tmp_path)

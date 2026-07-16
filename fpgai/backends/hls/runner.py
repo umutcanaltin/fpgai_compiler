@@ -21,6 +21,12 @@ class HLSRunResult:
     stdout_log: str
     stderr_log: str
     csynth_report: Optional[str] = None
+    csim_ran: bool | None = None
+    csim_ok: bool | None = None
+    csynth_ran: bool | None = None
+    csynth_ok: bool | None = None
+    failure_stage: Optional[str] = None
+    failure_reason: Optional[str] = None
 
 
 def _find_csynth_report(hls_dir: Path) -> Optional[str]:
@@ -127,14 +133,55 @@ def run_vitis_hls(
             t_out.join(timeout=5)
             t_err.join(timeout=5)
 
-    returncode = proc.returncode if proc.returncode is not None else (-9 if timed_out else -1)
+    raw_returncode = proc.returncode if proc.returncode is not None else (-9 if timed_out else -1)
+    stdout_text = stdout_log.read_text(encoding="utf-8", errors="replace") if stdout_log.exists() else ""
+    stderr_text = stderr_log.read_text(encoding="utf-8", errors="replace") if stderr_log.exists() else ""
+    lowered = f"{stdout_text}\n{stderr_text}".lower()
+
+    csim_ran = "csim start" in lowered or "running: csim_design" in lowered
+    csim_failed = (
+        "'csim_design' failed" in lowered
+        or "error: [sim" in lowered
+        or "err: [sim" in lowered
+    )
+    csim_ok = (not csim_failed) if csim_ran else None
+
+    csynth_ran = "running: csynth_design" in lowered
+    csynth_report = _find_csynth_report(hls_dir)
+    csynth_failed = "'csynth_design' failed" in lowered or "error: [syn" in lowered
+    csynth_ok = (not csynth_failed and csynth_report is not None) if csynth_ran else None
+
+    failure_stage = None
+    failure_reason = None
+    if timed_out:
+        failure_stage = "tool_timeout"
+        failure_reason = f"Vitis HLS timed out after {timeout_sec}s."
+    elif csim_failed:
+        failure_stage = "csim"
+        failure_reason = "Vitis HLS C simulation failed; see vitis_hls_stdout.log and the CSim report."
+    elif csynth_failed:
+        failure_stage = "csynth"
+        failure_reason = "Vitis HLS synthesis failed; see vitis_hls_stdout.log."
+    elif raw_returncode != 0:
+        failure_stage = "tool_process"
+        failure_reason = f"Vitis HLS exited with return code {raw_returncode}."
+
+    effective_returncode = raw_returncode
+    if effective_returncode == 0 and failure_stage is not None:
+        effective_returncode = 1
 
     return HLSRunResult(
-        ok=(returncode == 0),
-        returncode=returncode,
+        ok=(effective_returncode == 0 and failure_stage is None),
+        returncode=effective_returncode,
         command=command_str,
         workdir=str(hls_dir),
         stdout_log=str(stdout_log.resolve()),
         stderr_log=str(stderr_log.resolve()),
-        csynth_report=_find_csynth_report(hls_dir),
+        csynth_report=csynth_report,
+        csim_ran=csim_ran,
+        csim_ok=csim_ok,
+        csynth_ran=csynth_ran,
+        csynth_ok=csynth_ok,
+        failure_stage=failure_stage,
+        failure_reason=failure_reason,
     )

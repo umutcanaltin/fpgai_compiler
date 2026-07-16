@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import copy
 import json
 
@@ -27,6 +27,184 @@ def _deep_merge(base: Any, override: Any) -> Any:
             out[k] = _deep_merge(out.get(k), v)
         return out
     return copy.deepcopy(override if override is not None else base)
+
+
+
+
+@dataclass(frozen=True)
+class TrainingExecutionSchedule:
+    """Canonical dataset-training execution schedule.
+
+    Residency/movement choices are intentionally not encoded here.  This object
+    only defines how dataset records are grouped into optimizer updates and
+    epochs so the HLS testbench, software reference, reports, and runtime can
+    share one interpretation.
+    """
+
+    batch_size: int
+    epochs: int
+    batch_mode: str
+    shuffle: bool
+    seed: int
+    drop_last: bool
+    sample_count: Optional[int]
+    batches_per_epoch: Optional[int]
+    samples_per_epoch: Optional[int]
+    total_forward_backward_calls: Optional[int]
+    total_optimizer_updates: Optional[int]
+    explicit_train_steps: Optional[int]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "batch_size": self.batch_size,
+            "epochs": self.epochs,
+            "batch_mode": self.batch_mode,
+            "shuffle": self.shuffle,
+            "seed": self.seed,
+            "drop_last": self.drop_last,
+            "sample_count": self.sample_count,
+            "batches_per_epoch": self.batches_per_epoch,
+            "samples_per_epoch": self.samples_per_epoch,
+            "total_forward_backward_calls": self.total_forward_backward_calls,
+            "total_optimizer_updates": self.total_optimizer_updates,
+            "explicit_train_steps": self.explicit_train_steps,
+            "max_updates": self.explicit_train_steps,
+            "sampling_policy": "deterministic_shuffle" if self.shuffle else "sequential",
+            "partial_batch_policy": "drop" if self.drop_last else "include",
+        }
+
+
+def resolve_training_execution_schedule(
+    raw_cfg: Dict[str, Any],
+    *,
+    sample_count: Optional[int] = None,
+) -> TrainingExecutionSchedule:
+    """Resolve canonical epoch/batch semantics with legacy compatibility.
+
+    Canonical public keys are ``training.batch.*``.  Legacy
+    ``training.execution.train_steps`` remains supported as an explicit optimizer
+    update count, but it is never interpreted as an epoch count.
+    """
+
+    batch_size = max(1, int(_cfg_get(
+        raw_cfg,
+        "training.batch.size",
+        _cfg_get(raw_cfg, "training.execution.batch_size", _cfg_get(raw_cfg, "training.batch_size", 1)),
+    )))
+    epochs = max(1, int(_cfg_get(
+        raw_cfg,
+        "training.batch.epochs",
+        _cfg_get(raw_cfg, "training.execution.epochs", 1),
+    )))
+    batch_mode = str(_cfg_get(
+        raw_cfg,
+        "training.batch.mode",
+        _cfg_get(
+            raw_cfg,
+            "training.accumulation.mode",
+            _cfg_get(raw_cfg, "training.execution.batch_mode", "replay"),
+        ),
+    )).strip().lower().replace("-", "_")
+    shuffle = bool(_cfg_get(
+        raw_cfg,
+        "training.batch.shuffle",
+        _cfg_get(raw_cfg, "training.execution.shuffle", False),
+    ))
+    seed = int(_cfg_get(
+        raw_cfg,
+        "training.batch.seed",
+        _cfg_get(raw_cfg, "training.execution.seed", 0),
+    ))
+    drop_last = bool(_cfg_get(
+        raw_cfg,
+        "training.batch.drop_last",
+        _cfg_get(raw_cfg, "training.execution.drop_last", False),
+    ))
+    explicit = _cfg_get(
+        raw_cfg,
+        "training.batch.max_updates",
+        _cfg_get(raw_cfg, "training.execution.train_steps", None),
+    )
+    explicit_train_steps = None if explicit is None else max(1, int(explicit))
+
+    normalized_count = None if sample_count is None else max(0, int(sample_count))
+    batches_per_epoch: Optional[int] = None
+    samples_per_epoch: Optional[int] = None
+    total_calls: Optional[int] = None
+    total_updates: Optional[int] = None
+    if normalized_count is not None:
+        if normalized_count <= 0:
+            raise ValueError("Dataset training requires sample_count > 0.")
+        if drop_last:
+            batches_per_epoch = normalized_count // batch_size
+            if batches_per_epoch <= 0:
+                raise ValueError(
+                    "training.batch.drop_last=true would produce zero batches: "
+                    f"sample_count={normalized_count}, batch_size={batch_size}."
+                )
+            samples_per_epoch = batches_per_epoch * batch_size
+        else:
+            batches_per_epoch = (normalized_count + batch_size - 1) // batch_size
+            samples_per_epoch = normalized_count
+
+        natural_updates = epochs * batches_per_epoch
+        if explicit_train_steps is not None:
+            total_updates = explicit_train_steps
+            # Explicit train_steps is a legacy update-count override.  It is
+            # intentionally not multiplied by epochs.
+            full_epochs, remainder = divmod(total_updates, batches_per_epoch)
+            total_calls = full_epochs * samples_per_epoch
+            if remainder:
+                if drop_last:
+                    total_calls += remainder * batch_size
+                else:
+                    for batch_index in range(remainder):
+                        start = batch_index * batch_size
+                        total_calls += min(batch_size, normalized_count - start)
+        else:
+            total_updates = natural_updates
+            total_calls = epochs * samples_per_epoch
+
+    return TrainingExecutionSchedule(
+        batch_size=batch_size,
+        epochs=epochs,
+        batch_mode=batch_mode,
+        shuffle=shuffle,
+        seed=seed,
+        drop_last=drop_last,
+        sample_count=normalized_count,
+        batches_per_epoch=batches_per_epoch,
+        samples_per_epoch=samples_per_epoch,
+        total_forward_backward_calls=total_calls,
+        total_optimizer_updates=total_updates,
+        explicit_train_steps=explicit_train_steps,
+    )
+
+
+def training_record_order(
+    sample_count: int,
+    *,
+    epoch_index: int,
+    shuffle: bool,
+    seed: int,
+) -> List[int]:
+    """Return the deterministic record order shared with the CSim testbench.
+
+    The small LCG/Fisher-Yates implementation is deliberate: it is easy to
+    reproduce in generated C++ without depending on implementation-specific
+    standard-library random engines.
+    """
+
+    count = max(0, int(sample_count))
+    order = list(range(count))
+    if not shuffle or count <= 1:
+        return order
+    state = (int(seed) ^ (((int(epoch_index) + 1) * 0x9E3779B9) & 0xFFFFFFFF)) & 0xFFFFFFFF
+    for index in range(count - 1, 0, -1):
+        state = (state * 1664525 + 1013904223) & 0xFFFFFFFF
+        swap_index = state % (index + 1)
+        order[index], order[swap_index] = order[swap_index], order[index]
+    return order
 
 
 @dataclass(frozen=True)
@@ -250,8 +428,9 @@ def build_training_plan(graph, raw_cfg: Dict[str, Any], compile_plan=None, memor
     optimizer_type = str(_cfg_get(raw_cfg, "training.optimizer.type", "sgd")).lower()
     learning_rate = float(_cfg_get(raw_cfg, "training.optimizer.learning_rate", 0.01))
     loss_type = str(_cfg_get(raw_cfg, "training.loss.type", "mse")).lower()
-    batch_size = int(_cfg_get(raw_cfg, "training.batch.size", _cfg_get(raw_cfg, "training.execution.batch_size", 1)))
-    epochs = int(_cfg_get(raw_cfg, "training.batch.epochs", _cfg_get(raw_cfg, "training.execution.epochs", 1)))
+    execution_schedule = resolve_training_execution_schedule(raw_cfg)
+    batch_size = execution_schedule.batch_size
+    epochs = execution_schedule.epochs
 
     storage = _resolve_storage_policy(raw_cfg, compile_plan=compile_plan, memory_plan=memory_plan)
     movement_policy = _resolve_movement_policy(raw_cfg, communication_plan=communication_plan)

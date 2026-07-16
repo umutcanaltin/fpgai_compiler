@@ -115,9 +115,9 @@ def test_training_m_axi_tensor_edge_testbench_signature_matches_generated_top_or
     tb = (tmp_path / "tb.cpp").read_text(encoding="utf-8")
     signature = "".join(tb[tb.index('extern "C" void deeplearn_train('):tb.index(');', tb.index('extern "C" void deeplearn_train('))].split())
     assert "ap_uint<32>*weights_mem,ap_uint<32>*input_mem,ap_uint<32>*label_mem,ap_uint<32>*output_mem,ap_uint<32>*gradients_mem,intmode" in signature
-    assert "std::vector<ap_uint<32> > input_mem(8);" in tb
-    assert "std::vector<ap_uint<32> > label_mem(2);" in tb
-    assert "std::vector<ap_uint<32> > output_mem(2);" in tb
+    assert "std::vector<ap_uint<32> > input_mem((size_t)(input_words_per_record > 0 ? input_words_per_record : 1));" in tb
+    assert "std::vector<ap_uint<32> > label_mem((size_t)(target_words_per_record > 0 ? target_words_per_record : 1));" in tb
+    assert "std::vector<ap_uint<32> > output_mem((size_t)(target_words_per_record > 0 ? target_words_per_record : 1));" in tb
     assert "deeplearn_train(in_stream, out_stream, aux_stream, weights_mem.data(), input_mem.data(), label_mem.data(), output_mem.data(), gradients_mem.data(), 1)" in tb
     assert "deeplearn_train(in_stream, out_stream, aux_stream, weights_mem.data(), input_mem.data(), label_mem.data(), output_mem.data(), gradients_mem.data(), 2)" in tb
     assert "deeplearn_train(in_stream, out_stream, aux_stream, weights_mem.data(), input_mem.data(), label_mem.data(), output_mem.data(), gradients_mem.data(), 8)" in tb
@@ -283,3 +283,60 @@ def test_inference_runtime_weight_dataset_batch_rejects_misaligned_input_count(t
     tb = (tmp_path / "tb.cpp").read_text(encoding="utf-8")
     assert "n_floats != requested_samples * sample_words" in tb
     assert "return 5;" in tb
+
+
+def test_training_multi_epoch_accuracy_codegen_expands_all_template_tokens(tmp_path: Path) -> None:
+    emit_tb_train_cpp(
+        tmp_path,
+        graph=None,
+        top_name="deeplearn_train",
+        in_words=4,
+        out_words=2,
+        weights_mode="embedded",
+        weight_words=3,
+        preload_weights=[0.1, 0.2, 0.3],
+        training_cfg={
+            "batch": {"size": 1, "epochs": 2, "mode": "accumulated"},
+            "validation": {"convergence_smoke": True, "loss_eval_records": 2},
+        },
+        output_dir=str(tmp_path),
+        raw_cfg={},
+    )
+
+    tb = (tmp_path / "tb.cpp").read_text(encoding="utf-8")
+    assert "auto evaluate_accuracy" in tb
+    assert "deeplearn_train(in_stream, out_stream, aux_stream, 0);" in tb
+    assert 'drain_exact(out_stream, 2, "accuracy_eval")' in tb
+    for unresolved in [
+        "{eval_record_mem_pack}",
+        "{top_name}",
+        "{movement_call_args}",
+        "{int(out_words)}",
+    ]:
+        assert unresolved not in tb
+
+
+def test_training_testbench_emits_pre_post_held_out_evaluation(tmp_path: Path) -> None:
+    emit_tb_train_cpp(
+        tmp_path,
+        graph=None,
+        top_name="deeplearn",
+        in_words=4,
+        out_words=3,
+        weights_mode="embedded",
+        weight_words=6,
+        preload_weights=[0.0] * 6,
+        training_cfg={"batch": {"size": 1, "epochs": 1}},
+        raw_cfg={"training": {"batch": {"size": 1, "epochs": 1}}},
+        dataset_sample_count=2,
+        held_out_sample_count=3,
+    )
+    text = (tmp_path / "tb.cpp").read_text(encoding="utf-8")
+    assert "held_out_input_path = argc >= 6" in text
+    assert "HeldOutMetrics held_out_before = evaluate_held_out(\"before\")" in text
+    assert "HeldOutMetrics held_out_after = evaluate_held_out(\"after\")" in text
+    assert "held_out_validation_summary.json" in text
+    assert "held_out_predictions_before.csv" in text
+    assert "held_out_predictions_after.csv" in text
+    assert "held_out_curve.csv" in text
+    assert "deeplearn(in_stream, out_stream, aux_stream, 0);" in text

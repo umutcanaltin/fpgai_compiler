@@ -24,25 +24,50 @@ def spec_max_value(spec: Dict[str, Any]) -> float:
     return float(((2 ** (total_bits - 1)) - 1) / (2 ** frac_bits))
 
 
-def quantize_array(x: np.ndarray, spec: Dict[str, Any], rounding: str = "nearest") -> np.ndarray:
+def quantize_array(
+    x: np.ndarray,
+    spec: Dict[str, Any],
+    rounding: str = "nearest",
+    overflow: str = "saturate",
+) -> np.ndarray:
+    """Quantize values to a signed fixed-point storage format.
+
+    ``rounding="trunc"`` preserves the historical FPGAI behavior of
+    truncating toward zero.  Xilinx ``ap_fixed`` defaults are represented by
+    ``rounding="ap_trn"`` and ``overflow="wrap"``; AP_TRN removes low
+    bits from a two's-complement value, which is floor-like for negative
+    numbers rather than truncation toward zero.
+    """
     x = np.asarray(x, dtype=np.float32)
     scale = spec_scale(spec)
-    qmin = spec_min_value(spec)
-    qmax = spec_max_value(spec)
+    total_bits = int(spec["total_bits"])
+    qmin_int = -(2 ** (total_bits - 1))
+    qmax_int = (2 ** (total_bits - 1)) - 1
 
-    clipped = np.clip(x, qmin, qmax)
-
-    scaled = clipped * scale
+    scaled = x.astype(np.float64) * scale
     if rounding == "nearest":
         q = np.round(scaled)
     elif rounding == "trunc":
         q = np.trunc(scaled)
+    elif rounding in {"floor", "ap_trn"}:
+        q = np.floor(scaled)
     else:
         raise ValueError(f"Unsupported rounding mode: {rounding}")
 
-    y = q / scale
-    y = np.clip(y, qmin, qmax)
-    return y.astype(np.float32, copy=False)
+    if overflow in {"saturate", "clip"}:
+        q = np.clip(q, qmin_int, qmax_int)
+    elif overflow in {"wrap", "ap_wrap"}:
+        modulus = float(2 ** total_bits)
+        q = np.mod(q - qmin_int, modulus) + qmin_int
+    else:
+        raise ValueError(f"Unsupported overflow mode: {overflow}")
+
+    return (q / scale).astype(np.float32, copy=False)
+
+
+def quantize_ap_fixed_array(x: np.ndarray, spec: Dict[str, Any]) -> np.ndarray:
+    """Emulate the default ``ap_fixed<W,I>`` cast (AP_TRN, AP_WRAP)."""
+    return quantize_array(x, spec, rounding="ap_trn", overflow="ap_wrap")
 
 
 def mse(a: np.ndarray, b: np.ndarray) -> float:

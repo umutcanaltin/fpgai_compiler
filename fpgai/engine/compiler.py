@@ -20,7 +20,11 @@ from fpgai.engine.planner import make_compile_plan
 from fpgai.engine.result import CompileResult
 from fpgai.engine.partition import single_device_plan
 from fpgai.engine.layerwise_precision import resolve_layerwise_precision
-from fpgai.engine.training import build_training_plan, emit_training_artifacts
+from fpgai.engine.training import (
+    build_training_plan,
+    emit_training_artifacts,
+    resolve_training_execution_schedule,
+)
 from fpgai.analysis.model_inspection import inspect_config, write_model_inspection_report
 from fpgai.analysis.model_compatibility import emit_model_compatibility_reports
 from fpgai.analysis.resource_estimator import estimate_resources_from_descriptors
@@ -63,7 +67,12 @@ from fpgai.analysis.hls_calibration_runner import run_hls_calibration
 from fpgai.util.binio import write_f32_bin
 from fpgai.runtime.package import emit_runtime_package
 from fpgai.validation.numeric import emit_numeric_validation_report
-from fpgai.validation.dataset import emit_dataset_artifacts
+from fpgai.validation.dataset import (
+    emit_dataset_artifacts,
+    emit_dataset_model_contract,
+    emit_training_validation_dataset_artifacts,
+    emit_training_validation_split_contract,
+)
 from fpgai.paper.verification import emit_paper_verification_artifacts
 from fpgai.paper.experiment_artifacts import emit_experiment_artifact_reports
 from fpgai.backends.vivado.boards import get_board
@@ -889,7 +898,34 @@ def _resolve_training_optimizer_loss_contract(raw: Dict[str, Any]) -> Dict[str, 
     export_movement = _resolve_optimizer_state_movement(raw, "export")
 
     state_required = optimizer_type in {"momentum", "adam"}
-    hls_update_status = "implemented" if optimizer_type in {"sgd", "momentum", "adam"} else "not_implemented"
+    if state_required and storage == "none":
+        raise ValueError(
+            f"training.optimizer.type={optimizer_type!r} requires persistent optimizer state; "
+            "training.storage.optimizer_state must be bram, uram, or ddr."
+        )
+
+    momentum_value = float(_cfg_get(raw, "training.optimizer.momentum", 0.9) or 0.9)
+    beta1_value = float(_cfg_get(raw, "training.optimizer.beta1", 0.9) or 0.9)
+    beta2_value = float(_cfg_get(raw, "training.optimizer.beta2", 0.999) or 0.999)
+    epsilon_value = float(_cfg_get(raw, "training.optimizer.epsilon", 1.0e-8) or 1.0e-8)
+    if optimizer_type == "momentum" and not (0.0 <= momentum_value < 1.0):
+        raise ValueError("training.optimizer.momentum must satisfy 0 <= momentum < 1.")
+    if optimizer_type == "adam":
+        if not (0.0 <= beta1_value < 1.0):
+            raise ValueError("training.optimizer.beta1 must satisfy 0 <= beta1 < 1.")
+        if not (0.0 <= beta2_value < 1.0):
+            raise ValueError("training.optimizer.beta2 must satisfy 0 <= beta2 < 1.")
+        if epsilon_value <= 0.0:
+            raise ValueError("training.optimizer.epsilon must be positive.")
+
+    # Support is reported by execution path. SGD and Momentum now have canonical
+    # dataset-wide multi-epoch references. Adam remains single-step until its
+    # first/second-moment and step-counter state are carried across epochs.
+    dataset_multi_epoch_status = (
+        "implemented" if optimizer_type in {"sgd", "momentum"} else "not_implemented"
+    )
+    end_to_end_multi_epoch_status = "implemented" if optimizer_type in {"sgd", "momentum"} else "partial"
+    hls_update_status = "implemented"
     loss_hls_status = "implemented" if loss_type in {"mse", "cross_entropy"} else "not_implemented"
     loss_numeric_status = (
         "implemented"
@@ -899,16 +935,25 @@ def _resolve_training_optimizer_loss_contract(raw: Dict[str, Any]) -> Dict[str, 
 
     generated_state = storage in {"bram", "uram", "ddr"} or import_movement["supported"] or export_movement["supported"]
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "optimizer": {
             "type": optimizer_type,
             "learning_rate": learning_rate,
-            "momentum": float(_cfg_get(raw, "training.optimizer.momentum", 0.9) or 0.9),
-            "beta1": float(_cfg_get(raw, "training.optimizer.beta1", 0.9) or 0.9),
-            "beta2": float(_cfg_get(raw, "training.optimizer.beta2", 0.999) or 0.999),
-            "epsilon": float(_cfg_get(raw, "training.optimizer.epsilon", 1.0e-8) or 1.0e-8),
+            "momentum": momentum_value,
+            "beta1": beta1_value,
+            "beta2": beta2_value,
+            "epsilon": epsilon_value,
             "hls_update_status": hls_update_status,
-            "numeric_validation_status": "implemented" if optimizer_type in {"sgd", "momentum", "adam"} else "not_implemented",
+            "numeric_validation_status": "implemented",
+            "support_status": {
+                "generated_hls_update": "implemented",
+                "single_step_reference": "implemented",
+                "single_step_numeric_validation": "implemented",
+                "dataset_multi_epoch_reference": dataset_multi_epoch_status,
+                "dataset_multi_epoch_hls": end_to_end_multi_epoch_status,
+                "end_to_end_multi_epoch_validation": end_to_end_multi_epoch_status,
+                "board_runtime_validation": "not_validated",
+            },
         },
         "optimizer_state": {
             "required": state_required,
@@ -937,7 +982,7 @@ def _write_training_optimizer_loss_reports(out_dir: Path, raw: Dict[str, Any]) -
     opt_path = reports_dir / "training_optimizer_state.json"
     loss_path = reports_dir / "training_loss_contract.json"
     opt_payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "optimizer": contract["optimizer"],
         "optimizer_state": contract["optimizer_state"],
     }
@@ -955,7 +1000,10 @@ def _write_training_optimizer_loss_reports(out_dir: Path, raw: Dict[str, Any]) -
         f"- optimizer_state.storage: `{contract['optimizer_state']['storage']}`\n"
         f"- optimizer_state.import: `{contract['optimizer_state']['import']['resolved']}`\n"
         f"- optimizer_state.export: `{contract['optimizer_state']['export']['resolved']}`\n"
-        f"- hls_update_status: `{contract['optimizer']['hls_update_status']}`\n",
+        f"- hls_update_status: `{contract['optimizer']['hls_update_status']}`\n"
+        f"- dataset_multi_epoch_reference: `{contract['optimizer']['support_status']['dataset_multi_epoch_reference']}`\n"
+        f"- end_to_end_multi_epoch_validation: `{contract['optimizer']['support_status']['end_to_end_multi_epoch_validation']}`\n"
+        f"- board_runtime_validation: `{contract['optimizer']['support_status']['board_runtime_validation']}`\n",
         encoding="utf-8",
     )
     (reports_dir / "training_loss_contract.md").write_text(
@@ -1537,20 +1585,6 @@ class Compiler:
         ) if enable_hls else None
         host_dir: Optional[Path] = self._emit_hostcpp(out_dir, g, top_name=top_name) if enable_host else None
         hls_run = self._maybe_run_vitis_hls(hls_dir, build_stages=build_stages) if enable_hls and hls_dir is not None else None
-        if training_dataset_available and hls_dir is not None:
-            multistep_summary = self._find_file_recursive(hls_dir, "training_multistep_summary.json")
-            if multistep_summary is not None:
-                canonical_summary = out_dir / "training_multistep_summary.json"
-                canonical_summary.write_bytes(multistep_summary.read_bytes())
-                execution_payload = json.loads(multistep_summary.read_text(encoding="utf-8"))
-                execution_payload.update({
-                    "artifact_kind": "fpgai_training_dataset_execution",
-                    "schema_version": 1,
-                    "sample_count_requested": int(training_dataset_artifacts.get("sample_count") or 0),
-                    "sample_count_executed": int(execution_payload.get("dataset_records_consumed", execution_payload.get("total_train_calls", 0))),
-                    "reference_samples_executed": int(training_dataset_artifacts.get("sample_count") or 0),
-                })
-                write_text(out_dir / "reports" / "training_dataset_execution.json", json.dumps(execution_payload, indent=2) + "\n")
         hls_calibration_result = run_hls_calibration(
             out_dir=out_dir,
             raw_cfg=raw,
@@ -2005,10 +2039,37 @@ class Compiler:
             print("\n" + training_estimate_result.summary_txt.read_text(encoding="utf-8") + "\n")
 
         training_dataset_artifacts = emit_dataset_artifacts(out_dir, raw_config=raw)
+        held_out_dataset_artifacts = emit_training_validation_dataset_artifacts(
+            out_dir, raw_config=raw
+        )
+        training_validation_split_contract = emit_training_validation_split_contract(
+            out_dir,
+            training_artifacts=training_dataset_artifacts,
+            validation_artifacts=held_out_dataset_artifacts,
+        )
+        if training_validation_split_contract.get("status") == "incompatible":
+            raise ValueError(
+                "Training/held-out validation dataset contract failed: "
+                + str(training_validation_split_contract.get("reason") or "incompatible split")
+            )
+        held_out_dataset_available = held_out_dataset_artifacts.get("status") == "available"
+        if held_out_dataset_available:
+            self._emit_held_out_dataset_target(out_dir, g, held_out_dataset_artifacts)
         training_dataset_available = training_dataset_artifacts.get("status") == "available"
         dataset_inputs_matrix = None
         dataset_targets_matrix = None
         if training_dataset_available:
+            dataset_model_contract = emit_dataset_model_contract(
+                out_dir,
+                graph=g,
+                dataset_artifacts=training_dataset_artifacts,
+                require_supervision=True,
+            )
+            if dataset_model_contract.get("status") != "compatible":
+                raise ValueError(
+                    str(dataset_model_contract.get("reason") or "training dataset/model contract is incompatible")
+                    + f" See {dataset_model_contract.get('json_path')}"
+                )
             input_path = Path(training_dataset_artifacts["inputs_bin"])
             target_path = self._emit_training_dataset_target(
                 out_dir,
@@ -2031,20 +2092,30 @@ class Compiler:
             dataset_targets_matrix = all_targets.reshape(sample_count, output_words_per_sample)
             x_input = dataset_inputs_matrix[0]
             y_target = dataset_targets_matrix[0]
+            training_execution_schedule = resolve_training_execution_schedule(
+                raw, sample_count=sample_count
+            )
             training_dataset_contract = {
                 "artifact_kind": "fpgai_training_dataset_contract",
-                "schema_version": 1,
+                "schema_version": 2,
                 "status": "available",
                 "sample_count": sample_count,
                 "input_words_per_sample": input_words_per_sample,
                 "target_words_per_sample": output_words_per_sample,
                 "inputs_bin": str(input_path),
                 "targets_bin": str(target_path),
-                "reference_scope": "full_dataset_accumulated_update",
-                "reference_scope_reason": (
-                    "The software reference consumes the same ordered dataset records, "
-                    "averages accumulated gradients, and applies the same single SGD update."
+                "reference_scope": (
+                    "full_dataset_accumulated_update"
+                    if int(training_execution_schedule.total_optimizer_updates or 0) == 1
+                    else "deterministic_multi_epoch_accumulated_training"
                 ),
+                "reference_scope_reason": (
+                    "The HLS testbench and software references share the same canonical "
+                    "epoch, batch, deterministic-shuffle, and partial-batch schedule."
+                ),
+                "execution_schedule": training_execution_schedule.to_dict(),
+                "dataset_model_contract": str(dataset_model_contract.get("json_path") or ""),
+                "dataset_claim_scope": str(dataset_model_contract.get("claim_scope") or "unknown"),
             }
             write_text(
                 out_dir / "reports" / "training_dataset_contract.json",
@@ -2081,20 +2152,16 @@ class Compiler:
         ) if enable_hls else None
         host_dir: Optional[Path] = self._emit_hostcpp(out_dir, g, top_name=top_name) if enable_host else None
         hls_run = self._maybe_run_vitis_hls(hls_dir, build_stages=build_stages) if enable_hls and hls_dir is not None else None
-        if training_dataset_available and hls_dir is not None:
-            multistep_summary = self._find_file_recursive(hls_dir, "training_multistep_summary.json")
-            if multistep_summary is not None:
-                canonical_summary = out_dir / "training_multistep_summary.json"
-                canonical_summary.write_bytes(multistep_summary.read_bytes())
-                execution_payload = json.loads(multistep_summary.read_text(encoding="utf-8"))
-                execution_payload.update({
-                    "artifact_kind": "fpgai_training_dataset_execution",
-                    "schema_version": 1,
-                    "sample_count_requested": int(training_dataset_artifacts.get("sample_count") or 0),
-                    "sample_count_executed": int(execution_payload.get("dataset_records_consumed", execution_payload.get("total_train_calls", 0))),
-                    "reference_samples_executed": int(training_dataset_artifacts.get("sample_count") or 0),
-                })
-                write_text(out_dir / "reports" / "training_dataset_execution.json", json.dumps(execution_payload, indent=2) + "\n")
+        self._emit_training_dataset_execution_report(
+            out_dir=out_dir,
+            hls_dir=hls_dir,
+            training_dataset_artifacts=training_dataset_artifacts,
+        )
+        self._emit_training_validation_execution_report(
+            out_dir=out_dir,
+            hls_dir=hls_dir,
+            held_out_dataset_artifacts=held_out_dataset_artifacts,
+        )
         hls_calibration_result = run_hls_calibration(
             out_dir=out_dir,
             raw_cfg=raw,
@@ -2188,40 +2255,85 @@ class Compiler:
                 ref_per_sample_paths=[Path(str(value)) for value in (hardware_reference.get("per_sample_gradient_ref_bins") or [])],
                 ref_accumulator_paths=[Path(str(value)) for value in (hardware_reference.get("accumulator_after_ref_bins") or [])],
                 parameter_layer_map_path=(Path(str(hardware_reference.get("parameter_layer_map_json"))) if hardware_reference.get("parameter_layer_map_json") else None),
-                batch_size=int((raw.get("training", {}).get("execution", {}) or {}).get("batch_size", 1)),
+                batch_size=resolve_training_execution_schedule(
+                    raw,
+                    sample_count=int(training_dataset_artifacts.get("sample_count") or 1),
+                ).batch_size,
             )
             write_text(out_dir / "reports" / "training_gradient_by_layer.json", json.dumps(by_layer_payload, indent=2) + "\n")
             write_text(out_dir / "reports" / "training_gradient_by_role.json", json.dumps(by_role_payload, indent=2) + "\n")
-            initial_loss = float(training_reference_result.loss_before)
-            final_loss = float(training_reference_result.loss_after)
-            loss_change = final_loss - initial_loss
+            float_initial_loss = float(training_reference_result.loss_before)
+            float_final_loss = float(training_reference_result.loss_after)
+            hardware_initial_loss = float(hardware_reference.get("initial_dataset_loss", float_initial_loss))
+            hardware_final_loss = float(hardware_reference.get("final_dataset_loss", float_final_loss))
+            hls_initial_loss = execution_payload.get("initial_loss") if execution_payload else None
+            hls_final_loss = execution_payload.get("final_loss") if execution_payload else None
+            hls_initial_accuracy = execution_payload.get("initial_accuracy") if execution_payload else None
+            hls_final_accuracy = execution_payload.get("final_accuracy") if execution_payload else None
+            hardware_initial_accuracy = hardware_reference.get("initial_accuracy")
+            hardware_final_accuracy = hardware_reference.get("final_accuracy")
+            float_initial_accuracy = reference_payload.get("initial_accuracy")
+            float_final_accuracy = reference_payload.get("final_accuracy")
+            headline_initial_loss = hardware_initial_loss
+            headline_final_loss = hardware_final_loss
+            loss_change = headline_final_loss - headline_initial_loss
             loss_direction = "decreased" if loss_change < 0 else ("increased" if loss_change > 0 else "unchanged")
+            accuracy_change = None
+            accuracy_direction = "not_available"
+            if hardware_initial_accuracy is not None and hardware_final_accuracy is not None:
+                accuracy_change = float(hardware_final_accuracy) - float(hardware_initial_accuracy)
+                accuracy_direction = "increased" if accuracy_change > 0 else ("decreased" if accuracy_change < 0 else "unchanged")
             learning_payload = {
                 "artifact_kind": "fpgai_training_learning_behavior",
-                "schema_version": 1,
+                "schema_version": 2,
                 "execution_status": "passed" if (out_dir / "reports" / "training_dataset_execution.json").exists() else "not_available",
                 "numeric_validation_status": str(compare_payload.get("status", "pending_comparison")),
                 "numeric_validation_reference_domain": str(compare_payload.get("decision_reference_domain", "hardware_fixed_point")),
+                "headline_domain": "hardware_fixed_point",
                 "sample_count": int(training_dataset_artifacts.get("sample_count") or 0),
-                "optimizer_updates": 1,
-                "initial_dataset_loss": initial_loss,
-                "final_dataset_loss": final_loss,
+                "optimizer_updates": int(reference_payload.get("optimizer_updates") or 0),
+                "epochs_completed": int(reference_payload.get("epochs_completed") or 0),
+                "records_consumed": int(reference_payload.get("records_consumed") or 0),
+                "execution_schedule": reference_payload.get("execution_schedule"),
+                "initial_dataset_loss": headline_initial_loss,
+                "final_dataset_loss": headline_final_loss,
                 "loss_change": loss_change,
-                "loss_reduction": initial_loss - final_loss,
+                "loss_reduction": headline_initial_loss - headline_final_loss,
                 "loss_direction": loss_direction,
-                "learning_observed": bool(final_loss < initial_loss),
+                "learning_observed": bool(headline_final_loss < headline_initial_loss),
+                "initial_accuracy": hardware_initial_accuracy,
+                "final_accuracy": hardware_final_accuracy,
+                "accuracy_change": accuracy_change,
+                "accuracy_direction": accuracy_direction,
+                "domains": {
+                    "hls_csim": {
+                        "initial_loss": hls_initial_loss,
+                        "final_loss": hls_final_loss,
+                        "initial_accuracy": hls_initial_accuracy,
+                        "final_accuracy": hls_final_accuracy,
+                    },
+                    "hardware_fixed_point": {
+                        "initial_loss": hardware_initial_loss,
+                        "final_loss": hardware_final_loss,
+                        "initial_accuracy": hardware_initial_accuracy,
+                        "final_accuracy": hardware_final_accuracy,
+                    },
+                    "float_reference": {
+                        "initial_loss": float_initial_loss,
+                        "final_loss": float_final_loss,
+                        "initial_accuracy": float_initial_accuracy,
+                        "final_accuracy": float_final_accuracy,
+                    },
+                },
                 "convergence_claim": "not_evaluated",
-                "gradient_l1_norm": reference_payload.get("gradient_l1_norm"),
-                "gradient_l2_norm": reference_payload.get("gradient_l2_norm"),
-                "gradient_max_abs": reference_payload.get("gradient_max_abs"),
-                "weight_update_l2_norm": reference_payload.get("weight_update_l2_norm"),
+                "gradient_l1_norm": hardware_reference.get("gradient_l1_norm", reference_payload.get("gradient_l1_norm")),
+                "gradient_l2_norm": hardware_reference.get("gradient_l2_norm", reference_payload.get("gradient_l2_norm")),
+                "gradient_max_abs": hardware_reference.get("gradient_max_abs", reference_payload.get("gradient_max_abs")),
+                "weight_update_l2_norm": hardware_reference.get("weight_update_l2_norm", reference_payload.get("weight_update_l2_norm")),
                 "interpretation": (
-                    (
-                        "The HLS training operation satisfies the dataset-wide software-reference comparison checks. "
-                        if compare_payload.get("passed")
-                        else "The learning behavior is reported, but HLS/reference numerical equivalence is not yet validated. "
-                    )
-                    + "Loss direction is descriptive for this one-update workload and is not a convergence requirement."
+                    ("The HLS training operation satisfies the dataset-wide hardware-domain comparison checks. " if compare_payload.get("passed") else "Learning behavior is reported, but HLS/hardware-domain numerical equivalence is not validated. ")
+                    + "Headline loss and accuracy use the hardware-fixed-point decision domain; float-reference values are diagnostic. "
+                    + "Loss or accuracy direction alone does not establish convergence or generalization."
                 ),
             }
             learning_json = out_dir / "reports" / "training_learning_behavior.json"
@@ -2230,11 +2342,17 @@ class Compiler:
             write_text(learning_md, "\n".join([
                 "# FPGAI training learning behavior",
                 "",
+                f"- Headline domain: {learning_payload['headline_domain']}",
                 f"- Samples processed: {learning_payload['sample_count']}",
+                f"- Epochs completed: {learning_payload['epochs_completed']}",
                 f"- Optimizer updates: {learning_payload['optimizer_updates']}",
-                f"- Initial dataset loss: {initial_loss:.9g}",
-                f"- Final dataset loss: {final_loss:.9g}",
+                f"- Records consumed: {learning_payload['records_consumed']}",
+                f"- Initial dataset loss: {headline_initial_loss:.9g}",
+                f"- Final dataset loss: {headline_final_loss:.9g}",
                 f"- Loss direction: {loss_direction}",
+                f"- Initial accuracy: {hardware_initial_accuracy}",
+                f"- Final accuracy: {hardware_final_accuracy}",
+                f"- Accuracy direction: {accuracy_direction}",
                 f"- Gradient L2 norm: {learning_payload['gradient_l2_norm']}",
                 f"- Weight-update L2 norm: {learning_payload['weight_update_l2_norm']}",
                 f"- Numerical validation: {learning_payload['numeric_validation_status']}",
@@ -2403,6 +2521,8 @@ class Compiler:
             _preserved_validation_dir / "optimizer_state_before_ref.bin",
             _preserved_validation_dir / "reference" / "optimizer_state_before_ref.bin",
             _preserved_validation_dir / "runtime_package" / "reference" / "optimizer_state_before_ref.bin",
+            out_dir / "training_dataset_reference" / "hardware_domain" / "optimizer_state_before_ref.bin",
+            out_dir / "hardware_domain" / "optimizer_state_before_ref.bin",
             out_dir / "training_reference" / "optimizer_state_before_ref.bin",
             out_dir / "optimizer_state_before_ref.bin",
             out_dir / "reference" / "optimizer_state_before_ref.bin",
@@ -2413,6 +2533,8 @@ class Compiler:
             _preserved_validation_dir / "optimizer_state_after_ref.bin",
             _preserved_validation_dir / "reference" / "optimizer_state_after_ref.bin",
             _preserved_validation_dir / "runtime_package" / "reference" / "optimizer_state_after_ref.bin",
+            out_dir / "training_dataset_reference" / "hardware_domain" / "optimizer_state_after_ref.bin",
+            out_dir / "hardware_domain" / "optimizer_state_after_ref.bin",
             out_dir / "training_reference" / "optimizer_state_after_ref.bin",
             out_dir / "optimizer_state_after_ref.bin",
             out_dir / "reference" / "optimizer_state_after_ref.bin",
@@ -2432,6 +2554,7 @@ class Compiler:
             _preserved_validation_dir / "runtime_package" / "outputs" / "optimizer_state_after.bin",
             out_dir / "optimizer_state_after.bin",
             out_dir / "hls" / "optimizer_state_after.bin",
+            out_dir / "hls" / "fpgai_hls_proj" / "sol1" / "csim" / "build" / "optimizer_state_after.bin",
             out_dir / "runtime_package" / "outputs" / "optimizer_state_after.bin",
         )
         _optimizer_state_comparisons = {}
@@ -2451,6 +2574,10 @@ class Compiler:
             "optimizer": _optimizer_type,
             "storage": _optimizer_state.get("storage", "none"),
             "expected_tensors": _state_names,
+            "layout": "canonical_parameter_order",
+            "layout_version": 1,
+            "reference_domain": "hardware_domain_fixed_point",
+            "claim_scope": "hls_csim_optimizer_state_numeric_validation",
             "bias_correction": _optimizer_bias_correction if _optimizer_type == "adam" else False,
             "bias_correction_status": ("enabled" if (_optimizer_type == "adam" and _optimizer_bias_correction) else ("disabled" if _optimizer_type == "adam" else "not_applicable")),
             "status": (
@@ -2931,6 +3058,174 @@ class Compiler:
         targets[np.arange(sample_count), labels] = 1.0
         write_f32_bin(target_path, targets.reshape(-1))
         return target_path
+
+
+    def _emit_held_out_dataset_target(
+        self,
+        out_dir: Path,
+        g,
+        dataset_artifacts: Dict[str, Any],
+    ) -> Path:
+        """Materialize held-out supervision independently from training targets."""
+        dataset_dir = out_dir / "validation" / "held_out_dataset"
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+        target_path = dataset_dir / "validation_targets.bin"
+        sample_count = int(dataset_artifacts.get("sample_count") or 0)
+        targets_path = dataset_artifacts.get("targets_path")
+        labels_path = dataset_artifacts.get("labels_path")
+        if targets_path:
+            targets = np.asarray(np.load(targets_path), dtype=np.float32)
+            if targets.shape[0] != sample_count:
+                raise ValueError("held-out target count does not match sample_count")
+            write_f32_bin(target_path, targets.reshape(-1))
+            return target_path
+        if not labels_path:
+            raise ValueError("held-out dataset requires labels or targets")
+        labels = np.asarray(np.load(labels_path), dtype=np.int64).reshape(-1)
+        if labels.size != sample_count:
+            raise ValueError("held-out label count does not match sample_count")
+        y_spec = g.get_tensor(g.outputs[0])
+        shape = tuple(int(x) for x in getattr(y_spec, "shape", ()) or ())
+        if len(shape) > 1 and shape[0] == 1:
+            shape = shape[1:]
+        out_words = int(np.prod(shape)) if shape else 1
+        if out_words <= 1 or np.any(labels < 0) or np.any(labels >= out_words):
+            raise ValueError("held-out labels are incompatible with model output width")
+        targets = np.zeros((sample_count, out_words), dtype=np.float32)
+        targets[np.arange(sample_count), labels] = 1.0
+        write_f32_bin(target_path, targets.reshape(-1))
+        return target_path
+
+    def _emit_training_validation_execution_report(
+        self,
+        *,
+        out_dir: Path,
+        hls_dir: Optional[Path],
+        held_out_dataset_artifacts: Dict[str, Any],
+    ) -> Optional[Path]:
+        if hls_dir is None or held_out_dataset_artifacts.get("status") != "available":
+            return None
+        source = self._find_file_recursive(hls_dir, "held_out_validation_summary.json")
+        if source is None:
+            return None
+        report_dir = out_dir / "reports"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        payload = json.loads(source.read_text(encoding="utf-8"))
+        payload["artifact_kind"] = "fpgai_training_validation_execution"
+        payload["dataset_sample_count"] = int(held_out_dataset_artifacts.get("sample_count") or 0)
+        payload["statistical_generalization_claim"] = False
+        for filename, public_name, key in (
+            ("held_out_curve.csv", "training_validation_curve.csv", "curve_csv"),
+            ("held_out_predictions_before.csv", "training_validation_predictions_before.csv", "predictions_before_csv"),
+            ("held_out_predictions_after.csv", "training_validation_predictions_after.csv", "predictions_after_csv"),
+        ):
+            artifact = self._find_file_recursive(hls_dir, filename)
+            if artifact is not None:
+                destination = report_dir / public_name
+                destination.write_bytes(artifact.read_bytes())
+                payload[key] = str(destination)
+        before = payload.get("before") or {}
+        after = payload.get("after") or {}
+        payload["loss_change"] = float(after.get("average_loss", 0.0)) - float(before.get("average_loss", 0.0))
+        payload["accuracy_change"] = float(after.get("accuracy", 0.0)) - float(before.get("accuracy", 0.0))
+        report_path = report_dir / "training_validation_execution.json"
+        write_text(report_path, json.dumps(payload, indent=2) + "\n")
+        write_text(
+            report_dir / "training_validation_summary.md",
+            "# FPGAI held-out HLS validation summary\n\n"
+            f"- Samples: `{payload['dataset_sample_count']}`\n"
+            f"- Before loss: `{before.get('average_loss')}`\n"
+            f"- After loss: `{after.get('average_loss')}`\n"
+            f"- Before accuracy: `{before.get('accuracy')}`\n"
+            f"- After accuracy: `{after.get('accuracy')}`\n"
+            f"- Claim scope: `{payload.get('claim_scope')}`\n"
+            "- Statistical generalization claim: `False`\n",
+        )
+        return report_path
+
+    def _emit_training_dataset_execution_report(
+        self,
+        *,
+        out_dir: Path,
+        hls_dir: Optional[Path],
+        training_dataset_artifacts: dict[str, Any],
+    ) -> Optional[Path]:
+        """Publish the canonical dataset-training execution report.
+
+        This helper is intentionally owned by the training compile path. Inference
+        compilation must not reference dataset-training locals or emit training
+        execution artifacts.
+        """
+        if hls_dir is None or training_dataset_artifacts.get("status") != "available":
+            return None
+
+        multistep_summary = self._find_file_recursive(
+            hls_dir,
+            "training_multistep_summary.json",
+        )
+        if multistep_summary is None:
+            return None
+
+        out_dir.mkdir(parents=True, exist_ok=True)
+        canonical_summary = out_dir / "training_multistep_summary.json"
+        canonical_summary.write_bytes(multistep_summary.read_bytes())
+
+        execution_payload = json.loads(
+            multistep_summary.read_text(encoding="utf-8")
+        )
+        sample_count = int(training_dataset_artifacts.get("sample_count") or 0)
+        record_visits = int(
+            execution_payload.get(
+                "dataset_records_consumed",
+                execution_payload.get("total_train_calls", 0),
+            )
+        )
+
+        report_dir = out_dir / "reports"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        copied_artifacts: dict[str, Any] = {}
+        for filename, public_name, key in (
+            ("training_epoch_curve.csv", "training_epoch_curve_hls.csv", "training_epoch_curve_csv"),
+            ("training_batch_curve.csv", "training_batch_curve_hls.csv", "training_batch_curve_csv"),
+        ):
+            source = self._find_file_recursive(hls_dir, filename)
+            if source is not None:
+                destination = report_dir / public_name
+                destination.write_bytes(source.read_bytes())
+                copied_artifacts[key] = str(destination)
+
+        checkpoint_files = sorted(
+            {
+                str(path)
+                for path in hls_dir.rglob("epoch_*_weights.bin")
+                if path.is_file()
+            }
+        )
+        execution_payload.update(
+            {
+                "artifact_kind": "fpgai_training_dataset_execution",
+                "schema_version": 2,
+                # Compatibility fields retained for existing consumers.
+                "sample_count_requested": sample_count,
+                "sample_count_executed": record_visits,
+                "reference_samples_executed": sample_count,
+                # Canonical multi-epoch execution fields.
+                "dataset_sample_count": sample_count,
+                "unique_records_executed": sample_count,
+                "record_visits_executed": record_visits,
+                "forward_backward_calls": int(execution_payload.get("total_forward_backward_calls", execution_payload.get("total_train_calls", 0))),
+                "optimizer_updates": int(execution_payload.get("optimizer_update_calls", 0)),
+                "batches_completed": int(execution_payload.get("optimizer_update_calls", 0)),
+                # Deprecated compatibility alias retained through the schema transition.
+                "unique_dataset_records": sample_count,
+                "checkpoint_count": len(checkpoint_files),
+                "checkpoint_files": checkpoint_files,
+                **copied_artifacts,
+            }
+        )
+        report_path = report_dir / "training_dataset_execution.json"
+        write_text(report_path, json.dumps(execution_payload, indent=2) + "\n")
+        return report_path
 
     def _find_file_recursive(self, root: Path, filename: str) -> Optional[Path]:
         for p in root.rglob(filename):
@@ -3681,6 +3976,14 @@ class Compiler:
             else (out_dir / "input.bin").resolve()
         )
         hls_dataset_sample_count = int(dataset_artifacts_for_hls.get("sample_count") or 1)
+        held_out_artifacts_for_hls = emit_training_validation_dataset_artifacts(
+            out_dir,
+            raw_config=self.cfg.raw,
+        )
+        held_out_available_for_hls = held_out_artifacts_for_hls.get("status") == "available"
+        held_out_input_bin = str(Path(held_out_artifacts_for_hls["inputs_bin"]).resolve()) if held_out_available_for_hls else None
+        held_out_target_bin = str((out_dir / "validation" / "held_out_dataset" / "validation_targets.bin").resolve()) if held_out_available_for_hls else None
+        held_out_sample_count = int(held_out_artifacts_for_hls.get("sample_count") or 0)
         hls_execution_record = str((out_dir / "reports" / "hls_dataset_execution.json").resolve())
 
         if pipeline_mode == "training_on_device":
@@ -3837,6 +4140,8 @@ class Compiler:
                     preload_weights=[],
                     training_cfg=training_cfg,
                     raw_cfg=self.cfg.raw,
+                    dataset_sample_count=hls_dataset_sample_count,
+                    held_out_sample_count=held_out_sample_count,
                 )
 
             if emit_hls_project:
@@ -3849,6 +4154,8 @@ class Compiler:
                         target_bin_path=target_bin,
                         weights_mode=weights_mode,
                         intermediate_dump=intermediate_dump,
+                        held_out_input_bin_path=held_out_input_bin,
+                        held_out_target_bin_path=held_out_target_bin,
                     ),
                 )
         else:
@@ -4185,6 +4492,12 @@ class Compiler:
             "hls_ran": hls_run is not None,
             "hls_ok": hls_run.ok if hls_run is not None else None,
             "hls_returncode": hls_run.returncode if hls_run is not None else None,
+            "hls_csim_ran": getattr(hls_run, "csim_ran", None) if hls_run is not None else None,
+            "hls_csim_ok": getattr(hls_run, "csim_ok", None) if hls_run is not None else None,
+            "hls_csynth_ran": getattr(hls_run, "csynth_ran", None) if hls_run is not None else None,
+            "hls_csynth_ok": getattr(hls_run, "csynth_ok", None) if hls_run is not None else None,
+            "hls_failure_stage": getattr(hls_run, "failure_stage", None) if hls_run is not None else None,
+            "hls_failure_reason": getattr(hls_run, "failure_reason", None) if hls_run is not None else None,
             "hls_project_dir": str(out_dir / "hls"),
             "stdout_log": (
                 str(hls_run.stdout_log)
@@ -4366,6 +4679,12 @@ class Compiler:
                             "stdout_log": getattr(hls_run, "stdout_log", None),
                             "stderr_log": getattr(hls_run, "stderr_log", None),
                             "csynth_report": getattr(hls_run, "csynth_report", None),
+                            "csim_ran": getattr(hls_run, "csim_ran", None),
+                            "csim_ok": getattr(hls_run, "csim_ok", None),
+                            "csynth_ran": getattr(hls_run, "csynth_ran", None),
+                            "csynth_ok": getattr(hls_run, "csynth_ok", None),
+                            "failure_stage": getattr(hls_run, "failure_stage", None),
+                            "failure_reason": getattr(hls_run, "failure_reason", None),
                         }.items()
                         if value is not None
                     }

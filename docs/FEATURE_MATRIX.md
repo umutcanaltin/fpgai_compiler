@@ -40,7 +40,8 @@ A feature is `supported` only when all of these are true:
 | Inference correctness benchmark | Supported inference flows compare outputs against reference/ONNX Runtime. | supported | not_applicable | supported | Keep benchmark limitations documented; training validation is separate. |
 | Training code generation | Training configs generate HLS artifacts for forward, loss, gradient, update, optimizer, and training-specific data movement paths. | not_applicable | supported | supported | This is a generated-artifact/codegen claim, not a physical-board convergence claim. |
 | Training single-step reference reports | Compile reports can record CPU/reference single-step training summaries such as loss_before, loss_after, and training estimate metadata. | not_applicable | supported | supported | This covers report generation and reference-summary traceability; numerical tolerance scope must remain in tests. |
-| Training multi-step convergence | Multi-step training/convergence sweeps exist for research validation. | not_applicable | experimental | experimental | Do not claim stable convergence until reproducible loss/accuracy trends are validated and summarized as paper artifacts. |
+| Deterministic multi-epoch training schedule | One canonical epoch/batch/order contract drives the HLS CSim testbench, float reference, fixed-point reference, execution counts, curves, and checkpoints. | not_applicable | supported | supported | This is a schedule/artifact claim. Real-board training and convergence remain separate. |
+| Training multi-step convergence | Multi-step training/convergence sweeps and loss-curve artifacts exist for research validation. | not_applicable | experimental | experimental | Do not claim stable convergence/generalization until reproducible task metrics and real FPGA runs are validated and summarized as paper artifacts. |
 | Training on-board runtime | Physical FPGA training runs and board-measured loss/timing artifacts. | not_applicable | experimental | experimental | Not stable until board runtime artifacts record bitstream, board, dataset, loss/timing, and reference comparison. |
 | Communication optimization | Compiler models input/weight/output/aux tensor-edge data movement, per-edge precision/compression, transfer estimates, and generated HLS communication annotations. | supported | supported | supported | Compression codecs are modeled unless implemented_in_hls=true; measured board DMA speedup remains outside this claim. |
 
@@ -299,3 +300,7 @@ tests/test_memory_semantics_classifier.py
 tests/test_memory_storage_effect.py
 tests/test_training_memory_storage_contract.py
 ```
+
+## P3D-F3A memory residency contract
+
+FPGAI now emits `reports/memory_residency_contract.json` and `.md` from the existing data-movement reporting owner. The contract separates physical residency, transfer mechanism, local staging, mutability, and lifetime. It distinguishes full DDR preload into BRAM/URAM from genuine DDR-tiled residency and reports the current tensor-level representation gap for gradients and optimizer state. Realized BRAM/URAM/DDR behavior still requires generated-source, HLS, Vivado, and board validation.

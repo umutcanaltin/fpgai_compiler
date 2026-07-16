@@ -1278,10 +1278,6 @@ def emit_top_train_cpp(
     lines.append(
         f"  static act_t target_buf[{output_size}];"
     )
-    lines.append(
-        f"  for (int i = 0; i < {output_size}; ++i) "
-        "target_buf[i] = (act_t)read_f32(aux);"
-    )
     lines.append("")
 
     for root in roots_in_order:
@@ -1612,6 +1608,28 @@ def emit_top_train_cpp(
     final_gradient = gradient_name_to_buffer[
         output_name
     ]
+
+    # Mode 0 is the target-free inference path for embedded/on-chip training
+    # designs.  The forward graph is complete at this point, so emit the model
+    # output before any supervised-loss state is consumed.  Runtime-import
+    # designs that reserve mode 0 for parameter preload already return earlier.
+    lines.append("  if (mode == 0) {")
+    lines.append(
+        f"    for (int i = 0; i < {output_size}; ++i) "
+        f"write_f32(out, (float){final_buffer}[i], i == {output_size - 1});"
+    )
+    lines.append("    return;")
+    lines.append("  }")
+    lines.append("")
+
+    # Labels/targets are required only by supervised loss, backward, and update
+    # modes.  Keeping this read after the inference return prevents target-free
+    # inference from blocking on an empty auxiliary stream.
+    lines.append(
+        f"  for (int i = 0; i < {output_size}; ++i) "
+        "target_buf[i] = (act_t)read_f32(aux);"
+    )
+    lines.append("")
 
     if loss_type == "mse":
         lines.append(
@@ -3925,8 +3943,10 @@ def _fpgai_insert_optimizer_state_export_capture(source: str, *, raw_cfg: Any) -
         return source
 
     updated = source
-    if "FPGAI optimizer-state export/capture mode" in updated:
-        return updated
+    existing_export_block_re = re.compile(
+        r"\n  if \(mode == FPGAI_MODE_EXPORT_OPTIMIZER_STATE \|\| mode == 9\) \{.*?\n    return;\n  \}\n",
+        flags=re.DOTALL,
+    )
 
     state_decl_re = re.compile(r"static\s+opt_t\s+(FPGAI_(?:MOMENTUM|ADAM)_[A-Z]+_[A-Za-z0-9_]+)\s*\[\s*(\d+)\s*\]\s*;")
     states: list[tuple[str, int]] = []
@@ -3941,6 +3961,30 @@ def _fpgai_insert_optimizer_state_export_capture(source: str, *, raw_cfg: Any) -
     if not states:
         # Do not silently pretend export is implemented without actual optimizer state.
         raise RuntimeError("Optimizer-state export was requested but no persistent Momentum/Adam state arrays were found in generated C++")
+
+    # Momentum export must use the same canonical parameter order as weights,
+    # gradients, and the dataset-wide optimizer-state reference.  Declaration
+    # order is not reliable because earlier wrappers may emit state arrays in
+    # lexical order (for example B0, B1, W0, W1).
+    if optimizer_type == "momentum":
+        parameter_order: list[str] = []
+        parameter_decl_re = re.compile(
+            r"(?:static\s+)?(?:const\s+)?(?:wgt_t|bias_t)\s+([WB]_[A-Za-z0-9_]+)"
+            r"(?:\s*\[\s*\d+\s*\])+\s*(?:=|;)"
+        )
+        for match in parameter_decl_re.finditer(updated):
+            name = match.group(1)
+            if name not in parameter_order:
+                parameter_order.append(name)
+        order_index = {name: index for index, name in enumerate(parameter_order)}
+
+        def momentum_state_key(item: tuple[str, int]) -> tuple[int, str]:
+            state_name = item[0]
+            prefix = "FPGAI_MOMENTUM_"
+            parameter_name = state_name[len(prefix):] if state_name.startswith(prefix) else state_name
+            return (order_index.get(parameter_name, len(order_index)), state_name)
+
+        states.sort(key=momentum_state_key)
 
     total_words = sum(size for _, size in states)
 
@@ -3982,6 +4026,7 @@ def _fpgai_insert_optimizer_state_export_capture(source: str, *, raw_cfg: Any) -
         "  if (mode == FPGAI_MODE_EXPORT_OPTIMIZER_STATE || mode == 9) {",
         "    // FPGAI export_optimizer_state runtime command.",
         "    // Captures persistent optimizer state for numeric_validation optimizer_state_validation.",
+        "    // Export order follows canonical parameter order used by weights, gradients, and references.",
     ]
     offset = 0
     for name, size in states:
@@ -3992,6 +4037,14 @@ def _fpgai_insert_optimizer_state_export_capture(source: str, *, raw_cfg: Any) -
         offset += size
     export_lines.extend(["    return;", "  }", ""])
     export_block = "\n".join(export_lines)
+
+    # Earlier wrappers may already have emitted an optimizer-state export block.
+    # Rewrite that block in place so final serialization follows the canonical
+    # parameter order instead of returning early with declaration-order layout.
+    existing_match = existing_export_block_re.search(updated)
+    if existing_match:
+        updated = updated[:existing_match.start()] + export_block + updated[existing_match.end():]
+        return updated
 
     # Insert before any normal training input read or mode-specific computation.
     candidate_markers = [
@@ -4193,3 +4246,119 @@ def emit_top_train_cpp(*args, **kwargs):
     source = _fpgai_p2t_training_m_axi_previous_emit_top_train_cpp(*args, **kwargs)
     return _fpgai_p2t_materialize_training_m_axi_tiles(source, raw_cfg=kwargs.get("raw_cfg") or {})
 
+
+# FPGAI P3D-F4C live Momentum update-path repair.
+#
+# Dense training codegen aliases its selected implementation to
+# ``sgd_update_*_tiled``.  Earlier Momentum wrappers only recognized the
+# ``*_typed`` and legacy unsuffixed call spellings, so both the accumulated
+# mode-4 path and the direct update path could silently retain SGD while mode 9
+# exported separate, never-written Momentum velocity arrays.  This final
+# generated-source guard runs after all storage/tiling wrappers and replaces
+# every surviving typed/tiled SGD call for Momentum configurations.
+_fpgai_p3d_f4c_live_momentum_previous_emit_top_train_cpp = emit_top_train_cpp
+
+
+def _fpgai_p3d_f4c_materialize_live_momentum_updates(source: str, *, raw_cfg: Any) -> str:
+    raw = raw_cfg or {}
+    optimizer_type = str(
+        _fpgai_training_raw_get(raw, "training.optimizer.type", "sgd") or "sgd"
+    ).strip().lower().replace("-", "_")
+    if optimizer_type != "momentum":
+        return source
+
+    learning_rate = float(
+        _fpgai_training_raw_get(raw, "training.optimizer.learning_rate", 0.01) or 0.01
+    )
+    momentum = float(
+        _fpgai_training_raw_get(raw, "training.optimizer.momentum", 0.9) or 0.9
+    )
+    updated = source
+
+    # The first template argument is the logical parameter element count for
+    # both typed and tiled update helpers.  Additional template arguments encode
+    # numeric types and implementation tile factors and do not affect state
+    # layout.
+    residual_sgd_pattern = re.compile(
+        r"(?P<indent>[ \t]*)fpgai::sgd_update_(?P<kind>wgt|bias)_(?:typed|tiled)\s*"
+        r"<\s*(?P<size>\d+)\s*,(?P<template>[^;]+?)>\s*\(\s*"
+        r"(?P<arr>[WB]_[A-Za-z0-9_]+)\s*,\s*"
+        r"(?P<grad>d[WB]_[A-Za-z0-9_]+)\s*,\s*"
+        r"\(upd_t\)[^;]+?;",
+        re.DOTALL,
+    )
+
+    generated_velocity_sizes: dict[str, int] = {}
+
+    def replace_call(match: re.Match) -> str:
+        indent = match.group("indent")
+        kind = match.group("kind")
+        size = int(match.group("size"))
+        arr = match.group("arr")
+        grad = match.group("grad")
+        prefix = "W" if kind == "wgt" else "B"
+        suffix = arr.split("_", 1)[1] if "_" in arr else arr
+        velocity = f"FPGAI_MOMENTUM_{prefix}_{suffix}"
+        value_type = "wgt_t" if kind == "wgt" else "bias_t"
+        generated_velocity_sizes[velocity] = size
+        return "\n".join([
+            f"{indent}// FPGAI live Momentum optimizer update for {arr}.",
+            f"{indent}// V = momentum * V - learning_rate * dParam; Param = Param + V.",
+            f"{indent}for (int i = 0; i < {size}; ++i) {{",
+            f"{indent}  {velocity}[i] = (opt_t)(((float){momentum:.8f}f * (float){velocity}[i]) - ((float){learning_rate:.8f}f * (float){grad}[i]));",
+            f"{indent}  {arr}[i] = ({value_type})((float){arr}[i] + (float){velocity}[i]);",
+            f"{indent}}}",
+        ])
+
+    updated, replacements = residual_sgd_pattern.subn(replace_call, updated)
+
+    # Guard against a Momentum configuration retaining an active SGD helper.
+    # Macro aliases are allowed at file scope; only real function invocations
+    # with parameter arrays indicate an unresolved update path.
+    unresolved_call = re.search(
+        r"fpgai::sgd_update_(?:wgt|bias)_(?:typed|tiled)\s*<[^;]+?>\s*\(\s*[WB]_[A-Za-z0-9_]+\s*,",
+        updated,
+        flags=re.DOTALL,
+    )
+    if unresolved_call:
+        raise RuntimeError(
+            "Momentum code generation left an active SGD update call in the final HLS source"
+        )
+
+    # The arrays normally already exist because optimizer-state export owns the
+    # same symbols.  Add any missing declarations defensively so the replacement
+    # and mode-9 export always reference one shared persistent state object.
+    missing = []
+    for velocity, size in sorted(generated_velocity_sizes.items()):
+        if not re.search(rf"static\s+opt_t\s+{re.escape(velocity)}\s*\[", updated):
+            missing.append((velocity, size))
+    if missing:
+        decl_text = "\n".join(
+            ["", "// FPGAI persistent momentum optimizer velocity state."]
+            + [f"static opt_t {velocity}[{size}];" for velocity, size in missing]
+        ) + "\n"
+        extern_match = re.search(r'\nextern\s+"C"\s+void\s+', updated)
+        if extern_match:
+            updated = updated[:extern_match.start()] + decl_text + updated[extern_match.start():]
+        else:
+            updated = decl_text + updated
+
+    if replacements and "FPGAI live Momentum update-path repair" not in updated:
+        marker = (
+            "// FPGAI live Momentum update-path repair: accumulated and direct "
+            "training paths update the same persistent state exported by mode 9.\n"
+        )
+        if "using namespace fpgai;\n" in updated:
+            updated = updated.replace("using namespace fpgai;\n", "using namespace fpgai;\n" + marker, 1)
+        else:
+            updated = marker + updated
+
+    return updated
+
+
+def emit_top_train_cpp(*args, **kwargs):
+    source = _fpgai_p3d_f4c_live_momentum_previous_emit_top_train_cpp(*args, **kwargs)
+    return _fpgai_p3d_f4c_materialize_live_momentum_updates(
+        source,
+        raw_cfg=kwargs.get("raw_cfg") or {},
+    )

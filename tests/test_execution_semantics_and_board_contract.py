@@ -146,6 +146,7 @@ def test_inference_axi_stream_tiled_io_generates_tile_buffers_and_tlast(tmp_path
     report = json.loads((out_dir / "reports/stream_tiled_io.json").read_text(encoding="utf-8"))
     assert report["inputs"]["import"]["status"] == "generated_interface_supported"
     assert report["outputs"]["export"]["status"] == "generated_interface_supported"
+    assert not (out_dir / "reports/training_dataset_execution.json").exists()
 
 
 def test_native_batch_accumulation_generates_hls_modes_and_runtime_commands(tmp_path: Path) -> None:

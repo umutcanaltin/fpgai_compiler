@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from fpgai.ir.graph import Graph
+from fpgai.engine.training import resolve_training_execution_schedule
 
 
 def _cpp_string_literal(value: str) -> str:
@@ -49,6 +50,8 @@ def emit_tb_train_cpp(
     training_cfg: dict,
     output_dir: Optional[str] = None,
     raw_cfg: Optional[dict] = None,
+    dataset_sample_count: Optional[int] = None,
+    held_out_sample_count: Optional[int] = None,
 ) -> None:
     """Emit the Vitis HLS C-simulation testbench for training.
 
@@ -75,42 +78,19 @@ def emit_tb_train_cpp(
     preload_vals = ", ".join(f"{float(v):.8f}f" for v in preload_weights)
     default_out_dir = _cpp_string_literal(str(output_dir or "."))
 
-    # Existing sweeps use training.execution.epochs and training.execution.batch_size.
-    # For 13C, train_steps can be explicit, but epochs also works as the step count.
-    train_steps = _as_int(
-        _cfg_lookup(
-            training_cfg,
-            "execution.train_steps",
-            "train_steps",
-            "execution.steps",
-            "steps",
-            "execution.epochs",
-            "epochs",
-            default=1,
-        ),
-        default=1,
+    schedule_cfg = raw_cfg if isinstance(raw_cfg, dict) and raw_cfg else {"training": training_cfg}
+    schedule = resolve_training_execution_schedule(
+        schedule_cfg,
+        sample_count=(int(dataset_sample_count) if dataset_sample_count is not None else None),
     )
-    batch_size = _as_int(
-        _cfg_lookup(
-            training_cfg,
-            "execution.batch_size",
-            "batch_size",
-            "execution.micro_batch_size",
-            "micro_batch_size",
-            default=1,
-        ),
-        default=1,
-    )
+    train_steps = int(schedule.explicit_train_steps or 0)
+    batch_size = int(schedule.batch_size)
+    epochs = int(schedule.epochs)
+    shuffle = bool(schedule.shuffle)
+    shuffle_seed = int(schedule.seed)
+    drop_last = bool(schedule.drop_last)
 
-    batch_mode = str(
-        _cfg_lookup(
-            training_cfg,
-            "execution.batch_mode",
-            "batch_mode",
-            "optimizer.batch_mode",
-            default="replay",
-        )
-    ).strip().lower()
+    batch_mode = str(schedule.batch_mode).strip().lower()
     accumulated_batch = batch_mode in {"accumulate", "accumulated", "true_minibatch", "mini_batch", "minibatch"}
     learning_rate = float(
         _cfg_lookup(
@@ -127,7 +107,7 @@ def emit_tb_train_cpp(
             "execution.convergence_smoke",
             "convergence_smoke",
             "validation.convergence_smoke",
-            default=False,
+            default=(epochs > 1),
         )
     )
     loss_eval_records = _as_int(
@@ -136,9 +116,9 @@ def emit_tb_train_cpp(
             "execution.loss_eval_records",
             "loss_eval_records",
             "validation.loss_eval_records",
-            default=batch_size,
+            default=(int(dataset_sample_count) if dataset_sample_count else batch_size),
         ),
-        default=batch_size,
+        default=(int(dataset_sample_count) if dataset_sample_count else batch_size),
     )
 
     runtime_mode_expr = (
@@ -225,6 +205,11 @@ def emit_tb_train_cpp(
         "            pack_record_mem(label_mem, target_data, target_words_per_record, r, \"label\");\n"
         if label_m_axi_tiled_requested else ""
     )
+    held_out_eval_mem_pack = (
+        "            pack_record_mem(input_mem, held_out_input_data, input_words_per_record, r, \"held_out_input\");\n"
+        if input_m_axi_tiled_requested else ""
+    )
+
     train_record_mem_pack = (
         "                pack_record_mem(input_mem, input_data, input_words_per_record, rec, \"input\");\n"
         if input_m_axi_tiled_requested else ""
@@ -269,14 +254,134 @@ def emit_tb_train_cpp(
         )
 
 
+    accuracy_eval_block = f"""
+    auto evaluate_accuracy = [&]() -> float {{
+        int input_records = input_words_per_record > 0 ? ((int)input_data.size() / input_words_per_record) : 0;
+        int target_records = target_words_per_record > 0 ? ((int)target_data.size() / target_words_per_record) : 0;
+        int n_records = loss_eval_records;
+        if (input_records > 0 && n_records > input_records) n_records = input_records;
+        if (target_records > 0 && n_records > target_records) n_records = target_records;
+        if (n_records <= 0) return -1.0f;
+        int correct = 0;
+        for (int r = 0; r < n_records; ++r) {{
+            push_record(in_stream, input_data, input_words_per_record, r);
+{held_out_eval_mem_pack}            {top_name}(in_stream, out_stream, aux_stream, {movement_call_args}0);
+            std::vector<float> prediction = drain_exact(out_stream, {int(out_words)}, "accuracy_eval");
+            int predicted_class = 0;
+            for (int i = 1; i < (int)prediction.size(); ++i) {{
+                if (prediction[(size_t)i] > prediction[(size_t)predicted_class]) predicted_class = i;
+            }}
+            int expected_class = 0;
+            const float *target_record = target_data.data() + (size_t)r * (size_t)target_words_per_record;
+            for (int i = 1; i < target_words_per_record; ++i) {{
+                if (target_record[i] > target_record[expected_class]) expected_class = i;
+            }}
+            if (predicted_class == expected_class) correct += 1;
+        }}
+        return (float)correct / (float)n_records;
+    }};
+""" if convergence_smoke else """
+    auto evaluate_accuracy = [&]() -> float {{ return -1.0f; }};
+"""
+
+
+    held_out_enabled = bool(held_out_sample_count and int(held_out_sample_count) > 0)
+    held_out_arg_block = (
+        '    const char* held_out_input_path = argc >= 6 ? argv[5] : "__FPGAI_NO_HELD_OUT__";\n'
+        '    const char* held_out_target_path = argc >= 7 ? argv[6] : "__FPGAI_NO_HELD_OUT__";\n'
+        if held_out_enabled
+        else
+        '    const char* held_out_input_path = "__FPGAI_NO_HELD_OUT__";\n'
+        '    const char* held_out_target_path = "__FPGAI_NO_HELD_OUT__";\n'
+    )
+    held_out_load_block = ""
+    held_out_eval_block = ""
+    held_out_after_block = ""
+    if held_out_enabled:
+        held_out_load_block = (
+            '    std::vector<float> held_out_input_data = read_bin(held_out_input_path);\n'
+            '    std::vector<float> held_out_target_data = read_bin(held_out_target_path);\n'
+        )
+        held_out_eval_block = f"""
+    struct HeldOutMetrics {{
+        int sample_count;
+        int correct_count;
+        float average_loss;
+        float accuracy;
+        std::string predictions_csv;
+    }};
+
+    auto evaluate_held_out = [&](const char* phase) -> HeldOutMetrics {{
+        HeldOutMetrics metrics = {{0, 0, 0.0f, 0.0f, "sample,target,prediction,loss\\n"}};
+        int held_input_records = input_words_per_record > 0 ? ((int)held_out_input_data.size() / input_words_per_record) : 0;
+        int held_target_records = target_words_per_record > 0 ? ((int)held_out_target_data.size() / target_words_per_record) : 0;
+        int held_records = held_input_records < held_target_records ? held_input_records : held_target_records;
+        if (held_records != {int(held_out_sample_count)}) {{
+            fprintf(stderr, "[TB-TRAIN] Held-out record-count mismatch. configured=%d runtime=%d\\n", {int(held_out_sample_count)}, held_records);
+            std::exit(7);
+        }}
+        for (int r = 0; r < held_records; ++r) {{
+            push_record(in_stream, held_out_input_data, input_words_per_record, r);
+{eval_record_mem_pack}            {top_name}(in_stream, out_stream, aux_stream, {movement_call_args}0);
+            std::vector<float> prediction = drain_exact(out_stream, {int(out_words)}, "held_out_eval");
+            int base = r * target_words_per_record;
+            int target_index = 0;
+            int prediction_index = 0;
+            float best_target = held_out_target_data[(size_t)base];
+            float best_prediction = prediction[0];
+            float record_loss = 0.0f;
+            for (int i = 0; i < target_words_per_record; ++i) {{
+                float target_value = held_out_target_data[(size_t)(base + i)];
+                float prediction_value = prediction[(size_t)i];
+                if (target_value > best_target) {{ best_target = target_value; target_index = i; }}
+                if (prediction_value > best_prediction) {{ best_prediction = prediction_value; prediction_index = i; }}
+                float clipped = prediction_value < 1.0e-7f ? 1.0e-7f : prediction_value;
+                record_loss -= target_value * std::log(clipped);
+            }}
+            if (prediction_index == target_index) metrics.correct_count += 1;
+            metrics.average_loss += record_loss;
+            metrics.predictions_csv += std::to_string(r) + "," + std::to_string(target_index) + "," + std::to_string(prediction_index) + "," + std::to_string(record_loss) + "\\n";
+        }}
+        metrics.sample_count = held_records;
+        metrics.average_loss /= (float)held_records;
+        metrics.accuracy = (float)metrics.correct_count / (float)held_records;
+        printf("[TB-TRAIN] held_out_%s samples=%d loss=%f accuracy=%f\\n", phase, metrics.sample_count, metrics.average_loss, metrics.accuracy);
+        return metrics;
+    }};
+
+    HeldOutMetrics held_out_before = evaluate_held_out("before");
+"""
+        held_out_after_block = """
+    HeldOutMetrics held_out_after = evaluate_held_out("after");
+    write_text_file(join_path(out_dir, "held_out_predictions_before.csv"), held_out_before.predictions_csv);
+    write_text_file(join_path(out_dir, "held_out_predictions_after.csv"), held_out_after.predictions_csv);
+    std::string held_curve = "phase,sample_count,correct_count,average_loss,accuracy,checkpoint\\n";
+    held_curve += "before," + std::to_string(held_out_before.sample_count) + "," + std::to_string(held_out_before.correct_count) + "," + std::to_string(held_out_before.average_loss) + "," + std::to_string(held_out_before.accuracy) + ",weights_before.bin\\n";
+    held_curve += "after," + std::to_string(held_out_after.sample_count) + "," + std::to_string(held_out_after.correct_count) + "," + std::to_string(held_out_after.average_loss) + "," + std::to_string(held_out_after.accuracy) + ",weights_after.bin\\n";
+    write_text_file(join_path(out_dir, "held_out_curve.csv"), held_curve);
+    std::string held_summary = "{\\n";
+    held_summary += "  \\\"artifact_kind\\\": \\\"fpgai_hls_held_out_validation_execution\\\",\\n";
+    held_summary += "  \\\"schema_version\\\": 1,\\n";
+    held_summary += "  \\\"sample_count\\\": " + std::to_string(held_out_after.sample_count) + ",\\n";
+    held_summary += "  \\\"before\\\": {\\\"average_loss\\\": " + std::to_string(held_out_before.average_loss) + ", \\\"accuracy\\\": " + std::to_string(held_out_before.accuracy) + ", \\\"correct_count\\\": " + std::to_string(held_out_before.correct_count) + "},\\n";
+    held_summary += "  \\\"after\\\": {\\\"average_loss\\\": " + std::to_string(held_out_after.average_loss) + ", \\\"accuracy\\\": " + std::to_string(held_out_after.accuracy) + ", \\\"correct_count\\\": " + std::to_string(held_out_after.correct_count) + "},\\n";
+    held_summary += "  \\\"checkpoint_before\\\": \\\"weights_before.bin\\\",\\n";
+    held_summary += "  \\\"checkpoint_after\\\": \\\"weights_after.bin\\\",\\n";
+    held_summary += "  \\\"claim_scope\\\": \\\"held_out_validation_mechanism_demonstrated\\\"\\n";
+    held_summary += "}\\n";
+    write_text_file(join_path(out_dir, "held_out_validation_summary.json"), held_summary);
+"""
+
     tb_text = f"""\
 #include <ap_axi_sdata.h>
 #include <ap_int.h>
 #include <hls_stream.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <cstdint>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -310,6 +415,21 @@ static void mkdir_best_effort(const std::string& path) {{
 #else
     mkdir(path.c_str(), 0777);
 #endif
+}}
+
+static std::vector<int> make_epoch_order(int sample_count, int epoch_index, bool shuffle, uint32_t seed) {{
+    std::vector<int> order((size_t)sample_count);
+    for (int i = 0; i < sample_count; ++i) order[(size_t)i] = i;
+    if (!shuffle || sample_count <= 1) return order;
+    uint32_t state = seed ^ ((uint32_t)(epoch_index + 1) * 0x9E3779B9u);
+    for (int i = sample_count - 1; i > 0; --i) {{
+        state = state * 1664525u + 1013904223u;
+        int j = (int)(state % (uint32_t)(i + 1));
+        int tmp = order[(size_t)i];
+        order[(size_t)i] = order[(size_t)j];
+        order[(size_t)j] = tmp;
+    }}
+    return order;
 }}
 
 static void push_f32(hls::stream<axis_t>& s, float v, bool last=false) {{
@@ -465,21 +585,52 @@ int main(int argc, char** argv) {{
     if (argc >= 4) preload_path = argv[3];
     std::string out_dir = "{default_out_dir}";
     if (argc >= 5) out_dir = argv[4];
-    mkdir_best_effort(out_dir);
+{held_out_arg_block}    mkdir_best_effort(out_dir);
 
     printf("[TB-TRAIN] input=%s\\n", in_path);
     printf("[TB-TRAIN] target=%s\\n", target_path);
     printf("[TB-TRAIN] preload_path=%s\\n", preload_path);
     printf("[TB-TRAIN] output_dir=%s\\n", out_dir.c_str());
+    printf("[TB-TRAIN] held_out_input=%s\\n", held_out_input_path);
+    printf("[TB-TRAIN] held_out_target=%s\\n", held_out_target_path);
     printf("[TB-TRAIN] mode={_cpp_string_literal(normalized_mode)} expected_weight_words={int(weight_words)}\\n");
     printf("[TB-TRAIN] train_steps={int(train_steps)} batch_size={int(batch_size)} in_words={int(in_words)} out_words={int(out_words)}\\n");
 
     std::vector<float> input_data = read_bin(in_path);
     std::vector<float> target_data = read_bin(target_path);
-    int input_words_per_record = {int(in_words)};
+{held_out_load_block}    int input_words_per_record = {int(in_words)};
     if (input_words_per_record <= 0) input_words_per_record = (int)input_data.size();
     int target_words_per_record = {int(out_words)};
     if (target_words_per_record <= 0) target_words_per_record = (int)target_data.size();
+    int input_records = input_words_per_record > 0 ? ((int)input_data.size() / input_words_per_record) : 0;
+    int target_records = target_words_per_record > 0 ? ((int)target_data.size() / target_words_per_record) : 0;
+    int dataset_records = input_records < target_records ? input_records : target_records;
+    if (dataset_records <= 0) {{
+        fprintf(stderr, "[TB-TRAIN] Dataset contains no complete input/target records.\\n");
+        std::exit(7);
+    }}
+    const int configured_dataset_records = {int(dataset_sample_count or 0)};
+    if (configured_dataset_records > 0 && configured_dataset_records != dataset_records) {{
+        fprintf(
+            stderr,
+            "[TB-TRAIN] Dataset record-count mismatch. configured=%d runtime=%d\\n",
+            configured_dataset_records,
+            dataset_records
+        );
+        std::exit(7);
+    }}
+    const int batches_per_epoch = {str(drop_last).lower()}
+        ? (dataset_records / {int(batch_size)})
+        : ((dataset_records + {int(batch_size)} - 1) / {int(batch_size)});
+    if (batches_per_epoch <= 0) {{
+        fprintf(stderr, "[TB-TRAIN] Resolved zero batches per epoch.\\n");
+        std::exit(7);
+    }}
+    const int configured_epochs = {int(epochs)};
+    const int explicit_update_limit = {int(train_steps)};
+    const int total_update_target = explicit_update_limit > 0
+        ? explicit_update_limit
+        : configured_epochs * batches_per_epoch;
 
 {dynamic_movement_mem_decl}    hls::stream<axis_t> in_stream;
     hls::stream<axis_t> out_stream;
@@ -517,6 +668,8 @@ int main(int argc, char** argv) {{
     std::vector<float> epoch_losses;
     float initial_loss = -1.0f;
     float final_loss = -1.0f;
+    float initial_accuracy = -1.0f;
+    float final_accuracy = -1.0f;
 
     auto evaluate_loss = [&]() -> float {{
         int input_records = input_words_per_record > 0 ? ((int)input_data.size() / input_words_per_record) : 0;
@@ -539,8 +692,11 @@ int main(int argc, char** argv) {{
         return total_loss / (float)n_records;
     }};
 
+{accuracy_eval_block}
+{held_out_eval_block}
     if (convergence_smoke) {{
         initial_loss = evaluate_loss();
+        initial_accuracy = evaluate_accuracy();
         epoch_losses.push_back(initial_loss);
         printf("[TB-TRAIN] convergence_initial_loss=%f loss_eval_records=%d\\n", initial_loss, loss_eval_records);
     }}
@@ -550,13 +706,37 @@ int main(int argc, char** argv) {{
     std::vector<float> previous_accumulator((size_t){int(weight_words)}, 0.0f);
     int total_train_calls = 0;
     int optimizer_update_calls = 0;
+    int epochs_completed = 0;
+    int records_consumed = 0;
+    std::string epoch_curve = "epoch,optimizer_updates,records_consumed,dataset_loss,accuracy,checkpoint\\n";
+    std::string batch_curve = "epoch,batch,optimizer_update,actual_batch_size,records_consumed,gradient_l2_norm,gradient_max_abs\\n";
+    if (convergence_smoke) {{
+        epoch_curve += "0,0,0," + std::to_string(initial_loss) + "," + std::to_string(initial_accuracy) + ",weights_before.bin\\n";
+    }}
+    std::string checkpoint_dir = join_path(out_dir, "checkpoints");
+    mkdir_best_effort(checkpoint_dir);
 
     if ({str(accumulated_batch).lower()}) {{
         printf("[TB-TRAIN] native_accumulated_batch=true optimizer_location=hls_top_accumulated_optimizer\\n");
-        for (int step = 0; step < {int(train_steps)}; ++step) {{
+        for (int update_index = 0; update_index < total_update_target; ++update_index) {{
+            int epoch_index = update_index / batches_per_epoch;
+            int batch_index = update_index % batches_per_epoch;
+            std::vector<int> order = make_epoch_order(
+                dataset_records,
+                epoch_index,
+                {str(shuffle).lower()},
+                (uint32_t){int(shuffle_seed)}u
+            );
+            int batch_start = batch_index * {int(batch_size)};
+            int actual_batch_size = dataset_records - batch_start;
+            if (actual_batch_size > {int(batch_size)}) actual_batch_size = {int(batch_size)};
+            if ({str(drop_last).lower()} && actual_batch_size < {int(batch_size)}) actual_batch_size = 0;
+            if (actual_batch_size <= 0) continue;
+
             {top_name}(in_stream, out_stream, aux_stream, {movement_call_args}5);
-            for (int b = 0; b < {int(batch_size)}; ++b) {{
-                int rec = step * {int(batch_size)} + b;
+            std::fill(previous_accumulator.begin(), previous_accumulator.end(), 0.0f);
+            for (int b = 0; b < actual_batch_size; ++b) {{
+                int rec = order[(size_t)(batch_start + b)];
                 push_record(in_stream, input_data, input_words_per_record, rec);
                 push_record(aux_stream, target_data, target_words_per_record, rec);
 {train_record_mem_pack}                {top_name}(in_stream, out_stream, aux_stream, {movement_call_args}3);
@@ -565,42 +745,116 @@ int main(int argc, char** argv) {{
                 for (size_t gi = 0; gi < last_grads.size(); ++gi) {{
                     sample_gradient[gi] = last_grads[gi] - previous_accumulator[gi];
                 }}
-                char sample_name[96];
-                char accum_name[96];
-                std::snprintf(sample_name, sizeof(sample_name), "per_sample_gradient_%04d.bin", rec);
-                std::snprintf(accum_name, sizeof(accum_name), "accumulator_after_%04d.bin", rec);
-                write_bin_both(out_dir, sample_name, sample_gradient);
-                write_bin_both(out_dir, accum_name, last_grads);
+                char canonical_sample_name[96];
+                char canonical_accum_name[96];
+                char detailed_sample_name[160];
+                char detailed_accum_name[160];
+                std::snprintf(canonical_sample_name, sizeof(canonical_sample_name), "per_sample_gradient_%04d.bin", b);
+                std::snprintf(canonical_accum_name, sizeof(canonical_accum_name), "accumulator_after_%04d.bin", b);
+                std::snprintf(
+                    detailed_sample_name,
+                    sizeof(detailed_sample_name),
+                    "trace_epoch_%04d_batch_%04d_slot_%04d_record_%04d_gradient.bin",
+                    epoch_index + 1,
+                    batch_index + 1,
+                    b,
+                    rec
+                );
+                std::snprintf(
+                    detailed_accum_name,
+                    sizeof(detailed_accum_name),
+                    "trace_epoch_%04d_batch_%04d_slot_%04d_record_%04d_accumulator.bin",
+                    epoch_index + 1,
+                    batch_index + 1,
+                    b,
+                    rec
+                );
+                write_bin_both(out_dir, canonical_sample_name, sample_gradient);
+                write_bin_both(out_dir, canonical_accum_name, last_grads);
+                write_one_bin(join_path(out_dir, detailed_sample_name), sample_gradient);
+                write_one_bin(join_path(out_dir, detailed_accum_name), last_grads);
                 previous_accumulator = last_grads;
                 total_train_calls += 1;
+                records_consumed += 1;
             }}
+
             accumulated_grads_before_reduce = last_grads;
             write_bin_both(out_dir, "gradient_accumulated_pre_reduce.bin", accumulated_grads_before_reduce);
             {top_name}(in_stream, out_stream, aux_stream, {movement_call_args}4);
             last_grads = drain_exact(out_stream, {int(weight_words)}, "avg_grads");
             write_bin_both(out_dir, "gradient_reduced_export.bin", last_grads);
             optimizer_update_calls += 1;
-            if (convergence_smoke) {{
-                float epoch_loss = evaluate_loss();
-                epoch_losses.push_back(epoch_loss);
-                printf("[TB-TRAIN] convergence_epoch=%d loss=%f\\n", step + 1, epoch_loss);
+
+            float batch_grad_l2_sq = 0.0f;
+            float batch_grad_max_abs = 0.0f;
+            for (float value : last_grads) {{
+                float av = value < 0.0f ? -value : value;
+                batch_grad_l2_sq += value * value;
+                if (av > batch_grad_max_abs) batch_grad_max_abs = av;
+            }}
+            batch_curve += std::to_string(epoch_index + 1) + ",";
+            batch_curve += std::to_string(batch_index + 1) + ",";
+            batch_curve += std::to_string(optimizer_update_calls) + ",";
+            batch_curve += std::to_string(actual_batch_size) + ",";
+            batch_curve += std::to_string(records_consumed) + ",";
+            batch_curve += std::to_string(std::sqrt(batch_grad_l2_sq)) + ",";
+            batch_curve += std::to_string(batch_grad_max_abs) + "\\n";
+
+            bool end_of_epoch = batch_index == batches_per_epoch - 1;
+            bool end_of_run = update_index == total_update_target - 1;
+            if (end_of_epoch || end_of_run) {{
+                float epoch_loss = -1.0f;
+                if (convergence_smoke) {{
+                    epoch_loss = evaluate_loss();
+                    final_accuracy = evaluate_accuracy();
+                    epoch_losses.push_back(epoch_loss);
+                    printf("[TB-TRAIN] convergence_epoch=%d loss=%f\\n", epoch_index + 1, epoch_loss);
+                }}
+                {top_name}(in_stream, out_stream, aux_stream, {movement_call_args}1);
+                std::vector<float> checkpoint_weights = drain_exact(out_stream, {int(weight_words)}, "checkpoint_weights");
+                char checkpoint_name[96];
+                std::snprintf(checkpoint_name, sizeof(checkpoint_name), "epoch_%04d_weights.bin", epoch_index + 1);
+                write_one_bin(join_path(checkpoint_dir, checkpoint_name), checkpoint_weights);
+                epoch_curve += std::to_string(epoch_index + 1) + ",";
+                epoch_curve += std::to_string(optimizer_update_calls) + ",";
+                epoch_curve += std::to_string(records_consumed) + ",";
+                epoch_curve += (convergence_smoke ? std::to_string(epoch_loss) : std::string("")) + ",";
+                epoch_curve += (convergence_smoke ? std::to_string(final_accuracy) : std::string("")) + ",";
+                epoch_curve += std::string("checkpoints/") + checkpoint_name + "\\n";
+                epochs_completed = epoch_index + 1;
             }}
         }}
     }} else {{
-        for (int step = 0; step < {int(train_steps)}; ++step) {{
-            for (int b = 0; b < {int(batch_size)}; ++b) {{
-                int rec = step * {int(batch_size)} + b;
+        for (int update_index = 0; update_index < total_update_target; ++update_index) {{
+            int epoch_index = update_index / batches_per_epoch;
+            int batch_index = update_index % batches_per_epoch;
+            std::vector<int> order = make_epoch_order(
+                dataset_records,
+                epoch_index,
+                {str(shuffle).lower()},
+                (uint32_t){int(shuffle_seed)}u
+            );
+            int batch_start = batch_index * {int(batch_size)};
+            int actual_batch_size = dataset_records - batch_start;
+            if (actual_batch_size > {int(batch_size)}) actual_batch_size = {int(batch_size)};
+            if ({str(drop_last).lower()} && actual_batch_size < {int(batch_size)}) actual_batch_size = 0;
+            for (int b = 0; b < actual_batch_size; ++b) {{
+                int rec = order[(size_t)(batch_start + b)];
                 push_record(in_stream, input_data, input_words_per_record, rec);
                 push_record(aux_stream, target_data, target_words_per_record, rec);
 {train_record_mem_pack}                {top_name}(in_stream, out_stream, aux_stream, {movement_call_args}2);
                 last_grads = drain_exact(out_stream, {int(weight_words)}, "grads");
                 total_train_calls += 1;
                 optimizer_update_calls += 1;
+                records_consumed += 1;
+            }}
+            if (batch_index == batches_per_epoch - 1 || update_index == total_update_target - 1) {{
+                epochs_completed = epoch_index + 1;
             }}
         }}
     }}
     if (last_grads.empty()) {{
-        fprintf(stderr, "[TB-TRAIN] No train calls were executed. train_steps={int(train_steps)} batch_size={int(batch_size)}\\n");
+        fprintf(stderr, "[TB-TRAIN] No train calls were executed. updates=%d batch_size={int(batch_size)}\\n", total_update_target);
         std::exit(6);
     }}
     write_bin_both(out_dir, "grads.bin", last_grads);
@@ -609,16 +863,31 @@ int main(int argc, char** argv) {{
         write_bin_both(out_dir, "gradient_accumulated_pre_reduce.bin", accumulated_grads_before_reduce);
         write_bin_both(out_dir, "gradient_reduced_export.bin", last_grads);
     }}
+    write_text_file(join_path(out_dir, "training_epoch_curve.csv"), epoch_curve);
+    write_text_file(join_path(out_dir, "training_batch_curve.csv"), batch_curve);
+    if (!(out_dir.empty() || out_dir == ".")) {{
+        write_text_file("training_epoch_curve.csv", epoch_curve);
+        write_text_file("training_batch_curve.csv", batch_curve);
+    }}
 
     {top_name}(in_stream, out_stream, aux_stream, {movement_call_args}1);
     std::vector<float> weights_after = drain_exact(out_stream, {int(weight_words)}, "weights_after");
     write_bin_both(out_dir, "weights_after.bin", weights_after);
-{gradient_capture_block}{optimizer_state_capture_block}
+{held_out_after_block}{gradient_capture_block}{optimizer_state_capture_block}
 
     std::string summary = "{{\\n";
+    summary += "  \\\"artifact_kind\\\": \\\"fpgai_hls_training_multiepoch_execution\\\",\\n";
+    summary += "  \\\"schema_version\\\": 2,\\n";
     summary += "  \\\"mode\\\": \\\"{_cpp_string_literal(normalized_mode)}\\\",\\n";
     summary += "  \\\"train_steps\\\": " + std::to_string({int(train_steps)}) + ",\\n";
+    summary += "  \\\"epochs_requested\\\": " + std::to_string(configured_epochs) + ",\\n";
+    summary += "  \\\"epochs_completed\\\": " + std::to_string(epochs_completed) + ",\\n";
     summary += "  \\\"batch_size\\\": " + std::to_string({int(batch_size)}) + ",\\n";
+    summary += "  \\\"batches_per_epoch\\\": " + std::to_string(batches_per_epoch) + ",\\n";
+    summary += "  \\\"shuffle\\\": " + std::string({str(shuffle).lower()} ? "true" : "false") + ",\\n";
+    summary += "  \\\"shuffle_seed\\\": " + std::to_string({int(shuffle_seed)}) + ",\\n";
+    summary += "  \\\"drop_last\\\": " + std::string({str(drop_last).lower()} ? "true" : "false") + ",\\n";
+    summary += "  \\\"total_update_target\\\": " + std::to_string(total_update_target) + ",\\n";
     summary += "  \\\"total_train_calls\\\": " + std::to_string(total_train_calls) + ",\\n";
     summary += "  \\\"total_forward_backward_calls\\\": " + std::to_string(total_train_calls) + ",\\n";
     summary += "  \\\"optimizer_update_calls\\\": " + std::to_string(optimizer_update_calls) + ",\\n";
@@ -635,7 +904,10 @@ int main(int argc, char** argv) {{
     summary += "  \\\"out_words\\\": " + std::to_string({int(out_words)}) + ",\\n";
     summary += "  \\\"dataset_input_records\\\": " + std::to_string(dataset_input_records) + ",\\n";
     summary += "  \\\"dataset_target_records\\\": " + std::to_string(dataset_target_records) + ",\\n";
-    summary += "  \\\"dataset_records_consumed\\\": " + std::to_string(total_train_calls) + ",\\n";
+    summary += "  \\\"dataset_records_consumed\\\": " + std::to_string(records_consumed) + ",\\n";
+    summary += "  \\\"training_epoch_curve_csv\\\": \\\"training_epoch_curve.csv\\\",\\n";
+    summary += "  \\\"training_batch_curve_csv\\\": \\\"training_batch_curve.csv\\\",\\n";
+    summary += "  \\\"checkpoint_directory\\\": \\\"checkpoints\\\",\\n";
     summary += "  \\\"initial_loss\\\": " + std::string(convergence_smoke ? std::to_string(initial_loss) : "null") + ",\\n";
     summary += "  \\\"final_loss\\\": " + std::string(convergence_smoke && !epoch_losses.empty() ? std::to_string(epoch_losses.back()) : "null") + ",\\n";
     float grad_l1 = 0.0f; float grad_l2_sq = 0.0f; float grad_max_abs = 0.0f;
@@ -652,7 +924,7 @@ int main(int argc, char** argv) {{
     printf("[TB-TRAIN] Wrote %s (%zu floats)\\n", join_path(out_dir, "weights_before.bin").c_str(), weights_before.size());
     printf("[TB-TRAIN] Wrote %s (%zu floats)\\n", join_path(out_dir, "grads.bin").c_str(), last_grads.size());
     printf("[TB-TRAIN] Wrote %s (%zu floats)\\n", join_path(out_dir, "weights_after.bin").c_str(), weights_after.size());
-    printf("[TB-TRAIN] Multi-step summary: train_steps=%d batch_size=%d total_train_calls=%d\\n", {int(train_steps)}, {int(batch_size)}, total_train_calls);
+    printf("[TB-TRAIN] Multi-epoch summary: epochs=%d batches_per_epoch=%d updates=%d records=%d\\n", epochs_completed, batches_per_epoch, optimizer_update_calls, records_consumed);
     return 0;
 }}
 """

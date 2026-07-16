@@ -1462,6 +1462,13 @@ def test_w0_lite_classifies_sweep_paper_and_legacy_yaml_groups() -> None:
     assert classify_config_path("memory.storage.weights")["replacement"] == "memory.weight_storage"
     assert classify_config_path("training.execution.epochs")["status"] == "deprecated_alias"
     assert classify_config_path("training.execution.epochs")["replacement"] == "training.batch.epochs"
+    assert classify_config_path("training.execution.train_steps")["replacement"] == "training.batch.max_updates"
+    assert classify_config_path("training.execution.batch_mode")["replacement"] == "training.batch.mode"
+    assert classify_config_path("training.execution.shuffle")["replacement"] == "training.batch.shuffle"
+    assert classify_config_path("training.execution.seed")["replacement"] == "training.batch.seed"
+    assert classify_config_path("training.execution.drop_last")["replacement"] == "training.batch.drop_last"
+    assert classify_config_path("training.execution.convergence_smoke")["replacement"] == "training.validation.convergence_smoke"
+    assert classify_config_path("training.execution.loss_eval_records")["replacement"] == "training.validation.loss_eval_records"
     assert classify_config_path("data_movement.ps_pl.compression.enabled")["status"] == "legacy_or_internal"
     assert classify_config_path("project")["status"] == "section_container"
 
@@ -2562,3 +2569,93 @@ def test_runtime_package_dataset_refresh_preserves_sequence_modes_and_repeat(tmp
     buffers = {item["name"]: item for item in plan["buffers"]}
     assert buffers["input"]["shape"] == [10, 784]
     assert buffers["output"]["shape"] == [10, 10]
+
+
+def test_memory_residency_contract_separates_full_preload_from_ddr_residency(tmp_path: Path) -> None:
+    from fpgai.engine.models import MemoryPlan, TensorPlacement
+    from fpgai.reporting.data_movement import emit_data_movement_reports
+
+    out_dir = tmp_path / "memory_residency_full_preload"
+    out_dir.mkdir()
+    memory_plan = MemoryPlan(
+        placements=[
+            TensorPlacement("W0", "weight", "BRAM", size_bytes=128),
+            TensorPlacement("hidden", "activation", "BRAM", size_bytes=64),
+            TensorPlacement("input", "input", "HOST", size_bytes=32),
+            TensorPlacement("output", "output", "HOST", size_bytes=16),
+        ],
+        notes={"memory_semantics_mode": "bram_import_full"},
+    )
+
+    emit_data_movement_reports(
+        out_dir,
+        raw_config={
+            "memory": {"storage": {"weights": "bram", "activations": "bram"}},
+            "training": {"storage": {"gradients": "bram", "optimizer_state": "uram"}},
+            "data_movement": {
+                "weights": {"import": {"interface": "m_axi", "transport": "ps_runtime", "policy": "full"}},
+            },
+        },
+        pipeline_mode="training_on_device",
+        weights_mode="bram_import_full",
+        memory_plan=memory_plan,
+        communication_plan=None,
+        runtime_sequence={"sequence": ["import_weights", "accumulate_gradients", "apply_accumulated_gradients"]},
+    )
+
+    contract = json.loads((out_dir / "reports/memory_residency_contract.json").read_text(encoding="utf-8"))
+    rows = {row["role"]: row for row in contract["tensor_classes"]}
+
+    weights = rows["weights"]
+    assert weights["primary_residency"] == "pl_on_chip"
+    assert weights["source_or_destination_residency"] == "external_ddr"
+    assert weights["local_staging"] == "full_tensor_replica"
+    assert weights["movement_semantics"] == "full_preload"
+    assert weights["compute_mutated"] is True
+    assert weights["runtime_replaceable"] is True
+
+    assert rows["gradients"]["primary_residency"] == "pl_on_chip"
+    assert rows["gradients"]["representation_status"] == "aggregate_config_or_runtime_contract"
+    assert rows["optimizer_state"]["storage"] == "uram"
+    assert contract["checks"]["full_preload_is_classified_as_on_chip_compute_residency"] is True
+    assert contract["checks"]["training_state_has_tensor_level_memory_plan_entries"] is False
+    assert any("explicit state objects" in item for item in contract["limitations"])
+
+
+def test_memory_residency_contract_classifies_ddr_tiled_mutable_weights(tmp_path: Path) -> None:
+    from fpgai.engine.models import MemoryPlan, TensorPlacement
+    from fpgai.reporting.data_movement import emit_data_movement_reports
+
+    out_dir = tmp_path / "memory_residency_ddr_tiled"
+    out_dir.mkdir()
+    memory_plan = MemoryPlan(
+        placements=[TensorPlacement("W0", "weight", "DDR", layout="tiled", size_bytes=1024)],
+        notes={"memory_semantics_mode": "ddr_tiled_mutable"},
+    )
+
+    emit_data_movement_reports(
+        out_dir,
+        raw_config={
+            "memory": {"storage": {"weights": "ddr"}},
+            "data_movement": {
+                "weights": {
+                    "import": {"interface": "m_axi", "transport": "ps_runtime", "policy": "tiled"},
+                    "export": {"interface": "m_axi", "transport": "ps_runtime", "policy": "tiled"},
+                }
+            },
+        },
+        pipeline_mode="training_on_device",
+        weights_mode="ddr_tiled_mutable",
+        memory_plan=memory_plan,
+        communication_plan=None,
+        runtime_sequence={"sequence": ["import_weights", "accumulate_gradients", "apply_accumulated_gradients", "export_weights"]},
+    )
+
+    contract = json.loads((out_dir / "reports/memory_residency_contract.json").read_text(encoding="utf-8"))
+    weights = next(row for row in contract["tensor_classes"] if row["role"] == "weights")
+
+    assert weights["primary_residency"] == "external_ddr"
+    assert weights["local_staging"] == "tile_buffer"
+    assert weights["movement_semantics"] == "tiled_fetch_and_writeback"
+    assert weights["writeback_required"] is True
+    assert contract["checks"]["ddr_weight_residency_uses_tiled_movement"] is True

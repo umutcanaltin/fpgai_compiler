@@ -77,8 +77,47 @@ class ResultStore:
                 return list(data)
         return []
 
+    @staticmethod
+    def _latest_records(records: Iterable[Mapping[str, Any]]) -> List[Dict[str, Any]]:
+        """Return the latest attempt for every design while preserving design order.
+
+        ``results.jsonl`` remains the append-only attempt history.  The public
+        ``results.json``/CSV views represent the latest status of each design,
+        so a failed design can be retried without permanently contaminating the
+        experiment summary with an obsolete failure.
+        """
+
+        latest: Dict[str, Dict[str, Any]] = {}
+        order: List[str] = []
+        anonymous_index = 0
+        for raw in records:
+            row = dict(raw)
+            name = row.get("design_name")
+            if name in {None, ""}:
+                key = f"__anonymous_{anonymous_index}"
+                anonymous_index += 1
+            else:
+                key = str(name)
+            if key not in latest:
+                order.append(key)
+            latest[key] = row
+        return [latest[key] for key in order]
+
+    def latest_records(self) -> List[Dict[str, Any]]:
+        return self._latest_records(self.load_records())
+
     def completed_design_names(self) -> set[str]:
-        return {str(r.get("design_name")) for r in self.load_records() if r.get("status") in {"passed", "failed", "skipped"}}
+        """Return designs whose latest attempt passed.
+
+        Failed designs are intentionally excluded so ``resume=True`` retries
+        them on the next sweep invocation.
+        """
+
+        return {
+            str(row.get("design_name"))
+            for row in self.latest_records()
+            if row.get("status") == "passed" and row.get("design_name") not in {None, ""}
+        }
 
     def append_record(self, record: Mapping[str, Any]) -> None:
         row = dict(record)
@@ -88,17 +127,20 @@ class ResultStore:
         self.materialize()
 
     def materialize(self) -> None:
-        records = self.load_records()
+        attempts = self.load_records()
+        records = self._latest_records(attempts)
         passed_count = sum(1 for row in records if row.get("status") == "passed")
         failed_count = sum(1 for row in records if row.get("status") == "failed")
         skipped_count = sum(1 for row in records if row.get("status") == "skipped")
         payload = {
-            "schema_version": 1,
+            "schema_version": 2,
             "experiment_dir": str(self.experiment_dir),
             "result_count": len(records),
+            "attempt_count": len(attempts),
             "passed_count": passed_count,
             "failed_count": failed_count,
             "skipped_count": skipped_count,
+            "attempt_history_jsonl": str(self.jsonl_path),
             "results": records,
         }
         self.results_path.write_text(json.dumps(payload, indent=2, sort_keys=True, default=_json_default), encoding="utf-8")

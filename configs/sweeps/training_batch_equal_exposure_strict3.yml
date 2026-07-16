@@ -1,0 +1,82 @@
+name: training_batch_equal_exposure_strict3
+command_template: PYTHONPATH=. python -B main.py compile --config {config_path}
+required_artifacts:
+- manifest.json
+- reports/training_dataset_execution.json
+- reports/training_learning_behavior.json
+- reports/training_dataset_comparison.json
+- reports/training_epoch_curve_hls.csv
+materialize_configs:
+  enabled: true
+  directory: configs
+  strip_unknown_top_level_sections: true
+  canonicalize_policy: true
+  strip_top_level_sections:
+  - notes
+  compiler_policy_names: true
+  parameter_mappings:
+    model_path: {path: model.path, create: true}
+    weight_mode: {path: weights.mode, create: true}
+    learning_rate: {path: training.optimizer.learning_rate, create: true}
+    loss_type: {path: training.loss.type, create: true}
+    epochs: {path: training.batch.epochs, create: true}
+    batch_size: {path: training.batch.size, create: true}
+    batch_mode: {path: training.batch.mode, create: true}
+    shuffle: {path: training.batch.shuffle, create: true}
+    seed: {path: training.batch.seed, create: true}
+    drop_last: {path: training.batch.drop_last, create: true}
+    convergence_smoke: {path: training.validation.convergence_smoke, create: true}
+    loss_eval_records: {path: training.validation.loss_eval_records, create: true}
+    dump_intermediates: {path: training.debug.dump_intermediates, create: true}
+    policy: {path: optimization.parallel.policy, create: true}
+    pe: {path: optimization.parallel.pe, create: true}
+    simd: {path: optimization.parallel.simd, create: true}
+    unroll_factor: {path: optimization.parallel.unroll_factor, create: true}
+    partition_factor: {path: optimization.parallel.partition_factor, create: true}
+defaults:
+  base_config_path: examples/training/mnist_balanced10_dataset_training.yml
+  config_path: examples/training/mnist_balanced10_dataset_training.yml
+  board: kv260
+  model_path: models/suite/mlp_mnist.onnx
+  weight_mode: embedded
+  policy: balanced
+  pe: 2
+  simd: 2
+  unroll_factor: 2
+  partition_factor: 2
+  learning_rate: 0.005
+  loss_type: cross_entropy
+  epochs: 3
+  batch_size: 2
+  batch_mode: accumulated
+  shuffle: true
+  seed: 42
+  drop_last: false
+  convergence_smoke: true
+  loss_eval_records: 10
+  dump_intermediates: true
+design_points:
+- name: training_mlp_equal_exposure30_b2
+  epochs: 3
+  batch_size: 2
+  seed: 42
+  comparison_role: primary_comparison
+- name: training_mlp_equal_exposure30_b5
+  epochs: 3
+  batch_size: 5
+  seed: 42
+  comparison_role: primary_comparison
+- name: training_mlp_equal_exposure30_b10
+  epochs: 3
+  batch_size: 10
+  seed: 42
+  comparison_role: primary_comparison
+description: Strict deterministic equal-sample-exposure batch ablation. Every design processes 30 record visits over three epochs.
+claim_scope: Mechanism-level equal-exposure comparison only; not convergence, generalization, statistical, or real-FPGA support.
+analysis:
+  kind: training_learning_ablation
+  comparison_basis: equal_sample_exposure
+  primary_epochs: 3
+  paired_experiment_dirs:
+    equal_sample_exposure: paper_experiments/training_batch_equal_exposure_strict3
+    equal_update_budget: paper_experiments/training_batch_equal_updates6

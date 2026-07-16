@@ -656,6 +656,46 @@ def inspect_experiment_config(
 
 
 
+def _tail_text_file(path_value: object, *, max_lines: int = 8) -> list[str]:
+    """Return a compact non-empty tail from a sweep log path."""
+
+    if not path_value:
+        return []
+    try:
+        path = Path(str(path_value))
+        if not path.exists() or not path.is_file():
+            return []
+        lines = [line.rstrip() for line in path.read_text(encoding="utf-8", errors="replace").splitlines()]
+        lines = [line for line in lines if line.strip()]
+        return lines[-max_lines:]
+    except OSError:
+        return []
+
+
+def _print_sweep_failures(results: list[dict[str, object]]) -> None:
+    failed_rows = [row for row in results if row.get("status") == "failed"]
+    if not failed_rows:
+        return
+
+    print("---------------- Sweep failure details ----------------")
+    for row in failed_rows:
+        name = row.get("design_name") or "<unnamed>"
+        print(f"Design              : {name}")
+        print(f"Return code         : {row.get('returncode')}")
+        print(f"Reason              : {row.get('error') or 'command failed'}")
+        print(f"Generated config    : {row.get('config_path')}")
+        print(f"Stdout log          : {row.get('stdout_log')}")
+        print(f"Stderr log          : {row.get('stderr_log')}")
+        tail = _tail_text_file(row.get("stderr_log"))
+        if not tail:
+            tail = _tail_text_file(row.get("stdout_log"))
+        if tail:
+            print("Log tail:")
+            for line in tail:
+                print(f"  {line}")
+        print("--------------------------------------------------------")
+
+
 def run_sweep_from_config(
     config_path: str,
     *,
@@ -719,10 +759,11 @@ def run_sweep_from_config(
         print("================================================")
 
         if failed:
-            print(f"[WARN] Sweep completed with {failed} failed record(s).")
-        else:
-            print("[OK] Sweep completed successfully.")
+            _print_sweep_failures([row for row in results if isinstance(row, dict)])
+            print(f"[ERROR] Sweep completed with {failed} failed record(s).")
+            return 1
 
+        print("[OK] Sweep completed successfully.")
         return 0
 
     except FileNotFoundError as exc:

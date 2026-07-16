@@ -210,6 +210,8 @@ fpgai sweep run \
 
 Sweep output goes under `experiments/`. Generated experiment artifacts should not normally be committed.
 
+A failed design point makes `sweep run` return a non-zero exit status. The terminal summary identifies the failed design, generated config, log paths, and a compact log tail. Re-running with the same output directory retries failed points while preserving successful points and the append-only attempt history.
+
 ## 9. Experiment config
 
 Use this workflow for reproducibility and paper-result generation.

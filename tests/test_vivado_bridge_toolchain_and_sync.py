@@ -560,3 +560,30 @@ def test_yaml_vivado_bridge_owned_hls_synthesis_exports_ip_and_runs_impl(tmp_pat
     assert captured["export_hls_ip"] is True
     assert captured["run_vivado_impl"] is True
     assert captured["run_bitstream"] is False
+
+
+def test_vitis_hls_runner_marks_internal_csim_failure_when_tool_exits_zero(tmp_path: Path) -> None:
+    from fpgai.backends.hls.runner import run_vitis_hls
+
+    fake = tmp_path / "vitis_hls"
+    fake.write_text(
+        "#!/usr/bin/env bash\n"
+        "echo 'INFO: [SIM 211-2] *************** CSIM start ***************'\n"
+        "echo \"ERROR: [SIM 211-100] 'csim_design' failed: compilation error(s).\"\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    fake.chmod(0o755)
+
+    hls_dir = tmp_path / "hls"
+    hls_dir.mkdir()
+    (hls_dir / "run_hls.tcl").write_text("puts fake\n", encoding="utf-8")
+
+    result = run_vitis_hls(hls_dir=hls_dir, vitis_hls_exe=str(fake))
+
+    assert result.ok is False
+    assert result.returncode != 0
+    assert result.csim_ran is True
+    assert result.csim_ok is False
+    assert result.failure_stage == "csim"
+    assert result.failure_reason and "C simulation failed" in result.failure_reason
