@@ -68,6 +68,7 @@ def _empty_actual() -> Dict[str, float]:
         "actual_ff": 0,
         "actual_dsp": 0,
         "actual_bram18": 0,
+        "actual_uram": 0,
         "actual_latency_cycles": 0.0,
     }
 
@@ -127,6 +128,9 @@ def _extract_from_xml(xml_path: Path) -> Dict[str, float]:
         ),
         "actual_bram18": _safe_int(
             _extract_xml_tag(text, "BRAM_18K", 0)
+        ),
+        "actual_uram": _safe_int(
+            _extract_xml_tag(text, "URAM", 0)
         ),
         "actual_latency_cycles": _extract_latency_from_xml(
             text

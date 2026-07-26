@@ -430,7 +430,7 @@ def _emit_training_tb_cpp(
         if optimizer_type == "momentum":
             optimizer_state_words = int(total_param_words)
         elif optimizer_type == "adam":
-            optimizer_state_words = 2 * int(total_param_words)
+            optimizer_state_words = (2 * int(total_param_words)) + 1
         else:
             optimizer_state_export_requested = False
 

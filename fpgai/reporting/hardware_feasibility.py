@@ -280,6 +280,20 @@ def classify_board_fit(
     else:
         status = "fits"
 
+    # Select the limiting dimension from the most severe status class. A
+    # near-limit clock request must never outrank a fabric resource that is
+    # already over capacity. Within the selected class, use the largest ratio.
+    severity = "over_limit" if any_over else ("near_limit" if any_near else "fits")
+    candidates = []
+    for key, row in per_dimension.items():
+        if row.get("status") != severity:
+            continue
+        ratio = row.get("ratio")
+        score = float("inf") if ratio is None and row.get("used") not in (None, 0) else float(ratio or 0.0)
+        candidates.append((score, key))
+    if candidates:
+        limiting_dimension = max(candidates)[1]
+
     return {
         "board": board,
         "part": part,
@@ -372,6 +386,7 @@ def extract_board_fit_resources(
             "estimated_lut",
             "total_lut",
             "predicted_lut_raw",
+            "actual_lut",
         ),
         "ff": _nested_resource_value(
             resource_data,
@@ -384,6 +399,7 @@ def extract_board_fit_resources(
             "estimated_ff",
             "total_ff",
             "predicted_ff_raw",
+            "actual_ff",
         ),
         "bram_18k": _nested_resource_value(
             resource_data,
@@ -400,6 +416,7 @@ def extract_board_fit_resources(
             "estimated_bram_18k",
             "total_bram18",
             "predicted_bram18_raw",
+            "actual_bram18",
         ),
         "uram": _nested_resource_value(
             resource_data,
@@ -410,6 +427,7 @@ def extract_board_fit_resources(
             "predicted_uram",
             "estimated_uram",
             "total_uram",
+            "actual_uram",
         ),
         "dsp": _nested_resource_value(
             resource_data,
@@ -423,6 +441,7 @@ def extract_board_fit_resources(
             "estimated_dsp",
             "total_dsp",
             "predicted_dsp_raw",
+            "actual_dsp",
         ),
         "ddr_bytes": _nested_resource_value(
             resource_data,

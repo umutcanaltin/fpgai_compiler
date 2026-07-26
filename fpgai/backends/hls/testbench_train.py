@@ -78,6 +78,22 @@ def emit_tb_train_cpp(
     preload_vals = ", ".join(f"{float(v):.8f}f" for v in preload_weights)
     default_out_dir = _cpp_string_literal(str(output_dir or "."))
 
+    probe_cfg = _cfg_lookup(raw_cfg or {}, "validation.numeric.probes", default={})
+    training_probe_enabled = isinstance(probe_cfg, dict) and bool(probe_cfg.get("enabled", False))
+    training_probe_extern = (
+        'extern "C" float fpgai_training_probe_values[16];\n'
+        if training_probe_enabled else ""
+    )
+    training_probe_capture_block = (
+        "\n    // FPGAI selected Dense/Adam CSim probe capture.\n"
+        "    {\n"
+        "        std::vector<float> training_probe_values(fpgai_training_probe_values, fpgai_training_probe_values + 16);\n"
+        "        write_bin_both(out_dir, \"training_probe_values.bin\", training_probe_values);\n"
+        "        printf(\"[TB-TRAIN] Wrote %s (%zu floats) from selected training probe with execution metadata\\n\", join_path(out_dir, \"training_probe_values.bin\").c_str(), training_probe_values.size());\n"
+        "    }\n"
+        if training_probe_enabled else ""
+    )
+
     schedule_cfg = raw_cfg if isinstance(raw_cfg, dict) and raw_cfg else {"training": training_cfg}
     schedule = resolve_training_execution_schedule(
         schedule_cfg,
@@ -165,7 +181,7 @@ def emit_tb_train_cpp(
     gradient_export_requested = _movement_requested("gradients", "export")
     optimizer_state_export_requested = _movement_requested("optimizer_state", "export")
     optimizer_type = str(_cfg_lookup(raw_for_movement, "training.optimizer.type", default=_cfg_lookup(training_cfg, "optimizer.type", default="sgd"))).strip().lower().replace("-", "_")
-    optimizer_state_words = int(weight_words) if optimizer_type == "momentum" else (2 * int(weight_words) if optimizer_type == "adam" else 0)
+    optimizer_state_words = int(weight_words) if optimizer_type == "momentum" else ((2 * int(weight_words)) + 1 if optimizer_type == "adam" else 0)
     if not optimizer_state_export_requested or optimizer_state_words <= 0:
         optimizer_state_export_requested = False
         optimizer_state_words = 0
@@ -250,7 +266,16 @@ def emit_tb_train_cpp(
             f"        std::vector<float> optimizer_state_after = unpack_words_to_f32(optimizer_state_mem, {optimizer_state_words});\n"
             "        write_bin_both(out_dir, \"optimizer_state_after.bin\", optimizer_state_after);\n"
             "        printf(\"[TB-TRAIN] Wrote %s (%zu floats) from FPGAI_MODE_EXPORT_OPTIMIZER_STATE\\n\", join_path(out_dir, \"optimizer_state_after.bin\").c_str(), optimizer_state_after.size());\n"
-            "    }\n"
+            + (
+                "        int optimizer_state_nonzero = 0;\n"
+                "        for (size_t i = 0; i + 1 < optimizer_state_after.size(); ++i) { if (optimizer_state_after[i] != 0.0f) optimizer_state_nonzero += 1; }\n"
+                "        float optimizer_step_after = optimizer_state_after.empty() ? -1.0f : optimizer_state_after.back();\n"
+                "        printf(\"[TB-TRAIN] Adam optimizer_state_nonzero=%d optimizer_step=%f expected_updates=%d\\n\", optimizer_state_nonzero, optimizer_step_after, optimizer_update_calls);\n"
+                "        if (optimizer_update_calls > 0 && optimizer_step_after < 1.0f) { fprintf(stderr, \"[TB-TRAIN] Adam state capture failed: optimizer step did not advance.\\n\"); std::exit(12); }\n"
+                "        if (optimizer_update_calls > 0 && optimizer_state_nonzero == 0) { fprintf(stderr, \"[TB-TRAIN] Adam state capture failed: all m/v words are zero after training.\\n\"); std::exit(13); }\n"
+                if optimizer_type == "adam" else ""
+            )
+            + "    }\n"
         )
 
 
@@ -372,6 +397,26 @@ def emit_tb_train_cpp(
     write_text_file(join_path(out_dir, "held_out_validation_summary.json"), held_summary);
 """
 
+    update_state_capture_cpp = ""
+    if optimizer_state_export_requested:
+        update_state_capture_cpp = (
+            f"        {top_name}(in_stream, out_stream, aux_stream, {call_weights_arg}{input_mem_call_arg}{label_mem_call_arg}{output_mem_call_arg}{gradient_mem_call_arg}optimizer_state_mem.data(), 9);\n"
+            f"        std::vector<float> update_state = unpack_words_to_f32(optimizer_state_mem, {optimizer_state_words});\n"
+            "        char update_state_name[128];\n"
+            "        std::snprintf(update_state_name, sizeof(update_state_name), \"update_%04d_optimizer_state.bin\", update_number);\n"
+            "        write_one_bin(join_path(update_trace_dir, update_state_name), update_state);\n"
+        )
+    update_trace_lambda = (
+        "    auto capture_update_trace = [&](int update_number) {\n"
+        f"        {top_name}(in_stream, out_stream, aux_stream, {movement_call_args}1);\n"
+        f"        std::vector<float> update_weights = drain_exact(out_stream, {int(weight_words)}, \"update_weights\");\n"
+        "        char update_weights_name[128];\n"
+        "        std::snprintf(update_weights_name, sizeof(update_weights_name), \"update_%04d_weights.bin\", update_number);\n"
+        "        write_one_bin(join_path(update_trace_dir, update_weights_name), update_weights);\n"
+        + update_state_capture_cpp
+        + "    };\n"
+    )
+
     tb_text = f"""\
 #include <ap_axi_sdata.h>
 #include <ap_int.h>
@@ -394,6 +439,7 @@ def emit_tb_train_cpp(
 
 typedef ap_axis<32,0,0,0> axis_t;
 
+{training_probe_extern}
 extern "C" void {top_name}(
     hls::stream<axis_t>& in,
     hls::stream<axis_t>& out,
@@ -715,6 +761,9 @@ int main(int argc, char** argv) {{
     }}
     std::string checkpoint_dir = join_path(out_dir, "checkpoints");
     mkdir_best_effort(checkpoint_dir);
+    std::string update_trace_dir = join_path(out_dir, "per_update_trace");
+    mkdir_best_effort(update_trace_dir);
+{update_trace_lambda}
 
     if ({str(accumulated_batch).lower()}) {{
         printf("[TB-TRAIN] native_accumulated_batch=true optimizer_location=hls_top_accumulated_optimizer\\n");
@@ -784,6 +833,7 @@ int main(int argc, char** argv) {{
             last_grads = drain_exact(out_stream, {int(weight_words)}, "avg_grads");
             write_bin_both(out_dir, "gradient_reduced_export.bin", last_grads);
             optimizer_update_calls += 1;
+            capture_update_trace(optimizer_update_calls);
 
             float batch_grad_l2_sq = 0.0f;
             float batch_grad_max_abs = 0.0f;
@@ -846,6 +896,7 @@ int main(int argc, char** argv) {{
                 last_grads = drain_exact(out_stream, {int(weight_words)}, "grads");
                 total_train_calls += 1;
                 optimizer_update_calls += 1;
+                capture_update_trace(optimizer_update_calls);
                 records_consumed += 1;
             }}
             if (batch_index == batches_per_epoch - 1 || update_index == total_update_target - 1) {{
@@ -857,6 +908,7 @@ int main(int argc, char** argv) {{
         fprintf(stderr, "[TB-TRAIN] No train calls were executed. updates=%d batch_size={int(batch_size)}\\n", total_update_target);
         std::exit(6);
     }}
+{training_probe_capture_block}
     write_bin_both(out_dir, "grads.bin", last_grads);
     if (accumulated_grads_before_reduce.empty()) {{
         accumulated_grads_before_reduce = last_grads;
@@ -873,6 +925,12 @@ int main(int argc, char** argv) {{
     {top_name}(in_stream, out_stream, aux_stream, {movement_call_args}1);
     std::vector<float> weights_after = drain_exact(out_stream, {int(weight_words)}, "weights_after");
     write_bin_both(out_dir, "weights_after.bin", weights_after);
+    final_loss = evaluate_loss();
+    write_one_bin(join_path(out_dir, "loss_after.bin"), std::vector<float>{{final_loss}});
+    if (!(out_dir.empty() || out_dir == ".")) {{
+        write_one_bin("loss_after.bin", std::vector<float>{{final_loss}});
+    }}
+    printf("[TB-TRAIN] numeric_capture_final_loss=%f loss_eval_records=%d\\n", final_loss, loss_eval_records);
 {held_out_after_block}{gradient_capture_block}{optimizer_state_capture_block}
 
     std::string summary = "{{\\n";

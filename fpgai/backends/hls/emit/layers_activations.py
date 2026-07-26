@@ -451,6 +451,119 @@ void add_vec(
 }
 
 
+
+
+template<
+    int N,
+    typename ACT_T = act_t,
+    typename MASK_T = unsigned char
+>
+void relu_with_mask_typed(
+    const ACT_T input[N],
+    ACT_T output[N],
+    MASK_T mask[N]
+) {
+#pragma HLS INLINE off
+
+    for (
+        int base = 0;
+        base < N;
+        base += FPGAI_ACT_UNROLL
+    ) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+
+        for (
+            int lane = 0;
+            lane < FPGAI_ACT_UNROLL;
+            ++lane
+        ) {
+#pragma HLS UNROLL
+
+            const int index = base + lane;
+
+            if (index < N) {
+                const bool active = input[index] > (ACT_T)0;
+                mask[index] = active ? (MASK_T)1 : (MASK_T)0;
+                output[index] = active ? input[index] : (ACT_T)0;
+            }
+        }
+    }
+}
+
+
+template<int N>
+void relu_with_mask(
+    const act_t* input,
+    act_t* output,
+    unsigned char* mask
+) {
+    relu_with_mask_typed<N, act_t, unsigned char>(
+        input,
+        output,
+        mask
+    );
+}
+
+
+template<
+    int N,
+    typename MASK_T = unsigned char,
+    typename GRAD_OUT_T = grad_act_t,
+    typename GRAD_IN_T = grad_act_t
+>
+void relu_backward_from_mask_typed(
+    const MASK_T mask[N],
+    const GRAD_OUT_T dY[N],
+    GRAD_IN_T dX[N]
+) {
+#pragma HLS INLINE off
+
+    for (
+        int base = 0;
+        base < N;
+        base += FPGAI_ACT_UNROLL
+    ) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+
+        for (
+            int lane = 0;
+            lane < FPGAI_ACT_UNROLL;
+            ++lane
+        ) {
+#pragma HLS UNROLL
+
+            const int index = base + lane;
+
+            if (index < N) {
+                dX[index] = (
+                    mask[index] != (MASK_T)0
+                    ? (GRAD_IN_T)dY[index]
+                    : (GRAD_IN_T)0
+                );
+            }
+        }
+    }
+}
+
+
+template<int N>
+void relu_backward_from_mask(
+    const unsigned char* mask,
+    const grad_act_t* dY,
+    grad_act_t* dX
+) {
+    relu_backward_from_mask_typed<
+        N,
+        unsigned char,
+        grad_act_t,
+        grad_act_t
+    >(
+        mask,
+        dY,
+        dX
+    );
+}
+
 template<
     int N,
     typename ACT_T = act_t,

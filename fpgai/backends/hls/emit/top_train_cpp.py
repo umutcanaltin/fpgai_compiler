@@ -10,6 +10,7 @@ from fpgai.backends.hls.emit.dense_tiling_codegen import apply_dense_tiling_to_t
 from fpgai.backends.hls.emit.dense_tiling_codegen import apply_dense_training_tiling_to_top_source
 from fpgai.backends.hls.emit.conv_tiling_codegen import apply_conv_tiling_to_top_source
 from fpgai.backends.hls.emit.conv_tiling_codegen import apply_conv_training_tiling_to_top_source
+from fpgai.backends.hls.emit.types_h import resolve_training_numeric_specs
 from fpgai.engine.training_graph_utils import (
     as_chw as _as_chw,
     flat_size as _flat_size,
@@ -999,6 +1000,19 @@ def emit_top_train_cpp(
             f"static grad_act_t {gradient_name}[{size}];"
         )
 
+    # Persist ReLU branch decisions from the forward pass. Activation buffers
+    # may be reused or overwritten before backward execution, so deriving the
+    # derivative from the live output buffer is not a valid lifetime contract.
+    for op in graph.ops:
+        if op.op_type != "Relu":
+            continue
+        relu_output_name = op.outputs[0]
+        relu_size = tensor_name_to_size[relu_output_name]
+        relu_tag = _sanitize(op.name)
+        lines.append(
+            f"static unsigned char FPGAI_RELU_MASK_{relu_tag}[{relu_size}];"
+        )
+
     parameter_specs = []
 
     for op in graph.ops:
@@ -1445,9 +1459,14 @@ def emit_top_train_cpp(
             )
 
         elif op.op_type == "Relu":
+            relu_tag = _sanitize(op.name)
             lines.append(
-                f"  fpgai::relu<{output_tensor_size}>"
-                f"({input_buffer}, {output_buffer});"
+                f"  // FPGAI ReLU forward branch cache for training backward."
+            )
+            lines.append(
+                f"  fpgai::relu_with_mask<{output_tensor_size}>"
+                f"({input_buffer}, {output_buffer}, "
+                f"FPGAI_RELU_MASK_{relu_tag});"
             )
 
         elif op.op_type == "LeakyRelu":
@@ -1629,6 +1648,20 @@ def emit_top_train_cpp(
         f"  for (int i = 0; i < {output_size}; ++i) "
         "target_buf[i] = (act_t)read_f32(aux);"
     )
+    lines.append("")
+
+    # Gradient workspaces are static HLS arrays and therefore persist across
+    # kernel invocations in CSim and hardware.  Clear every canonical gradient
+    # tensor before constructing a new backward pass.  This also makes additive
+    # gradient owners (Add and other fan-in paths) deterministic.
+    lines.append("  // FPGAI reset per-step gradient workspaces.")
+    for root in roots_in_order:
+        gradient_buffer = gradient_name_to_buffer[root]
+        gradient_size = tensor_name_to_size[root]
+        lines.append(
+            f"  for (int i = 0; i < {gradient_size}; ++i) "
+            f"{gradient_buffer}[i] = (grad_act_t)0;"
+        )
     lines.append("")
 
     if loss_type == "mse":
@@ -1887,10 +1920,15 @@ def emit_top_train_cpp(
                 )
 
         elif op.op_type == "Relu":
+            relu_tag = _sanitize(op.name)
             lines.append(
-                f"  fpgai::relu_backward_from_output"
+                "  // FPGAI ReLU backward uses the forward-pass branch cache; "
+                "do not derive the mask from a reusable activation buffer."
+            )
+            lines.append(
+                f"  fpgai::relu_backward_from_mask"
                 f"<{output_tensor_size}>"
-                f"({output_buffer}, {output_gradient}, "
+                f"(FPGAI_RELU_MASK_{relu_tag}, {output_gradient}, "
                 f"{input_gradient});"
             )
 
@@ -1928,8 +1966,11 @@ def emit_top_train_cpp(
                 and is_final_op
             ):
                 lines.append(
+                    "  // FPGAI fused softmax-cross-entropy backward owner assignment."
+                )
+                lines.append(
                     f"  for (int i = 0; i < {output_tensor_size}; ++i) "
-                    f"{input_gradient}[i] += "
+                    f"{input_gradient}[i] = "
                     f"{output_gradient}[i];"
                 )
             else:
@@ -3800,13 +3841,26 @@ def _fpgai_ensure_adam_final_contract(source: str, *, raw_cfg: Any) -> str:
     beta1 = float(_fpgai_training_raw_get(raw, "training.optimizer.beta1", 0.9) or 0.9)
     beta2 = float(_fpgai_training_raw_get(raw, "training.optimizer.beta2", 0.999) or 0.999)
     epsilon = float(_fpgai_training_raw_get(raw, "training.optimizer.epsilon", 1.0e-8) or 1.0e-8)
+    update_spec = resolve_training_numeric_specs(raw)["update_accum"]
+    update_total_bits = int(update_spec.get("total_bits", 24))
+    update_int_bits = int(update_spec.get("int_bits", 10))
+    update_frac_bits = max(0, update_total_bits - update_int_bits)
+    epsilon_lsb = float(2.0 ** (-update_frac_bits))
+    epsilon_effective = max(abs(epsilon), epsilon_lsb)
+    bias_correction = bool(_fpgai_training_raw_get(raw, "training.optimizer.bias_correction", False))
+    arithmetic_strategy = str(_fpgai_training_raw_get(raw, "training.optimizer.implementation.arithmetic", "direct") or "direct").strip().lower().replace("-", "_")
+    update_parallelism = int(_fpgai_training_raw_get(raw, "training.optimizer.implementation.update_parallelism", 1) or 1)
+    if arithmetic_strategy not in {"direct", "shared"}:
+        raise ValueError("training.optimizer.implementation.arithmetic must be direct or shared")
+    if update_parallelism < 1:
+        raise ValueError("training.optimizer.implementation.update_parallelism must be >= 1")
 
     if "#include <math.h>" not in updated and "#include <cmath>" not in updated:
         updated = updated.replace("#include", "#include <math.h>\n#include", 1)
 
     rule_m = "// M = beta1 * M + (1-beta1) * dParam."
     rule_v = "// V = beta2 * V + (1-beta2) * dParam*dParam."
-    rule_w = "// Param = Param - learning_rate * M / sqrt(V + epsilon)."
+    rule_w = "// Param = Param - learning_rate * M_used / (sqrt(V_used) + epsilon)."
     if "FPGAI Adam optimizer update kernel" not in updated:
         banner = "\n".join([
             "// ============================================================",
@@ -3817,7 +3871,19 @@ def _fpgai_ensure_adam_final_contract(source: str, *, raw_cfg: Any) -> str:
             f"// learning_rate = {learning_rate:.8f}",
             f"// beta1 = {beta1:.8f}",
             f"// beta2 = {beta2:.8f}",
-            f"// epsilon = {epsilon:.8e}",
+            f"// epsilon_requested = {epsilon:.8e}",
+            f"// epsilon_effective = {epsilon_effective:.8e}",
+            f"// epsilon_numeric_type = {str(update_spec.get('type', 'ap_fixed'))}",
+            f"// epsilon_total_bits = {update_total_bits}",
+            f"// epsilon_integer_bits = {update_int_bits}",
+            f"// epsilon_fractional_bits = {update_frac_bits}",
+            f"// epsilon_lsb = {epsilon_lsb:.8e}",
+            f"// epsilon_policy = clamp_to_one_update_accum_lsb",
+            f"// epsilon_resolution_source = canonical_training_numeric_specs.update_accum",
+            f"// bias_correction = {str(bias_correction).lower()}",
+            f"// arithmetic_strategy = {arithmetic_strategy}",
+            f"// update_parallelism = {update_parallelism}",
+            "// FPGAI_ADAM_STEP advances exactly once per optimizer update, not once per tensor.",
             "// ============================================================",
             "",
         ])
@@ -3826,8 +3892,28 @@ def _fpgai_ensure_adam_final_contract(source: str, *, raw_cfg: Any) -> str:
         else:
             updated = banner + updated
 
+    if arithmetic_strategy == "shared" and "fpgai_adam_delta_shared" not in updated:
+        helper = "\n".join([
+            "// FPGAI shared Adam correction arithmetic; one reusable sqrt/divide owner.",
+            "static float fpgai_adam_delta_shared(float adam_m_used, float adam_v_used) {",
+            "#pragma HLS INLINE off",
+            f"  return ((float){learning_rate:.8f}f * adam_m_used) / (sqrtf(adam_v_used) + (float){epsilon_effective:.8e}f);",
+            "}",
+            "",
+        ])
+        extern_match = re.search(r'\nextern\s+"C"\s+void\s+', updated)
+        if extern_match:
+            updated = updated[:extern_match.start()] + "\n" + helper + updated[extern_match.start():]
+        else:
+            updated = helper + updated
+
     typed_pattern = re.compile(
         r"(?P<indent>[ \t]*)fpgai::sgd_update_(?P<kind>wgt|bias)_typed\s*<\s*(?P<size>\d+)\s*,[^>]+?>\s*\(\s*"
+        r"(?P<arr>[WB]_[A-Za-z0-9_]+)\s*,\s*(?P<grad>d[WB]_[A-Za-z0-9_]+)\s*,\s*\(upd_t\)[^;]+?;",
+        re.DOTALL,
+    )
+    tiled_pattern = re.compile(
+        r"(?P<indent>[ \t]*)fpgai::sgd_update_(?P<kind>wgt|bias)_tiled\s*<\s*(?P<size>\d+)\s*,[^>]+?>\s*\(\s*"
         r"(?P<arr>[WB]_[A-Za-z0-9_]+)\s*,\s*(?P<grad>d[WB]_[A-Za-z0-9_]+)\s*,\s*\(upd_t\)[^;]+?;",
         re.DOTALL,
     )
@@ -3861,12 +3947,16 @@ def _fpgai_ensure_adam_final_contract(source: str, *, raw_cfg: Any) -> str:
             f"{indent}  float grad_value = (float){grad}[i];",
             f"{indent}  {m_name}[i] = (opt_t)(((float){beta1:.8f}f * (float){m_name}[i]) + ((1.0f - (float){beta1:.8f}f) * grad_value));",
             f"{indent}  {v_name}[i] = (opt_t)(((float){beta2:.8f}f * (float){v_name}[i]) + ((1.0f - (float){beta2:.8f}f) * grad_value * grad_value));",
-            f"{indent}  float adam_step = ((float){learning_rate:.8f}f * (float){m_name}[i]) / sqrtf((float){v_name}[i] + (float){epsilon:.8e}f);",
-            f"{indent}  {arr}[i] = ({value_type})((float){arr}[i] - adam_step);",
+            f"{indent}  float adam_m_used = (float){m_name}[i];",
+            f"{indent}  float adam_v_used = (float){v_name}[i];",
+            *([f"{indent}  adam_m_used *= FPGAI_ADAM_INV_BIAS1;", f"{indent}  adam_v_used *= FPGAI_ADAM_INV_BIAS2;"] if bias_correction else []),
+            (f"{indent}  float adam_delta = fpgai_adam_delta_shared(adam_m_used, adam_v_used);" if arithmetic_strategy == "shared" else f"{indent}  float adam_delta = ((float){learning_rate:.8f}f * adam_m_used) / (sqrtf(adam_v_used) + (float){epsilon_effective:.8e}f);"),
+            f"{indent}  {arr}[i] = ({value_type})((float){arr}[i] - adam_delta);",
             f"{indent}}}",
         ])
 
     updated = typed_pattern.sub(_replace_sgd, updated)
+    updated = tiled_pattern.sub(_replace_sgd, updated)
     updated = legacy_pattern.sub(_replace_sgd, updated)
 
     # Recover state names from already generated Adam loops when another wrapper has
@@ -3898,13 +3988,26 @@ def _fpgai_ensure_adam_final_contract(source: str, *, raw_cfg: Any) -> str:
         if not re.search(rf"static\s+opt_t\s+{re.escape(name)}\s*\[", updated):
             missing.append((name, size))
 
-    if "FPGAI persistent Adam optimizer first/second moment state" not in updated or missing:
+    adam_scalar_state_missing = "static unsigned long long FPGAI_ADAM_STEP" not in updated
+    if "FPGAI persistent Adam optimizer first/second moment state" not in updated or missing or adam_scalar_state_missing:
         decl_lines = []
         if "FPGAI persistent Adam optimizer first/second moment state" not in updated:
             decl_lines.append("")
             decl_lines.append("// FPGAI persistent Adam optimizer first/second moment state.")
+        state_storage = str(_fpgai_training_raw_get(raw, "training.storage.optimizer_state", _fpgai_training_raw_get(raw, "memory.optimizer_state_storage", "bram")) or "bram").strip().lower().replace("-", "_")
+        state_impl = "uram" if state_storage == "uram" else "bram"
+        state_binding_names = []
         for name, size in missing:
             decl_lines.append(f"static opt_t {name}[{size}];")
+            if state_storage in {"bram", "uram"}:
+                state_binding_names.append(name)
+        if adam_scalar_state_missing:
+            decl_lines.extend([
+                "// Persistent Adam scalar state; checkpoint/resume requires the update step.",
+                "static unsigned long long FPGAI_ADAM_STEP = 0ULL;",
+                "static float FPGAI_ADAM_BETA1_POWER = 1.0f;",
+                "static float FPGAI_ADAM_BETA2_POWER = 1.0f;",
+            ])
         decl_text = "\n".join(decl_lines) + "\n"
         extern_match = re.search(r'\nextern\s+"C"\s+void\s+', updated)
         if extern_match:
@@ -3913,6 +4016,59 @@ def _fpgai_ensure_adam_final_contract(source: str, *, raw_cfg: Any) -> str:
             updated = updated.replace("using namespace fpgai;\n", "using namespace fpgai;\n" + decl_text, 1)
         else:
             updated = decl_text + updated
+
+        # Vitis HLS accepts BIND_STORAGE only in function scope.  The Adam
+        # moment arrays remain persistent file-scope statics, while their
+        # storage directives are materialized at the start of the generated
+        # top function where those globals are visible.
+        if state_binding_names:
+            binding_lines = "\n".join(
+                f"  #pragma HLS BIND_STORAGE variable={name} type=ram_2p impl={state_impl}"
+                for name in state_binding_names
+            ) + "\n"
+            top_match = re.search(r'(extern\s+"C"\s+void\s+[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)\s*\{\n)', updated, flags=re.DOTALL)
+            if not top_match:
+                raise RuntimeError("Unable to place Adam optimizer-state storage bindings inside generated HLS top function")
+            updated = updated[:top_match.end()] + binding_lines + updated[top_match.end():]
+
+    def _step_preamble(indent: str, path_name: str) -> str:
+        lines = [
+            f"{indent}// FPGAI Adam optimizer-step advance ({path_name}); exactly once per optimizer update.",
+            f"{indent}FPGAI_ADAM_STEP += 1ULL;",
+            f"{indent}FPGAI_ADAM_BETA1_POWER *= (float){beta1:.8f}f;",
+            f"{indent}FPGAI_ADAM_BETA2_POWER *= (float){beta2:.8f}f;",
+        ]
+        if bias_correction:
+            lines.extend([
+                f"{indent}const float FPGAI_ADAM_INV_BIAS1 = 1.0f / (1.0f - FPGAI_ADAM_BETA1_POWER);",
+                f"{indent}const float FPGAI_ADAM_INV_BIAS2 = 1.0f / (1.0f - FPGAI_ADAM_BETA2_POWER);",
+            ])
+        return "\n".join(lines) + "\n"
+
+    adam_update_marker = "// FPGAI Adam optimizer update for "
+    mode4_match = re.search(
+        r"  if \(mode == FPGAI_MODE_APPLY_ACCUMULATED_GRADIENTS \|\| mode == 4\) \{.*?\n    return;\n  \}",
+        updated,
+        flags=re.DOTALL,
+    )
+    mode4_end = 0
+    if mode4_match:
+        block = mode4_match.group(0)
+        marker_pos = block.find(adam_update_marker)
+        if marker_pos >= 0 and "optimizer-step advance (accumulated_gradients)" not in block:
+            line_start = block.rfind("\n", 0, marker_pos) + 1
+            block = block[:line_start] + _step_preamble("    ", "accumulated_gradients") + block[line_start:]
+            updated = updated[:mode4_match.start()] + block + updated[mode4_match.end():]
+            mode4_end = mode4_match.start() + len(block)
+        else:
+            mode4_end = mode4_match.end()
+
+    direct_pos = updated.find(adam_update_marker, mode4_end)
+    if direct_pos >= 0:
+        direct_prefix = updated[max(0, direct_pos - 500):direct_pos]
+        if "optimizer-step advance (direct_training)" not in direct_prefix:
+            line_start = updated.rfind("\n", 0, direct_pos) + 1
+            updated = updated[:line_start] + _step_preamble("  ", "direct_training") + updated[line_start:]
 
     return updated
 
@@ -3962,22 +4118,21 @@ def _fpgai_insert_optimizer_state_export_capture(source: str, *, raw_cfg: Any) -
         # Do not silently pretend export is implemented without actual optimizer state.
         raise RuntimeError("Optimizer-state export was requested but no persistent Momentum/Adam state arrays were found in generated C++")
 
-    # Momentum export must use the same canonical parameter order as weights,
-    # gradients, and the dataset-wide optimizer-state reference.  Declaration
-    # order is not reliable because earlier wrappers may emit state arrays in
-    # lexical order (for example B0, B1, W0, W1).
-    if optimizer_type == "momentum":
-        parameter_order: list[str] = []
-        parameter_decl_re = re.compile(
-            r"(?:static\s+)?(?:const\s+)?(?:wgt_t|bias_t)\s+([WB]_[A-Za-z0-9_]+)"
-            r"(?:\s*\[\s*\d+\s*\])+\s*(?:=|;)"
-        )
-        for match in parameter_decl_re.finditer(updated):
-            name = match.group(1)
-            if name not in parameter_order:
-                parameter_order.append(name)
-        order_index = {name: index for index, name in enumerate(parameter_order)}
+    # Optimizer-state export must use the same canonical parameter order as
+    # weights, gradients, and the dataset-wide reference. Declaration order is
+    # not reliable because earlier wrappers may emit arrays in lexical order.
+    parameter_order: list[str] = []
+    parameter_decl_re = re.compile(
+        r"(?:static\s+)?(?:const\s+)?(?:wgt_t|bias_t)\s+([WB]_[A-Za-z0-9_]+)"
+        r"(?:\s*\[\s*\d+\s*\])+\s*(?:=|;)"
+    )
+    for match in parameter_decl_re.finditer(updated):
+        name = match.group(1)
+        if name not in parameter_order:
+            parameter_order.append(name)
+    order_index = {name: index for index, name in enumerate(parameter_order)}
 
+    if optimizer_type == "momentum":
         def momentum_state_key(item: tuple[str, int]) -> tuple[int, str]:
             state_name = item[0]
             prefix = "FPGAI_MOMENTUM_"
@@ -3985,8 +4140,35 @@ def _fpgai_insert_optimizer_state_export_capture(source: str, *, raw_cfg: Any) -
             return (order_index.get(parameter_name, len(order_index)), state_name)
 
         states.sort(key=momentum_state_key)
+    else:
+        def adam_state_key(item: tuple[str, int]) -> tuple[int, int, str]:
+            state_name = item[0]
+            if state_name.startswith("FPGAI_ADAM_M_"):
+                group = 0
+                parameter_name = state_name[len("FPGAI_ADAM_M_"):]
+            elif state_name.startswith("FPGAI_ADAM_V_"):
+                group = 1
+                parameter_name = state_name[len("FPGAI_ADAM_V_"):]
+            else:
+                group = 2
+                parameter_name = state_name
+            return (group, order_index.get(parameter_name, len(order_index)), state_name)
 
-    total_words = sum(size for _, size in states)
+        states.sort(key=adam_state_key)
+
+    # Adam export appends the persistent optimizer update step after all m/v
+    # tensors. The compact training schedules validated by FPGAI are exactly
+    # representable as float32 integers, matching the binary reference format.
+    step_words = 1 if optimizer_type == "adam" else 0
+    total_words = sum(size for _, size in states) + step_words
+
+    total_words_decl_re = re.compile(r"static const int FPGAI_OPTIMIZER_STATE_EXPORT_WORDS = \d+;")
+    if total_words_decl_re.search(updated):
+        updated = total_words_decl_re.sub(
+            f"static const int FPGAI_OPTIMIZER_STATE_EXPORT_WORDS = {total_words};",
+            updated,
+            count=1,
+        )
 
     if "FPGAI_MODE_EXPORT_OPTIMIZER_STATE" not in updated:
         mode_decl = "\n".join([
@@ -4035,6 +4217,10 @@ def _fpgai_insert_optimizer_state_export_capture(source: str, *, raw_cfg: Any) -
         export_lines.append(f"      optimizer_state_mem[{offset} + i] = fpgai_pack_optimizer_state_float32((float){name}[i]);")
         export_lines.append("    }")
         offset += size
+    if optimizer_type == "adam":
+        export_lines.append(f"    // optimizer_state scalar FPGAI_ADAM_STEP: offset_words={offset}, count_words=1")
+        export_lines.append(f"    optimizer_state_mem[{offset}] = fpgai_pack_optimizer_state_float32((float)FPGAI_ADAM_STEP);")
+        offset += 1
     export_lines.extend(["    return;", "  }", ""])
     export_block = "\n".join(export_lines)
 
@@ -4359,6 +4545,645 @@ def _fpgai_p3d_f4c_materialize_live_momentum_updates(source: str, *, raw_cfg: An
 def emit_top_train_cpp(*args, **kwargs):
     source = _fpgai_p3d_f4c_live_momentum_previous_emit_top_train_cpp(*args, **kwargs)
     return _fpgai_p3d_f4c_materialize_live_momentum_updates(
+        source,
+        raw_cfg=kwargs.get("raw_cfg") or {},
+    )
+
+
+# FPGAI P3D-F4L/F4M selectable gradient materialization and lifetime policy.
+_fpgai_p3d_f4lm_previous_emit_top_train_cpp = emit_top_train_cpp
+
+
+def _fpgai_p3d_f4lm_gradient_policy(raw_cfg: Any) -> tuple[str, int, str]:
+    raw = raw_cfg or {}
+    computation = str(
+        _fpgai_training_raw_get(raw, "training.gradients.computation", "full_buffer") or "full_buffer"
+    ).strip().lower().replace("-", "_")
+    requested_materialization = _fpgai_training_raw_get(
+        raw, "training.gradients.materialization", None
+    )
+    default_materialization = "streamed" if computation == "fused_update" else "full"
+    materialization = str(
+        requested_materialization
+        if requested_materialization is not None
+        else default_materialization
+    ).strip().lower().replace("-", "_")
+    if materialization not in {"full", "tiled", "streamed"}:
+        raise ValueError(
+            "training.gradients.materialization must be full, tiled, or streamed; "
+            f"got {materialization!r}."
+        )
+    tile_size = int(_fpgai_training_raw_get(raw, "training.gradients.tile_size", 256) or 256)
+    if tile_size <= 0:
+        raise ValueError("training.gradients.tile_size must be a positive integer.")
+    lifetime = str(
+        _fpgai_training_raw_get(raw, "training.memory_lifetime.policy", "separate") or "separate"
+    ).strip().lower().replace("-", "_")
+    if lifetime not in {"separate", "phase_shared"}:
+        raise ValueError(
+            "training.memory_lifetime.policy must be separate or phase_shared; "
+            f"got {lifetime!r}."
+        )
+    if computation == "fused_update" and materialization != "streamed":
+        raise ValueError(
+            "training.gradients.computation=fused_update requires "
+            "training.gradients.materialization=streamed because no parameter-gradient buffer is materialized."
+        )
+    if lifetime == "phase_shared" and materialization == "full":
+        raise ValueError(
+            "training.memory_lifetime.policy=phase_shared requires "
+            "training.gradients.materialization=tiled or streamed."
+        )
+    return materialization, tile_size, lifetime
+
+
+def _fpgai_p3d_f4lm_materialize_gradient_export(source: str, *, raw_cfg: Any) -> str:
+    materialization, tile_size, lifetime = _fpgai_p3d_f4lm_gradient_policy(raw_cfg)
+    if materialization == "full":
+        return source
+
+    updated = source
+    specs = []
+    for m in re.finditer(
+        r"static\s+float\s+OUT_grad_([A-Za-z0-9_]+)\[(\d+)\];",
+        updated,
+    ):
+        specs.append((m.group(1), int(m.group(2))))
+    if not specs:
+        return updated
+
+    # Remove the full per-layer export scratch arrays. dW/dB remain selectable
+    # gradient storage owners and preserve the validated optimizer semantics.
+    updated = re.sub(
+        r"\n?static\s+float\s+OUT_grad_[A-Za-z0-9_]+\[\d+\];",
+        "",
+        updated,
+    )
+
+    marker = 'extern "C" void '
+    extern_pos = updated.find(marker)
+    if extern_pos < 0:
+        return updated
+
+    declarations = [
+        "// FPGAI selectable gradient export materialization.",
+        f"#define FPGAI_GRADIENT_MATERIALIZATION_TILE_SIZE {tile_size}",
+    ]
+    if materialization == "tiled":
+        if lifetime == "phase_shared":
+            declarations.append(
+                "static float FPGAI_SHARED_GRADIENT_EXPORT_TILE[FPGAI_GRADIENT_MATERIALIZATION_TILE_SIZE];"
+            )
+        else:
+            for tag, _ in specs:
+                declarations.append(
+                    f"static float FPGAI_GRADIENT_EXPORT_TILE_{tag}[FPGAI_GRADIENT_MATERIALIZATION_TILE_SIZE];"
+                )
+    declarations.append("")
+    updated = updated[:extern_pos] + "\n".join(declarations) + updated[extern_pos:]
+
+    for index, (tag, total) in enumerate(specs):
+        # Infer weight and bias sizes from dW/dB declarations. These sizes are
+        # shared by weight export, immediate-gradient export, and accumulated-
+        # gradient export branches.
+        mw = re.search(rf"static\s+grad_wgt_t\s+dW_{re.escape(tag)}\[(\d+)\];", updated)
+        mb = re.search(rf"static\s+grad_bias_t\s+dB_{re.escape(tag)}\[(\d+)\];", updated)
+        if not mw or not mb:
+            continue
+        wsize, bsize = int(mw.group(1)), int(mb.group(1))
+
+        # Replace every legacy OUT_grad block for this layer, not only the final
+        # dW/dB export. The generated top can contain weight export, immediate
+        # gradient export, and accumulated-gradient export branches.
+        pattern = re.compile(
+            rf"(?P<indent>[ ]+)for \(int i = 0; i < {wsize}; \+\+i\) "
+            rf"OUT_grad_{re.escape(tag)}\[i\] = \(float\)(?P<wsrc>[A-Za-z0-9_]+)\[i\];\n"
+            rf"(?P=indent)for \(int i = 0; i < {bsize}; \+\+i\) "
+            rf"OUT_grad_{re.escape(tag)}\[{wsize} \+ i\] = \(float\)(?P<bsrc>[A-Za-z0-9_]+)\[i\];\n"
+            rf"(?P=indent)emit_stream_block<{total}>\(out, OUT_grad_{re.escape(tag)}, (?P<last>true|false)\);"
+        )
+
+        def _replacement(match: re.Match[str]) -> str:
+            indent = match.group("indent")
+            wsrc = match.group("wsrc")
+            bsrc = match.group("bsrc")
+            is_last = match.group("last")
+            export_kind = (
+                "weights" if wsrc.startswith("W_")
+                else "accumulated_gradients" if wsrc.startswith("ACC_dW_")
+                else "gradients"
+            )
+            if materialization == "streamed":
+                rows = [
+                    f"{indent}// FPGAI streamed {export_kind} materialization for {tag}: no OUT_grad scratch array.",
+                    f"{indent}for (int i = 0; i < {wsize}; ++i) write_f32(out, (float){wsrc}[i], false);",
+                    f"{indent}for (int i = 0; i < {bsize}; ++i) write_f32(out, (float){bsrc}[i], {is_last} && (i == {bsize - 1}));",
+                ]
+                return "\n".join(rows)
+
+            tile = (
+                "FPGAI_SHARED_GRADIENT_EXPORT_TILE"
+                if lifetime == "phase_shared"
+                else f"FPGAI_GRADIENT_EXPORT_TILE_{tag}"
+            )
+            rows = [
+                f"{indent}// FPGAI tiled {export_kind} materialization for {tag}; lifetime_policy={lifetime}.",
+                f"{indent}for (int tile_base = 0; tile_base < {total}; tile_base += FPGAI_GRADIENT_MATERIALIZATION_TILE_SIZE) {{",
+                f"{indent}  int tile_count = ((tile_base + FPGAI_GRADIENT_MATERIALIZATION_TILE_SIZE) <= {total}) ? FPGAI_GRADIENT_MATERIALIZATION_TILE_SIZE : ({total} - tile_base);",
+                f"{indent}  for (int lane = 0; lane < tile_count; ++lane) {{",
+                f"{indent}    int idx = tile_base + lane;",
+                f"{indent}    {tile}[lane] = (idx < {wsize}) ? (float){wsrc}[idx] : (float){bsrc}[idx - {wsize}];",
+                f"{indent}  }}",
+                f"{indent}  for (int lane = 0; lane < tile_count; ++lane) {{",
+                f"{indent}    bool last_word = {is_last} && ((tile_base + lane) == {total - 1});",
+                f"{indent}    write_f32(out, {tile}[lane], last_word);",
+                f"{indent}  }}",
+                f"{indent}}}",
+            ]
+            return "\n".join(rows)
+
+        updated, n = pattern.subn(_replacement, updated)
+        if n == 0:
+            raise RuntimeError(
+                f"Could not materialize selectable export branches for {tag}"
+            )
+
+    # Function-scope storage bindings for generated tiles.
+    anchor = "#pragma HLS INTERFACE s_axilite port=return bundle=CTRL\n"
+    bindings = []
+    if materialization == "tiled":
+        if lifetime == "phase_shared":
+            bindings.append("#pragma HLS BIND_STORAGE variable=FPGAI_SHARED_GRADIENT_EXPORT_TILE type=ram_1p impl=bram")
+        else:
+            bindings.extend(
+                f"#pragma HLS BIND_STORAGE variable=FPGAI_GRADIENT_EXPORT_TILE_{tag} type=ram_1p impl=bram"
+                for tag, _ in specs
+            )
+    if bindings and anchor in updated:
+        updated = updated.replace(anchor, anchor + "\n".join(bindings) + "\n", 1)
+
+    banner = (
+        f"// FPGAI gradient materialization={materialization}; tile_size={tile_size}; "
+        f"memory_lifetime={lifetime}.\n"
+    )
+    return banner + updated
+
+
+def emit_top_train_cpp(*args, **kwargs):
+    source = _fpgai_p3d_f4lm_previous_emit_top_train_cpp(*args, **kwargs)
+    return _fpgai_p3d_f4lm_materialize_gradient_export(
+        source,
+        raw_cfg=kwargs.get("raw_cfg") or {},
+    )
+
+# FPGAI F4O/F4P parameter-gradient computation and storage contract.
+_fpgai_f4op_previous_emit_top_train_cpp = emit_top_train_cpp
+
+
+def _fpgai_f4op_parameter_gradient_policy(raw_cfg: Any) -> tuple[str, str]:
+    raw = raw_cfg or {}
+    computation = str(
+        _fpgai_training_raw_get(raw, "training.gradients.computation", "full_buffer") or "full_buffer"
+    ).strip().lower().replace("-", "_")
+    if computation not in {"full_buffer", "tiled_accumulate", "fused_update"}:
+        raise ValueError(
+            "training.gradients.computation must be full_buffer, tiled_accumulate, or fused_update; "
+            f"got {computation!r}."
+        )
+    storage = str(
+        _fpgai_training_raw_get(
+            raw,
+            "training.storage.parameter_gradient",
+            _fpgai_training_raw_get(
+                raw,
+                "training.storage.gradient",
+                _fpgai_training_raw_get(raw, "training.storage.gradients", "bram"),
+            ),
+        )
+        or "bram"
+    ).strip().lower().replace("-", "_")
+    storage = {
+        "block": "bram",
+        "block_ram": "bram",
+        "ultra": "uram",
+        "ultra_ram": "uram",
+    }.get(storage, storage)
+    if storage not in {"bram", "uram", "ddr", "recompute"}:
+        raise ValueError(
+            "training.storage.parameter_gradient must be bram, uram, ddr, or recompute; "
+            f"got {storage!r}."
+        )
+    if computation != "full_buffer":
+        raise ValueError(
+            f"training.gradients.computation={computation} is not yet enabled in the generated HLS backend; "
+            "the current validated implementation is full_buffer."
+        )
+    if storage in {"ddr", "recompute"}:
+        raise ValueError(
+            f"training.storage.parameter_gradient={storage} is not yet enabled because no real "
+            "external-memory or recomputation lowering is present."
+        )
+    return computation, storage
+
+
+def _fpgai_f4op_materialize_parameter_gradient_contract(source: str, *, raw_cfg: Any) -> str:
+    computation, storage = _fpgai_f4op_parameter_gradient_policy(raw_cfg)
+    updated = source
+    # Storage pragmas are emitted by the existing training storage owner from the
+    # resolved memory-plan notes. This final contract verifies the selected value
+    # is visible in generated source and leaves the actual dW/dB arrays unchanged.
+    banner = (
+        f"// FPGAI parameter-gradient computation={computation}; "
+        f"storage={storage}; owner=training.storage.parameter_gradient.\n"
+    )
+    if banner not in updated:
+        updated = banner + updated
+    return updated
+
+
+def emit_top_train_cpp(*args, **kwargs):
+    source = _fpgai_f4op_previous_emit_top_train_cpp(*args, **kwargs)
+    return _fpgai_f4op_materialize_parameter_gradient_contract(
+        source,
+        raw_cfg=kwargs.get("raw_cfg") or {},
+    )
+
+# FPGAI F4O real dense parameter-gradient tiled-accumulate lowering.
+#
+# This final wrapper deliberately supports a bounded, scientifically explicit
+# first profile: direct single-record Dense training with Adam.  Complete dW
+# arrays are removed.  Weight gradients are recomputed tile-by-tile from the
+# retained forward activation and output-gradient buffers immediately before
+# each canonical Adam parameter update and when gradients are exported.
+_fpgai_f4o_tiled_accumulate_previous_emit_top_train_cpp = emit_top_train_cpp
+
+
+def _fpgai_f4o_balanced_brace_end(text: str, open_brace: int) -> int:
+    depth = 0
+    for index in range(open_brace, len(text)):
+        char = text[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return index + 1
+    raise RuntimeError("Unbalanced generated C++ block while lowering tiled_accumulate")
+
+
+def _fpgai_f4o_dense_gradient_specs(source: str) -> list[dict[str, Any]]:
+    pattern = re.compile(
+        r"(?P<call>\s*fpgai::dense_weight_grad_(?:typed|tiled)\s*<\s*"
+        r"(?P<input_features>\d+)\s*,\s*(?P<output_features>\d+)\s*,.*?>\s*\(\s*"
+        r"(?P<input>[A-Za-z_][A-Za-z0-9_]*)\s*,\s*"
+        r"(?P<output_grad>[A-Za-z_][A-Za-z0-9_]*)\s*,\s*"
+        r"(?P<dw>dW_(?P<tag>[A-Za-z0-9_]+))\s*\)\s*;)",
+        flags=re.DOTALL,
+    )
+    specs: list[dict[str, Any]] = []
+    for match in pattern.finditer(source):
+        specs.append({
+            "call_start": match.start("call"),
+            "call_end": match.end("call"),
+            "call": match.group("call"),
+            "input_features": int(match.group("input_features")),
+            "output_features": int(match.group("output_features")),
+            "input": match.group("input"),
+            "output_grad": match.group("output_grad"),
+            "dw": match.group("dw"),
+            "tag": match.group("tag"),
+        })
+    return specs
+
+
+def _fpgai_f4o_replace_adam_weight_update(
+    source: str,
+    *,
+    spec: dict[str, Any],
+    tile_size: int,
+) -> str:
+    tag = spec["tag"]
+    dw = spec["dw"]
+    weight = f"W_{tag}"
+    marker = f"// FPGAI Adam optimizer update for {weight}."
+    marker_pos = source.find(marker)
+    if marker_pos < 0:
+        raise RuntimeError(
+            f"tiled_accumulate could not find the final Adam update owner for {weight}"
+        )
+    loop_pos = source.find("for (int i = 0; i < ", marker_pos)
+    if loop_pos < 0:
+        raise RuntimeError(f"tiled_accumulate could not find the Adam loop for {weight}")
+    open_brace = source.find("{", loop_pos)
+    loop_end = _fpgai_f4o_balanced_brace_end(source, open_brace)
+    body_start = open_brace + 1
+    body_end = loop_end - 1
+    body = source[body_start:body_end]
+    if f"{dw}[i]" not in body:
+        raise RuntimeError(
+            f"tiled_accumulate Adam update for {weight} does not consume {dw}[i]"
+        )
+    tile_name = f"FPGAI_DW_TILE_{tag}"
+    transformed_body = body.replace(f"{dw}[i]", f"{tile_name}[lane]")
+    transformed_body = transformed_body.replace("[i]", "[gradient_index]")
+    transformed_body = "\n".join(
+        ("    " + line if line.strip() else line)
+        for line in transformed_body.splitlines()
+    )
+    count = spec["input_features"] * spec["output_features"]
+    replacement = "\n".join([
+        f"// FPGAI tiled_accumulate Adam update for {weight}; complete {dw} array of {count} elements is not materialized.",
+        f"for (int tile_base = 0; tile_base < {count}; tile_base += {tile_size}) {{",
+        f"  const int tile_count = ((tile_base + {tile_size}) <= {count}) ? {tile_size} : ({count} - tile_base);",
+        "  for (int lane = 0; lane < tile_count; ++lane) {",
+        "#pragma HLS PIPELINE II=1",
+        "    const int gradient_index = tile_base + lane;",
+        f"    const int output_index = gradient_index / {spec['input_features']};",
+        f"    const int input_index = gradient_index % {spec['input_features']};",
+        f"    {tile_name}[lane] = (grad_wgt_t)((acc_t){spec['input']}[input_index] * (acc_t){spec['output_grad']}[output_index]);",
+        "  }",
+        "  for (int lane = 0; lane < tile_count; ++lane) {",
+        "#pragma HLS PIPELINE II=1",
+        "    const int gradient_index = tile_base + lane;",
+        transformed_body,
+        "  }",
+        "}",
+    ])
+    return source[:marker_pos] + replacement + source[loop_end:]
+
+
+def _fpgai_f4o_materialize_dense_tiled_accumulate(source: str, *, raw_cfg: Any) -> str:
+    raw = raw_cfg or {}
+    computation, storage = _fpgai_f4op_parameter_gradient_policy(raw)
+    if computation != "tiled_accumulate":
+        return source
+
+    optimizer = str(
+        _fpgai_training_raw_get(raw, "training.optimizer.type", "sgd") or "sgd"
+    ).strip().lower().replace("-", "_")
+    batch_mode = str(
+        _fpgai_training_raw_get(raw, "training.batch.mode", "direct") or "direct"
+    ).strip().lower().replace("-", "_")
+    batch_size = int(_fpgai_training_raw_get(raw, "training.batch.size", 1) or 1)
+    accumulation_steps = int(
+        _fpgai_training_raw_get(raw, "training.gradient_accumulation.steps", 1) or 1
+    )
+    materialization = str(
+        _fpgai_training_raw_get(raw, "training.gradients.materialization", "tiled") or "tiled"
+    ).strip().lower().replace("-", "_")
+    tile_size = int(_fpgai_training_raw_get(raw, "training.gradients.tile_size", 256) or 256)
+
+    if optimizer != "adam":
+        raise ValueError(
+            "training.gradients.computation=tiled_accumulate currently supports optimizer.type=adam; "
+            "SGD and Momentum lowering remain explicit future alternatives."
+        )
+    if batch_mode in {"accumulated", "accumulate", "gradient_accumulation"} or batch_size != 1 or accumulation_steps != 1:
+        raise ValueError(
+            "training.gradients.computation=tiled_accumulate currently requires direct single-record updates "
+            "(training.batch.mode=direct, training.batch.size=1, gradient_accumulation.steps=1). "
+            "Cross-record accumulation requires a separately validated persistent tiled schedule."
+        )
+    if materialization not in {"tiled", "streamed"}:
+        raise ValueError(
+            "training.gradients.computation=tiled_accumulate requires gradient materialization=tiled or streamed."
+        )
+    if storage not in {"bram", "uram"}:
+        raise ValueError("tiled_accumulate gradient tiles currently require bram or uram storage.")
+
+    specs = _fpgai_f4o_dense_gradient_specs(source)
+    declared = set(re.findall(r"static\s+grad_wgt_t\s+dW_([A-Za-z0-9_]+)\[\d+\];", source))
+    mapped = {spec["tag"] for spec in specs}
+    unsupported = sorted(declared - mapped)
+    if unsupported:
+        raise ValueError(
+            "tiled_accumulate currently supports Dense parameter gradients only; "
+            f"unlowered trainable gradient owners: {unsupported}."
+        )
+    if not specs:
+        raise RuntimeError("tiled_accumulate found no Dense parameter-gradient calls to lower")
+
+    updated = source
+    # Remove complete weight-gradient computation calls first. Parameter updates
+    # below recompute the same gradients tile-by-tile after all backward-input
+    # gradients have been generated, preserving use of pre-update weights.
+    for spec in reversed(specs):
+        current = updated.find(spec["call"].strip())
+        if current < 0:
+            # Whitespace may have changed in earlier wrappers; use a targeted call regex.
+            call_re = re.compile(
+                rf"\s*fpgai::dense_weight_grad_(?:typed|tiled)\s*<.*?>\s*\(\s*"
+                rf"{re.escape(spec['input'])}\s*,\s*{re.escape(spec['output_grad'])}\s*,\s*"
+                rf"{re.escape(spec['dw'])}\s*\)\s*;",
+                flags=re.DOTALL,
+            )
+            updated, count = call_re.subn("\n  // FPGAI tiled_accumulate: full Dense dW kernel removed; gradient is recomputed by tile at update time.", updated, count=1)
+            if count != 1:
+                raise RuntimeError(f"Could not remove full gradient kernel for {spec['dw']}")
+        else:
+            end = current + len(spec["call"].strip())
+            updated = updated[:current] + "// FPGAI tiled_accumulate: full Dense dW kernel removed; gradient is recomputed by tile at update time." + updated[end:]
+
+    for spec in specs:
+        tag = spec["tag"]
+        dw = spec["dw"]
+        tile_name = f"FPGAI_DW_TILE_{tag}"
+        decl_re = re.compile(rf"static\s+grad_wgt_t\s+{re.escape(dw)}\[\d+\];")
+        updated, count = decl_re.subn(
+            f"static grad_wgt_t {tile_name}[{tile_size}];",
+            updated,
+            count=1,
+        )
+        if count != 1:
+            raise RuntimeError(f"Could not replace complete gradient declaration {dw}")
+        updated = re.sub(
+            rf"(#pragma\s+HLS\s+BIND_STORAGE\s+variable=){re.escape(dw)}(\s+type=ram_[12]p\s+impl=(?:bram|uram))",
+            rf"\1{tile_name}\2",
+            updated,
+        )
+        # Final Adam loops are the canonical optimizer owner after all earlier
+        # wrappers. Replace them with compute/update tile loops.
+        updated = _fpgai_f4o_replace_adam_weight_update(
+            updated,
+            spec=spec,
+            tile_size=tile_size,
+        )
+        # Export paths recompute the last logical weight gradient from retained
+        # activation and output-gradient buffers; no complete dW object is needed.
+        expression_i = (
+            f"(grad_wgt_t)((acc_t){spec['input']}[i % {spec['input_features']}] * "
+            f"(acc_t){spec['output_grad']}[i / {spec['input_features']}])"
+        )
+        expression_idx = (
+            f"(grad_wgt_t)((acc_t){spec['input']}[idx % {spec['input_features']}] * "
+            f"(acc_t){spec['output_grad']}[idx / {spec['input_features']}])"
+        )
+        # Direct-mode source still contains generic accumulated-mini-batch branches.
+        # Their ACC_dW_* arrays must not survive this lowering: besides retaining the
+        # full parameter-gradient owner, naïve substring replacement of dW_* inside
+        # ACC_dW_* produced malformed expressions such as ACC_(grad_wgt_t)(...).
+        acc_dw = f"ACC_{dw}"
+        updated = re.sub(
+            rf"(?m)^\s*static\s+acc_t\s+{re.escape(acc_dw)}\[\d+\];\s*\n?",
+            "",
+            updated,
+        )
+        updated = re.sub(
+            rf"(?m)^\s*#pragma\s+HLS\s+BIND_STORAGE\s+variable={re.escape(acc_dw)}[^\n]*\n?",
+            "",
+            updated,
+        )
+        # Remove one-line initialize/accumulate/normalize loops owned only by the
+        # unavailable accumulated-batch path in this direct single-record profile.
+        updated = re.sub(
+            rf"(?m)^\s*for\s*\(int\s+i\s*=\s*0;[^\n]*\)\s*{re.escape(acc_dw)}\[i\]\s*(?:=|\+=)[^;]*;\s*$",
+            f"  // FPGAI tiled_accumulate: removed obsolete full accumulator loop for {acc_dw}.",
+            updated,
+        )
+        # Export branches may still read the accumulated owner. Recompute the
+        # mathematically identical direct-record gradient from retained buffers.
+        updated = re.sub(
+            rf"\(float\){re.escape(acc_dw)}\[i\]",
+            f"(float){expression_i}",
+            updated,
+        )
+        updated = re.sub(
+            rf"\(float\){re.escape(acc_dw)}\[idx\]",
+            f"(float){expression_idx}",
+            updated,
+        )
+        updated = re.sub(
+            rf"(?<![A-Za-z0-9_]){re.escape(dw)}\[i\]",
+            expression_i,
+            updated,
+        )
+        updated = re.sub(
+            rf"(?<![A-Za-z0-9_]){re.escape(dw)}\[idx\]",
+            expression_idx,
+            updated,
+        )
+        if re.search(rf"\b(?:ACC_)?{re.escape(dw)}\s*\[", updated):
+            raise RuntimeError(
+                f"tiled_accumulate left a complete-gradient reference for {dw} in generated source"
+            )
+        if "ACC_(grad_wgt_t)" in updated:
+            raise RuntimeError("tiled_accumulate generated malformed ACC_(grad_wgt_t) expression")
+
+    anchor = "#pragma HLS INTERFACE s_axilite port=return bundle=CTRL\n"
+    bindings = "\n".join(
+        f"#pragma HLS BIND_STORAGE variable=FPGAI_DW_TILE_{spec['tag']} type=ram_2p impl={storage}"
+        for spec in specs
+    ) + "\n"
+    if anchor in updated and "FPGAI tiled-accumulate parameter-gradient tile bindings" not in updated:
+        updated = updated.replace(
+            anchor,
+            anchor + "// FPGAI tiled-accumulate parameter-gradient tile bindings.\n" + bindings,
+            1,
+        )
+    banner = (
+        f"// FPGAI real parameter-gradient tiled_accumulate lowering: dense_only=true; "
+        f"optimizer=adam; tile_size={tile_size}; storage={storage}; full_dW_arrays=false.\n"
+    )
+    return banner + updated
+
+
+def _fpgai_f4op_parameter_gradient_policy(raw_cfg: Any) -> tuple[str, str]:
+    raw = raw_cfg or {}
+    computation = str(
+        _fpgai_training_raw_get(raw, "training.gradients.computation", "full_buffer") or "full_buffer"
+    ).strip().lower().replace("-", "_")
+    if computation not in {"full_buffer", "tiled_accumulate", "fused_update"}:
+        raise ValueError(
+            "training.gradients.computation must be full_buffer, tiled_accumulate, or fused_update; "
+            f"got {computation!r}."
+        )
+    training = raw.get("training", {}) if isinstance(raw, dict) else {}
+    storage_cfg = training.get("storage", {}) if isinstance(training, dict) else {}
+    explicit_parameter_storage = isinstance(storage_cfg, dict) and any(
+        key in storage_cfg for key in ("parameter_gradient", "gradient", "gradients")
+    )
+    default_storage = "recompute" if computation == "fused_update" else "bram"
+    storage = str(
+        _fpgai_training_raw_get(
+            raw,
+            "training.storage.parameter_gradient",
+            _fpgai_training_raw_get(
+                raw,
+                "training.storage.gradient",
+                _fpgai_training_raw_get(raw, "training.storage.gradients", default_storage),
+            ),
+        )
+        or default_storage
+    ).strip().lower().replace("-", "_")
+    storage = {"block": "bram", "block_ram": "bram", "ultra": "uram", "ultra_ram": "uram"}.get(storage, storage)
+    if storage not in {"bram", "uram", "ddr", "recompute"}:
+        raise ValueError(
+            "training.storage.parameter_gradient must be bram, uram, ddr, or recompute; "
+            f"got {storage!r}."
+        )
+    if computation == "fused_update":
+        if explicit_parameter_storage and storage != "recompute":
+            raise ValueError(
+                "training.gradients.computation=fused_update does not materialize a parameter-gradient buffer; "
+                "set training.storage.parameter_gradient=recompute or omit the storage option."
+            )
+        return computation, "recompute"
+    if storage in {"ddr", "recompute"}:
+        raise ValueError(
+            f"training.storage.parameter_gradient={storage} is not yet enabled for computation={computation}; "
+            "no real external-memory or recomputation lowering is present for that selected mechanism."
+        )
+    return computation, storage
+
+
+def emit_top_train_cpp(*args, **kwargs):
+    source = _fpgai_f4o_tiled_accumulate_previous_emit_top_train_cpp(*args, **kwargs)
+    return _fpgai_f4o_materialize_dense_tiled_accumulate(
+        source,
+        raw_cfg=kwargs.get("raw_cfg") or {},
+    )
+
+
+# Compatibility owner retained for focused mechanism tests and external callers.
+def _fpgai_f5a_materialize_dense_fused_update(source: str, *, raw_cfg: Any) -> str:
+    from .training_fused_update import materialize_dense_fused_update
+
+    return materialize_dense_fused_update(
+        source,
+        raw_cfg=raw_cfg or {},
+        raw_get=_fpgai_training_raw_get,
+        parameter_gradient_policy=_fpgai_f4op_parameter_gradient_policy,
+        dense_gradient_specs=_fpgai_f4o_dense_gradient_specs,
+        balanced_brace_end=_fpgai_f4o_balanced_brace_end,
+    )
+
+
+# FPGAI F5A real Dense/Adam fused parameter-gradient update lowering.
+_fpgai_f5a_fused_update_previous_emit_top_train_cpp = emit_top_train_cpp
+
+
+def emit_top_train_cpp(*args, **kwargs):
+    from .training_fused_update import materialize_dense_fused_update
+
+    source = _fpgai_f5a_fused_update_previous_emit_top_train_cpp(*args, **kwargs)
+    return materialize_dense_fused_update(
+        source,
+        raw_cfg=kwargs.get("raw_cfg") or {},
+        raw_get=_fpgai_training_raw_get,
+        parameter_gradient_policy=_fpgai_f4op_parameter_gradient_policy,
+        dense_gradient_specs=_fpgai_f4o_dense_gradient_specs,
+        balanced_brace_end=_fpgai_f4o_balanced_brace_end,
+    )
+
+# FPGAI F5D.2 CSim-only selected Dense training probes.
+_fpgai_f5d2_probe_previous_emit_top_train_cpp = emit_top_train_cpp
+
+
+def emit_top_train_cpp(*args, **kwargs):
+    from .training_trace_probes import instrument_fused_dense_adam_probe
+
+    source = _fpgai_f5d2_probe_previous_emit_top_train_cpp(*args, **kwargs)
+    return instrument_fused_dense_adam_probe(
         source,
         raw_cfg=kwargs.get("raw_cfg") or {},
     )

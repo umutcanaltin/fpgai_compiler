@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import numpy as np
 
@@ -72,6 +73,35 @@ def test_training_testbench_reports_dataset_record_counts(tmp_path: Path) -> Non
     assert "input_words_per_record = 784" in text
     assert "target_words_per_record = 10" in text
 
+
+
+def test_training_testbench_escapes_numeric_capture_printf_newline(tmp_path: Path) -> None:
+    emit_tb_train_cpp(
+        tmp_path,
+        graph=_Graph(),
+        top_name="deeplearn",
+        in_words=784,
+        out_words=10,
+        weights_mode="embedded",
+        weight_words=10,
+        preload_weights=[],
+        training_cfg={
+            "execution": {"train_steps": 1, "batch_size": 1, "batch_mode": "direct"},
+            "optimizer": {"type": "adam", "learning_rate": 0.001},
+            "loss": {"type": "cross_entropy"},
+        },
+        raw_cfg={},
+    )
+    text = (tmp_path / "tb.cpp").read_text(encoding="utf-8")
+    expected = (
+        'printf("[TB-TRAIN] numeric_capture_final_loss=%f '
+        'loss_eval_records=%d\\n", final_loss, loss_eval_records);'
+    )
+    assert expected in text
+    assert (
+        'printf("[TB-TRAIN] numeric_capture_final_loss=%f loss_eval_records=%d\n"'
+        not in text
+    )
 
 def test_dataset_artifact_contract_reports_input_words_per_sample(tmp_path: Path) -> None:
     from fpgai.validation.dataset import emit_dataset_artifacts
@@ -1212,7 +1242,7 @@ def test_dataset_training_reference_persists_momentum_state_across_updates(tmp_p
     assert np.linalg.norm(hardware_after) > 0.0
 
 
-def test_dataset_training_reference_rejects_adam_until_stateful_multi_epoch_support(tmp_path: Path) -> None:
+def test_dataset_training_reference_carries_adam_state_across_updates(tmp_path: Path) -> None:
     from fpgai.ir.graph import Graph
     from fpgai.benchmark.training_dataset_reference import run_training_dataset_reference
 
@@ -1225,18 +1255,45 @@ def test_dataset_training_reference_rejects_adam_until_stateful_multi_epoch_supp
     graph.constants["B"] = np.zeros((1,), dtype=np.float32)
     graph.add_op("Dense", ["input", "W", "B"], ["output"], name="dense", attrs={"in_features": 1, "out_features": 1})
 
-    import pytest
-    with pytest.raises(ValueError, match="supports SGD and Momentum"):
-        run_training_dataset_reference(
-            graph=graph,
-            raw_cfg={
-                "training": {
-                    "optimizer": {"type": "adam", "learning_rate": 0.01},
-                    "loss": {"type": "mse"},
-                    "execution": {"epochs": 1, "batch_size": 1, "batch_mode": "accumulated"},
-                }
-            },
-            out_dir=tmp_path,
-            inputs=np.asarray([[1.0]], dtype=np.float32),
-            targets=np.asarray([[0.0]], dtype=np.float32),
-        )
+    result = run_training_dataset_reference(
+        graph=graph,
+        raw_cfg={
+            "training": {
+                "optimizer": {
+                    "type": "adam",
+                    "learning_rate": 0.01,
+                    "beta1": 0.9,
+                    "beta2": 0.999,
+                    "epsilon": 1.0e-8,
+                    "bias_correction": True,
+                },
+                "loss": {"type": "mse"},
+                "execution": {"epochs": 2, "batch_size": 1, "batch_mode": "accumulated", "shuffle": False},
+            }
+        },
+        out_dir=tmp_path,
+        inputs=np.asarray([[1.0]], dtype=np.float32),
+        targets=np.asarray([[0.0]], dtype=np.float32),
+    )
+
+    payload = json.loads(result.summary_json.read_text(encoding="utf-8"))
+    assert payload["optimizer_type"] == "adam"
+    assert payload["optimizer_updates"] == 2
+    assert payload["optimizer_step"] == 2
+    assert payload["bias_correction"] is True
+    assert payload["optimizer_state_layout"] == "m_then_v_then_step_canonical_parameter_order"
+    assert payload["optimizer_state_words"] == 5
+    before = np.fromfile(result.optimizer_state_before_flat_path, dtype=np.float32)
+    after = np.fromfile(result.optimizer_state_after_flat_path, dtype=np.float32)
+    assert np.array_equal(before, np.zeros_like(before))
+    assert np.linalg.norm(after[:2]) > 0.0
+    assert np.linalg.norm(after[2:-1]) > 0.0
+    assert after[-1] == 2.0
+    hardware = payload["hardware_domain_reference"]
+    assert hardware["optimizer_type"] == "adam"
+    assert hardware["optimizer_step"] == 2
+    assert hardware["optimizer_state_layout"] == "m_then_v_then_step_canonical_parameter_order"
+    hardware_after = np.fromfile(hardware["optimizer_state_after_ref_bin"], dtype=np.float32)
+    assert hardware_after.size == after.size
+    assert hardware_after[-1] == 2.0
+    assert np.linalg.norm(hardware_after[:-1]) > 0.0

@@ -5,9 +5,15 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 import copy
 import json
+import hashlib
 
 from fpgai.config.access import get_path
 from fpgai.util.fs import write_text
+from fpgai.validation.capture_schema import (
+    NumericCaptureContract,
+    default_training_capture_requirements,
+    write_capture_contract,
+)
 
 
 _cfg_get = get_path
@@ -71,6 +77,10 @@ class TrainingExecutionSchedule:
             "max_updates": self.explicit_train_steps,
             "sampling_policy": "deterministic_shuffle" if self.shuffle else "sequential",
             "partial_batch_policy": "drop" if self.drop_last else "include",
+            "workload_resolution": "dataset" if self.sample_count is not None else "kernel_invocation",
+            "kernel_calls_per_optimizer_step": 1,
+            "forward_backward_calls_per_kernel_call": self.batch_size if self.batch_mode != "direct" else 1,
+            "optimizer_updates_per_kernel_call": 1,
         }
 
 
@@ -253,6 +263,9 @@ class TrainingPlan:
     loss_type: str
     batch_size: int
     epochs: int
+    execution_schedule: Dict[str, Any]
+    gradient_mechanism: Dict[str, Any]
+    implementation_stack: Dict[str, Any]
 
     weights_mode: str
     weight_storage: str
@@ -282,6 +295,9 @@ class TrainingPlan:
             "loss_type": self.loss_type,
             "batch_size": self.batch_size,
             "epochs": self.epochs,
+            "execution_schedule": self.execution_schedule,
+            "gradient_mechanism": self.gradient_mechanism,
+            "implementation_stack": self.implementation_stack,
             "weights_mode": self.weights_mode,
             "weight_storage": self.weight_storage,
             "activation_storage": self.activation_storage,
@@ -424,6 +440,53 @@ def _planner_policy_dict(compile_plan=None, memory_plan=None, communication_plan
     }
 
 
+
+def _resolve_implementation_stack(raw_cfg: Dict[str, Any], gradient_mechanism: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize implementation provenance without requiring the future plugin runtime.
+
+    The contract is intentionally stable across built-in and community implementations.
+    It records selections now; later registry/ABI sprints will validate and instantiate them.
+    """
+    def selected(path: str, default: str) -> str:
+        value = _cfg_get(raw_cfg, path, default)
+        return str(value or default).strip()
+
+    operator_impls = _cfg_get(raw_cfg, "implementations.operators", {}) or {}
+    if not isinstance(operator_impls, dict):
+        operator_impls = {}
+
+    model_family = selected("implementations.model_family", "fpgai.imported_graph")
+    model_impl = selected("implementations.model", "fpgai.graph_lowering")
+    memory_policy = selected("implementations.memory_policy", "fpgai.memory.default")
+    streaming_policy = selected("implementations.streaming_policy", "fpgai.streaming.default")
+    transport_policy = selected("implementations.transport_policy", "fpgai.transport.default")
+    numerical_policy = selected("implementations.numerical_policy", "fpgai.numeric.configured")
+    backend = selected("implementations.backend", "fpgai.backend.hls_cpp")
+    toolchain = selected("implementations.toolchain", "vitis_hls")
+    board = selected("targets.platform.board", selected("targets.board", "unspecified"))
+
+    return {
+        "schema_version": 1,
+        "model_family": model_family,
+        "model_implementation": model_impl,
+        "operator_implementations": {str(k): str(v) for k, v in sorted(operator_impls.items())},
+        "memory_policy": memory_policy,
+        "streaming_policy": streaming_policy,
+        "transport_policy": transport_policy,
+        "training_mechanism": str(gradient_mechanism.get("computation", "full_buffer")),
+        "numerical_policy": numerical_policy,
+        "backend": backend,
+        "toolchain": toolchain,
+        "board": board,
+        "extension_resolution_status": "built_in_or_declared_selection",
+        "registry_validation_status": "not_available_until_extension_abi_sprint",
+    }
+
+
+def _implementation_stack_fingerprint(stack: Dict[str, Any]) -> str:
+    canonical = json.dumps(stack, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
 def build_training_plan(graph, raw_cfg: Dict[str, Any], compile_plan=None, memory_plan=None, communication_plan=None) -> TrainingPlan:
     optimizer_type = str(_cfg_get(raw_cfg, "training.optimizer.type", "sgd")).lower()
     learning_rate = float(_cfg_get(raw_cfg, "training.optimizer.learning_rate", 0.01))
@@ -440,6 +503,25 @@ def build_training_plan(graph, raw_cfg: Dict[str, Any], compile_plan=None, memor
     phase_overrides = _cfg_get(raw_cfg, "training.phase_overrides", {}) or {}
     numerics = _resolve_training_numerics(raw_cfg)
     estimator = _deep_merge(_default_estimator_cfg(), _cfg_get(raw_cfg, "training.estimator", {}) or {})
+
+    gradient_computation = str(_cfg_get(raw_cfg, "training.gradients.computation", "full_buffer") or "full_buffer").strip().lower().replace("-", "_")
+    gradient_materialization_default = "streamed" if gradient_computation == "fused_update" else ("tiled" if gradient_computation == "tiled_accumulate" else "full")
+    gradient_materialization = str(_cfg_get(raw_cfg, "training.gradients.materialization", gradient_materialization_default) or gradient_materialization_default).strip().lower().replace("-", "_")
+    gradient_export_policy = str(_cfg_get(raw_cfg, "training.gradients.export_policy", "recompute" if gradient_computation == "fused_update" else "materialized") or "disabled").strip().lower().replace("-", "_")
+    parameter_gradient_storage = "none" if gradient_computation == "fused_update" else storage["gradient_storage"]
+    gradient_mechanism = {
+        "computation": gradient_computation,
+        "materialization": gradient_materialization,
+        "parameter_gradient_storage": parameter_gradient_storage,
+        "configured_gradient_region": storage["gradient_storage"],
+        "export_policy": gradient_export_policy,
+        "complete_parameter_gradient_buffer": gradient_computation == "full_buffer",
+        "gradient_tile_buffer": gradient_computation == "tiled_accumulate",
+        "direct_optimizer_consumption": gradient_computation == "fused_update",
+        "persistent_optimizer_state_required": optimizer_type in {"adam", "momentum"},
+        "persistent_optimizer_state_storage": storage["optimizer_state_storage"] if optimizer_type in {"adam", "momentum"} else "none",
+    }
+    implementation_stack = _resolve_implementation_stack(raw_cfg, gradient_mechanism)
 
     op_sequence: List[str] = []
     op_capabilities: Dict[str, Dict[str, Any]] = {}
@@ -482,6 +564,9 @@ def build_training_plan(graph, raw_cfg: Dict[str, Any], compile_plan=None, memor
         loss_type=loss_type,
         batch_size=batch_size,
         epochs=epochs,
+        execution_schedule=execution_schedule.to_dict(),
+        gradient_mechanism=gradient_mechanism,
+        implementation_stack=implementation_stack,
         weights_mode=storage["weights_mode"],
         weight_storage=storage["weight_storage"],
         activation_storage=storage["activation_storage"],
@@ -502,6 +587,84 @@ def build_training_plan(graph, raw_cfg: Dict[str, Any], compile_plan=None, memor
     )
 
 
+
+def _equivalence_workload_contract(plan: TrainingPlan) -> Dict[str, Any]:
+    """Return the mechanism-independent contract used for fair comparisons."""
+    contract = {
+        "optimizer_type": plan.optimizer_type,
+        "learning_rate": plan.learning_rate,
+        "loss_type": plan.loss_type,
+        "execution_schedule": plan.execution_schedule,
+        "training_numerics": plan.numerics.get("training") or {},
+        "parameter_trainable_ops": sorted(set(plan.parameter_trainable_ops)),
+    }
+    canonical = json.dumps(contract, sort_keys=True, separators=(",", ":"))
+    return {
+        "contract": contract,
+        "fingerprint_sha256": hashlib.sha256(canonical.encode("utf-8")).hexdigest(),
+    }
+
+def _emit_gradient_mechanism_equivalence(training_dir: Path, plan: TrainingPlan) -> None:
+    workload = _equivalence_workload_contract(plan)
+    capture_requirements = default_training_capture_requirements(
+        optimizer_type=plan.optimizer_type,
+        export_gradients=str(plan.gradient_mechanism.get("export_policy", "none")) != "none",
+    )
+    capture_contract = NumericCaptureContract(
+        workload_fingerprint_sha256=workload["fingerprint_sha256"],
+        implementation_stack_fingerprint_sha256=_implementation_stack_fingerprint(plan.implementation_stack),
+        producer_kind="hls_csim",
+        producer_id=str(plan.implementation_stack.get("backend", "fpgai.backend.hls_cpp")),
+        captures=capture_requirements,
+        metadata={
+            "training_mechanism": plan.gradient_mechanism.get("computation"),
+            "optimizer_type": plan.optimizer_type,
+            "loss_type": plan.loss_type,
+            "validation_adapter_status": "built_in_schema_ready_capture_pending",
+        },
+    )
+    capture_path = write_capture_contract(training_dir / "numeric_capture_contract.json", capture_contract)
+    payload = {
+        "artifact_kind": "fpgai_gradient_mechanism_equivalence",
+        "schema_version": 2,
+        "current_mechanism": plan.gradient_mechanism.get("computation"),
+        "implementation_stack": plan.implementation_stack,
+        "implementation_stack_fingerprint_sha256": _implementation_stack_fingerprint(plan.implementation_stack),
+        "supported_comparison_mechanisms": ["full_buffer", "tiled_accumulate", "fused_update"],
+        "workload_contract": workload["contract"],
+        "workload_fingerprint_sha256": workload["fingerprint_sha256"],
+        "contract_status": "resolved",
+        "numeric_equivalence_status": "capture_pending",
+        "numeric_reference": "python_training_reference",
+        "numeric_capture_contract": str(capture_path),
+        "numeric_capture_schema_version": 1,
+        "required_comparisons": {
+            "pre_update_loss_abs_error": None,
+            "post_update_loss_abs_error": None,
+            "weights_max_abs_error": None,
+            "biases_max_abs_error": None,
+            "adam_m_max_abs_error": None,
+            "adam_v_max_abs_error": None,
+            "optimizer_step_match": None,
+            "exported_gradients_max_abs_error": None,
+        },
+        "claim_status": "architectural_result_preliminary_until_numeric_equivalence_passes",
+        "comparison_rule": "Only artifacts with identical workload_fingerprint_sha256 are directly comparable.",
+    }
+    write_text(training_dir / "gradient_mechanism_equivalence.json", json.dumps(payload, indent=2) + "\n")
+    lines = [
+        "======= FPGAI Gradient Mechanism Equivalence =======",
+        f"current_mechanism          : {payload['current_mechanism']}",
+        f"workload_fingerprint      : {payload['workload_fingerprint_sha256']}",
+        f"implementation_fingerprint: {payload['implementation_stack_fingerprint_sha256']}",
+        f"contract_status           : {payload['contract_status']}",
+        f"numeric_equivalence_status: {payload['numeric_equivalence_status']}",
+        f"claim_status              : {payload['claim_status']}",
+        "comparison_rule          : identical workload fingerprints required",
+        "====================================================",
+    ]
+    write_text(training_dir / "gradient_mechanism_equivalence.txt", "\n".join(lines) + "\n")
+
 def emit_training_artifacts(out_dir: Path, plan: TrainingPlan) -> Path:
     training_dir = out_dir / "training"
     training_dir.mkdir(parents=True, exist_ok=True)
@@ -518,6 +681,15 @@ def emit_training_artifacts(out_dir: Path, plan: TrainingPlan) -> Path:
     lines.append(f"loss_type                : {plan.loss_type}")
     lines.append(f"batch_size               : {plan.batch_size}")
     lines.append(f"epochs                   : {plan.epochs}")
+    lines.append("execution_schedule       :")
+    for k, v in sorted(plan.execution_schedule.items()):
+        lines.append(f"  - {k}: {v}")
+    lines.append("gradient_mechanism       :")
+    for k, v in sorted(plan.gradient_mechanism.items()):
+        lines.append(f"  - {k}: {v}")
+    lines.append("implementation_stack     :")
+    for k, v in sorted(plan.implementation_stack.items()):
+        lines.append(f"  - {k}: {v}")
     lines.append(f"weights_mode             : {plan.weights_mode}")
     lines.append(f"weight_storage           : {plan.weight_storage}")
     lines.append(f"activation_storage       : {plan.activation_storage}")
@@ -545,4 +717,5 @@ def emit_training_artifacts(out_dir: Path, plan: TrainingPlan) -> Path:
     lines.append("===================================================")
 
     write_text(txt_path, "\n".join(lines))
+    _emit_gradient_mechanism_equivalence(training_dir, plan)
     return json_path

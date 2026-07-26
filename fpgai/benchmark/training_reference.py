@@ -43,6 +43,8 @@ class TrainingReferenceResult:
     tiled_outputs_ref_path: Path | None = None
     tiled_gradients_ref_path: Path | None = None
     tiled_weights_after_ref_path: Path | None = None
+    input_ref_path: Path | None = None
+    target_ref_path: Path | None = None
 
 
 def _write_f32(path: Path, array: np.ndarray) -> None:
@@ -1184,6 +1186,7 @@ def _forward_pass(
         )
         caches[op.name] = cache
 
+        _write_f32(layerwise_dir / f"{op.name}__fwd_input.bin", input_value)
         _write_f32(
             layerwise_dir
             / f"{op.name}__fwd.bin",
@@ -1341,6 +1344,11 @@ def run_training_reference_step(
     beta2 = float(optimizer_config.get("beta2", 0.999))
     epsilon = float(optimizer_config.get("epsilon", 1.0e-8))
     bias_correction = bool(optimizer_config.get("bias_correction", False))
+
+    input_ref_path = reference_dir / "input_ref.bin"
+    target_ref_path = reference_dir / "target_ref.bin"
+    _write_f32(input_ref_path, x_input.astype(np.float32))
+    _write_f32(target_ref_path, target.astype(np.float32))
 
     tiled_inputs_ref_path = reference_dir / "tiled_inputs_ref.bin" if tiled_io_requested else None
     tiled_labels_ref_path = reference_dir / "tiled_labels_ref.bin" if tiled_io_requested else None
@@ -1554,6 +1562,7 @@ def run_training_reference_step(
         output_gradient = gradients_by_tensor[
             output_name
         ]
+        _write_f32(layerwise_dir / f"{op.name}__bwd_output_grad.bin", output_gradient)
 
         if op.op_type == "Dense":
             parameters = parameter_state[op.name]
@@ -1838,6 +1847,10 @@ def run_training_reference_step(
 
     optimizer_state_before_chunks: List[np.ndarray] = []
     optimizer_state_after_chunks: List[np.ndarray] = []
+    adam_m_before_chunks: List[np.ndarray] = []
+    adam_v_before_chunks: List[np.ndarray] = []
+    adam_m_after_chunks: List[np.ndarray] = []
+    adam_v_after_chunks: List[np.ndarray] = []
 
     def _apply_optimizer_update(value: np.ndarray, gradient: np.ndarray) -> np.ndarray:
         value_flat = value.reshape(-1).astype(np.float32)
@@ -1853,8 +1866,14 @@ def run_training_reference_step(
             second_before = np.zeros_like(grad_flat, dtype=np.float32)
             first_after = (beta1 * first_before + (1.0 - beta1) * grad_flat).astype(np.float32)
             second_after = (beta2 * second_before + (1.0 - beta2) * grad_flat * grad_flat).astype(np.float32)
-            optimizer_state_before_chunks.extend([first_before, second_before])
-            optimizer_state_after_chunks.extend([first_after, second_after])
+            # Keep Adam state serialization canonical across Python and HLS:
+            # all first moments in parameter order, then all second moments.
+            # Appending m/v per tensor would produce mW,vW,mB,vB,... and makes
+            # the canonical m||v splitter reinterpret v data as m and vice versa.
+            adam_m_before_chunks.append(first_before)
+            adam_v_before_chunks.append(second_before)
+            adam_m_after_chunks.append(first_after)
+            adam_v_after_chunks.append(second_after)
             if bias_correction:
                 first_used = (first_after / max(1.0e-12, 1.0 - beta1)).astype(np.float32)
                 second_used = (second_after / max(1.0e-12, 1.0 - beta2)).astype(np.float32)
@@ -1879,7 +1898,14 @@ def run_training_reference_step(
             parameters["gamma"] = _apply_optimizer_update(parameters["gamma"], first_gradient)
             parameters["beta"] = _apply_optimizer_update(parameters["beta"], second_gradient)
 
-    if optimizer_state_before_chunks:
+    if optimizer_type == "adam" and adam_m_before_chunks:
+        optimizer_state_before_flat = np.concatenate(
+            adam_m_before_chunks + adam_v_before_chunks
+        ).astype(np.float32)
+        optimizer_state_after_flat = np.concatenate(
+            adam_m_after_chunks + adam_v_after_chunks
+        ).astype(np.float32)
+    elif optimizer_state_before_chunks:
         optimizer_state_before_flat = np.concatenate(optimizer_state_before_chunks).astype(np.float32)
         optimizer_state_after_flat = np.concatenate(optimizer_state_after_chunks).astype(np.float32)
     else:
@@ -2086,4 +2112,6 @@ def run_training_reference_step(
         softmax_ref_path=softmax_ref_path,
         cross_entropy_loss_ref_json=cross_entropy_loss_ref_json,
         dlogits_ref_path=dlogits_ref_path,
+        input_ref_path=input_ref_path,
+        target_ref_path=target_ref_path,
     )

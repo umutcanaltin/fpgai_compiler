@@ -903,7 +903,7 @@ def _validate_validation_cfg(
         issues.append(ConfigIssue("validation", "Expected a mapping"))
         return
 
-    allowed_validation = {"task", "dataset", "decision_thresholds", "training_validation"}
+    allowed_validation = {"task", "dataset", "decision_thresholds", "training_validation", "numeric"}
     for key in sorted(set(validation) - allowed_validation):
         issues.append(
             ConfigIssue(
@@ -911,6 +911,43 @@ def _validate_validation_cfg(
                 f"Unknown validation field {key!r}",
             )
         )
+
+    numeric = validation.get("numeric")
+    if numeric is not None:
+        if not isinstance(numeric, dict):
+            issues.append(ConfigIssue("validation.numeric", "Expected a mapping"))
+        else:
+            for key in sorted(set(numeric) - {"probes"}):
+                issues.append(ConfigIssue(f"validation.numeric.{key}", f"Unknown numeric validation field {key!r}"))
+            probes = numeric.get("probes")
+            if probes is not None:
+                if not isinstance(probes, dict):
+                    issues.append(ConfigIssue("validation.numeric.probes", "Expected a mapping"))
+                else:
+                    for key in sorted(set(probes) - {"enabled", "selectors", "stages"}):
+                        issues.append(ConfigIssue(f"validation.numeric.probes.{key}", f"Unknown probe field {key!r}"))
+                    stages = probes.get("stages", [])
+                    from fpgai.validation.training_probes import SUPPORTED_PROBE_STAGES
+                    if not isinstance(stages, list):
+                        issues.append(ConfigIssue("validation.numeric.probes.stages", "Expected a list"))
+                    else:
+                        for i, stage in enumerate(stages):
+                            if str(stage) not in SUPPORTED_PROBE_STAGES:
+                                issues.append(ConfigIssue(f"validation.numeric.probes.stages.{i}", f"Unsupported probe stage {stage!r}"))
+                    selectors = probes.get("selectors", [])
+                    if not isinstance(selectors, list):
+                        issues.append(ConfigIssue("validation.numeric.probes.selectors", "Expected a list"))
+                    else:
+                        for i, selector in enumerate(selectors):
+                            if not isinstance(selector, dict):
+                                issues.append(ConfigIssue(f"validation.numeric.probes.selectors.{i}", "Expected a mapping")); continue
+                            for key in sorted(set(selector)-{"operator","parameter","tensor_index"}):
+                                issues.append(ConfigIssue(f"validation.numeric.probes.selectors.{i}.{key}", f"Unknown selector field {key!r}"))
+                            if not str(selector.get("operator", "")).strip():
+                                issues.append(ConfigIssue(f"validation.numeric.probes.selectors.{i}.operator", "Operator is required"))
+                            idx=selector.get("tensor_index")
+                            if not isinstance(idx, list) or len(idx)!=2 or any(not isinstance(v,int) or v<0 for v in idx):
+                                issues.append(ConfigIssue(f"validation.numeric.probes.selectors.{i}.tensor_index", "Dense weight probe requires two non-negative integer indices"))
 
     training_validation = validation.get("training_validation")
     if training_validation is not None:

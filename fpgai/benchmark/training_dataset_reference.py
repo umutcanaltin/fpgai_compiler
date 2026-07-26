@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, Tuple
 import numpy as np
 
 from fpgai.benchmark.training_reference import TrainingReferenceResult, run_training_reference_step
+from fpgai.backends.hls.emit.types_h import resolve_training_numeric_specs
 from fpgai.numerics.fixed_emulation import quantize_ap_fixed_array
 from fpgai.engine.training import resolve_training_execution_schedule, training_record_order
 from fpgai.engine.training_graph_utils import (
@@ -26,6 +27,20 @@ from fpgai.engine.training_graph_utils import (
 def _write_f32(path: Path, values: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     np.asarray(values, dtype=np.float32).reshape(-1).tofile(path)
+
+
+def _optimizer_state_artifact_vector(
+    state: np.ndarray,
+    *,
+    optimizer_type: str,
+    optimizer_step: int,
+) -> np.ndarray:
+    flat = np.asarray(state, dtype=np.float32).reshape(-1)
+    if optimizer_type != "adam":
+        return flat
+    return np.concatenate(
+        [flat, np.asarray([float(optimizer_step)], dtype=np.float32)]
+    ).astype(np.float32, copy=False)
 
 
 def _attr_parameter_binding(
@@ -163,64 +178,13 @@ def _precision_spec(raw_cfg: Dict[str, Any], path: tuple[str, ...], fallback: Di
 
 
 def _training_numeric_specs(raw_cfg: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    """Resolve the same global numeric roles used by emit_types_h()."""
-    activation = _precision_spec(
-        raw_cfg,
-        ("numerics", "defaults", "activation"),
-        {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
-    )
-    weight = _precision_spec(
-        raw_cfg,
-        ("numerics", "defaults", "weight"),
-        {"type": "ap_fixed", "total_bits": 16, "int_bits": 6},
-    )
-    bias = _precision_spec(
-        raw_cfg,
-        ("numerics", "defaults", "bias"),
-        {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
-    )
-    accum = _precision_spec(
-        raw_cfg,
-        ("numerics", "defaults", "accum"),
-        {"type": "ap_fixed", "total_bits": 24, "int_bits": 10},
-    )
-    generic_grad = _precision_spec(raw_cfg, ("numerics", "training", "grad"), activation)
-    grad_activation = _precision_spec(
-        raw_cfg,
-        ("numerics", "training", "grad_activation"),
-        generic_grad,
-    )
-    grad_weight = _precision_spec(
-        raw_cfg,
-        ("numerics", "training", "grad_weight"),
-        weight,
-    )
-    grad_bias = _precision_spec(
-        raw_cfg,
-        ("numerics", "training", "grad_bias"),
-        bias,
-    )
-    update_accum = _precision_spec(
-        raw_cfg,
-        ("numerics", "training", "update_accum"),
-        accum,
-    )
-    optimizer_state = _precision_spec(
-        raw_cfg,
-        ("numerics", "training", "optimizer_state"),
-        accum,
-    )
-    return {
-        "activation": activation,
-        "weight": weight,
-        "bias": bias,
-        "accum": accum,
-        "grad_activation": grad_activation,
-        "grad_weight": grad_weight,
-        "grad_bias": grad_bias,
-        "update_accum": update_accum,
-        "optimizer_state": optimizer_state,
-    }
+    """Compatibility wrapper around the canonical HLS numeric-role owner."""
+    specs = resolve_training_numeric_specs(raw_cfg)
+    return {key: specs[key] for key in (
+        "activation", "weight", "bias", "accum",
+        "grad_activation", "grad_weight", "grad_bias",
+        "update_accum", "optimizer_state",
+    )}
 
 
 def _q(values: Any, spec: Dict[str, Any]) -> np.ndarray:
@@ -351,6 +315,7 @@ def _run_hls_numeric_training_sample(
     target: np.ndarray,
     layout: list[tuple[str, str, str, str, tuple[int, ...], int]],
     return_prediction: bool = False,
+    return_trace: bool = False,
 ) -> Any:
     """Emulate the generated Dense/activation training arithmetic operation by operation.
 
@@ -364,12 +329,20 @@ def _run_hls_numeric_training_sample(
         graph.inputs[0]: _q(np.asarray(x_input, dtype=np.float32).reshape(-1), specs["activation"])
     }
     caches: Dict[str, Dict[str, np.ndarray]] = {}
+    trace: Dict[str, Dict[str, np.ndarray]] = {
+        "forward_inputs": {},
+        "forward_outputs": {},
+        "backward_output_gradients": {},
+        "backward_input_gradients": {},
+        "parameter_gradients": {},
+    }
     parameters: Dict[str, Dict[str, np.ndarray]] = {}
 
     for op in graph.ops:
         input_name = op.inputs[0]
         output_name = op.outputs[0]
         input_value = values[input_name]
+        trace["forward_inputs"][op.name] = np.asarray(input_value, dtype=np.float32).copy()
         if op.op_type == "Dense":
             weights, bias, _, _ = resolve_dense_arrays(graph, op)
             weights_q = _q(weights, specs["weight"])
@@ -397,6 +370,7 @@ def _run_hls_numeric_training_sample(
             raise NotImplementedError(
                 f"Hardware-domain dataset reference does not yet support operator {op.op_type!r}."
             )
+        trace["forward_outputs"][op.name] = np.asarray(values[output_name], dtype=np.float32).copy()
 
     output_name = graph.outputs[0]
     prediction = values[output_name].reshape(-1)
@@ -426,12 +400,15 @@ def _run_hls_numeric_training_sample(
         input_name = op.inputs[0]
         output_name_for_op = op.outputs[0]
         dy = gradients_by_tensor[output_name_for_op]
+        trace["backward_output_gradients"][op.name] = np.asarray(dy, dtype=np.float32).copy()
         if op.op_type == "Dense":
             d_weight, d_bias, d_input = _hls_dense_backward_numeric(
                 caches[op.name]["x"], dy, parameters[op.name]["W"], specs
             )
             parameter_gradients[(op.name, "weight")] = d_weight.reshape(-1)
             parameter_gradients[(op.name, "bias")] = d_bias.reshape(-1)
+            trace["parameter_gradients"][f"{op.name}.weight"] = d_weight.reshape(-1).copy()
+            trace["parameter_gradients"][f"{op.name}.bias"] = d_bias.reshape(-1).copy()
             gradients_by_tensor[input_name] = d_input.reshape(-1)
         elif op.op_type == "Relu":
             output_value = values[output_name_for_op]
@@ -458,6 +435,7 @@ def _run_hls_numeric_training_sample(
             raise NotImplementedError(
                 f"Hardware-domain backward reference does not yet support operator {op.op_type!r}."
             )
+        trace["backward_input_gradients"][op.name] = np.asarray(gradients_by_tensor[input_name], dtype=np.float32).copy()
 
     chunks: list[np.ndarray] = []
     for op_name, _binding_kind, _binding_key, role, _shape, count in layout:
@@ -472,6 +450,8 @@ def _run_hls_numeric_training_sample(
         chunks.append(chunk)
     gradient_vector = np.concatenate(chunks).astype(np.float32)
     prediction_vector = probabilities.astype(np.float32) if loss_type in {"cross_entropy", "ce"} else prediction.astype(np.float32)
+    if return_trace:
+        return gradient_vector, loss, prediction_vector, trace
     if return_prediction:
         return gradient_vector, loss, prediction_vector
     return gradient_vector, loss
@@ -526,6 +506,11 @@ def _hardware_batch_update(
     learning_rate: float,
     optimizer_type: str = "sgd",
     momentum: float = 0.0,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+    epsilon: float = 1.0e-8,
+    bias_correction: bool = False,
+    optimizer_step: int = 1,
     optimizer_state_before: np.ndarray | None = None,
 ) -> Dict[str, Any]:
     (
@@ -562,14 +547,15 @@ def _hardware_batch_update(
     lr_q = float(quantize_ap_fixed_array(np.asarray([learning_rate], dtype=np.float32), update_spec)[0])
     lr_acc = quantize_ap_fixed_array(np.asarray([lr_q], dtype=np.float32), accum_spec)[0]
     optimizer_state_spec = _training_numeric_specs(raw_cfg)["optimizer_state"]
-    state_before = np.zeros(current_weights.shape, dtype=np.float32)
-    if optimizer_type == "momentum":
+    state_words = current_weights.size * (2 if optimizer_type == "adam" else 1)
+    state_before = np.zeros((state_words,), dtype=np.float32)
+    if optimizer_type in {"momentum", "adam"}:
         if optimizer_state_before is not None:
             candidate = np.asarray(optimizer_state_before, dtype=np.float32).reshape(-1)
-            if candidate.shape != current_weights.shape:
+            if candidate.shape != state_before.shape:
                 raise RuntimeError(
-                    "Momentum optimizer-state shape mismatch: "
-                    f"{candidate.shape} != {current_weights.shape}."
+                    f"{optimizer_type} optimizer-state shape mismatch: "
+                    f"{candidate.shape} != {state_before.shape}."
                 )
             state_before = quantize_ap_fixed_array(candidate, optimizer_state_spec)
     elif optimizer_type != "sgd":
@@ -578,6 +564,15 @@ def _hardware_batch_update(
     momentum_q = float(
         quantize_ap_fixed_array(np.asarray([momentum], dtype=np.float32), update_spec)[0]
     ) if optimizer_type == "momentum" else 0.0
+    # Generated HLS uses raw float32 Adam beta literals (for example, 0.9f and 0.999f)
+    # for moment updates and iterative bias-correction powers. Quantizing beta through
+    # update_accum changes the parameter delta while the final opt_t state can still look
+    # identical, so preserve the generated float32 hyperparameter contract here.
+    beta1_effective = float(np.float32(beta1)) if optimizer_type == "adam" else 0.0
+    beta2_effective = float(np.float32(beta2)) if optimizer_type == "adam" else 0.0
+    epsilon_q = float(quantize_ap_fixed_array(np.asarray([epsilon], dtype=np.float32), update_spec)[0]) if optimizer_type == "adam" else 0.0
+    epsilon_lsb = float(2.0 ** -(int(update_spec["total_bits"]) - int(update_spec["int_bits"]))) if optimizer_type == "adam" else 0.0
+    epsilon_effective = max(abs(epsilon_q), epsilon_lsb) if optimizer_type == "adam" else 0.0
 
     cursor = 0
     for _op_name, _binding_kind, _binding_key, role, _shape, count in layout:
@@ -613,6 +608,67 @@ def _hardware_batch_update(
                 parameter_acc + quantize_ap_fixed_array(velocity_after, accum_spec),
                 accum_spec,
             )
+        elif optimizer_type == "adam":
+            m_sl = sl
+            v_sl = slice(current_weights.size + cursor, current_weights.size + cursor + count)
+            m_before = quantize_ap_fixed_array(state_before[m_sl], optimizer_state_spec)
+            v_before = quantize_ap_fixed_array(state_before[v_sl], optimizer_state_spec)
+            m_after = quantize_ap_fixed_array(
+                (np.float32(beta1_effective) * quantize_ap_fixed_array(m_before, accum_spec))
+                + ((np.float32(1.0) - np.float32(beta1_effective)) * gradient_acc),
+                optimizer_state_spec,
+            )
+            v_after = quantize_ap_fixed_array(
+                (np.float32(beta2_effective) * quantize_ap_fixed_array(v_before, accum_spec))
+                + ((np.float32(1.0) - np.float32(beta2_effective)) * gradient_acc * gradient_acc),
+                optimizer_state_spec,
+            )
+            state_after[m_sl] = m_after
+            state_after[v_sl] = v_after
+            m_used = m_after.astype(np.float32)
+            v_used = v_after.astype(np.float32)
+            beta1_power = np.float32(1.0)
+            beta2_power = np.float32(1.0)
+            for _ in range(int(optimizer_step)):
+                beta1_power = np.float32(beta1_power * np.float32(beta1_effective))
+                beta2_power = np.float32(beta2_power * np.float32(beta2_effective))
+            if bias_correction:
+                bias1_denom = np.float32(np.float32(1.0) - beta1_power)
+                bias2_denom = np.float32(np.float32(1.0) - beta2_power)
+                if bias1_denom <= 0.0 or bias2_denom <= 0.0:
+                    raise RuntimeError(
+                        "Hardware-domain Adam bias-correction denominator is non-positive; "
+                        f"optimizer_step={optimizer_step}, beta1_power={beta1_power}, "
+                        f"beta2_power={beta2_power}."
+                    )
+                inverse_bias1 = np.float32(np.float32(1.0) / bias1_denom)
+                inverse_bias2 = np.float32(np.float32(1.0) / bias2_denom)
+                m_used = (m_used * inverse_bias1).astype(np.float32)
+                v_used = (v_used * inverse_bias2).astype(np.float32)
+            denominator = (
+                np.sqrt(np.maximum(v_used, np.float32(0.0))).astype(np.float32)
+                + np.float32(epsilon_effective)
+            ).astype(np.float32)
+            if not np.all(np.isfinite(denominator)) or np.any(denominator <= 0.0):
+                raise RuntimeError(
+                    "Hardware-domain Adam denominator is non-finite or non-positive after "
+                    f"epsilon resolution: requested={epsilon}, quantized={epsilon_q}, "
+                    f"effective={epsilon_effective}."
+                )
+            # Match generated HLS expression order exactly:
+            #   ((float)learning_rate * adam_m_used) / denominator
+            # rather than computing m/denominator before multiplying by LR.
+            numerator = (np.float32(learning_rate) * m_used).astype(np.float32)
+            adam_delta = (numerator / denominator).astype(np.float32)
+            if not np.all(np.isfinite(adam_delta)):
+                raise RuntimeError(
+                    "Hardware-domain Adam update delta became non-finite; "
+                    f"optimizer_step={optimizer_step}, epsilon_effective={epsilon_effective}."
+                )
+            # Match generated HLS exactly: float32 Adam delta and subtraction,
+            # followed by the direct parameter-type cast. Do not insert an
+            # additional acc_t quantization stage that the kernel does not use.
+            updated = (q_before_role.astype(np.float32) - adam_delta).astype(np.float32)
         else:
             updated = quantize_ap_fixed_array(
                 parameter_acc - (np.float32(lr_acc) * gradient_acc), accum_spec
@@ -629,6 +685,18 @@ def _hardware_batch_update(
         "mean_batch_loss": float(np.mean(losses)),
         "learning_rate_quantized": lr_q,
         "momentum_quantized": momentum_q if optimizer_type == "momentum" else None,
+        "beta1_requested": float(beta1) if optimizer_type == "adam" else None,
+        "beta2_requested": float(beta2) if optimizer_type == "adam" else None,
+        "beta1_effective": beta1_effective if optimizer_type == "adam" else None,
+        "beta2_effective": beta2_effective if optimizer_type == "adam" else None,
+        "beta_resolution_source": "generated_hls_raw_float32_literal" if optimizer_type == "adam" else None,
+        "epsilon_requested": float(epsilon) if optimizer_type == "adam" else None,
+        "epsilon_quantized": epsilon_q if optimizer_type == "adam" else None,
+        "epsilon_lsb": epsilon_lsb if optimizer_type == "adam" else None,
+        "epsilon_effective": epsilon_effective if optimizer_type == "adam" else None,
+        "epsilon_policy": "clamp_to_one_update_accum_lsb" if optimizer_type == "adam" else None,
+        "optimizer_step": int(optimizer_step) if optimizer_type == "adam" else None,
+        "bias_correction": bool(bias_correction) if optimizer_type == "adam" else None,
         "optimizer_state_before": state_before,
         "optimizer_state_after": state_after,
         "precision": {
@@ -754,7 +822,11 @@ def _hardware_domain_reference(
     optimizer = ((raw_cfg.get("training", {}) or {}).get("optimizer", {}) or {})
     optimizer_type = str(optimizer.get("type", "sgd")).strip().lower().replace("-", "_")
     momentum = float(optimizer.get("momentum", 0.9))
-    current_optimizer_state = np.zeros(current_weights.shape, dtype=np.float32)
+    beta1 = float(optimizer.get("beta1", 0.9))
+    beta2 = float(optimizer.get("beta2", 0.999))
+    epsilon = float(optimizer.get("epsilon", 1.0e-8))
+    bias_correction = bool(optimizer.get("bias_correction", False))
+    current_optimizer_state = np.zeros((current_weights.size * (2 if optimizer_type == "adam" else 1),), dtype=np.float32)
     initial_optimizer_state = current_optimizer_state.copy()
     initial_loss, initial_accuracy = _evaluate_hardware_dataset(
         graph=hardware_graph,
@@ -768,6 +840,13 @@ def _hardware_domain_reference(
     batches_per_epoch = int(schedule.batches_per_epoch or 0)
     if total_updates <= 0 or batches_per_epoch <= 0:
         raise RuntimeError("Hardware-domain multi-epoch schedule has no optimizer updates.")
+
+    root = Path(out_dir) / "hardware_domain"
+    root.mkdir(parents=True, exist_ok=True)
+    update_trace_root = root / "per_update_trace"
+    update_trace_root.mkdir(parents=True, exist_ok=True)
+    per_update_weight_paths: list[str] = []
+    per_update_optimizer_state_paths: list[str] = []
 
     last_update: Dict[str, Any] | None = None
     curve_rows: list[dict[str, Any]] = [{
@@ -809,6 +888,11 @@ def _hardware_domain_reference(
             learning_rate=learning_rate,
             optimizer_type=optimizer_type,
             momentum=momentum,
+            beta1=beta1,
+            beta2=beta2,
+            epsilon=epsilon,
+            bias_correction=bias_correction,
+            optimizer_step=update_index + 1,
             optimizer_state_before=current_optimizer_state,
         )
         current_weights = np.asarray(last_update["weights_after"], dtype=np.float32)
@@ -816,6 +900,21 @@ def _hardware_domain_reference(
             last_update["optimizer_state_after"], dtype=np.float32
         )
         _assign_flat_weights(hardware_graph, current_weights, layout)
+        update_number = update_index + 1
+        update_weights_path = update_trace_root / f"update_{update_number:04d}_weights_ref.bin"
+        _write_f32(update_weights_path, current_weights)
+        per_update_weight_paths.append(str(update_weights_path))
+        if optimizer_type in {"momentum", "adam"}:
+            update_state_path = update_trace_root / f"update_{update_number:04d}_optimizer_state_ref.bin"
+            _write_f32(
+                update_state_path,
+                _optimizer_state_artifact_vector(
+                    current_optimizer_state,
+                    optimizer_type=optimizer_type,
+                    optimizer_step=update_number,
+                ),
+            )
+            per_update_optimizer_state_paths.append(str(update_state_path))
         records_consumed += len(record_indices)
         epoch_last_gradient_norm = float(np.linalg.norm(last_update["gradient"]))
         epoch_update_norm += float(np.linalg.norm(current_weights - before_update))
@@ -845,8 +944,6 @@ def _hardware_domain_reference(
     if last_update is None:
         raise RuntimeError("Hardware-domain schedule executed no batch update.")
 
-    root = Path(out_dir) / "hardware_domain"
-    root.mkdir(parents=True, exist_ok=True)
     grads_path = root / "grads_ref.bin"
     accum_path = root / "gradient_accumulated_pre_reduce_ref.bin"
     reduced_path = root / "gradient_reduced_ref.bin"
@@ -859,9 +956,23 @@ def _hardware_domain_reference(
     _write_f32(reduced_path, last_update["gradient"])
     _write_f32(before_path, q_initial)
     _write_f32(after_path, current_weights)
-    if optimizer_type == "momentum":
-        _write_f32(optimizer_state_before_path, initial_optimizer_state)
-        _write_f32(optimizer_state_after_path, current_optimizer_state)
+    if optimizer_type in {"momentum", "adam"}:
+        _write_f32(
+            optimizer_state_before_path,
+            _optimizer_state_artifact_vector(
+                initial_optimizer_state,
+                optimizer_type=optimizer_type,
+                optimizer_step=0,
+            ),
+        )
+        _write_f32(
+            optimizer_state_after_path,
+            _optimizer_state_artifact_vector(
+                current_optimizer_state,
+                optimizer_type=optimizer_type,
+                optimizer_step=total_updates,
+            ),
+        )
 
     trace_root = root / "per_sample_trace"
     trace_root.mkdir(parents=True, exist_ok=True)
@@ -900,7 +1011,7 @@ def _hardware_domain_reference(
         "status": "available",
         "rounding_emulation": "AP_TRN",
         "overflow_emulation": "AP_WRAP",
-        "update_cast_sequence": "upd_t_to_acc_t; grad_t_to_acc_t; expression_product; final_acc_t_cast; parameter_cast",
+        "update_cast_sequence": "adam_state_cast_to_opt_t; float32_bias_correction; float32_sqrt_divide; float32_parameter_subtract; direct_parameter_cast",
         "reference_method": "operation_level_fixed_point",
         "fallback_reason": None,
         "gradient_reduction": "quantize_each_sample_accumulate_then_mean",
@@ -920,12 +1031,34 @@ def _hardware_domain_reference(
         "weights_before_ref_bin": str(before_path),
         "weights_after_ref_bin": str(after_path),
         "optimizer_type": optimizer_type,
-        "optimizer_state_words": int(current_optimizer_state.size) if optimizer_type == "momentum" else 0,
-        "optimizer_state_before_ref_bin": str(optimizer_state_before_path) if optimizer_type == "momentum" else None,
-        "optimizer_state_after_ref_bin": str(optimizer_state_after_path) if optimizer_type == "momentum" else None,
+        "optimizer_state_words": int(current_optimizer_state.size + (1 if optimizer_type == "adam" else 0)) if optimizer_type in {"momentum", "adam"} else 0,
+        "optimizer_state_layout": "m_then_v_then_step_canonical_parameter_order" if optimizer_type == "adam" else ("canonical_parameter_order" if optimizer_type == "momentum" else None),
+        "optimizer_step": total_updates if optimizer_type == "adam" else None,
+        "optimizer_step_in_state_artifact": optimizer_type == "adam",
+        "bias_correction": bias_correction if optimizer_type == "adam" else None,
+        "beta1_requested": last_update.get("beta1_requested"),
+        "beta2_requested": last_update.get("beta2_requested"),
+        "beta1_effective": last_update.get("beta1_effective"),
+        "beta2_effective": last_update.get("beta2_effective"),
+        "beta_resolution_source": last_update.get("beta_resolution_source"),
+        "epsilon_requested": last_update.get("epsilon_requested"),
+        "epsilon_quantized": last_update.get("epsilon_quantized"),
+        "epsilon_effective": last_update.get("epsilon_effective"),
+        "epsilon_lsb": last_update.get("epsilon_lsb"),
+        "epsilon_policy": last_update.get("epsilon_policy"),
+        "epsilon_numeric_type": (last_update.get("precision") or {}).get("update_accum", {}).get("type") if optimizer_type == "adam" else None,
+        "epsilon_total_bits": (last_update.get("precision") or {}).get("update_accum", {}).get("total_bits") if optimizer_type == "adam" else None,
+        "epsilon_integer_bits": (last_update.get("precision") or {}).get("update_accum", {}).get("int_bits") if optimizer_type == "adam" else None,
+        "epsilon_fractional_bits": ((last_update.get("precision") or {}).get("update_accum", {}).get("total_bits", 0) - (last_update.get("precision") or {}).get("update_accum", {}).get("int_bits", 0)) if optimizer_type == "adam" else None,
+        "epsilon_resolution_source": "canonical_training_numeric_specs.update_accum" if optimizer_type == "adam" else None,
+        "optimizer_state_before_ref_bin": str(optimizer_state_before_path) if optimizer_type in {"momentum", "adam"} else None,
+        "optimizer_state_after_ref_bin": str(optimizer_state_after_path) if optimizer_type in {"momentum", "adam"} else None,
         "per_sample_gradient_ref_bins": per_sample_paths,
         "accumulator_after_ref_bins": accumulator_paths,
         "parameter_layer_map_json": str(layer_map_path),
+        "per_update_trace_directory": str(update_trace_root),
+        "per_update_weight_ref_bins": per_update_weight_paths,
+        "per_update_optimizer_state_ref_bins": per_update_optimizer_state_paths,
         "training_epoch_curve_csv": str(curve_path),
         "execution_schedule": schedule.to_dict(),
         "precision": last_update["precision"],
@@ -967,13 +1100,17 @@ def run_training_dataset_reference(
     training = raw_cfg.get("training", {}) or {}
     optimizer = training.get("optimizer", {}) or {}
     optimizer_type = str(optimizer.get("type", "sgd")).strip().lower().replace("-", "_")
-    if optimizer_type not in {"sgd", "momentum"}:
+    if optimizer_type not in {"sgd", "momentum", "adam"}:
         raise ValueError(
-            "Dataset-wide multi-epoch training reference currently supports SGD and Momentum; "
+            "Dataset-wide multi-epoch training reference currently supports SGD, Momentum, and Adam; "
             f"got optimizer.type={optimizer_type!r}."
         )
     learning_rate = float(optimizer.get("learning_rate", 0.01))
     momentum = float(optimizer.get("momentum", 0.9))
+    beta1 = float(optimizer.get("beta1", 0.9))
+    beta2 = float(optimizer.get("beta2", 0.999))
+    epsilon = float(optimizer.get("epsilon", 1.0e-8))
+    bias_correction = bool(optimizer.get("bias_correction", False))
     schedule = resolve_training_execution_schedule(
         raw_cfg,
         sample_count=int(inputs.shape[0]),
@@ -1006,7 +1143,8 @@ def run_training_dataset_reference(
         targets=targets,
     )
     current_weights = np.asarray(weights_before, dtype=np.float32).copy()
-    optimizer_state_before = np.zeros(current_weights.shape, dtype=np.float32)
+    optimizer_state_words = current_weights.size * (2 if optimizer_type == "adam" else 1)
+    optimizer_state_before = np.zeros((optimizer_state_words,), dtype=np.float32)
     current_optimizer_state = optimizer_state_before.copy()
     total_updates = int(schedule.total_optimizer_updates or 0)
     batches_per_epoch = int(schedule.batches_per_epoch or 0)
@@ -1073,6 +1211,17 @@ def run_training_dataset_reference(
                 momentum * current_optimizer_state - learning_rate * last_gradient
             ).astype(np.float32)
             current_weights = (current_weights + current_optimizer_state).astype(np.float32)
+        elif optimizer_type == "adam":
+            n = current_weights.size
+            m = current_optimizer_state[:n]
+            v = current_optimizer_state[n:]
+            m = (beta1 * m + (1.0 - beta1) * last_gradient).astype(np.float32)
+            v = (beta2 * v + (1.0 - beta2) * last_gradient * last_gradient).astype(np.float32)
+            step = update_index + 1
+            m_used = m / max(1.0e-12, 1.0 - beta1 ** step) if bias_correction else m
+            v_used = v / max(1.0e-12, 1.0 - beta2 ** step) if bias_correction else v
+            current_weights = (current_weights - learning_rate * m_used / (np.sqrt(v_used) + epsilon)).astype(np.float32)
+            current_optimizer_state = np.concatenate([m, v]).astype(np.float32)
         else:
             current_weights = (current_weights - learning_rate * last_gradient).astype(np.float32)
         _assign_flat_weights(float_graph, current_weights, layout)
@@ -1130,9 +1279,23 @@ def run_training_dataset_reference(
     _write_f32(grads_path, last_gradient)
     _write_f32(weights_before_path, weights_before)
     _write_f32(weights_after_path, current_weights)
-    if optimizer_type == "momentum":
-        _write_f32(optimizer_state_before_path, optimizer_state_before)
-        _write_f32(optimizer_state_after_path, current_optimizer_state)
+    if optimizer_type in {"momentum", "adam"}:
+        _write_f32(
+            optimizer_state_before_path,
+            _optimizer_state_artifact_vector(
+                optimizer_state_before,
+                optimizer_type=optimizer_type,
+                optimizer_step=0,
+            ),
+        )
+        _write_f32(
+            optimizer_state_after_path,
+            _optimizer_state_artifact_vector(
+                current_optimizer_state,
+                optimizer_type=optimizer_type,
+                optimizer_step=total_updates,
+            ),
+        )
 
     loss_change = final_loss - initial_loss
     loss_reduction = initial_loss - final_loss
@@ -1165,9 +1328,15 @@ def run_training_dataset_reference(
         "records_consumed": records_consumed,
         "learning_rate": learning_rate,
         "momentum": momentum if optimizer_type == "momentum" else None,
-        "optimizer_state_words": int(current_optimizer_state.size) if optimizer_type == "momentum" else 0,
-        "optimizer_state_before_ref_bin": str(optimizer_state_before_path) if optimizer_type == "momentum" else None,
-        "optimizer_state_after_ref_bin": str(optimizer_state_after_path) if optimizer_type == "momentum" else None,
+        "beta1": beta1 if optimizer_type == "adam" else None,
+        "beta2": beta2 if optimizer_type == "adam" else None,
+        "epsilon": epsilon if optimizer_type == "adam" else None,
+        "bias_correction": bias_correction if optimizer_type == "adam" else None,
+        "optimizer_step": total_updates if optimizer_type == "adam" else None,
+        "optimizer_state_layout": "m_then_v_then_step_canonical_parameter_order" if optimizer_type == "adam" else ("canonical_parameter_order" if optimizer_type == "momentum" else None),
+        "optimizer_state_words": int(current_optimizer_state.size + (1 if optimizer_type == "adam" else 0)) if optimizer_type in {"momentum", "adam"} else 0,
+        "optimizer_state_before_ref_bin": str(optimizer_state_before_path) if optimizer_type in {"momentum", "adam"} else None,
+        "optimizer_state_after_ref_bin": str(optimizer_state_after_path) if optimizer_type in {"momentum", "adam"} else None,
         "gradient_reduction": "mean_per_optimizer_batch",
         "initial_dataset_loss": initial_loss,
         "final_dataset_loss": final_loss,
@@ -1229,8 +1398,8 @@ def run_training_dataset_reference(
         layerwise_dir=root / "batches",
         optimizer_type=optimizer_type,
         optimizer_bias_correction=False,
-        optimizer_state_before_flat_path=(optimizer_state_before_path if optimizer_type == "momentum" else None),
-        optimizer_state_after_flat_path=(optimizer_state_after_path if optimizer_type == "momentum" else None),
+        optimizer_state_before_flat_path=(optimizer_state_before_path if optimizer_type in {"momentum", "adam"} else None),
+        optimizer_state_after_flat_path=(optimizer_state_after_path if optimizer_type in {"momentum", "adam"} else None),
         loss_type=str((training.get("loss", {}) or {}).get("type", "mse")),
     )
 

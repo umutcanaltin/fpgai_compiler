@@ -2790,3 +2790,122 @@ Implementation status: implemented, awaiting real Vitis HLS validation.
 - Export now follows canonical generated parameter order rather than state declaration order.
 - Added generated-source regression for W/B interleaving and explicit offset comments.
 - Momentum HLS support remains partial until a clean Vitis HLS rerun validates the unpermuted state vector.
+
+## P3D-F4D.5 — Optimizer-state propagated-quantization validation
+
+- Active numeric-validation owner confirmed as `fpgai/validation/numeric.py`.
+- Removed duplicate implementation ownership by converting `fpgai/numeric.py` to a compatibility shim.
+- Single-update optimizer-state validation remains strict at one LSB.
+- Multi-update optimizer-state validation now reports and accepts only bounded propagation with every word within two LSBs.
+- Added canonical per-segment metrics and Adam step validation using the existing hardware-domain parameter layer map.
+- Validation result in the supplied repository: 69 passed, 16 skipped for the targeted optimizer/training suite.
+
+## P3D-F4E/F4F/F4G — Adam parameter validation, update tracing, and resource strategy
+
+Implementation status: implemented in source and unit validation.
+
+- Added automatic hardware-domain versus HLS parameter-update validation with weight/bias-specific LSBs and canonical layer segments.
+- Added `parameter_update_validation.json/.md` and integrated status into the main numeric-validation report.
+- Added hardware-reference and HLS CSim per-update weight/optimizer-state checkpoints under `per_update_trace/`.
+- Added `training_update_behavior_trace.json/.csv/.md`, including first boundary, per-update comparison, and propagation classification.
+- Added `training.optimizer.implementation.arithmetic: direct|shared` and `update_parallelism` code-generation controls.
+- Shared Adam arithmetic emits one non-inlined correction owner for sqrt/divide reuse; direct remains the default.
+- Added `optimizer_resource_strategy.json/.md`; baseline resource delta remains to be measured with matched HLS/Vivado builds.
+- Adam support contract is now implemented at dataset-wide multi-update HLS/CSim level. Board runtime remains not validated when board fit is over limit.
+
+## P3D-F4H/F4I/F4J resource-oriented training profile
+- Persistent Adam first/second-moment arrays now materialize `BIND_STORAGE` pragmas according to `training.storage.optimizer_state` / `memory.optimizer_state_storage`.
+- Optimizer resource reports now expose per-array source bindings and requested-versus-observed synthesized storage status.
+- Added `configs/examples/training_adam_kv260_serialized.yml`, reusing existing PE/SIMD/unroll/partition controls with all factors set to one and URAM requested for gradients and optimizer state.
+- Numeric behavior and Adam acceptance rules are unchanged; real HLS synthesis must determine whether URAM is observed and whether KV260 fit improves.
+
+
+## P3D-F4N.1/F4O-F4P contract baseline — 19 July 2026
+
+- Corrected board-fit limiting-dimension ranking: over-limit resources now take priority over near-limit clock dimensions.
+- Added conservative command-scoped latency reporting that separates aggregate HLS top latency from source-derived transfer lower bounds.
+- Added the canonical parameter-gradient compute knob `training.gradients.computation` with values `full_buffer`, `tiled_accumulate`, and `fused_update`.
+- `full_buffer` remains the only generated-HLS implementation currently enabled; unlowered alternatives fail validation explicitly rather than becoming report-only knobs.
+- Added canonical parameter-gradient storage path `training.storage.parameter_gradient`; `training.storage.gradient` and `training.storage.gradients` remain compatibility aliases.
+- BRAM and URAM parameter-gradient storage are real generated HLS bindings through the existing storage owner. DDR and recompute are rejected until real movement/recomputation lowerings exist.
+- Training resource ownership now attributes complete `dW/dB` arrays to `training.storage.parameter_gradient`.
+- Updated the tiled/phase-shared Adam example to declare `computation: full_buffer` and `parameter_gradient: uram`.
+- Targeted validation result in this archive: 105 passed, 30 skipped.
+- Next implementation work remains the actual `tiled_accumulate` and `fused_update` lowering; this status does not claim those mechanisms are implemented.
+
+
+## F4O real parameter-gradient tiled-accumulate lowering
+
+The first real `training.gradients.computation: tiled_accumulate` backend path is implemented for a bounded, explicit profile:
+
+- Dense trainable layers only;
+- Adam optimizer;
+- direct single-record updates (`training.batch.mode: direct`, `size: 1`);
+- no cross-record gradient accumulation (`training.gradient_accumulation.steps: 1`);
+- `tiled` or `streamed` gradient materialization;
+- BRAM or URAM tile storage.
+
+The generated HLS removes complete Dense `dW_*` arrays and their full-gradient kernels. It retains forward activations and backward output gradients, then recomputes each weight-gradient tile immediately before the canonical Adam update. Adam `m/v` state and parameter arrays are indexed by the canonical linear parameter index. Gradient export recomputes the same values from retained buffers without restoring a complete gradient array.
+
+This initial lowering intentionally rejects accumulated mini-batch mode because cross-runtime-record accumulation requires a separate persistent tiled schedule. It also rejects Conv/BatchNorm trainable gradients, SGD/Momentum tiled updates, and `fused_update` until their dedicated generated-HLS and numeric-validation paths are implemented.
+
+Example configuration:
+
+```text
+configs/examples/training_adam_kv260_tiled_accumulate_direct.yml
+```
+
+Local Python validation for this batch:
+
+```text
+108 passed, 30 skipped
+```
+
+The skipped tests require external tool/runtime dependencies. Real Vitis HLS CSim/C-synthesis remains to be run on the user's configured 2023.2 installation before making a synthesis or resource claim.
+
+### F4O.1 tiled-accumulate direct-profile code-generation repair
+
+- Corrected the final Dense tiled-accumulate lowering so standalone `dW_*` references are not substituted inside `ACC_dW_*` identifiers.
+- Removed obsolete complete `ACC_dW_*` declarations, storage pragmas, and direct-profile accumulator loops when `training.gradients.computation=tiled_accumulate`.
+- Rewired generic export branches to recompute the direct-record Dense weight gradient from retained activation and output-gradient buffers.
+- Added regression coverage asserting that generated source contains neither complete `dW_*`/`ACC_dW_*` owners nor malformed `ACC_(grad_wgt_t)` expressions.
+- Local regression result for the five targeted suites: `109 passed, 30 skipped` in the patch environment. Real Vitis HLS CSim/C-synthesis remains to be rerun by the user.
+
+## Community extensibility program added
+
+The forward roadmap now includes the complete Community Extension and Implementation Ecosystem in `docs/COMMUNITY_EXTENSION_SPRINTS.md`.
+
+Immediate implementation foundation:
+- Training plans record a normalized implementation stack.
+- Gradient-mechanism equivalence artifacts record a separate implementation-stack SHA-256 fingerprint.
+- Workload and implementation fingerprints are intentionally separate so alternative C++/HLS, VHDL/RTL, memory, streaming, transport, numerical, training, backend, and board implementations can be compared under the same semantic workload.
+- Registry validation remains explicitly pending until the Extension ABI sprint rather than being falsely reported as implemented.
+
+Current execution order:
+1. F5C generic numerical-equivalence engine.
+2. F5D matched fused-update HLS/Vivado/board evaluation.
+3. E1-E10 community extension program, with extension-compatible validation schemas designed during F5C.
+
+## F5D.1-F5D.3 intermediate training-probe implementation prepared — 23 July 2026
+
+- Numeric-equivalence report writing is now the canonical owner of `training_execution_trace.json` for training captures; direct and orchestrated report paths use the same integration and inference-only reports remain unaffected.
+- Added explicit `validation.numeric.probes` configuration with disabled-by-default selectors and stage validation.
+- Added backend-neutral selected-parameter probe artifacts for Dense weight entries.
+- Python reference execution now preserves per-layer forward input and backward output-gradient tensors required to compute the selected raw gradient term.
+- HLS CSim probe materialization currently publishes every requested stage and marks values unavailable unless an existing CSim artifact exposes them; the canonical accumulated gradient is captured from the exported gradient artifact when available.
+- Intermediate probe comparison can replace the higher-level semantic first divergence when a lower-level comparable stage is available.
+- Implementation status: prepared. Local authoritative validation, real compiler generation, HLS CSim, and synthesis remain pending user execution.
+
+## F5D.2 selected Dense/Adam HLS CSim probes — implementation prepared
+
+- Added a CSim-only selected-parameter probe owner in
+  `fpgai/backends/hls/emit/training_trace_probes.py`.
+- The generated fused Dense/Adam update captures forward input, backward output
+  gradient, raw/accumulated gradient, Adam m/v, update delta, and parameter
+  before/after for one configured Dense weight.
+- Probe globals and assignments are guarded by `#ifndef __SYNTHESIS__`; they do
+  not alter synthesized hardware.
+- The generated training testbench writes `training_probe_values.bin` and the
+  validation adapter maps it into `hls_training_probes.json`.
+- Implementation-copy focused result: 24 passed. Authoritative local CSim/HLS
+  validation is pending the user's run.

@@ -51,8 +51,10 @@ except ModuleNotFoundError as exc:  # pragma: no cover
     def run_design_space_report(*args, **kwargs):
         raise _DESIGN_SPACE_IMPORT_ERROR
 from fpgai.analysis.post_synthesis import run_post_synthesis_analysis
+from fpgai.analysis.hls_estimate_compare import parse_hls_csynth_report
 from fpgai.analysis.training_resource_estimate import run_training_resource_estimate
 from fpgai.benchmark.training_reference import run_training_reference_step
+from fpgai.validation.capture_adapters import orchestrate_training_numeric_equivalence
 from fpgai.benchmark.training_dataset_reference import run_training_dataset_reference
 from fpgai.benchmark.training_compare import compare_training_artifacts, build_dataset_training_comparison, build_training_semantic_trace_report, build_training_per_sample_gradient_trace_report, build_training_gradient_layer_role_reports
 from fpgai.util.fs import ensure_clean_dir, write_text
@@ -918,13 +920,16 @@ def _resolve_training_optimizer_loss_contract(raw: Dict[str, Any]) -> Dict[str, 
         if epsilon_value <= 0.0:
             raise ValueError("training.optimizer.epsilon must be positive.")
 
-    # Support is reported by execution path. SGD and Momentum now have canonical
-    # dataset-wide multi-epoch references. Adam remains single-step until its
-    # first/second-moment and step-counter state are carried across epochs.
+    # Support is reported by execution path. SGD, Momentum, and Adam have
+    # dataset-wide multi-epoch software and hardware-domain references. Adam HLS
+    # is implemented at CSim level with persistent step, bias correction,
+    # canonical m/v export, parameter-update validation, and propagated
+    # quantization alignment. Board runtime remains separately not validated.
     dataset_multi_epoch_status = (
-        "implemented" if optimizer_type in {"sgd", "momentum"} else "not_implemented"
+        "implemented" if optimizer_type in {"sgd", "momentum", "adam"} else "not_implemented"
     )
-    end_to_end_multi_epoch_status = "implemented" if optimizer_type in {"sgd", "momentum"} else "partial"
+    dataset_multi_epoch_hls_status = "implemented" if optimizer_type in {"sgd", "momentum", "adam"} else "not_implemented"
+    end_to_end_multi_epoch_status = "implemented" if optimizer_type in {"sgd", "momentum", "adam"} else "not_implemented"
     hls_update_status = "implemented"
     loss_hls_status = "implemented" if loss_type in {"mse", "cross_entropy"} else "not_implemented"
     loss_numeric_status = (
@@ -950,7 +955,7 @@ def _resolve_training_optimizer_loss_contract(raw: Dict[str, Any]) -> Dict[str, 
                 "single_step_reference": "implemented",
                 "single_step_numeric_validation": "implemented",
                 "dataset_multi_epoch_reference": dataset_multi_epoch_status,
-                "dataset_multi_epoch_hls": end_to_end_multi_epoch_status,
+                "dataset_multi_epoch_hls": dataset_multi_epoch_hls_status,
                 "end_to_end_multi_epoch_validation": end_to_end_multi_epoch_status,
                 "board_runtime_validation": "not_validated",
             },
@@ -1593,6 +1598,22 @@ class Compiler:
             clock_mhz=float(getattr(compile_plan, "clock_mhz", _cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0))),
             verbose=verbose,
         ) if enable_reports else None
+        if enable_reports:
+            prediction_artifacts = self._refresh_board_fit_from_hls(
+                out_dir=out_dir,
+                compile_plan=compile_plan,
+                hls_run=hls_run,
+                prediction_artifacts=prediction_artifacts,
+                build_stages=build_stages,
+            )
+            execution_semantics_artifacts = _write_execution_semantics_reports(
+                out_dir,
+                raw,
+                pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
+                memory_plan=memory_plan,
+                communication_plan=communication_plan,
+                prediction_artifacts=prediction_artifacts,
+            )
 
         estimate_vs_hls_result = None
         hls_module_breakdown_result = None
@@ -1720,6 +1741,7 @@ class Compiler:
             source_generated=(hls_dir is not None),
             hls_ran=(hls_run is not None),
             hls_ok=(hls_run.ok if hls_run is not None else None),
+            hls_csynth_report=(hls_run.csynth_report if hls_run is not None else None),
             inference_reference_artifacts=inference_reference_artifacts,
             raw_config=raw,
             runtime_sequence=runtime_sequence,
@@ -2162,6 +2184,14 @@ class Compiler:
             hls_dir=hls_dir,
             held_out_dataset_artifacts=held_out_dataset_artifacts,
         )
+        training_numeric_equivalence_artifacts = orchestrate_training_numeric_equivalence(
+            graph=g,
+            training_reference_result=training_reference_result,
+            hls_artifact_dir=hls_dir,
+            training_dir=out_dir / "training",
+            optimizer_type=str(getattr(training_reference_result, "optimizer_type", "sgd")),
+            raw_config=raw,
+        )
         hls_calibration_result = run_hls_calibration(
             out_dir=out_dir,
             raw_cfg=raw,
@@ -2170,6 +2200,22 @@ class Compiler:
             clock_mhz=float(getattr(compile_plan, "clock_mhz", _cfg_get(raw, "targets.platform.clocks.0.target_mhz", 200.0))),
             verbose=verbose,
         ) if enable_reports else None
+        if enable_reports:
+            prediction_artifacts = self._refresh_board_fit_from_hls(
+                out_dir=out_dir,
+                compile_plan=compile_plan,
+                hls_run=hls_run,
+                prediction_artifacts=prediction_artifacts,
+                build_stages=build_stages,
+            )
+            execution_semantics_artifacts = _write_execution_semantics_reports(
+                out_dir,
+                raw,
+                pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
+                memory_plan=memory_plan,
+                communication_plan=communication_plan,
+                prediction_artifacts=prediction_artifacts,
+            )
 
         training_compare_result = None
         hardware_training_compare_result = None
@@ -2505,7 +2551,7 @@ class Compiler:
         if _optimizer_type == "momentum":
             _state_names = ["velocity"]
         elif _optimizer_type == "adam":
-            _state_names = ["first_moment", "second_moment"]
+            _state_names = ["first_moment", "second_moment", "optimizer_step"]
 
         def _first_existing_optimizer_state_file(*candidates: Path) -> Path | None:
             for candidate in candidates:
@@ -2574,8 +2620,8 @@ class Compiler:
             "optimizer": _optimizer_type,
             "storage": _optimizer_state.get("storage", "none"),
             "expected_tensors": _state_names,
-            "layout": "canonical_parameter_order",
-            "layout_version": 1,
+            "layout": ("m_then_v_then_step_canonical_parameter_order" if _optimizer_type == "adam" else "canonical_parameter_order"),
+            "layout_version": 2 if _optimizer_type == "adam" else 1,
             "reference_domain": "hardware_domain_fixed_point",
             "claim_scope": "hls_csim_optimizer_state_numeric_validation",
             "bias_correction": _optimizer_bias_correction if _optimizer_type == "adam" else False,
@@ -2603,16 +2649,35 @@ class Compiler:
                 "optimizer_state_after_bin": str(_optimizer_state_got_file) if _optimizer_state_got_file is not None else None,
             },
         }
+        _parameter_update_ref_file = _first_existing_optimizer_state_file(
+            out_dir / "training_dataset_reference" / "hardware_domain" / "weights_after_ref.bin",
+            out_dir / "hardware_domain" / "weights_after_ref.bin",
+            out_dir / "training_reference" / "weights_after_ref.bin",
+        )
+        _parameter_update_got_file = (
+            self._find_file_recursive(hls_dir, "weights_after.bin")
+            if hls_dir is not None
+            else None
+        )
+        _parameter_update_artifacts = {
+            "requested": True,
+            "reference_domain": "hardware_domain_fixed_point",
+            "claim_scope": "hls_csim_parameter_update_numeric_validation",
+            "ref": _parameter_update_ref_file,
+            "got": _parameter_update_got_file,
+        }
         numeric_validation_artifacts = emit_numeric_validation_report(
             out_dir,
             pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
             source_generated=(hls_dir is not None),
             hls_ran=(hls_run is not None),
             hls_ok=(hls_run.ok if hls_run is not None else None),
+            hls_csynth_report=(hls_run.csynth_report if hls_run is not None else None),
             training_reference_result=training_reference_result,
             training_compare_result=training_compare_result,
             gradient_export_artifacts=_gradient_export_artifacts,
             optimizer_state_artifacts=_optimizer_state_artifacts,
+            parameter_update_artifacts=_parameter_update_artifacts,
             raw_config=raw,
             runtime_sequence=runtime_sequence,
         ) if enable_reports else None
@@ -2942,6 +3007,103 @@ class Compiler:
         prediction_artifacts["board_fit_markdown"] = board_fit_artifacts.get("markdown")
 
         return prediction_artifacts
+
+    def _refresh_board_fit_from_hls(
+        self,
+        *,
+        out_dir: Path,
+        compile_plan,
+        hls_run: Any | None,
+        prediction_artifacts: dict[str, Any],
+        build_stages: dict[str, bool],
+    ) -> dict[str, Any]:
+        """Promote successful C-synthesis resources to the active board-fit source.
+
+        The pre-HLS prediction fit is preserved as a separate artifact. The
+        canonical reports/board_fit.json remains the active fit used by stage
+        gating and manifests, so later stages do not continue to act on stale
+        estimator values after csynth.rpt is available.
+        """
+        csynth_report = getattr(hls_run, "csynth_report", None) if hls_run is not None else None
+        if not (hls_run is not None and getattr(hls_run, "ok", False) and csynth_report):
+            return prediction_artifacts
+        csynth_path = Path(csynth_report)
+        if not csynth_path.is_file():
+            return prediction_artifacts
+
+        reports_dir = out_dir / "reports"
+        active_json = reports_dir / "board_fit.json"
+        active_md = reports_dir / "board_fit.md"
+        prediction_payload: dict[str, Any] = {}
+        if active_json.is_file():
+            try:
+                prediction_payload = json.loads(active_json.read_text(encoding="utf-8"))
+            except Exception:
+                prediction_payload = {}
+        prediction_json = reports_dir / "board_fit_prediction.json"
+        prediction_md = reports_dir / "board_fit_prediction.md"
+        if prediction_payload:
+            prediction_json.write_text(json.dumps(prediction_payload, indent=2, sort_keys=True), encoding="utf-8")
+            if active_md.is_file():
+                prediction_md.write_text(active_md.read_text(encoding="utf-8"), encoding="utf-8")
+
+        actual = parse_hls_csynth_report(csynth_path)
+        board = str(
+            _cfg_get(
+                self.cfg.raw,
+                "targets.platform.board",
+                _cfg_get(self.cfg.raw, "targets.board", _cfg_get(self.cfg.raw, "project.board", "")),
+            )
+            or ""
+        )
+        part = str(_cfg_get(self.cfg.raw, "targets.platform.part", "") or "")
+        target_clock_mhz = getattr(
+            compile_plan,
+            "clock_mhz",
+            _cfg_get(self.cfg.raw, "targets.platform.clocks.0.target_mhz", None),
+        )
+        hls_summary = emit_board_fit_report(
+            reports_dir,
+            resource_data=actual,
+            timing_data={},
+            board=board,
+            part=part,
+            target_clock_mhz=target_clock_mhz,
+            source="hls_synthesis",
+            raw_config=self.cfg.raw,
+            build_stages=build_stages,
+        )
+        hls_payload = json.loads(active_json.read_text(encoding="utf-8"))
+        hls_snapshot = dict(hls_payload)
+        hls_json = reports_dir / "board_fit_hls_synthesis.json"
+        hls_md = reports_dir / "board_fit_hls_synthesis.md"
+        hls_json.write_text(json.dumps(hls_snapshot, indent=2, sort_keys=True), encoding="utf-8")
+        if active_md.is_file():
+            hls_md.write_text(active_md.read_text(encoding="utf-8"), encoding="utf-8")
+
+        hls_payload["format"] = "fpgai.board_fit.v2"
+        hls_payload["active_fit_source"] = "hls_synthesis"
+        hls_payload["available_fit_sources"] = [
+            source for source, present in (("prediction", bool(prediction_payload)), ("hls_synthesis", True)) if present
+        ]
+        hls_payload["prediction_fit"] = prediction_payload or None
+        hls_payload["hls_synthesis_fit"] = hls_snapshot
+        hls_payload["csynth_report"] = str(csynth_path)
+        active_json.write_text(json.dumps(hls_payload, indent=2, sort_keys=True), encoding="utf-8")
+
+        result = dict(prediction_artifacts)
+        result["board_fit"] = {
+            **hls_summary,
+            "source": "hls_synthesis",
+            "active_fit_source": "hls_synthesis",
+        }
+        result["board_fit_json"] = str(active_json)
+        result["board_fit_markdown"] = str(active_md)
+        result["board_fit_prediction_json"] = str(prediction_json) if prediction_payload else None
+        result["board_fit_prediction_markdown"] = str(prediction_md) if prediction_payload else None
+        result["board_fit_hls_synthesis_json"] = str(hls_json)
+        result["board_fit_hls_synthesis_markdown"] = str(hls_md)
+        return result
 
     def _emit_ir_artifacts(self, out_dir: Path, g, descriptors, compile_plan, memory_plan, communication_plan) -> None:
         write_text(out_dir / "ir_summary.txt", g.summary())
@@ -3724,15 +3886,100 @@ class Compiler:
         semantics = self._resolve_weight_movement_semantics(raw)
         activation_semantics = self._resolve_activation_storage_semantics(raw)
         semantics.update(activation_semantics)
-        gradient_storage = str(_cfg_get(raw, "training.storage.gradients", _cfg_get(raw, "memory.storage.gradients", "bram")) or "bram").strip().lower().replace("-", "_")
+        gradient_computation = str(_cfg_get(raw, "training.gradients.computation", "full_buffer") or "full_buffer").strip().lower().replace("-", "_")
+        if gradient_computation not in {"full_buffer", "tiled_accumulate", "fused_update"}:
+            raise ValueError(
+                "training.gradients.computation must be full_buffer, tiled_accumulate, or fused_update; "
+                f"got {gradient_computation!r}."
+            )
+
+        requested_gradient_storage = _cfg_get(
+            raw,
+            "training.storage.parameter_gradient",
+            _cfg_get(
+                raw,
+                "training.storage.gradient",
+                _cfg_get(raw, "training.storage.gradients", _cfg_get(raw, "memory.storage.gradients", None)),
+            ),
+        )
+        gradient_storage_was_explicit = requested_gradient_storage is not None
+        default_gradient_storage = "recompute" if gradient_computation == "fused_update" else "bram"
+        gradient_storage = str(requested_gradient_storage or default_gradient_storage).strip().lower().replace("-", "_")
         gradient_aliases = {"block": "bram", "block_ram": "bram", "bram": "bram", "ultra": "uram", "ultra_ram": "uram", "uram": "uram"}
         gradient_storage = gradient_aliases.get(gradient_storage, gradient_storage)
-        if gradient_storage not in {"bram", "uram"}:
-            raise ValueError(f"training.storage.gradients must be bram or uram for this backend; got {gradient_storage!r}.")
+        if gradient_storage not in {"bram", "uram", "ddr", "recompute"}:
+            raise ValueError(
+                "training.storage.parameter_gradient must be bram, uram, ddr, or recompute; "
+                f"got {gradient_storage!r}."
+            )
+        if gradient_computation == "fused_update" and gradient_storage != "recompute":
+            raise ValueError(
+                "training.gradients.computation=fused_update does not materialize a parameter-gradient buffer; "
+                "omit training.storage.parameter_gradient or set it to recompute."
+            )
+        if gradient_computation == "tiled_accumulate":
+            optimizer_type = str(_cfg_get(raw, "training.optimizer.type", "sgd") or "sgd").strip().lower().replace("-", "_")
+            batch_mode = str(_cfg_get(raw, "training.batch.mode", "direct") or "direct").strip().lower().replace("-", "_")
+            batch_size = int(_cfg_get(raw, "training.batch.size", 1) or 1)
+            accumulation_steps = int(_cfg_get(raw, "training.gradient_accumulation.steps", 1) or 1)
+            if optimizer_type != "adam":
+                raise ValueError(
+                    "training.gradients.computation=tiled_accumulate currently supports training.optimizer.type=adam."
+                )
+            if batch_mode in {"accumulated", "accumulate", "gradient_accumulation"} or batch_size != 1 or accumulation_steps != 1:
+                raise ValueError(
+                    "training.gradients.computation=tiled_accumulate currently requires direct single-record updates "
+                    "(training.batch.mode=direct, training.batch.size=1, gradient_accumulation.steps=1)."
+                )
+        if gradient_storage == "ddr":
+            raise ValueError(
+                "training.storage.parameter_gradient=ddr requires a real external-memory lowering and is not yet enabled; "
+                "use bram, uram, or select fused_update with recompute storage."
+            )
+        if gradient_storage == "recompute" and gradient_computation != "fused_update":
+            raise ValueError(
+                "training.storage.parameter_gradient=recompute currently requires "
+                "training.gradients.computation=fused_update."
+            )
+        requested_gradient_materialization = _cfg_get(raw, "training.gradients.materialization", None)
+        default_gradient_materialization = "streamed" if gradient_computation == "fused_update" else "full"
+        gradient_materialization = str(
+            requested_gradient_materialization
+            if requested_gradient_materialization is not None
+            else default_gradient_materialization
+        ).strip().lower().replace("-", "_")
+        if gradient_materialization not in {"full", "tiled", "streamed"}:
+            raise ValueError(
+                "training.gradients.materialization must be full, tiled, or streamed; "
+                f"got {gradient_materialization!r}."
+            )
+        gradient_tile_size = int(_cfg_get(raw, "training.gradients.tile_size", 256) or 256)
+        if gradient_tile_size <= 0:
+            raise ValueError("training.gradients.tile_size must be a positive integer.")
+        lifetime_policy = str(_cfg_get(raw, "training.memory_lifetime.policy", "separate") or "separate").strip().lower().replace("-", "_")
+        if lifetime_policy not in {"separate", "phase_shared"}:
+            raise ValueError(
+                "training.memory_lifetime.policy must be separate or phase_shared; "
+                f"got {lifetime_policy!r}."
+            )
+        if gradient_computation == "fused_update" and gradient_materialization != "streamed":
+            raise ValueError(
+                "training.gradients.computation=fused_update requires "
+                "training.gradients.materialization=streamed because no parameter-gradient buffer is materialized."
+            )
+        if lifetime_policy == "phase_shared" and gradient_materialization == "full":
+            raise ValueError(
+                "training.memory_lifetime.policy=phase_shared requires "
+                "training.gradients.materialization=tiled or streamed."
+            )
         semantics.update({
-            "requested_gradient_storage": gradient_storage,
+            "requested_gradient_storage": (str(requested_gradient_storage) if gradient_storage_was_explicit else None),
             "resolved_gradient_storage": gradient_storage,
-            "gradient_storage_semantics": f"gradient_{gradient_storage}",
+            "gradient_storage_semantics": f"parameter_gradient_{gradient_storage}",
+            "parameter_gradient_computation": gradient_computation,
+            "gradient_materialization": gradient_materialization,
+            "gradient_materialization_tile_size": gradient_tile_size,
+            "training_memory_lifetime_policy": lifetime_policy,
         })
         compile_plan.notes.update(semantics)
         memory_plan.notes.update(semantics)
@@ -4133,7 +4380,7 @@ class Compiler:
                     out_words=(
                         int(np.fromfile(target_bin, dtype=np.float32).size // max(1, hls_dataset_sample_count))
                         if dataset_available_for_hls
-                        else 0
+                        else int(np.fromfile(target_bin, dtype=np.float32).size)
                     ),
                     weights_mode=weights_mode,
                     weight_words=total_param_words,
@@ -5277,6 +5524,35 @@ class Compiler:
                 "HLS ARRAY_PARTITION mode where supported",
             ],
         )
+        add(
+            "training.gradients.materialization",
+            notes.get("gradient_materialization", "full"),
+            applied_to=[
+                "generated training gradient export structure",
+                "OUT_grad scratch-array materialization",
+                "training_resource_ownership",
+            ],
+            note="full preserves per-layer scratch arrays; tiled uses bounded tiles; streamed writes directly.",
+        )
+        add(
+            "training.gradients.tile_size",
+            notes.get("gradient_materialization_tile_size", 256),
+            applied_to=[
+                "generated gradient export tile dimensions",
+                "HLS loop bounds for tiled materialization",
+            ],
+            status=("not_applicable" if notes.get("gradient_materialization", "full") != "tiled" else None),
+        )
+        add(
+            "training.memory_lifetime.policy",
+            notes.get("training_memory_lifetime_policy", "separate"),
+            applied_to=[
+                "gradient export tile physical ownership",
+                "training_resource_ownership reuse groups",
+            ],
+            note="phase_shared reuses one physical export tile; separate preserves per-layer ownership.",
+        )
+
         add(
             "optimization.pipeline.style",
             first_layer_value("architecture.pipeline.style", "pipeline_style"),

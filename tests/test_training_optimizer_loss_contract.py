@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -210,8 +211,9 @@ def test_training_adam_optimizer_generates_real_update_kernel_and_reports(tmp_pa
     assert opt["optimizer"]["hls_update_status"] == "implemented"
     assert opt["optimizer"]["numeric_validation_status"] == "implemented"
     assert opt["optimizer"]["support_status"]["generated_hls_update"] == "implemented"
-    assert opt["optimizer"]["support_status"]["dataset_multi_epoch_reference"] == "not_implemented"
-    assert opt["optimizer"]["support_status"]["end_to_end_multi_epoch_validation"] == "partial"
+    assert opt["optimizer"]["support_status"]["dataset_multi_epoch_reference"] == "implemented"
+    assert opt["optimizer"]["support_status"]["dataset_multi_epoch_hls"] == "implemented"
+    assert opt["optimizer"]["support_status"]["end_to_end_multi_epoch_validation"] == "implemented"
     assert opt["optimizer"]["beta1"] == 0.9
     assert opt["optimizer"]["beta2"] == 0.999
     assert opt["optimizer_state"]["required"] is True
@@ -243,6 +245,12 @@ def test_training_adam_optimizer_state_export_generates_capture_mode_and_reports
     assert "FPGAI_ADAM_M_W_" in source
     assert "FPGAI_ADAM_V_W_" in source
     assert "fpgai_pack_optimizer_state_float32" in source
+    assert "optimizer_state scalar FPGAI_ADAM_STEP" in source
+    assert "(float)FPGAI_ADAM_STEP" in source
+    m_pos = source.index("optimizer_state tensor FPGAI_ADAM_M_W_")
+    v_pos = source.index("optimizer_state tensor FPGAI_ADAM_V_W_")
+    step_pos = source.index("optimizer_state scalar FPGAI_ADAM_STEP")
+    assert m_pos < v_pos < step_pos
 
     opt = json.loads((out_dir / "reports/training_optimizer_state.json").read_text(encoding="utf-8"))
     assert opt["optimizer_state"]["export"]["resolved"] == "m_axi_export_full"
@@ -272,6 +280,33 @@ def test_training_cross_entropy_generates_real_loss_kernel_and_reports(tmp_path:
     # existing probabilities and bypass a second softmax normalization.
     assert "softmax_denom" not in source
     assert "fpgai::softmax_backward" not in source
+    # ReLU backward must consume the branch decision captured during the
+    # forward pass. Activation buffers may be reused before backward under
+    # phase-shared lifetime policies.
+    assert "static unsigned char FPGAI_RELU_MASK_" in source
+    assert "fpgai::relu_with_mask<" in source
+    assert "fpgai::relu_backward_from_mask<" in source
+    assert "fpgai::relu_backward_from_output<" not in source
+    # The fused softmax-cross-entropy gradient is an owner assignment, not an
+    # accumulation into persistent HLS workspace state. Imported tensor names
+    # are graph-dependent, so validate the generated semantic contract rather
+    # than hard-coding one ONNX naming layout.
+    marker = "FPGAI fused softmax-cross-entropy backward owner assignment."
+    assert marker in source
+    marker_offset = source.index(marker)
+    owner_block = source[marker_offset : marker_offset + 640]
+    identifier = r"[A-Za-z_][A-Za-z0-9_]*"
+    assert re.search(
+        rf"for\s*\(\s*int\s+i\s*=\s*0\s*;\s*i\s*<\s*\d+\s*;"
+        rf"\s*\+\+i\s*\)\s*{identifier}\[i\]\s*=\s*{identifier}\[i\]\s*;",
+        owner_block,
+    )
+    assert not re.search(
+        rf"{identifier}\[i\]\s*\+=\s*{identifier}\[i\]\s*;",
+        owner_block,
+    )
+    # Every canonical gradient workspace is reset before each backward pass.
+    assert "FPGAI reset per-step gradient workspaces" in source
 
     loss = json.loads((out_dir / "reports/training_loss_contract.json").read_text(encoding="utf-8"))
     assert loss["loss"]["type"] == "cross_entropy"

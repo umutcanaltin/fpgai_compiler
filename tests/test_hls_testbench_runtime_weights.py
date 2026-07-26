@@ -340,3 +340,39 @@ def test_training_testbench_emits_pre_post_held_out_evaluation(tmp_path: Path) -
     assert "held_out_predictions_after.csv" in text
     assert "held_out_curve.csv" in text
     assert "deeplearn(in_stream, out_stream, aux_stream, 0);" in text
+
+
+def test_training_adam_optimizer_state_capture_includes_step_and_runtime_checks(tmp_path: Path) -> None:
+    emit_tb_train_cpp(
+        tmp_path,
+        graph=None,
+        top_name="deeplearn_train",
+        in_words=4,
+        out_words=2,
+        weights_mode="embedded",
+        weight_words=5,
+        preload_weights=[],
+        training_cfg={
+            "optimizer": {"type": "adam"},
+            "execution": {"train_steps": 1, "batch_size": 1},
+        },
+        output_dir=str(tmp_path),
+        raw_cfg={
+            "training": {
+                "optimizer": {"type": "adam"},
+                "execution": {"train_steps": 1, "batch_size": 1},
+            },
+            "data_movement": {
+                "optimizer_state": {
+                    "export": {"interface": "m_axi", "policy": "full"}
+                }
+            },
+        },
+    )
+
+    tb = (tmp_path / "tb.cpp").read_text(encoding="utf-8")
+    assert "std::vector<ap_uint<32> > optimizer_state_mem(11);" in tb
+    assert "unpack_words_to_f32(optimizer_state_mem, 11)" in tb
+    assert "optimizer_state_after.back()" in tb
+    assert "optimizer step did not advance" in tb
+    assert "all m/v words are zero after training" in tb

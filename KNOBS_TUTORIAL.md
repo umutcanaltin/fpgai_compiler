@@ -2167,3 +2167,40 @@ Xilinx/AMD FPGA implementation tool used for synthesis, place, route, timing, an
 ## Vitis HLS
 
 Xilinx/AMD HLS tool that converts C/C++ into RTL hardware.
+
+## Parameter-gradient computation strategies
+
+FPGAI keeps parameter-gradient handling user-selectable. Existing behavior is not replaced globally.
+
+```yaml
+training:
+  gradients:
+    computation: full_buffer
+  storage:
+    parameter_gradient: bram
+```
+
+`full_buffer` materializes complete parameter-gradient arrays and currently supports BRAM or URAM placement.
+
+```yaml
+training:
+  gradients:
+    computation: tiled_accumulate
+    materialization: tiled
+    tile_size: 256
+  storage:
+    parameter_gradient: bram
+```
+
+`tiled_accumulate` retains only a bounded gradient tile. The currently validated profile is Dense + Adam with direct single-record updates.
+
+```yaml
+training:
+  gradients:
+    computation: fused_update
+    export_policy: recompute
+  storage:
+    parameter_gradient: recompute
+```
+
+`fused_update` computes each Dense weight gradient and immediately consumes it in the Adam update. It does not materialize a full gradient array or a gradient tile. Adam first- and second-moment state remain persistent. The initial support profile is Dense + Adam, direct batch mode, batch size 1, and one accumulation step. Incompatible combinations fail explicitly; FPGAI does not silently select another mechanism.

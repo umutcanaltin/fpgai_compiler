@@ -276,7 +276,7 @@ def test_training_numeric_validation_records_adam_optimizer_state_debt(tmp_path:
     assert opt_state['requested'] is True
     assert opt_state['optimizer'] == 'adam'
     assert opt_state['storage'] == 'bram'
-    assert opt_state['expected_tensors'] == ['first_moment', 'second_moment']
+    assert opt_state['expected_tensors'] == ['first_moment', 'second_moment', 'optimizer_step']
     assert opt_state['bias_correction'] is False
     assert numeric['training']['reference']['optimizer_type'] == 'adam'
     assert numeric['training']['reference']['optimizer_state_before_ref_bin'] is not None
@@ -315,7 +315,7 @@ def test_compile_numeric_validation_compares_captured_optimizer_state_files(tmp_
     numeric = json.loads((compiled_out / 'reports/numeric_validation.json').read_text(encoding='utf-8'))
     opt_state = numeric['optimizer_state_validation']
     assert opt_state['requested'] is True
-    assert opt_state['status'] == 'compared'
+    assert opt_state['status'] == 'implemented'
     assert opt_state['passed'] is True
     assert opt_state['comparisons']['packed_optimizer_state_after']['max_abs_error'] == 0.0
 

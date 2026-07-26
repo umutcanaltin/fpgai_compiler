@@ -26,6 +26,38 @@ def _default_precision(raw_cfg: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+
+def resolve_training_numeric_specs(raw_cfg: Dict[str, Any] | None = None) -> Dict[str, Dict[str, Any]]:
+    """Resolve canonical HLS numeric roles with fallback-field merging.
+
+    This is the shared owner for generated type aliases and operation-level
+    references. A partial role override inherits unspecified fields from its
+    fallback role instead of silently selecting a different default.
+    """
+    raw_cfg = raw_cfg or {}
+    dflt = _default_precision(raw_cfg)
+
+    def merged(path: str, fallback: Dict[str, Any]) -> Dict[str, Any]:
+        value = _deep_get(raw_cfg, path, None)
+        out = dict(fallback)
+        if isinstance(value, dict):
+            out.update(value)
+        return out
+
+    generic_grad = merged("numerics.training.grad", dflt["activation"])
+    return {
+        "activation": dict(dflt["activation"]),
+        "weight": dict(dflt["weight"]),
+        "bias": dict(dflt["bias"]),
+        "accum": dict(dflt["accum"]),
+        "grad_activation": merged("numerics.training.grad_activation", generic_grad),
+        "grad_weight": merged("numerics.training.grad_weight", dflt["weight"]),
+        "grad_bias": merged("numerics.training.grad_bias", dflt["bias"]),
+        "update_accum": merged("numerics.training.update_accum", dflt["accum"]),
+        "optimizer_state": merged("numerics.training.optimizer_state", dflt["accum"]),
+        "loss": merged("numerics.training.loss", dflt["accum"]),
+    }
+
 def _macro_int(raw_cfg: Dict[str, Any], path: str, default: int) -> int:
     v = _deep_get(raw_cfg, path, default)
     try:
@@ -141,14 +173,15 @@ def emit_types_h(
 ) -> str:
     raw_cfg = raw_cfg or {}
     dflt = _default_precision(raw_cfg)
+    numeric_specs = resolve_training_numeric_specs(raw_cfg)
     plan_notes = getattr(compile_plan, "notes", {}) if compile_plan is not None else {}
 
-    grad_act = _deep_get(raw_cfg, "numerics.training.grad_activation", _deep_get(raw_cfg, "numerics.training.grad", dflt["activation"]))
-    grad_wgt = _deep_get(raw_cfg, "numerics.training.grad_weight", dflt["weight"])
-    grad_bias = _deep_get(raw_cfg, "numerics.training.grad_bias", dflt["bias"])
-    update_acc = _deep_get(raw_cfg, "numerics.training.update_accum", dflt["accum"])
-    optimizer_state = _deep_get(raw_cfg, "numerics.training.optimizer_state", dflt["accum"])
-    loss_t = _deep_get(raw_cfg, "numerics.training.loss", dflt["accum"])
+    grad_act = numeric_specs["grad_activation"]
+    grad_wgt = numeric_specs["grad_weight"]
+    grad_bias = numeric_specs["grad_bias"]
+    update_acc = numeric_specs["update_accum"]
+    optimizer_state = numeric_specs["optimizer_state"]
+    loss_t = numeric_specs["loss"]
 
     pe = int(plan_notes.get("parallel_pe", _deep_get(raw_cfg, "optimization.parallel.pe", 1)))
     simd = int(plan_notes.get("parallel_simd", _deep_get(raw_cfg, "optimization.parallel.simd", 1)))
