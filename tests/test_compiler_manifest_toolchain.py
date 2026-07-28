@@ -35,6 +35,7 @@ def test_resolved_toolchain_summary_preserves_vivado_and_vitis_settings64() -> N
 def test_manifest_source_records_toolchain_summary() -> None:
     import pathlib
 
-    source = pathlib.Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
-    assert '"toolchain": _resolved_toolchain_summary(self.cfg.raw)' in source
-    assert '"toolchain": _resolved_toolchain_summary(raw)' in source
+    compiler_source = pathlib.Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
+    reports_source = pathlib.Path("fpgai/engine/compiler_reports.py").read_text(encoding="utf-8")
+    assert '"toolchain": _resolved_toolchain_summary(self.cfg.raw)' in compiler_source
+    assert '"toolchain": _resolved_toolchain_summary(raw)' in reports_source
