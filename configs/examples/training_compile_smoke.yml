@@ -114,8 +114,6 @@ data_movement:
   ps_pl:
     compression:
       enabled: true
-    weights:
-      mode: embedded
 backends:
   hls:
     enabled: true
@@ -154,3 +152,5 @@ memory:
   activation_storage: bram
   gradient_storage: bram
   optimizer_state_storage: bram
+weights:
+  mode: embedded

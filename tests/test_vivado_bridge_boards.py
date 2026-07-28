@@ -226,7 +226,7 @@ def test_vivado_bridge_runner_honors_fit_policy_gate_in_source() -> None:
     assert '"vivado_reports_present": False' in source
     assert "bridge.mkdir(parents=True, exist_ok=True)" in source
     assert '"vivado_ran": False' in source
-    assert '"bitstream_requested": bool(run_vivado_impl)' in source
+    assert '"bitstream_requested": bool(run_bitstream)' in source
 
 
 def test_board_fit_counts_physical_m_axi_roles_without_runtime_double_counting(tmp_path) -> None:

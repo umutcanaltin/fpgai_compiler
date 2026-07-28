@@ -165,7 +165,7 @@ def test_resource_estimator_defaults_to_analytical_mode() -> None:
     )
 
     assert result["estimation_mode"] == "analytical"
-    assert result["analytical_model"] == "operator_structural_v2"
+    assert result["analytical_model"] == "operator_structural_v4_inference_hls_sharing_training_problem_shared"
     assert result["calibration"]["enabled"] is False
     assert len(result["layers"]) == 2
 

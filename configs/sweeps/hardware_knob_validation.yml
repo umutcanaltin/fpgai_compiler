@@ -1,41 +1,40 @@
 name: hardware_knob_validation
 command_template: PYTHONPATH=. python -B main.py compile --config {config_path}
-
 materialize_configs:
   enabled: true
   directory: configs
   strip_unknown_top_level_sections: true
   canonicalize_policy: true
   strip_top_level_sections:
-    - notes
+  - notes
   compiler_policy_names: true
   parameter_mappings:
     model_path:
       path: model.path
       create: true
     weight_mode:
-      path: data_movement.ps_pl.weights.mode
+      path: weights.mode
       create: true
     learning_rate:
       path: training.optimizer.learning_rate
       create: true
     epochs:
-      path: training.execution.epochs
+      path: training.batch.epochs
       create: true
     train_steps:
-      path: training.execution.train_steps
+      path: training.batch.max_updates
       create: true
     batch_size:
-      path: training.execution.batch_size
+      path: training.batch.size
       create: true
     batch_mode:
-      path: training.execution.batch_mode
+      path: training.batch.mode
       create: true
     dump_intermediates:
       path: training.debug.dump_intermediates
       create: true
     policy:
-      path: optimization.parallel_policy
+      path: optimization.parallel.policy
       create: true
     pe:
       path: optimization.parallel.pe
@@ -52,7 +51,6 @@ materialize_configs:
     pipeline_style:
       path: optimization.parallel.pipeline_style
       create: true
-
     activation_total_bits:
       path: numerics.defaults.activation.total_bits
       create: true
@@ -95,28 +93,24 @@ materialize_configs:
     master_weight_int_bits:
       path: numerics.training.master_weight.int_bits
       create: true
-
 defaults:
   base_config_path: configs/examples/training_compile_smoke.yml
   config_path: configs/examples/training_compile_smoke.yml
   board: kv260
   model_path: models/cnn_mnist.onnx
   weight_mode: stream
-
   policy: balanced
   pe: 2
   simd: 2
   unroll_factor: 2
   partition_factor: 2
   pipeline_style: balanced
-
   learning_rate: 0.005
   epochs: 2
   train_steps: 2
   batch_size: 2
   batch_mode: accumulated
   dump_intermediates: true
-
   activation_total_bits: 24
   activation_int_bits: 12
   weight_total_bits: 20
@@ -131,76 +125,70 @@ defaults:
   grad_accum_int_bits: 20
   master_weight_total_bits: 24
   master_weight_int_bits: 10
-
 design_points:
-  - name: hw_prec_fx8_like
-    activation_total_bits: 8
-    activation_int_bits: 3
-    weight_total_bits: 8
-    weight_int_bits: 3
-    bias_total_bits: 16
-    bias_int_bits: 6
-    accum_total_bits: 24
-    accum_int_bits: 10
-    grad_total_bits: 16
-    grad_int_bits: 6
-    grad_accum_total_bits: 24
-    grad_accum_int_bits: 10
-    master_weight_total_bits: 12
-    master_weight_int_bits: 5
-
-  - name: hw_prec_fx12_like
-    activation_total_bits: 12
-    activation_int_bits: 4
-    weight_total_bits: 12
-    weight_int_bits: 4
-    bias_total_bits: 24
-    bias_int_bits: 10
-    accum_total_bits: 32
-    accum_int_bits: 14
-    grad_total_bits: 24
-    grad_int_bits: 10
-    grad_accum_total_bits: 32
-    grad_accum_int_bits: 14
-    master_weight_total_bits: 16
-    master_weight_int_bits: 6
-
-  - name: hw_prec_fx16_like
-    activation_total_bits: 16
-    activation_int_bits: 6
-    weight_total_bits: 16
-    weight_int_bits: 6
-    bias_total_bits: 32
-    bias_int_bits: 12
-    accum_total_bits: 40
-    accum_int_bits: 18
-    grad_total_bits: 32
-    grad_int_bits: 12
-    grad_accum_total_bits: 40
-    grad_accum_int_bits: 18
-    master_weight_total_bits: 20
-    master_weight_int_bits: 8
-
-  - name: hw_parallel_1
-    pe: 1
-    simd: 1
-    unroll_factor: 1
-    partition_factor: 1
-    policy: resource_first
-    pipeline_style: conservative
-
-  - name: hw_parallel_2
-    pe: 2
-    simd: 2
-    unroll_factor: 2
-    partition_factor: 2
-    policy: balanced
-    pipeline_style: balanced
-
-  - name: hw_parallel_4
-    pe: 4
-    simd: 4
-    unroll_factor: 4
-    partition_factor: 4
-    policy: latency_first
-    pipeline_style: aggressive
+- name: hw_prec_fx8_like
+  activation_total_bits: 8
+  activation_int_bits: 3
+  weight_total_bits: 8
+  weight_int_bits: 3
+  bias_total_bits: 16
+  bias_int_bits: 6
+  accum_total_bits: 24
+  accum_int_bits: 10
+  grad_total_bits: 16
+  grad_int_bits: 6
+  grad_accum_total_bits: 24
+  grad_accum_int_bits: 10
+  master_weight_total_bits: 12
+  master_weight_int_bits: 5
+- name: hw_prec_fx12_like
+  activation_total_bits: 12
+  activation_int_bits: 4
+  weight_total_bits: 12
+  weight_int_bits: 4
+  bias_total_bits: 24
+  bias_int_bits: 10
+  accum_total_bits: 32
+  accum_int_bits: 14
+  grad_total_bits: 24
+  grad_int_bits: 10
+  grad_accum_total_bits: 32
+  grad_accum_int_bits: 14
+  master_weight_total_bits: 16
+  master_weight_int_bits: 6
+- name: hw_prec_fx16_like
+  activation_total_bits: 16
+  activation_int_bits: 6
+  weight_total_bits: 16
+  weight_int_bits: 6
+  bias_total_bits: 32
+  bias_int_bits: 12
+  accum_total_bits: 40
+  accum_int_bits: 18
+  grad_total_bits: 32
+  grad_int_bits: 12
+  grad_accum_total_bits: 40
+  grad_accum_int_bits: 18
+  master_weight_total_bits: 20
+  master_weight_int_bits: 8
+- name: hw_parallel_1
+  pe: 1
+  simd: 1
+  unroll_factor: 1
+  partition_factor: 1
+  policy: resource_first
+  pipeline_style: conservative
+- name: hw_parallel_2
+  pe: 2
+  simd: 2
+  unroll_factor: 2
+  partition_factor: 2
+  policy: balanced
+  pipeline_style: balanced
+- name: hw_parallel_4
+  pe: 4
+  simd: 4
+  unroll_factor: 4
+  partition_factor: 4
+  policy: latency_first
+  pipeline_style: aggressive

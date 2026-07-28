@@ -52,9 +52,6 @@ training:
   batch:
     size: 1
     epochs: 2
-  storage:
-    gradients: uram
-    optimizer_state: uram
 optimization:
   parallel:
     policy: manual

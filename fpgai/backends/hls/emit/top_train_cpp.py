@@ -2503,6 +2503,12 @@ def _fpgai_insert_training_storage_bindings(source: str, *, compile_plan=None, m
         grad_impl = "bram"
 
     updated = source
+    storage_anchor = "#pragma HLS INTERFACE s_axilite port=return bundle=CTRL\n"
+    if storage_anchor not in updated and "FPGAI training storage binding requested" not in updated:
+        updated = (
+            f"// FPGAI training storage binding requested: weights={impl}, gradients={grad_impl}; "
+            "file-scope BIND_STORAGE disabled.\n" + updated
+        )
     if runtime_import and "ap_uint<32>* weights_mem" not in updated:
         updated = updated.replace(
             "#include <ap_axi_sdata.h>\n",

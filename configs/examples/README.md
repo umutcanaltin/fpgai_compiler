@@ -61,7 +61,7 @@ FPGAI keeps two experiment contracts separate:
 ```bash
 # Equal sample exposure: epochs/record visits are held constant; update counts differ.
 PYTHONPATH=. python -m fpgai.cli sweep run \
-  --config configs/sweeps/training_multi_epoch_convergence.yml \
+  --config configs/sweeps/training_batch_equal_exposure_strict3.yml \
   --out paper_experiments/training_batch_equal_exposure
 
 # Equal optimizer budget: six updates are held constant; record exposure differs.

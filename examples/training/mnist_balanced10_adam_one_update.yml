@@ -131,8 +131,6 @@ data_movement:
   ps_pl:
     compression:
       enabled: true
-    weights:
-      mode: embedded
 backends:
   hls:
     enabled: true
@@ -197,3 +195,5 @@ metadata:
       validation
     claim_scope: compiler mechanism and fixed-point numerical validation only; not
       convergence or generalization
+weights:
+  mode: embedded

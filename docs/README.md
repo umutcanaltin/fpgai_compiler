@@ -11,6 +11,7 @@ This directory contains user-facing and developer-facing documentation for FPGAI
 
 ## Workflow references
 
+- [`REPOSITORY_STRUCTURE.md`](REPOSITORY_STRUCTURE.md): repository ownership, naming, readability, and generated-artifact policy.
 - [`CONFIG_FIRST_WORKFLOW.md`](CONFIG_FIRST_WORKFLOW.md): config-first development and usage policy.
 - [`inspect_command.md`](inspect_command.md): inspect command behavior.
 - [`logging.md`](logging.md): quiet/verbose logging behavior.

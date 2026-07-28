@@ -48,15 +48,14 @@ training:
     loss_eval_records: 10
   storage:
     parameter_gradient: recompute
-    optimizer_state: uram
-  gradient_accumulation:
-    steps: 1
   gradients:
     computation: fused_update
     materialization: streamed
     export_policy: recompute
   memory_lifetime:
     policy: phase_shared
+  accumulation:
+    steps: 1
 targets:
   platform:
     board: kv260
@@ -144,8 +143,6 @@ data_movement:
   ps_pl:
     compression:
       enabled: true
-    weights:
-      mode: embedded
 backends:
   hls:
     enabled: true
@@ -202,3 +199,5 @@ optimization:
     simd: 1
     unroll_factor: 1
     partition_factor: 1
+weights:
+  mode: embedded

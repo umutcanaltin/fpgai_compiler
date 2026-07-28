@@ -48,7 +48,6 @@ training:
     loss_eval_records: 10
   storage:
     parameter_gradient: uram
-    optimizer_state: uram
   gradients:
     computation: full_buffer
     materialization: tiled
@@ -142,8 +141,6 @@ data_movement:
   ps_pl:
     compression:
       enabled: true
-    weights:
-      mode: embedded
 backends:
   hls:
     enabled: true
@@ -215,3 +212,5 @@ optimization:
     simd: 1
     unroll_factor: 1
     partition_factor: 1
+weights:
+  mode: embedded

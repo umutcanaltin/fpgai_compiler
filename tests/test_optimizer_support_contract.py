@@ -1250,7 +1250,7 @@ def test_tiled_accumulate_example_selects_direct_dense_adam_profile() -> None:
     assert raw["training"]["gradients"]["materialization"] == "tiled"
     assert raw["training"]["batch"]["mode"] == "direct"
     assert raw["training"]["batch"]["size"] == 1
-    assert raw["training"]["gradient_accumulation"]["steps"] == 1
+    assert raw["training"]["accumulation"]["steps"] == 1
     assert raw["training"]["optimizer"]["type"] == "adam"
     assert raw["training"]["batch"]["epochs"] == 1
     assert "dataset" not in raw.get("validation", {})

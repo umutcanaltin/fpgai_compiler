@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from fpgai.reporting.artifacts import build_report
 from fpgai.validation.results import validate_results
-from fpgai.validation.correctness import validate_correctness
 import argparse
 import contextlib
 import io
@@ -20,11 +19,6 @@ from fpgai.analysis.resource_estimator import estimate_resources_from_descriptor
 from fpgai.engine.planner import make_compile_plan
 from fpgai.engine.analysis import analyze_graph
 from fpgai.ir.passes import assign_stable_names
-from fpgai.frontend.onnx import import_onnx
-from fpgai.benchmark.pipeline import (
-    run_compile_correctness_benchmark,
-    run_compile_training_benchmark,
-)
 from fpgai.config.loader import (
     ConfigError,
     load_config,
@@ -35,6 +29,24 @@ from fpgai.experiments.sweep_runner import run_sweep_config
 from fpgai.experiments.paper_runner import run_experiment_from_config
 
 T = TypeVar("T")
+
+
+def run_compile_correctness_benchmark(*, config_path: str):
+    """Lazy optional-dependency boundary for inference benchmarking."""
+    from fpgai.benchmark.pipeline import run_compile_correctness_benchmark as _run
+    return _run(config_path=config_path)
+
+
+def run_compile_training_benchmark(*, config_path: str):
+    """Lazy optional-dependency boundary for training benchmarking."""
+    from fpgai.benchmark.pipeline import run_compile_training_benchmark as _run
+    return _run(config_path=config_path)
+
+
+def validate_correctness(config_path: str):
+    """Lazy optional-dependency boundary for correctness validation."""
+    from fpgai.validation.correctness import validate_correctness as _validate
+    return _validate(config_path)
 
 
 def _benchmark_enabled(cfg) -> bool:
@@ -361,6 +373,7 @@ def _inspection_predictions_from_config(cfg) -> tuple[dict[str, Any], dict[str, 
     if model_path is None:
         raise ValueError("Cannot build predictions without a model path")
 
+    from fpgai.frontend.onnx import import_onnx
     graph = import_onnx(
         model_path,
         canonicalize=True,

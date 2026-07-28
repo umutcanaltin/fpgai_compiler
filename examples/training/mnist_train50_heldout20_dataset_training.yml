@@ -121,8 +121,6 @@ data_movement:
   ps_pl:
     compression:
       enabled: true
-    weights:
-      mode: embedded
 backends:
   hls:
     enabled: true
@@ -202,3 +200,5 @@ metadata:
   example:
     purpose: P3D-F3F compact train/held-out HLS validation contract
     claim_scope: held-out validation mechanism only; not statistical generalization
+weights:
+  mode: embedded

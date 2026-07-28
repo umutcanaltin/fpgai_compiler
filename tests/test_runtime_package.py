@@ -2659,3 +2659,116 @@ def test_memory_residency_contract_classifies_ddr_tiled_mutable_weights(tmp_path
     assert weights["movement_semantics"] == "tiled_fetch_and_writeback"
     assert weights["writeback_required"] is True
     assert contract["checks"]["ddr_weight_residency_uses_tiled_movement"] is True
+
+
+def test_generated_pynq_backend_runs_inference_and_programs_bound_pointer_registers(tmp_path: Path) -> None:
+    import importlib.util
+
+    out_dir = tmp_path / "pynq_inference_runtime"
+    out_dir.mkdir(parents=True)
+    emit_runtime_package(
+        out_dir,
+        board="kv260",
+        pipeline_mode="inference",
+        top_name="deeplearn",
+        runtime_sequence={"sequence": [{"command": "run_inference", "args": {"repeat": 1}}]},
+    )
+
+    package_dir = out_dir / "runtime_package"
+    spec = importlib.util.spec_from_file_location("board_runtime_inference_test", package_dir / "board_runtime.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    class FakeRegisterMap:
+        input = 0
+        output = 0
+
+    class FakeIP:
+        def __init__(self) -> None:
+            self.register_map = FakeRegisterMap()
+            self.writes: list[tuple[int, int]] = []
+
+        def write(self, offset: int, value: int) -> None:
+            self.writes.append((offset, value))
+
+        def read(self, offset: int) -> int:
+            return 0x2
+
+    class FakeBuffer:
+        def __init__(self, address: int) -> None:
+            self.device_address = address
+
+        def tobytes(self) -> bytes:
+            return b"payload"
+
+    ip = FakeIP()
+    backend = module.PynqDmaMmioBackend(
+        overlay=ip,
+        buffers={"input": FakeBuffer(0x1000), "output": FakeBuffer(0x2000)},
+    )
+
+    assert backend.run_inference(repeat=1) == {"mode": module.FPGAI_MODE_RUN_INFERENCE}
+    assert ip.register_map.input == 0x1000
+    assert ip.register_map.output == 0x2000
+    assert (0x10, module.FPGAI_MODE_RUN_INFERENCE) in ip.writes
+
+
+def test_generated_runtime_api_exposes_real_inference_and_weight_export_backend_calls(tmp_path: Path) -> None:
+    out_dir = tmp_path / "runtime_api_board_calls"
+    out_dir.mkdir(parents=True)
+    emit_runtime_package(
+        out_dir,
+        board="kv260",
+        pipeline_mode="inference",
+        top_name="deeplearn",
+        runtime_sequence={"sequence": [{"command": "run_inference", "args": {"repeat": 1}}]},
+    )
+
+    package_dir = out_dir / "runtime_package"
+    board_source = (package_dir / "board_runtime.py").read_text(encoding="utf-8")
+    api_source = (package_dir / "runtime_api.py").read_text(encoding="utf-8")
+
+    assert "def run_inference(self, inputs" in board_source
+    assert "def export_weights(self" in board_source
+    assert "return _BOUND_BACKEND.export_weights(capture_path=capture_path)" in api_source
+    assert "_unsupported_board_call('export_weights')" in api_source
+
+
+def test_generated_buffer_allocator_preloads_packaged_binary_sources(tmp_path: Path) -> None:
+    import importlib.util
+    import numpy as np
+
+    out_dir = tmp_path / "runtime_preload"
+    out_dir.mkdir(parents=True)
+    (out_dir / "input.bin").write_bytes(np.asarray([1.0, 2.0], dtype=np.float32).tobytes())
+    emit_runtime_package(
+        out_dir,
+        board="kv260",
+        pipeline_mode="inference",
+        top_name="deeplearn",
+        runtime_sequence={"sequence": [{"command": "run_inference", "args": {"repeat": 1}}]},
+    )
+
+    package_dir = out_dir / "runtime_package"
+    spec = importlib.util.spec_from_file_location("board_runtime_preload_test", package_dir / "board_runtime.py")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    plan = {
+        "buffers": [
+            {
+                "name": "input",
+                "shape": [2],
+                "dtype": "float32",
+                "source": "../input.bin",
+            }
+        ]
+    }
+
+    def allocate_fn(*, shape, dtype):
+        return np.zeros(shape=shape, dtype=dtype)
+
+    buffers = module.allocate_buffers_from_plan(plan, allocate_fn=allocate_fn, package_dir=package_dir)
+    assert np.allclose(buffers["input"], np.asarray([1.0, 2.0], dtype=np.float32))

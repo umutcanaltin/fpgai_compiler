@@ -48,15 +48,14 @@ training:
     loss_eval_records: 10
   storage:
     parameter_gradient: bram
-    optimizer_state: uram
-  gradient_accumulation:
-    steps: 1
   gradients:
     computation: tiled_accumulate
     materialization: tiled
     tile_size: 256
   memory_lifetime:
     policy: phase_shared
+  accumulation:
+    steps: 1
 targets:
   platform:
     board: kv260
@@ -144,8 +143,6 @@ data_movement:
   ps_pl:
     compression:
       enabled: true
-    weights:
-      mode: embedded
 backends:
   hls:
     enabled: true
@@ -191,7 +188,8 @@ validation:
     max_accuracy_drop_pct: 5.0
 metadata:
   example:
-    purpose: F4O dense Adam direct tiled parameter-gradient accumulation with bounded dW storage
+    purpose: F4O dense Adam direct tiled parameter-gradient accumulation with bounded
+      dW storage
     claim_scope: compiler mechanism and fixed-point numerical validation only; not
       convergence or generalization
 optimization:
@@ -201,3 +199,5 @@ optimization:
     simd: 1
     unroll_factor: 1
     partition_factor: 1
+weights:
+  mode: embedded

@@ -121,8 +121,6 @@ data_movement:
   ps_pl:
     compression:
       enabled: true
-    weights:
-      mode: embedded
 backends:
   hls:
     enabled: true
@@ -183,5 +181,9 @@ validation:
     max_accuracy_drop_pct: 5.0
 metadata:
   example:
-    purpose: P3D-F fast dataset-backed HLS training mechanism and numerical-equivalence validation
-    claim_scope: compiler mechanism and fixed-point numerical validation only; not convergence or generalization
+    purpose: P3D-F fast dataset-backed HLS training mechanism and numerical-equivalence
+      validation
+    claim_scope: compiler mechanism and fixed-point numerical validation only; not
+      convergence or generalization
+weights:
+  mode: embedded

@@ -185,16 +185,6 @@ optimization:
       tile_ow: 4
 data_movement:
   ps_pl:
-    input:
-      mode: stream
-      size_bytes: 3136
-      precision:
-        type: ap_fixed
-        total_bits: 8
-        int_bits: 3
-      compression:
-        enabled: true
-        codec: bitpack
     aux:
       enabled: false
       mode: stream
@@ -202,19 +192,19 @@ data_movement:
     compression:
       enabled: true
     weights:
-      mode: embedded
       compression:
         enabled: false
-  pl_ps:
-    output:
-      mode: stream
-      size_bytes: 40
-      precision:
-        type: ap_fixed
-        total_bits: 16
-        int_bits: 6
-      compression:
-        enabled: false
+  inputs:
+    interface: stream
+  outputs:
+    mode: stream
+    size_bytes: 40
+    precision:
+      type: ap_fixed
+      total_bits: 16
+      int_bits: 6
+    compression:
+      enabled: false
 backends:
   hls:
     enabled: false
@@ -253,3 +243,5 @@ memory:
   activation_storage: bram
   gradient_storage: bram
   optimizer_state_storage: bram
+weights:
+  mode: embedded

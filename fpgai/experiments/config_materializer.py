@@ -22,7 +22,7 @@ _POLICY_CANONICAL = {
 # Known existing paths only. Explicit parameter_mappings can create more.
 _DEFAULT_PATHS = {
     "policy": [
-        "optimization.parallel_policy",
+        "optimization.parallel.policy",
         "optimization.policy",
         "notes.parallel_policy",
     ],
@@ -43,7 +43,7 @@ _DEFAULT_PATHS = {
     ],
     "weight_storage": [
         "memory.weight_storage",
-        "data_movement.ps_pl.weights.mode",
+        "weights.mode",
     ],
     "memory_strategy": [
         "memory.strategy",
@@ -186,7 +186,7 @@ def _should_canonicalize_policy(path: str, opts: Mapping[str, Any], *, legacy_ra
     # canonical compiler enum paths, but preserve raw experiment enum paths.
     if path.endswith("optimization.policy"):
         return False
-    if path.endswith("parallel_policy"):
+    if path.endswith("parallel_policy") or path.endswith("parallel.policy"):
         return True
     return False
 
@@ -197,7 +197,7 @@ def _value_for_path(param: str, value: Any, path: str, opts: Mapping[str, Any], 
     # *parallel_policy fields use FPGAI's named policy enums.
     if param == "policy" and path == "optimization.policy":
         return value
-    if param == "policy" and bool(opts.get("compiler_policy_names")) and path.endswith("optimization.parallel_policy"):
+    if param == "policy" and bool(opts.get("compiler_policy_names")) and (path.endswith("optimization.parallel.policy") or path.endswith("parallel_policy")):
         return _compiler_policy(value)
     if param == "policy" and _should_canonicalize_policy(path, opts, legacy_raw=legacy_raw):
         return _canonical_policy(value)
@@ -272,7 +272,7 @@ def _memory_strategy_payload(value: Any) -> Tuple[bool, Dict[str, Any], str]:
         "on_chip": {
             "memory.strategy": "on_chip",
             "memory.weight_storage": "embedded",
-            "data_movement.ps_pl.weights.mode": "embedded",
+            "weights.mode": "embedded",
             "memory.weight_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.allow_double_buffer": False,
@@ -280,7 +280,7 @@ def _memory_strategy_payload(value: Any) -> Tuple[bool, Dict[str, Any], str]:
         "embedded": {
             "memory.strategy": "on_chip",
             "memory.weight_storage": "embedded",
-            "data_movement.ps_pl.weights.mode": "embedded",
+            "weights.mode": "embedded",
             "memory.weight_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.allow_double_buffer": False,
@@ -288,7 +288,7 @@ def _memory_strategy_payload(value: Any) -> Tuple[bool, Dict[str, Any], str]:
         "streaming": {
             "memory.strategy": "streaming",
             "memory.weight_storage": "stream",
-            "data_movement.ps_pl.weights.mode": "stream",
+            "weights.mode": "stream",
             "memory.weight_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.allow_double_buffer": True,
@@ -296,7 +296,7 @@ def _memory_strategy_payload(value: Any) -> Tuple[bool, Dict[str, Any], str]:
         "stream": {
             "memory.strategy": "streaming",
             "memory.weight_storage": "stream",
-            "data_movement.ps_pl.weights.mode": "stream",
+            "weights.mode": "stream",
             "memory.weight_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.allow_double_buffer": True,
@@ -304,7 +304,7 @@ def _memory_strategy_payload(value: Any) -> Tuple[bool, Dict[str, Any], str]:
         "external_ddr": {
             "memory.strategy": "external_ddr",
             "memory.weight_storage": "ddr",
-            "data_movement.ps_pl.weights.mode": "ddr",
+            "weights.mode": "ddr",
             "memory.weight_region_preference": ["DDR", "URAM", "BRAM"],
             "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.allow_double_buffer": True,
@@ -312,7 +312,7 @@ def _memory_strategy_payload(value: Any) -> Tuple[bool, Dict[str, Any], str]:
         "ddr": {
             "memory.strategy": "external_ddr",
             "memory.weight_storage": "ddr",
-            "data_movement.ps_pl.weights.mode": "ddr",
+            "weights.mode": "ddr",
             "memory.weight_region_preference": ["DDR", "URAM", "BRAM"],
             "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.allow_double_buffer": True,
@@ -320,7 +320,7 @@ def _memory_strategy_payload(value: Any) -> Tuple[bool, Dict[str, Any], str]:
         "bram_saver": {
             "memory.strategy": "bram_saver",
             "memory.weight_storage": "stream",
-            "data_movement.ps_pl.weights.mode": "stream",
+            "weights.mode": "stream",
             "memory.weight_region_preference": ["DDR", "URAM", "BRAM"],
             "memory.activation_region_preference": ["DDR", "URAM", "BRAM"],
             "memory.allow_double_buffer": False,
@@ -328,7 +328,7 @@ def _memory_strategy_payload(value: Any) -> Tuple[bool, Dict[str, Any], str]:
         "uram_first": {
             "memory.strategy": "uram_first",
             "memory.weight_storage": "embedded",
-            "data_movement.ps_pl.weights.mode": "embedded",
+            "weights.mode": "embedded",
             "memory.weight_region_preference": ["URAM", "BRAM", "DDR"],
             "memory.activation_region_preference": ["URAM", "BRAM", "DDR"],
             "memory.allow_double_buffer": False,
@@ -344,8 +344,8 @@ def _apply_weight_storage(cfg: MutableMapping[str, Any], value: Any) -> Tuple[bo
     if not ok:
         return False, reason
     _set_path(cfg, "memory.weight_storage", mode, create=True)
-    _set_path(cfg, "data_movement.ps_pl.weights.mode", mode, create=True)
-    return True, "memory.weight_storage,data_movement.ps_pl.weights.mode"
+    _set_path(cfg, "weights.mode", mode, create=True)
+    return True, "memory.weight_storage,weights.mode"
 
 
 def _apply_memory_strategy(cfg: MutableMapping[str, Any], value: Any) -> Tuple[bool, str]:
@@ -512,7 +512,7 @@ def apply_parameter_overrides(
             if path:
                 candidate_paths.append((str(path), bool(mapping.get("create", False))))
         elif isinstance(mapping, str):
-            candidate_paths.append((mapping, False))
+            candidate_paths.append((mapping, True))
 
         if forced_candidate_paths is not None:
             candidate_paths = forced_candidate_paths

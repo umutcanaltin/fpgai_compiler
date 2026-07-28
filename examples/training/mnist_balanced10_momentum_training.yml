@@ -127,8 +127,6 @@ data_movement:
   ps_pl:
     compression:
       enabled: true
-    weights:
-      mode: embedded
 backends:
   hls:
     enabled: true
@@ -189,5 +187,9 @@ validation:
     max_accuracy_drop_pct: 5.0
 metadata:
   example:
-    purpose: P3D-F4B/C multi-epoch Momentum state persistence and HLS optimizer-state validation
-    claim_scope: compiler mechanism and fixed-point numerical validation only; not convergence or generalization
+    purpose: P3D-F4B/C multi-epoch Momentum state persistence and HLS optimizer-state
+      validation
+    claim_scope: compiler mechanism and fixed-point numerical validation only; not
+      convergence or generalization
+weights:
+  mode: embedded

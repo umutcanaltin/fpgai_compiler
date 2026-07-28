@@ -58,8 +58,6 @@ data_movement:
   ps_pl:
     compression:
       enabled: true
-    weights:
-      mode: embedded
 backends:
   hls:
     enabled: true
@@ -91,3 +89,5 @@ benchmark:
     stop_on_first_bad_layer: false
 debug:
   verbose: false
+weights:
+  mode: embedded

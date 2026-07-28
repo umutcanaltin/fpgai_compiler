@@ -1,39 +1,37 @@
 name: training_batch_multistep
-
 command_template: PYTHONPATH=. python -B main.py compile --config {config_path}
-
 materialize_configs:
   enabled: true
   directory: configs
   strip_unknown_top_level_sections: true
   canonicalize_policy: true
   strip_top_level_sections:
-    - notes
+  - notes
   compiler_policy_names: true
   parameter_mappings:
     model_path:
       path: model.path
       create: true
     weight_mode:
-      path: data_movement.ps_pl.weights.mode
+      path: weights.mode
       create: true
     learning_rate:
       path: training.optimizer.learning_rate
       create: true
     epochs:
-      path: training.execution.epochs
+      path: training.batch.epochs
       create: true
     train_steps:
-      path: training.execution.train_steps
+      path: training.batch.max_updates
       create: true
     batch_size:
-      path: training.execution.batch_size
+      path: training.batch.size
       create: true
     dump_intermediates:
       path: training.debug.dump_intermediates
       create: true
     policy:
-      path: optimization.parallel_policy
+      path: optimization.parallel.policy
       create: true
     pe:
       path: optimization.parallel.pe
@@ -47,7 +45,6 @@ materialize_configs:
     partition_factor:
       path: optimization.parallel.partition_factor
       create: true
-
 defaults:
   base_config_path: configs/examples/training_compile_smoke.yml
   config_path: configs/examples/training_compile_smoke.yml
@@ -63,40 +60,34 @@ defaults:
   train_steps: 1
   batch_size: 1
   dump_intermediates: true
-
 design_points:
-  - name: training_cnn_embedded_2step_b1_balanced
-    weight_mode: embedded
-    train_steps: 2
-    epochs: 2
-    batch_size: 1
-
-  - name: training_cnn_stream_2step_b1_balanced
-    weight_mode: stream
-    train_steps: 2
-    epochs: 2
-    batch_size: 1
-
-  - name: training_cnn_embedded_5step_b1_balanced
-    weight_mode: embedded
-    train_steps: 5
-    epochs: 5
-    batch_size: 1
-
-  - name: training_cnn_stream_5step_b1_balanced
-    weight_mode: stream
-    train_steps: 5
-    epochs: 5
-    batch_size: 1
-
-  - name: training_cnn_embedded_2step_b2_balanced
-    weight_mode: embedded
-    train_steps: 2
-    epochs: 2
-    batch_size: 2
-
-  - name: training_cnn_stream_2step_b2_balanced
-    weight_mode: stream
-    train_steps: 2
-    epochs: 2
-    batch_size: 2
+- name: training_cnn_embedded_2step_b1_balanced
+  weight_mode: embedded
+  train_steps: 2
+  epochs: 2
+  batch_size: 1
+- name: training_cnn_stream_2step_b1_balanced
+  weight_mode: stream
+  train_steps: 2
+  epochs: 2
+  batch_size: 1
+- name: training_cnn_embedded_5step_b1_balanced
+  weight_mode: embedded
+  train_steps: 5
+  epochs: 5
+  batch_size: 1
+- name: training_cnn_stream_5step_b1_balanced
+  weight_mode: stream
+  train_steps: 5
+  epochs: 5
+  batch_size: 1
+- name: training_cnn_embedded_2step_b2_balanced
+  weight_mode: embedded
+  train_steps: 2
+  epochs: 2
+  batch_size: 2
+- name: training_cnn_stream_2step_b2_balanced
+  weight_mode: stream
+  train_steps: 2
+  epochs: 2
+  batch_size: 2

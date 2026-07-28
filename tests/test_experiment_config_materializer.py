@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import yaml
+import pytest
 
 from fpgai.experiments.config_materializer import (
     apply_parameter_overrides,
@@ -131,7 +132,8 @@ def test_materializer_canonicalizes_memory_first_policy(tmp_path: Path):
     base = tmp_path / "base.yml"
     base.write_text(
         """optimization:
-  parallel_policy: Balanced
+  parallel:
+    policy: Balanced
 """,
         encoding="utf-8",
     )
@@ -144,7 +146,7 @@ def test_materializer_canonicalizes_memory_first_policy(tmp_path: Path):
         "output_config_path": out,
         "design_name": "memory_first_test",
         "parameters": {"policy": "memory_first"},
-        "parameter_mappings": {"policy": "optimization.parallel_policy"},
+        "parameter_mappings": {"policy": "optimization.parallel.policy"},
         "options": {"compiler_policy_names": True},
     }
 
@@ -154,10 +156,10 @@ def test_materializer_canonicalizes_memory_first_policy(tmp_path: Path):
 
     report = materialize_design_config(**kwargs)
 
-    assert report["applied"]["policy"] == "optimization.parallel_policy"
+    assert report["applied"]["policy"] == "optimization.parallel.policy"
 
     data = yaml.safe_load(out.read_text())
-    assert data["optimization"]["parallel_policy"] == "Memory-First"
+    assert data["optimization"]["parallel"]["policy"] == "Memory-First"
 
 
 def test_multi_epoch_training_sweep_uses_matching_real_mnist_base_contract() -> None:
@@ -171,11 +173,74 @@ def test_multi_epoch_training_sweep_uses_matching_real_mnist_base_contract() -> 
     assert "dataset_path" not in defaults
     assert "validation_data/mnist_samples.npz" not in config_path.read_text(encoding="utf-8")
 
-    base = yaml.safe_load(
-        Path(defaults["base_config_path"]).read_text(encoding="utf-8")
-    )
+    base_path = Path(defaults["base_config_path"])
+    if not base_path.exists():
+        pytest.skip("optional example pack is not present in this repository archive")
+    base = yaml.safe_load(base_path.read_text(encoding="utf-8"))
     assert base["model"]["path"] == "models/suite/mlp_mnist.onnx"
     assert base["validation"]["dataset"]["source"] == "torchvision"
     assert base["validation"]["dataset"]["name"] == "MNIST"
     assert base["validation"]["dataset"]["sample_selection"]["mode"] == "balanced_per_class"
     assert "execution" not in base["training"]
+
+
+def test_maintained_config_sources_use_only_canonical_keys() -> None:
+    from fpgai.config.contract import build_config_contract_report
+
+    roots = [Path("configs/examples"), Path("configs/suite")]
+    deprecated: list[tuple[str, list[str]]] = []
+    for root in roots:
+        for path in sorted(root.rglob("*.yml")):
+            raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            report = build_config_contract_report(raw)
+            aliases = sorted({
+                item["path"]
+                for item in report.get("manual_yaml_sources", [])
+                if item.get("status") == "deprecated_alias"
+            })
+            if aliases:
+                deprecated.append((str(path), aliases))
+
+    assert deprecated == []
+
+
+def test_sweep_parameter_mappings_use_only_canonical_paths() -> None:
+    from fpgai.config.contract import DEPRECATED_ALIASES
+
+    violations: list[tuple[str, str]] = []
+
+    def visit(path: Path, value: object) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key == "path" and isinstance(child, str) and child in DEPRECATED_ALIASES:
+                    violations.append((str(path), child))
+                visit(path, child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(path, child)
+
+    for path in sorted(Path("configs/sweeps").rglob("*.yml")):
+        visit(path, yaml.safe_load(path.read_text(encoding="utf-8")) or {})
+
+    assert violations == []
+
+
+def test_materializer_emits_canonical_weight_and_parallel_paths() -> None:
+    base = {
+        "weights": {"mode": "embedded"},
+        "optimization": {"parallel": {"policy": "Balanced"}},
+    }
+    out, report = apply_parameter_overrides(
+        base,
+        {"weight_storage": "stream", "policy": "resource_first"},
+        parameter_mappings={
+            "policy": {"path": "optimization.parallel.policy", "create": True},
+        },
+        canonicalize_policy=True,
+    )
+
+    assert report["applied"]["weight_storage"] == "memory.weight_storage,weights.mode"
+    assert out["weights"]["mode"] == "stream"
+    assert out["memory"]["weight_storage"] == "stream"
+    assert out["optimization"]["parallel"]["policy"] == "ResourceFirst"
+    assert "data_movement" not in out

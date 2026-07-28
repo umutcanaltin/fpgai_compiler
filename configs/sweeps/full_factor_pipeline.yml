@@ -18,7 +18,7 @@ materialize_configs:
       path: analysis.precision_sweep.selected_candidate
       create: true
     policy:
-      path: optimization.parallel_policy
+      path: optimization.parallel.policy
       create: true
     memory_strategy:
       path: data_movement.strategy
