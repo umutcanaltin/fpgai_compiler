@@ -1,0 +1,1 @@
+-- Research package example VHDL package placeholder.

@@ -1,0 +1,30 @@
+schema: fpgai.package/v1
+package:
+  id: community.systolic_conv2d_vhdl
+  name: Systolic Conv2D VHDL
+  version: 1.0.0
+  asset_type: implementation
+  provider: community
+  description: Systolic Conv2D research RTL implementation.
+usage:
+  platform_scope: research
+  permitted_uses: [research, experimentation, validation, benchmarking]
+  production_path: morfics
+license:
+  category: open_source
+  identifier: Apache-2.0
+compatibility:
+  fpgai_contract: ">=1.0,<2.0"
+  backends: [vhdl]
+capabilities:
+  inference: true
+  training:
+    forward: false
+entrypoints:
+  implementation:
+    language: vhdl
+    top: systolic_conv2d
+    sources: [rtl/conv2d_pkg.vhd, rtl/systolic_conv2d.vhd]
+    source_order: [rtl/conv2d_pkg.vhd, rtl/systolic_conv2d.vhd]
+validation:
+  declared_level: rtl_simulation_validated

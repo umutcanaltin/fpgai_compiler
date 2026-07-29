@@ -1,0 +1,32 @@
+schema: fpgai.package/v1
+package:
+  id: community.line_buffered_conv2d_hls
+  name: Line-buffered Conv2D HLS
+  version: 1.0.0
+  asset_type: implementation
+  provider: community
+  description: Streaming Conv2D research implementation.
+usage:
+  platform_scope: research
+  permitted_uses: [research, experimentation, validation, benchmarking]
+  production_path: morfics
+license:
+  category: open_source
+  identifier: Apache-2.0
+compatibility:
+  fpgai_contract: ">=1.0,<2.0"
+  backends: [vitis_hls]
+capabilities:
+  inference: true
+  training:
+    forward: false
+  execution:
+    streaming: true
+entrypoints:
+  implementation:
+    language: hls_cpp
+    top: line_buffered_conv2d
+    sources: [src/line_buffered_conv2d.cpp]
+    headers: [include/line_buffered_conv2d.hpp]
+validation:
+  declared_level: c_simulation_validated

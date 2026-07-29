@@ -53,6 +53,9 @@ fpgai = "fpgai.cli:main"
 [tool.setuptools.packages.find]
 include = ["fpgai*"]
 
+[tool.setuptools.package-data]
+"fpgai.schemas" = ["*.json"]
+
 [tool.black]
 line-length = 100
 target-version = ["py310"]

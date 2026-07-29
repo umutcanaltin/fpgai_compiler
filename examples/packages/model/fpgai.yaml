@@ -1,0 +1,27 @@
+schema: fpgai.package/v1
+package:
+  id: community.mnist_mlp_model
+  name: MNIST MLP model
+  version: 1.0.0
+  asset_type: model
+  provider: community
+  description: Example ONNX model package for research compilation.
+usage:
+  platform_scope: research
+  permitted_uses: [research, experimentation, validation, benchmarking, education]
+  production_path: morfics
+license:
+  category: research_only
+  identifier: example-research-license
+compatibility:
+  fpgai_contract: ">=1.0,<2.0"
+capabilities:
+  inference: true
+  training:
+    forward: false
+entrypoints:
+  model:
+    format: onnx
+    path: model/model.onnx
+validation:
+  declared_level: reference_tested

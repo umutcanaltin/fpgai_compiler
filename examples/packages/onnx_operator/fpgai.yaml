@@ -1,0 +1,32 @@
+schema: fpgai.package/v1
+package:
+  id: community.grid_sample_operator
+  name: GridSample ONNX operator
+  version: 1.0.0
+  asset_type: operator
+  provider: community
+  description: ONNX import and FPGAI IR research extension for GridSample.
+usage:
+  platform_scope: research
+  permitted_uses: [research, experimentation, validation, benchmarking]
+  production_path: morfics
+license:
+  category: open_source
+  identifier: Apache-2.0
+compatibility:
+  fpgai_contract: ">=1.0,<2.0"
+capabilities:
+  inference: true
+  training:
+    forward: false
+entrypoints:
+  operator:
+    python_module: python/operator.py
+    symbol: GridSampleOperator
+  onnx_import:
+    python_module: python/onnx_import.py
+    symbol: register_onnx_import
+    domains: [ai.onnx]
+    op_types: [GridSample]
+validation:
+  declared_level: reference_tested

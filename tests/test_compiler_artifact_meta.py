@@ -590,8 +590,9 @@ def test_config_loader_validates_fit_policy_enum_in_source() -> None:
 
 
 def test_compiler_uses_compile_plan_clock_for_outputs_in_source() -> None:
-    source = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
+    compiler_source = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
+    hls_source = Path("fpgai/engine/hls_project_generation.py").read_text(encoding="utf-8")
 
-    assert 'getattr(compile_plan, "clock_mhz"' in source
-    assert 'target_clock_mhz = getattr(compile_plan, "clock_mhz"' in source
-    assert 'clk_mhz = float(getattr(compile_plan, "clock_mhz"' in source
+    assert 'getattr(compile_plan, "clock_mhz"' in compiler_source
+    assert 'target_clock_mhz = getattr(compile_plan, "clock_mhz"' in compiler_source
+    assert 'clk_mhz = float(getattr(compile_plan, "clock_mhz"' in hls_source
