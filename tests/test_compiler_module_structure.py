@@ -10,6 +10,7 @@ def test_compiler_helpers_are_split_into_focused_modules() -> None:
         "training_contracts.py",
         "vivado_pipeline.py",
         "memory_semantics.py",
+        "hls_project_generation.py",
     }
 
     engine_dir = Path("fpgai/engine")
@@ -20,7 +21,7 @@ def test_compiler_helpers_are_split_into_focused_modules() -> None:
 
 def test_compiler_module_is_smaller_after_helper_extraction() -> None:
     compiler_lines = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8").splitlines()
-    assert len(compiler_lines) < 4500
+    assert len(compiler_lines) < 4000
 
 
 def test_private_compatibility_imports_remain_available() -> None:
@@ -56,6 +57,16 @@ def test_memory_semantics_are_owned_by_a_focused_module() -> None:
     assert callable(Compiler._resolve_weight_movement_semantics)
     assert callable(Compiler._annotate_memory_movement_semantics)
 
+
+
+def test_hls_project_generation_is_owned_by_a_focused_module() -> None:
+    from fpgai.engine.compiler import Compiler
+    from fpgai.engine.hls_project_generation import HLSProjectGenerationMixin
+
+    assert issubclass(Compiler, HLSProjectGenerationMixin)
+    assert callable(Compiler._emit_hls)
+    assert callable(Compiler._hls_array_partition_mode)
+    assert callable(Compiler._postprocess_training_tb_cpp_for_requested_export_capture)
 
 def test_training_testbench_postprocess_staticmethod_signature() -> None:
     import inspect
