@@ -1,0 +1,59 @@
+schema: fpgai.package/v1
+package:
+  id: community.scale_bias_vhdl
+  name: ScaleBias VHDL
+  version: 1.0.0
+  asset_type: implementation
+  provider: community
+  description: Research VHDL implementation of the ScaleBias logical operator.
+usage:
+  platform_scope: research
+  permitted_uses: [research, experimentation, validation, benchmarking, education]
+  production_path: morfics
+license:
+  category: open_source
+  identifier: Apache-2.0
+compatibility:
+  fpgai_contract: ">=1.0,<2.0"
+  boards: [kv260, kr260]
+  precisions: [int16, fp32]
+  toolchains:
+    - name: vivado
+      versions: ["2023.2"]
+capabilities:
+  inference: true
+  training:
+    forward: false
+    backward_input: false
+    parameter_gradients: false
+    bias_gradients: false
+    optimizer_update: false
+entrypoints:
+  implementation:
+    language: vhdl
+    backend: vhdl
+    top: scale_bias_vhdl
+    sources:
+      - rtl/scale_bias_vhdl.vhd
+    source_order:
+      - rtl/scale_bias_vhdl.vhd
+implementation:
+  operator_id: community.operator.scale_bias
+  backend: vhdl
+interfaces:
+  input:
+    direction: input
+    protocol: axi_stream
+    data_type: fp32
+  output:
+    direction: output
+    protocol: axi_stream
+    data_type: fp32
+memory:
+  supported_weight_storage: [embedded, bram]
+  supported_activation_storage: [bram, uram]
+validation:
+  declared_level: rtl_simulation_validated
+metrics:
+  latency_cycles: 2
+  initiation_interval: 1

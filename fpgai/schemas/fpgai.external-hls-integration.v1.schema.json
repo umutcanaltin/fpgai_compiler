@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fpgai.dev/schemas/fpgai.external-hls-integration.v1.schema.json",
+  "title": "FPGAI External HLS Integration Report v1",
+  "type": "object",
+  "required": ["schema", "status", "usage", "operator", "implementation", "abi", "ownership", "artifacts", "validation"],
+  "properties": {
+    "schema": {"const": "fpgai.external-hls-integration/v1"},
+    "status": {"enum": ["generated", "failed"]},
+    "usage": {
+      "type": "object",
+      "required": ["platform_scope", "production_path"],
+      "properties": {
+        "platform_scope": {"const": "research"},
+        "production_path": {"const": "morfics"}
+      }
+    },
+    "operator": {"type": "object"},
+    "implementation": {"type": "object"},
+    "abi": {"type": "object"},
+    "ownership": {"type": "object"},
+    "artifacts": {"type": "array"},
+    "validation": {"type": "object"}
+  },
+  "additionalProperties": true
+}

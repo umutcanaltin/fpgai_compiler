@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "fpgai.registry-inventory/v1",
+  "title": "FPGAI Registry Inventory v1",
+  "type": "object",
+  "required": ["schema", "entries"],
+  "properties": {
+    "schema": {"const": "fpgai.registry-inventory/v1"},
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["package_id", "version", "asset_type", "source", "manifest_hash", "usage"],
+        "properties": {
+          "package_id": {"type": "string"},
+          "version": {"type": "string"},
+          "asset_type": {"type": "string"},
+          "source": {"type": "string"},
+          "manifest_hash": {"type": "string"},
+          "usage": {"type": "object"}
+        }
+      }
+    }
+  }
+}

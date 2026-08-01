@@ -1,0 +1,160 @@
+{
+  "abi": {
+    "input_words": 4,
+    "name": "flat_array_v1",
+    "output_words": 4,
+    "scalar_type": "float"
+  },
+  "artifacts": [
+    {
+      "kind": "copied_source",
+      "path": "dev_audits/external_hls/scale_bias/hls/external/community_scale_bias_hls/src/000_scale_bias.cpp",
+      "sha256": "sha256:f406200df9dbf0f54840d299f7c01ad6eb15f51da521947e4b3e26872ec584df"
+    },
+    {
+      "kind": "copied_header",
+      "path": "dev_audits/external_hls/scale_bias/hls/external/community_scale_bias_hls/include/scale_bias.hpp",
+      "sha256": "sha256:87944adf178c406afa5ab2c0082c86dc20630f37c24b9c048a37fc84326f0648"
+    },
+    {
+      "kind": "generated",
+      "path": "dev_audits/external_hls/scale_bias/hls/include/external_wrapper.h",
+      "sha256": "sha256:2c4b63408a14570feaac1c556a9b688715832254088f033c31303f7d2b5f1b90"
+    },
+    {
+      "kind": "generated",
+      "path": "dev_audits/external_hls/scale_bias/hls/src/deeplearn.cpp",
+      "sha256": "sha256:fe1db5b387289ba4c32a0e785dae5d890960e64e938cc20458151e1579bdd3a0"
+    },
+    {
+      "kind": "generated",
+      "path": "dev_audits/external_hls/scale_bias/hls/src/tb.cpp",
+      "sha256": "sha256:86bb503bcbe9450b633ba6e8bbfb7062f56dd02b309d718b0f14215294a7bcff"
+    },
+    {
+      "kind": "generated",
+      "path": "dev_audits/external_hls/scale_bias/hls/run_hls.tcl",
+      "sha256": "sha256:bfcb758602bd45c34368900847514fa92ca7ed0b4a44f4feac586d3a4dcc4022"
+    }
+  ],
+  "implementation": {
+    "backend": "vitis_hls",
+    "capabilities": {
+      "inference": true,
+      "training": {
+        "backward_input": false,
+        "bias_gradients": false,
+        "forward": true,
+        "optimizer_update": false,
+        "parameter_gradients": false
+      }
+    },
+    "compatibility": {
+      "boards": [
+        "kv260",
+        "kr260",
+        "pynq_z2"
+      ],
+      "precisions": [
+        "int16",
+        "fp32"
+      ],
+      "toolchains": {
+        "vitis_hls": [
+          "2023.2"
+        ]
+      }
+    },
+    "headers": [
+      "include/scale_bias.hpp"
+    ],
+    "interfaces": [
+      {
+        "data_type": "fp32",
+        "direction": "input",
+        "name": "input",
+        "protocol": "axi_stream"
+      },
+      {
+        "data_type": "fp32",
+        "direction": "output",
+        "name": "output",
+        "protocol": "axi_stream"
+      }
+    ],
+    "language": "hls_cpp",
+    "license_category": "open_source",
+    "manifest_hash": "",
+    "memory": {
+      "activation_storage": [
+        "bram",
+        "uram"
+      ],
+      "weight_storage": [
+        "embedded",
+        "bram"
+      ]
+    },
+    "metadata": {
+      "description": "Research HLS implementation of the ScaleBias logical operator.",
+      "integration": {
+        "hls": {
+          "abi": "flat_array_v1",
+          "attributes": [
+            {
+              "cpp_type": "float",
+              "default": 1.0,
+              "name": "scale"
+            },
+            {
+              "cpp_type": "float",
+              "default": 0.0,
+              "name": "bias"
+            }
+          ],
+          "scalar_type": "float"
+        }
+      },
+      "name": "ScaleBias HLS"
+    },
+    "metrics": {},
+    "operator_id": "community.operator.scale_bias",
+    "package_id": "community.scale_bias_hls",
+    "schema": "fpgai.implementation-contract/v1",
+    "source_order": [],
+    "sources": [
+      "src/scale_bias.cpp"
+    ],
+    "top": "scale_bias_hls",
+    "usage": {
+      "platform_scope": "research",
+      "production_path": "morfics"
+    },
+    "validation_level": "reference_tested",
+    "version": "1.0.0"
+  },
+  "operator": {
+    "attributes": {
+      "bias": 1.0,
+      "scale": 2.0
+    },
+    "name": "ScaleBias"
+  },
+  "ownership": {
+    "generated_wrapper": "compiler_owned",
+    "package_root_modified": false,
+    "package_sources": "user_owned_source_copied_read_only"
+  },
+  "schema": "fpgai.external-hls-integration/v1",
+  "status": "generated",
+  "usage": {
+    "platform_scope": "research",
+    "production_path": "morfics"
+  },
+  "validation": {
+    "c_simulation_requested": false,
+    "hls_synthesis_requested": false,
+    "reference_testbench_generated": true,
+    "tool_result": "not_run"
+  }
+}

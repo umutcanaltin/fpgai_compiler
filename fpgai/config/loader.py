@@ -201,6 +201,8 @@ TOP_LEVEL_SECTIONS_V1 = {
     "debug",
     "metadata",
     "validation",
+    "ecosystem",
+    "implementations",
 }
 
 DEFAULT_NUMERIC_ROLES = {

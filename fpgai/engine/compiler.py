@@ -219,6 +219,31 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
 
     def compile(self) -> CompileResult:
         mode = str(self.cfg.pipeline.mode).lower()
+        raw = self.cfg.raw
+        ecosystem_cfg = _cfg_get(raw, "ecosystem", None)
+        if isinstance(ecosystem_cfg, dict) and bool(ecosystem_cfg.get("enabled", False)):
+            from fpgai.ecosystem import compile_external_hls_if_configured
+
+            out_dir = self._prepare_out_dir(raw)
+            build_stages = _resolve_build_stages(raw)
+            external = compile_external_hls_if_configured(
+                self,
+                out_dir=out_dir,
+                build_stages=build_stages,
+            )
+            if external.handled:
+                hls_run = external.hls_run
+                return CompileResult(
+                    out_dir=out_dir,
+                    graph=external.graph,
+                    hls_project_dir=external.hls_dir,
+                    hls_ran=hls_run is not None,
+                    hls_ok=(None if hls_run is None else hls_run.ok),
+                    hls_returncode=(None if hls_run is None else hls_run.returncode),
+                    hls_stdout_log=(None if hls_run is None else hls_run.stdout_log),
+                    hls_stderr_log=(None if hls_run is None else hls_run.stderr_log),
+                    hls_csynth_report=(None if hls_run is None else hls_run.csynth_report),
+                )
         if mode == "inference":
             return self._compile_inference()
         if mode == "training_on_device":

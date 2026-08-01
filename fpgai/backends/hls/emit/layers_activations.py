@@ -5,6 +5,7 @@ def emit_activations_h() -> str:
     return r'''#pragma once
 
 #include "fpgai_types.h"
+#include <hls_math.h>
 
 #ifndef FPGAI_PIPELINE_II
 #define FPGAI_PIPELINE_II 1
@@ -26,18 +27,22 @@ static inline OUT_T sigmoid_approx_scalar_typed(
 ) {
     const ACC_T value = (ACC_T)input;
 
-    if (value <= (ACC_T)-4) {
+    // Preserve ONNX Sigmoid semantics in generated HLS.  The previous
+    // linear approximation (0.5 + x / 8) produced large, systematic
+    // numeric error and made C simulation disagree with the compiler
+    // reference.  hls::expf is synthesizable in Vitis HLS and keeps the
+    // operator behavior aligned with the logical Sigmoid contract.
+    if (value <= (ACC_T)-16) {
         return (OUT_T)0;
     }
 
-    if (value >= (ACC_T)4) {
+    if (value >= (ACC_T)16) {
         return (OUT_T)1;
     }
 
-    return (OUT_T)(
-        (ACC_T)0.5
-        + value / (ACC_T)8
-    );
+    const float value_f = (float)value;
+    const float denominator = 1.0f + hls::expf(-value_f);
+    return (OUT_T)(1.0f / denominator);
 }
 
 

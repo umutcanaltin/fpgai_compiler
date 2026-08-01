@@ -1,0 +1,67 @@
+schema: fpgai.package/v1
+package:
+  id: community.scale_bias_hls
+  name: ScaleBias HLS
+  version: 1.0.0
+  asset_type: implementation
+  provider: community
+  description: Research HLS implementation of the ScaleBias logical operator.
+usage:
+  platform_scope: research
+  permitted_uses: [research, experimentation, validation, benchmarking, education]
+  production_path: morfics
+license:
+  category: open_source
+  identifier: Apache-2.0
+compatibility:
+  fpgai_contract: ">=1.0,<2.0"
+  boards: [kv260, kr260, pynq_z2]
+  precisions: [int16, fp32]
+  toolchains:
+    - name: vitis_hls
+      versions: ["2023.2"]
+capabilities:
+  inference: true
+  training:
+    forward: true
+    backward_input: false
+    parameter_gradients: false
+    bias_gradients: false
+    optimizer_update: false
+entrypoints:
+  implementation:
+    language: hls_cpp
+    backend: vitis_hls
+    top: scale_bias_hls
+    sources:
+      - src/scale_bias.cpp
+    headers:
+      - include/scale_bias.hpp
+implementation:
+  operator_id: community.operator.scale_bias
+  backend: vitis_hls
+interfaces:
+  input:
+    direction: input
+    protocol: axi_stream
+    data_type: fp32
+  output:
+    direction: output
+    protocol: axi_stream
+    data_type: fp32
+memory:
+  supported_weight_storage: [embedded, bram]
+  supported_activation_storage: [bram, uram]
+integration:
+  hls:
+    abi: flat_array_v1
+    scalar_type: float
+    attributes:
+      - name: scale
+        cpp_type: float
+        default: 1.0
+      - name: bias
+        cpp_type: float
+        default: 0.0
+validation:
+  declared_level: reference_tested

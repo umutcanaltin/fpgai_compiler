@@ -768,6 +768,7 @@ def emit_top_cpp(
     memory_plan: Any = None,
     communication_plan: Any = None,
     raw_cfg: Any = None,
+    external_composition_plan: Any = None,
 ) -> str:
     if not graph.inputs:
         raise ValueError(
@@ -840,6 +841,14 @@ def emit_top_cpp(
         "typedef ap_axis<32, 0, 0, 0> axis_t;",
         "using namespace fpgai;",
         "",
+    ]
+
+    if external_composition_plan is not None:
+        from fpgai.implementations.hls_composition import package_declarations
+        lines.extend(package_declarations(external_composition_plan))
+        lines.append("")
+
+    lines.extend([
         "template<typename T>",
         "static inline T bits_to_value(unsigned int bits) {",
         "    union { unsigned int i; float f; } converter;",
@@ -904,7 +913,7 @@ def emit_top_cpp(
         "#pragma HLS INTERFACE s_axilite "
         "port=return bundle=control",
         "",
-    ]
+    ])
 
     input_name = graph.inputs[0]
     input_size = _flat_size(
@@ -1040,7 +1049,21 @@ def emit_top_cpp(
             output_memory,
         )
 
-        if op.op_type == "Conv":
+        external_binding = (
+            external_composition_plan.binding_for_node(op.name)
+            if external_composition_plan is not None
+            else None
+        )
+        if external_binding is not None:
+            from fpgai.implementations.hls_composition import emit_external_call
+            lines.extend(emit_external_call(
+                external_binding,
+                current_buffer=current_buffer,
+                current_type=current_type,
+                output_buffer=output_buffer,
+                output_type=output_type,
+            ))
+        elif op.op_type == "Conv":
             codegen = _layer_codegen_values(
                 layer_plan,
                 op_type="Conv",
@@ -3153,3 +3176,75 @@ def emit_top_cpp(*args, **kwargs):
     if banner and "FPGAI generated HLS top" not in source[:512]:
         return banner + source
     return source
+
+# FPGAI resolved-float AXI transport wrapper.
+# The core emitter historically derives stream lane width from the fixed-point
+# default policy even when generated activation aliases resolve to float.  Keep
+# the generic fixed-point helpers intact, but specialize the emitted transport
+# for IEEE-754 float and force one 32-bit value per AXI word.
+_fpgai_resolved_float_transport_previous_emit_top_cpp = emit_top_cpp
+
+
+def _fpgai_apply_resolved_float_axis_transport(source: str) -> str:
+    import re
+
+    float_alias = re.search(
+        r"(?:typedef\s+float\s+op0_act_t\s*;|using\s+op0_act_t\s*=\s*float\s*;)",
+        source,
+    )
+    if not float_alias:
+        return source
+
+    source = re.sub(
+        r"static const int FPGAI_ACT_BITS = \d+;",
+        "static const int FPGAI_ACT_BITS = 32;",
+        source,
+        count=1,
+    )
+    source = re.sub(
+        r"static const int FPGAI_ACT_PER_AXIS = \d+;",
+        "static const int FPGAI_ACT_PER_AXIS = 1;",
+        source,
+        count=1,
+    )
+
+    marker = "// FPGAI IEEE-754 float AXI transport specialization."
+    if marker in source:
+        return source
+
+    specializations = r'''// FPGAI IEEE-754 float AXI transport specialization.
+template <>
+inline float fpgai_unpack_axis_value<float, 32>(axis_t packet, int lane) {
+#pragma HLS INLINE
+    (void)lane;
+    union {
+        unsigned int bits;
+        float value;
+    } converter;
+    converter.bits = packet.data.range(31, 0).to_uint();
+    return converter.value;
+}
+
+template <>
+inline void fpgai_pack_axis_value<float, 32>(axis_t& packet, float value, int lane) {
+#pragma HLS INLINE
+    (void)lane;
+    union {
+        unsigned int bits;
+        float value;
+    } converter;
+    converter.value = value;
+    packet.data.range(31, 0) = converter.bits;
+}
+
+'''
+    anchor = 'extern "C" void '
+    position = source.find(anchor)
+    if position < 0:
+        raise ValueError("Could not locate generated HLS top declaration for float AXI transport")
+    return source[:position] + specializations + source[position:]
+
+
+def emit_top_cpp(*args, **kwargs):
+    source = _fpgai_resolved_float_transport_previous_emit_top_cpp(*args, **kwargs)
+    return _fpgai_apply_resolved_float_axis_transport(source)

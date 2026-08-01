@@ -62,6 +62,8 @@ CANONICAL_KEYS: Tuple[KeySpec, ...] = (
     KeySpec("toolchain.vitis_hls", "Vitis HLS tool execution/import", ("hls_truth_artifacts",), prefix=True),
     KeySpec("toolchain.vivado", "Vivado tool execution/import", ("vivado_truth_artifacts",), prefix=True),
     KeySpec("reports", "Report switches", ("manifest",), prefix=True),
+    KeySpec("ecosystem", "External research package discovery and trust configuration", ("package_discovery", "package-lock.yml"), prefix=True),
+    KeySpec("implementations", "External hardware implementation selection", ("implementation_selection", "manifest"), prefix=True),
 )
 
 DEPRECATED_ALIASES: Dict[str, Dict[str, str]] = {

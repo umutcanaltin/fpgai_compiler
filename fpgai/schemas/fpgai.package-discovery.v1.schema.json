@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fpgai.org/schemas/fpgai.package-discovery.v1.schema.json",
+  "title": "FPGAI package discovery report v1",
+  "type": "object",
+  "required": ["schema", "status", "summary", "search_roots", "packages", "errors", "warnings"],
+  "properties": {
+    "schema": {"const": "fpgai.package-discovery/v1"},
+    "status": {"enum": ["passed", "failed"]},
+    "summary": {"type": "object"},
+    "search_roots": {"type": "array"},
+    "packages": {"type": "array"},
+    "errors": {"type": "array"},
+    "warnings": {"type": "array"}
+  },
+  "additionalProperties": false
+}

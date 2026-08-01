@@ -10,7 +10,13 @@ import re
 from fpgai.config.access import get_path
 from fpgai.analysis.tiling_reports import write_tiling_report_artifacts
 from fpgai.backends.hls.emit.top_cpp import emit_top_cpp
+from fpgai.backends.hls.emit.types_h import emit_types_h
 from fpgai.backends.hls.emit.top_train_cpp import emit_top_train_cpp
+from fpgai.backends.hls.emit.layers_dense import emit_dense_h, emit_dense_cpp
+from fpgai.backends.hls.emit.layers_conv import emit_conv_h, emit_conv_cpp
+from fpgai.backends.hls.emit.layers_pool import emit_pool_h, emit_pool_cpp
+from fpgai.backends.hls.emit.layers_activations import emit_activations_h, emit_activations_cpp
+from fpgai.backends.hls.emit.layers_batchnorm import emit_batchnorm_h, emit_batchnorm_cpp
 from fpgai.analysis.hls_validation import run_and_write_hls_validation
 from fpgai.util.fs import ensure_clean_dir, write_text
 
@@ -73,9 +79,20 @@ def _emit_fpgai_types_h(graph: Any) -> str:
         "namespace fpgai {",
         "",
         "typedef float act_t;",
+        "typedef float wgt_t;",
         "typedef float weight_t;",
         "typedef float bias_t;",
         "typedef float acc_t;",
+        "",
+        "// Keep the complete shared layer ABI available even for inference-only",
+        "// projects. Layer headers contain training templates whose default type",
+        "// parameters are parsed by Vitis HLS during C simulation.",
+        "typedef float grad_act_t;",
+        "typedef float grad_wgt_t;",
+        "typedef float grad_bias_t;",
+        "typedef float upd_t;",
+        "typedef float opt_t;",
+        "typedef float loss_t;",
         "",
     ]
 
@@ -710,16 +727,24 @@ def emit_hls_stub(
     compile_plan=None,
     memory_plan=None,
     communication_plan=None,
+    external_composition_plan=None,
 ) -> HLSProject:
     hls_dir = out_dir / "hls"
     src_dir = hls_dir / "src"
     inc_dir = hls_dir / "include"
     layers_inc_dir = inc_dir / "layers"
+    layers_src_dir = src_dir / "layers"
 
     ensure_clean_dir(hls_dir, clean=True)
     src_dir.mkdir(parents=True, exist_ok=True)
     inc_dir.mkdir(parents=True, exist_ok=True)
     layers_inc_dir.mkdir(parents=True, exist_ok=True)
+    layers_src_dir.mkdir(parents=True, exist_ok=True)
+
+    staged_external = None
+    if external_composition_plan is not None:
+        from fpgai.implementations.hls_composition import stage_external_sources
+        staged_external = stage_external_sources(external_composition_plan, hls_dir)
 
     pipeline_mode = str(hls_options.get("pipeline_mode", "inference")).lower()
     weights_mode = str(hls_options.get("weights_mode", "embedded")).lower()
@@ -737,14 +762,47 @@ def emit_hls_stub(
     tb_cpp = src_dir / "tb.cpp"
     run_tcl = hls_dir / "run_hls.tcl"
 
-    write_text(inc_dir / "fpgai_types.h", _emit_fpgai_types_h(graph))
+    raw_cfg = hls_options.get("raw_cfg", {}) or {}
+    graph_ops = getattr(graph, "ops", None)
+    has_real_graph_ops = isinstance(graph_ops, (list, tuple)) and bool(graph_ops)
+    has_explicit_precision = bool(
+        isinstance(raw_cfg, dict)
+        and (
+            isinstance(raw_cfg.get("numerics"), dict)
+            or isinstance(raw_cfg.get("precision"), dict)
+        )
+    )
+
+    # Preserve the historical float stub for incomplete/test-only graphs and
+    # direct callers that do not provide a numeric contract. Use the canonical
+    # precision-aware emitter only when a real graph and explicit precision
+    # configuration are available (the normal compiler and ecosystem paths).
+    if has_real_graph_ops and has_explicit_precision:
+        types_h = emit_types_h(
+            graph,
+            top_name=top_name,
+            raw_cfg=raw_cfg,
+            compile_plan=compile_plan,
+        )
+    else:
+        types_h = _emit_fpgai_types_h(graph)
+
+    write_text(inc_dir / "fpgai_types.h", types_h)
     write_text(inc_dir / "fpgai_params.h", _emit_fpgai_params_h(graph))
     write_text(src_dir / "fpgai_params.cpp", '#include "fpgai_params.h"\n')
-    write_text(layers_inc_dir / "dense.h", "// auto-generated placeholder\n")
-    write_text(layers_inc_dir / "conv.h", "// auto-generated placeholder\n")
-    write_text(layers_inc_dir / "pool.h", "// auto-generated placeholder\n")
-    write_text(layers_inc_dir / "activations.h", "// auto-generated placeholder\n")
-    write_text(layers_inc_dir / "batchnorm.h", "// auto-generated placeholder\n")
+    # emit_hls_stub is also used directly by the external-ecosystem path.
+    # Keep it self-contained: generated tops must never include placeholder
+    # layer headers when Vitis HLS is requested.
+    write_text(layers_inc_dir / "dense.h", emit_dense_h())
+    write_text(layers_src_dir / "dense.cpp", emit_dense_cpp())
+    write_text(layers_inc_dir / "conv.h", emit_conv_h())
+    write_text(layers_src_dir / "conv.cpp", emit_conv_cpp())
+    write_text(layers_inc_dir / "pool.h", emit_pool_h())
+    write_text(layers_src_dir / "pool.cpp", emit_pool_cpp())
+    write_text(layers_inc_dir / "activations.h", emit_activations_h())
+    write_text(layers_src_dir / "activations.cpp", emit_activations_cpp())
+    write_text(layers_inc_dir / "batchnorm.h", emit_batchnorm_h())
+    write_text(layers_src_dir / "batchnorm.cpp", emit_batchnorm_cpp())
 
     if pipeline_mode == "training_on_device":
         top_src = emit_top_train_cpp(
@@ -782,6 +840,8 @@ def emit_hls_stub(
                 compile_plan=compile_plan,
                 memory_plan=memory_plan,
                 communication_plan=communication_plan,
+                raw_cfg=hls_options.get("raw_cfg", {}) or {},
+                external_composition_plan=external_composition_plan,
             )
         else:
             # Safe fallback for metadata/unit-test paths that do not construct
@@ -802,6 +862,19 @@ def emit_hls_stub(
     write_text(top_cpp, top_src)
     write_text(tb_cpp, tb_src)
 
+    if staged_external is not None:
+        include_flags = ["-I./include"] + [f"-I./{path.relative_to(hls_dir).as_posix()}" for path in staged_external.include_dirs]
+        cflags = " ".join(include_flags)
+        additions = "\n".join(
+            f'add_files "./{path.relative_to(hls_dir).as_posix()}" -cflags "{cflags}"'
+            for path in staged_external.sources
+        )
+        top_line = f'add_files ./src/{top_name}.cpp'
+        tcl_src = tcl_src.replace(top_line, f'{top_line} -cflags "{cflags}"')
+        marker = "open_solution -reset"
+        if marker in tcl_src:
+            tcl_src = tcl_src.replace(marker, additions + "\n" + marker, 1)
+
     build_input = str((out_dir / "input.bin").resolve())
     build_target = str((out_dir / "target.bin").resolve())
     tcl_src = tcl_src.replace("{build_input}", build_input).replace("{build_target}", build_target)
@@ -819,6 +892,8 @@ def emit_hls_stub(
         "compile_plan_present": compile_plan is not None,
         "memory_plan_present": memory_plan is not None,
         "communication_plan_present": communication_plan is not None,
+        "external_composition_present": external_composition_plan is not None,
+        "external_composition": None if external_composition_plan is None else external_composition_plan.to_dict(),
     }
 
     if compile_plan is not None:
