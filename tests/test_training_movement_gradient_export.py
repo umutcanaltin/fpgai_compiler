@@ -10,8 +10,8 @@ import yaml
 
 def _load_training_config() -> dict:
     candidates = [
-        Path("paper_experiments/full_pipeline_gate/sprint26_paper_matrix/configs/training_kv260_aggressive_fx8_3.yml"),
-        Path("paper_experiments/full_pipeline_gate/sprint27h_full_rerun/configs_hls/training_kv260_aggressive_fx8_3.yml"),
+        Path("benchmark_runs/full_pipeline_gate/benchmark_matrix/configs/training_kv260_aggressive_fx8_3.yml"),
+        Path("benchmark_runs/full_pipeline_gate/full_hls_validation/configs_hls/training_kv260_aggressive_fx8_3.yml"),
         Path("configs/examples/training_compile_smoke.yml"),
     ]
     for p in candidates:

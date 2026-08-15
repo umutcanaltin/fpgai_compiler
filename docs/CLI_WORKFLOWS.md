@@ -177,7 +177,7 @@ runtime_package/hardware/*.hwh
 runtime_package/hardware/*.xsa
 ```
 
-The package is truth-preserving. It does not run Vivado or deploy to hardware. It records whether bitstream, HWH, and XSA files are present:
+The package is validation-preserving. It does not run Vivado or deploy to hardware. It records whether bitstream, HWH, and XSA files are present:
 
 ```text
 bitstream_present
@@ -214,23 +214,23 @@ A failed design point makes `sweep run` return a non-zero exit status. The termi
 
 ## 9. Experiment config
 
-Use this workflow for reproducibility and paper-result generation.
+Use this workflow for reproducibility and benchmark-result generation.
 
 Inspect an experiment configuration before running it:
 
 ```bash
-fpgai experiment inspect --config configs/experiments/arxiv_paper.yml
+fpgai experiment inspect --config configs/experiments/benchmark_suite.yml
 ```
 
-Run the experiment configuration and write generated outputs under `paper_experiments/`:
+Run the experiment configuration and write generated outputs under `benchmark_runs/`:
 
 ```bash
 fpgai experiment run \
-  --config configs/experiments/arxiv_paper.yml \
-  --out paper_experiments/arxiv
+  --config configs/experiments/benchmark_suite.yml \
+  --out benchmark_runs/benchmark
 ```
 
-Generated experiment outputs should go under `paper_experiments/` or `experiments/`, not into tracked source directories.
+Generated experiment outputs should go under `benchmark_runs/` or `experiments/`, not into tracked source directories.
 
 ## 10. Report generation
 
@@ -244,12 +244,12 @@ fpgai report build \
   --out reports/inference_precision
 ```
 
-Generate paper tables and figures from a sweep/result CSV:
+Generate benchmark tables and figures from a sweep/result CSV:
 
 ```bash
-fpgai report paper-artifacts \
+fpgai report benchmark-artifacts \
   --csv experiments/inference_precision/policy_sweep_results.csv \
-  --out reports/inference_precision/paper_artifacts
+  --out reports/inference_precision/benchmark_artifacts
 ```
 
 Generate Pareto/frontier artifacts:

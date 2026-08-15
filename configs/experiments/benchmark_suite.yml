@@ -1,0 +1,31 @@
+version: 1
+
+benchmark:
+  title: FPGAI Benchmark Suite
+  stage: validation
+  result_policy: artifact_first
+
+inputs:
+  experiments:
+    training_convergence: configs/sweeps/training_multi_epoch_convergence.yml
+    hardware_knobs: configs/sweeps/hardware_knob_validation.yml
+    pipeline_policy: configs/sweeps/pipeline_policy_strength.yml
+    parallel_envelope: configs/sweeps/parallelism_feasible_envelope.yml
+  artifacts:
+    summary: benchmark_results/reproducibility/summary.csv
+    training_convergence: benchmark_runs/training_convergence/training_convergence.csv
+    vivado_impl: benchmark_runs/vivado_impl/vivado_impl_summary.csv
+    hardware_knobs: benchmark_runs/hardware_knobs
+    estimator_accuracy: benchmark_runs/estimator_accuracy/estimator_accuracy.csv
+    communication_ablation: benchmark_runs/communication_ablation/communication_ablation.csv
+
+validation_levels:
+  validated: result is supported by the required generated or tool-produced artifacts
+  partial: result is supported only for a subset or modeled/static artifact
+  unavailable: required validation artifacts are not available
+
+limitations:
+  - Physical-board training convergence requires board-runtime artifacts.
+  - Estimator accuracy requires exported resource predictions and corresponding tool reports.
+  - Communication measurements distinguish modeled transfer volume from board-runtime measurements.
+  - Vivado implementation reports define implementation-level timing and resource status.

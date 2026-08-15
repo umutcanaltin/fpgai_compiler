@@ -1,0 +1,48 @@
+version: 1
+project:
+  out_dir: build/mixed_external_multi_output_csim
+  clean: true
+model:
+  path: models/mixed_external_multi_output.onnx
+pipeline:
+  mode: inference
+  outputs: {top_kernel_name: deeplearn}
+operators:
+  supported: [SplitScale, Add, Relu]
+numerics:
+  kind: fixed
+  defaults:
+    activation: {type: ap_fixed, total_bits: 16, int_bits: 6}
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks: [{name: pl_clk0, target_mhz: 200}]
+build:
+  stages:
+    cpp: true
+    hls_project: true
+    hls_synthesis: false
+    reports: true
+    runtime_package: false
+ecosystem:
+  enabled: true
+  project_root: .
+  package_directories: [examples/packages]
+  strict_discovery: true
+  operator_packages:
+    enable: [community.split_scale_operator]
+  trust:
+    community.split_scale_operator: approved_for_reference
+  validation:
+    enabled: true
+    input_values: [-2.0, -0.5, 0.5, 2.0]
+    atol: 2.0e-3
+    rtol: 2.0e-3
+    run_vitis_csim: true
+implementations:
+  enable: [community.split_scale_tensor_ports_hls]
+  operators:
+    community.operator.split_scale:
+      preferred: [community.split_scale_tensor_ports_hls]
+      allow_fallback: false

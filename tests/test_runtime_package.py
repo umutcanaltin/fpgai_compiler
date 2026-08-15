@@ -1451,13 +1451,13 @@ def test_w0_lite_repo_yaml_audit_markdown_summarizes_findings(tmp_path: Path) ->
     assert "unknown_root" in text
 
 
-def test_w0_lite_classifies_sweep_paper_and_legacy_yaml_groups() -> None:
+def test_w0_lite_classifies_sweep_benchmark_and_legacy_yaml_groups() -> None:
     from fpgai.config.contract import classify_config_path
 
     assert classify_config_path("defaults.board")["status"] == "sweep_template"
     assert classify_config_path("materialize_configs.parameter_mappings.pe.path")["status"] == "sweep_template"
-    assert classify_config_path("paper.claim_policy")["status"] == "paper_artifact_spec"
-    assert classify_config_path("inputs.artifacts.summary")["status"] == "paper_artifact_spec"
+    assert classify_config_path("benchmark.claim_policy")["status"] == "benchmark_artifact_spec"
+    assert classify_config_path("inputs.artifacts.summary")["status"] == "benchmark_artifact_spec"
     assert classify_config_path("memory.storage.weights")["status"] == "deprecated_alias"
     assert classify_config_path("memory.storage.weights")["replacement"] == "memory.weight_storage"
     assert classify_config_path("training.execution.epochs")["status"] == "deprecated_alias"
@@ -1528,8 +1528,8 @@ def test_w0_lite_safe_example_configs_are_canonical_and_parseable() -> None:
 
     example_paths = sorted(Path("examples").glob("*/*.yml"))
     assert example_paths, "Q0 examples should exist"
-    production_paths = [p for p in example_paths if "reference" not in p.parts and "paper" not in p.parts]
-    template_paths = [p for p in example_paths if "reference" in p.parts or "paper" in p.parts]
+    production_paths = [p for p in example_paths if "reference" not in p.parts and "benchmark" not in p.parts]
+    template_paths = [p for p in example_paths if "reference" in p.parts or "benchmark" in p.parts]
     assert production_paths, "Q0 production examples should exist"
     assert template_paths, "Q0 reference/template examples should exist"
 
@@ -1590,8 +1590,8 @@ def test_artifact_smoke_audit_detects_required_compiler_outputs(tmp_path: Path) 
 
     audit = audit_compile_artifacts(out_dir)
     assert audit["status"] == "passed"
-    assert audit["evidence_levels"]["compiler_estimated"] is True
-    assert audit["evidence_levels"]["hls_truth"] is False
+    assert audit["validation_levels"]["compiler_estimated"] is True
+    assert audit["validation_levels"]["hls_validation"] is False
     suite = build_artifact_smoke_suite([out_dir])
     assert suite["passed"] is True
     assert suite["summary"]["runs"] == 1
@@ -1625,7 +1625,7 @@ def test_q0_selected_examples_compile_and_emit_artifact_smoke_reports(tmp_path: 
         assert audit["artifacts"]["runtime_package"]["exists"] is True
         assert audit["reports"]["data_movement_plan"]["exists"] is True
         assert audit["reports"]["movement_contract_validation"]["blocking_failure"] is False
-        assert audit["evidence_levels"]["compiler_estimated"] is True
+        assert audit["validation_levels"]["compiler_estimated"] is True
 
     suite = build_artifact_smoke_suite(out_dirs)
     assert suite["passed"] is True
@@ -1661,9 +1661,9 @@ def test_q0_batch2_expected_example_suite_exists_and_is_canonical() -> None:
     }
     expected_templates = {
         "examples/reference/full_options_reference.yml",
-        "examples/paper/precision_sweep.yml",
-        "examples/paper/memory_strategy_sweep.yml",
-        "examples/paper/pipeline_parallel_sweep.yml",
+        "examples/benchmark/precision_sweep.yml",
+        "examples/benchmark/memory_strategy_sweep.yml",
+        "examples/benchmark/pipeline_parallel_sweep.yml",
     }
 
     for rel in sorted(expected_compile_configs):
@@ -1709,10 +1709,10 @@ def test_q0_non_tiled_training_examples_match_stream_training_backend() -> None:
             assert (role_cfg.get("tiled") or {}).get("enabled") is False, f"{path}:{role}"
 
 
-def test_training_compile_path_emits_truth_status_reports_even_when_not_requested(tmp_path: Path) -> None:
+def test_training_compile_path_emits_validation_status_reports_even_when_not_requested(tmp_path: Path) -> None:
     from fpgai.reporting.artifact_smoke import audit_compile_artifacts
 
-    out_dir = tmp_path / "training_truth_reports"
+    out_dir = tmp_path / "training_validation_reports"
     reports = out_dir / "reports"
     hls_src = out_dir / "hls" / "src"
     runtime_pkg = out_dir / "runtime_package"
@@ -2274,7 +2274,7 @@ def test_runtime_package_validation_reports_static_boundary(tmp_path: Path) -> N
     emit_runtime_package(out_dir, board="kv260", pipeline_mode="inference", top_name="deeplearn")
     validation = json.loads((out_dir / "runtime_package" / "runtime_package_validation.json").read_text(encoding="utf-8"))
     assert validation["board_execution_claimed"] is False
-    assert "does not execute on the FPGA board" in validation["truth_boundary"]
+    assert "does not execute on the FPGA board" in validation["validation_boundary"]
     md = (out_dir / "reports" / "runtime_package_validation.md").read_text(encoding="utf-8")
     assert "Runtime Package Validation" in md
     assert "board_execution_claimed" in md

@@ -470,9 +470,9 @@ def test_design_space_payload_marks_recommendations_as_configured_candidate_only
     assert annotated["recommendation_scope"] == "configured_candidates_only"
     assert annotated["search_enabled"] is False
     assert annotated["recommendation_kind"] == "estimate_based_recommendation"
-    assert annotated["dse_truth"]["configured_candidates_only"] is True
-    assert annotated["dse_truth"]["search_enabled"] is False
-    assert annotated["dse_truth"]["estimate_based"] is True
+    assert annotated["dse_validation"]["configured_candidates_only"] is True
+    assert annotated["dse_validation"]["search_enabled"] is False
+    assert annotated["dse_validation"]["estimate_based"] is True
 
     for row in annotated["results"]:
         assert row["compile_ready"] is True

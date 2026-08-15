@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from fpgai.compiler.architecture_capabilities import (
+from fpgai.capabilities.architecture_capabilities import (
     ArchitectureCapabilityError,
     IMPLEMENTED,
     LIMITED,

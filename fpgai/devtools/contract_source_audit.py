@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 
-ROOT = Path("paper_experiments/full_pipeline_gate/sprint25_e2e_audit")
+ROOT = Path("benchmark_runs/full_pipeline_gate/end_to_end_audit")
 OUT_JSON = ROOT / "contract_source_audit.json"
 OUT_MD = ROOT / "contract_source_audit.md"
 

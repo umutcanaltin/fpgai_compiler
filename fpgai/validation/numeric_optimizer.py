@@ -207,7 +207,7 @@ def _optimizer_state_validation_payload(optimizer_state_artifacts: dict[str, Any
     Momentum and Adam correctness is not only weights-after correctness: their
     persistent state must also be checked.  This helper records requested state
     tensors and compares explicit ref/got float32 files when the testbench or
-    runtime path provides them.  Missing files are reported as missing evidence,
+    runtime path provides them.  Missing files are reported as missing artifacts,
     never as a pass.
     """
     if not optimizer_state_artifacts:
@@ -265,12 +265,12 @@ def _optimizer_state_validation_payload(optimizer_state_artifacts: dict[str, Any
         if both_sides_seen:
             payload["status"] = "failed"
             payload["implementation_status"] = "failed"
-            payload["evidence_status"] = "failed"
+            payload["artifact_status"] = "failed"
         elif any_ref_missing_got:
             # Keep the generated-export capability status for legacy contract
             # reports, but expose the stricter numeric proof status separately.
             # Non-export optimizer-state validation remains artifact_missing.
-            payload["evidence_status"] = "artifact_missing"
+            payload["artifact_status"] = "artifact_missing"
             if original_status == "generated_export_capture_supported":
                 payload["status"] = original_status
             else:
@@ -279,7 +279,7 @@ def _optimizer_state_validation_payload(optimizer_state_artifacts: dict[str, Any
         else:
             payload["status"] = "not_validated"
             payload["implementation_status"] = "not_validated"
-            payload.setdefault("evidence_status", "artifact_missing")
+            payload.setdefault("artifact_status", "artifact_missing")
         payload["passed"] = False
     else:
         payload["status"] = "not_validated" if requested else "not_applicable"

@@ -394,7 +394,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--out-dir",
-        default="paper_tables",
+        default="benchmark_tables",
         help="Directory to write output .tex files.",
     )
     parser.add_argument(

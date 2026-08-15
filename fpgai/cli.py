@@ -26,7 +26,7 @@ from fpgai.config.loader import (
 )
 from fpgai.engine.compiler import Compiler
 from fpgai.experiments.sweep_runner import run_sweep_config
-from fpgai.experiments.paper_runner import run_experiment_from_config
+from fpgai.experiments.benchmark_runner import run_experiment_from_config
 
 T = TypeVar("T")
 
@@ -619,41 +619,41 @@ def inspect_experiment_config(
         return 2
 
     top_keys = sorted(data.keys())
-    required = ["paper", "inputs", "claim_levels", "limitations"]
+    required = ["benchmark", "inputs", "validation_levels", "limitations"]
     errors = [f"{key}: missing" for key in required if key not in data]
 
-    paper = data.get("paper") or {}
+    benchmark = data.get("benchmark") or {}
     inputs = data.get("inputs") or {}
-    claim_levels = data.get("claim_levels") or {}
+    validation_levels = data.get("validation_levels") or {}
     limitations = data.get("limitations") or []
 
-    if "paper" in data and not isinstance(paper, dict):
-        errors.append("paper: expected mapping")
+    if "benchmark" in data and not isinstance(benchmark, dict):
+        errors.append("benchmark: expected mapping")
     if "inputs" in data and not isinstance(inputs, dict):
         errors.append("inputs: expected mapping")
-    if "claim_levels" in data and not isinstance(claim_levels, dict):
-        errors.append("claim_levels: expected mapping")
+    if "validation_levels" in data and not isinstance(validation_levels, dict):
+        errors.append("validation_levels: expected mapping")
     if "limitations" in data and not isinstance(limitations, (list, dict)):
         errors.append("limitations: expected list or mapping")
 
     report = {
-        "kind": "paper_experiment",
+        "kind": "benchmark",
         "config": config_path,
         "valid": not errors,
-        "paper_title": paper.get("title") if isinstance(paper, dict) else None,
+        "benchmark_title": benchmark.get("title") if isinstance(benchmark, dict) else None,
         "top_level_keys": top_keys,
         "input_count": len(inputs) if isinstance(inputs, dict) else 0,
-        "claim_level_count": len(claim_levels) if isinstance(claim_levels, dict) else 0,
+        "validation_level_count": len(validation_levels) if isinstance(validation_levels, dict) else 0,
         "limitation_count": len(limitations) if isinstance(limitations, (list, dict)) else 0,
         "errors": errors,
     }
 
     print("============== FPGAI Experiment Config Inspection ==============")
     print(f"Config                : {config_path}")
-    print(f"Paper title           : {report['paper_title']}")
+    print(f"Benchmark title           : {report['benchmark_title']}")
     print(f"Valid                 : {report['valid']}")
     print(f"Inputs                : {report['input_count']}")
-    print(f"Claim levels          : {report['claim_level_count']}")
+    print(f"Validation levels          : {report['validation_level_count']}")
     print(f"Limitations           : {report['limitation_count']}")
     if errors:
         print("-----------------------------------------------------------------")
@@ -842,9 +842,9 @@ def _run_existing_reporting_main(module_name: str, argv: list[str]) -> int:
 
 
 
-def _handle_report_paper_artifacts(args) -> int:
+def _handle_report_benchmark_artifacts(args) -> int:
     return _run_existing_reporting_main(
-        "fpgai.reporting.generate_paper_artifacts",
+        "fpgai.reporting.generate_benchmark_artifacts",
         ["--csv", args.csv, "--outdir", args.out],
     )
 
@@ -855,7 +855,7 @@ def _handle_report_frontier(args) -> int:
     if getattr(args, "require_pass", False):
         argv.append("--require-pass")
     return _run_existing_reporting_main(
-        "fpgai.reporting.paper_frontier",
+        "fpgai.reporting.design_frontier",
         argv,
     )
 
@@ -1063,14 +1063,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     experiment_parser = subparsers.add_parser(
         "experiment",
-        help="Inspect or run paper experiment configs",
+        help="Inspect or run benchmark configs",
     )
     experiment_subparsers = experiment_parser.add_subparsers(
         dest="experiment_command"
     )
     experiment_inspect_parser = experiment_subparsers.add_parser(
         "inspect",
-        help="Inspect a paper experiment YAML without running experiments",
+        help="Inspect a benchmark YAML without running experiments",
     )
     experiment_inspect_parser.add_argument(
         "--config",
@@ -1084,7 +1084,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     experiment_run_parser = experiment_subparsers.add_parser(
         "run",
-        help="Run a paper experiment YAML",
+        help="Run a benchmark YAML",
     )
     experiment_run_parser.add_argument(
         "--config",
@@ -1094,7 +1094,7 @@ def build_parser() -> argparse.ArgumentParser:
     experiment_run_parser.add_argument(
         "--out",
         required=True,
-        help="Output directory for paper experiment results",
+        help="Output directory for benchmark results",
     )
     experiment_run_parser.add_argument(
         "--max-design-points",
@@ -1151,27 +1151,27 @@ def build_parser() -> argparse.ArgumentParser:
     report_build_parser.add_argument(
         "--input",
         required=True,
-        help="Input experiment output directory, for example paper_experiments/arxiv",
+        help="Input experiment output directory, for example benchmark_runs/publication",
     )
     report_build_parser.add_argument(
         "--out",
         required=True,
-        help="Output report directory, for example reports/arxiv",
+        help="Output report directory, for example reports/publication",
     )
 
-    report_paper_artifacts_parser = report_subparsers.add_parser(
-        "paper-artifacts",
-        help="Generate paper tables and figures from an existing sweep CSV",
+    report_benchmark_artifacts_parser = report_subparsers.add_parser(
+        "benchmark-artifacts",
+        help="Generate benchmark tables and figures from an existing sweep CSV",
     )
-    report_paper_artifacts_parser.add_argument(
+    report_benchmark_artifacts_parser.add_argument(
         "--csv",
         required=True,
         help="Input policy_sweep_results.csv or compatible FPGAI result CSV",
     )
-    report_paper_artifacts_parser.add_argument(
+    report_benchmark_artifacts_parser.add_argument(
         "--out",
         required=True,
-        help="Output directory for generated paper artifacts",
+        help="Output directory for generated benchmark artifacts",
     )
 
     report_frontier_parser = report_subparsers.add_parser(
@@ -1232,7 +1232,7 @@ def build_parser() -> argparse.ArgumentParser:
     validate_results_parser.add_argument(
         "--input",
         required=True,
-        help="Input experiment output directory, for example paper_experiments/arxiv",
+        help="Input experiment output directory, for example benchmark_runs/publication",
     )
 
 
@@ -1268,8 +1268,8 @@ def main() -> None:
     if args.command == "report":
         if getattr(args, "report_command", None) == "build":
             return _handle_report_build(args)
-        if getattr(args, "report_command", None) == "paper-artifacts":
-            raise SystemExit(_handle_report_paper_artifacts(args))
+        if getattr(args, "report_command", None) == "benchmark-artifacts":
+            raise SystemExit(_handle_report_benchmark_artifacts(args))
         if getattr(args, "report_command", None) == "frontier":
             raise SystemExit(_handle_report_frontier(args))
         if getattr(args, "report_command", None) == "estimator":

@@ -1,6 +1,6 @@
 # FPGAI YAML migration guide — W0-lite
 
-This guide documents the first migration direction from legacy/sprint-era YAML keys to the canonical public format.
+This guide documents the first migration direction from legacy/intermediate YAML keys to the canonical public format.
 
 ## Pipeline II
 
@@ -198,15 +198,15 @@ memory:
   gradient_storage: bram
 ```
 
-## Sweep and paper YAML files
+## Sweep and benchmark YAML files
 
-Sweep files using roots such as `defaults`, `design_points`, `parameters`, and `materialize_configs` are classified as `sweep_template`, because they materialize compiler YAML instead of being direct compiler configs. Paper aggregation files using roots such as `paper`, `inputs`, `claim_levels`, `limitations`, and `vivado` are classified as `paper_artifact_spec`. They are still audit-visible, but they are not treated as unknown compiler YAML keys.
+Sweep files using roots such as `defaults`, `design_points`, `parameters`, and `materialize_configs` are classified as `sweep_template`, because they materialize compiler YAML instead of being direct compiler configs. Benchmark aggregation files using roots such as `benchmark`, `inputs`, `claim_levels`, `limitations`, and `vivado` are classified as `benchmark_artifact_spec`. They are still audit-visible, but they are not treated as unknown compiler YAML keys.
 
 ## Current behavior
 
 W0-lite reports deprecated aliases but keeps them accepted to avoid breaking existing configs immediately.
 
-Later sprints will:
+Future cleanup work will:
 
 ```text
 W0  — complete YAML cleanup and migration policy
@@ -216,7 +216,6 @@ Q0  — production examples based on canonical YAML only
 
 ## Repository audit before migration
 
-Use `docs/YAML_REPO_AUDIT.md` as the current migration queue. Files listed with deprecated aliases should be migrated first. Files listed with unknown or unclassified keys should be inspected before public examples are created, because an accepted YAML key must either materialize into generated artifacts/reports/runtime or reject clearly.
 
 ## W0-lite/Q0 safe migration notes
 

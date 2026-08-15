@@ -4,7 +4,7 @@ import csv
 import json
 from pathlib import Path
 
-from fpgai.paper.experiment_artifacts import emit_experiment_artifact_reports
+from fpgai.benchmark.experiment_artifacts import emit_experiment_artifact_reports
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -38,9 +38,9 @@ def test_experiment_artifact_matrix_records_bitstream_package_claim_level(tmp_pa
         },
     )
     _write_json(
-        out / "reports/paper_verification.json",
+        out / "reports/validation_summary.json",
         {
-            "verification_flags": {
+            "validation_flags": {
                 "vivado_implemented": True,
                 "bitstream_generated": True,
             }
@@ -97,7 +97,7 @@ def test_training_curve_contract_is_pending_until_board_runtime(tmp_path: Path) 
     assert result["summary"]["training_curve_available"] is False
     assert result["summary"]["training_curve_source"] == "pending_board_runtime"
     assert not (out / "training/training_curve.csv").exists()
-    assert not (out / "reports/paper_training_curve.csv").exists()
+    assert not (out / "reports/training_curve.csv").exists()
     assert (out / "reports/training_curve_contract.json").exists()
     assert (out / "runtime_package/reports/training_curve_contract.json").exists()
 
@@ -135,7 +135,7 @@ def test_training_curve_artifacts_use_real_board_runtime_rows(tmp_path: Path) ->
     assert result["summary"]["training_curve_available"] is True
     assert result["summary"]["training_curve_source"] == "kv260_board_runtime"
     assert (out / "training/training_curve.csv").exists()
-    assert (out / "reports/paper_training_curve.csv").exists()
+    assert (out / "reports/training_curve.csv").exists()
 
     with (out / "training/training_curve.csv").open(newline="", encoding="utf-8") as f:
         rows = list(csv.DictReader(f))
@@ -144,7 +144,7 @@ def test_training_curve_artifacts_use_real_board_runtime_rows(tmp_path: Path) ->
     assert rows[1]["loss"] == "0.75"
     assert rows[1]["cumulative_runtime_seconds"] == "0.03"
 
-    summary = json.loads((out / "reports/paper_training_curve_summary.json").read_text(encoding="utf-8"))
+    summary = json.loads((out / "reports/training_curve_summary.json").read_text(encoding="utf-8"))
     assert summary["final_loss"] == 0.75
     assert summary["board_execution_claimed"] is False
 
@@ -152,7 +152,7 @@ def test_training_curve_artifacts_use_real_board_runtime_rows(tmp_path: Path) ->
 def test_compiler_wires_experiment_artifact_reports_after_manifest_and_vivado_bridge() -> None:
     source = Path("fpgai/engine/compiler.py").read_text(encoding="utf-8")
 
-    assert "from fpgai.paper.experiment_artifacts import emit_experiment_artifact_reports" in source
+    assert "from fpgai.benchmark.experiment_artifacts import emit_experiment_artifact_reports" in source
     assert "emit_experiment_artifact_reports(out_dir)" in source
     assert source.count("emit_experiment_artifact_reports(out_dir)") >= 3
 
@@ -182,7 +182,7 @@ def test_failed_hls_does_not_upgrade_to_bitstream_claim_even_if_stale_bitstream_
             },
         },
     )
-    _write_json(out / "reports/paper_verification.json", {"verification_flags": {"vivado_implemented": True, "bitstream_generated": True}})
+    _write_json(out / "reports/validation_summary.json", {"validation_flags": {"vivado_implemented": True, "bitstream_generated": True}})
     _write_json(out / "runtime_package/runtime_package_validation.json", {"deployability_ready": True, "failed_count": 0})
     _write_json(out / "runtime_package/package_manifest.json", {"files": {}, "board": "kv260"})
 

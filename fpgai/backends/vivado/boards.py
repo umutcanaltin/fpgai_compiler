@@ -5,7 +5,7 @@ and KR260. PYNQ-Z2 uses a Zynq-7000 Processing System block-design path;
 KV260/KR260 use a Zynq UltraScale+ MPSoC block-design path.
 
 This module is the canonical source for board/device capacity used by
-board-fit reports, Vivado gating, runtime packaging metadata, and paper tables.
+board-fit reports, Vivado gating, runtime packaging metadata, and benchmark tables.
 
 Resource limits are expressed using normalized FPGAI keys:
   lut, ff, bram_18k, uram, dsp, ddr_bytes

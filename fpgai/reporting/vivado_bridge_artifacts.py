@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Extract Vivado/Vitis HLS reports from FPGAI experiment artifacts.
 
-This extractor is intentionally defensive because different sprints may produce
+This extractor is intentionally defensive because different implementation versions may produce
 slightly different directory layouts:
 
   artifacts/<design>/build/vivado_bridge/...
@@ -17,8 +17,8 @@ It extracts:
   - estimated energy = power_w * latency_cycles * clock_period_ns * 1e-9
 
 Outputs:
-  <experiment>/vivado_bridge_artifacts/evidence.json
-  <experiment>/vivado_bridge_artifacts/evidence.csv
+  <experiment>/vivado_bridge_artifacts/artifacts.json
+  <experiment>/vivado_bridge_artifacts/artifacts.csv
   <experiment>/vivado_bridge_artifacts/summary.md
 """
 from __future__ import annotations
@@ -338,8 +338,8 @@ def extract(exp: Path) -> List[Dict[str, Any]]:
 def _write_outputs(exp: Path, records: List[Dict[str, Any]]) -> None:
     out_dir = exp / "vivado_bridge_artifacts"
     out_dir.mkdir(parents=True, exist_ok=True)
-    json_path = out_dir / "evidence.json"
-    csv_path = out_dir / "evidence.csv"
+    json_path = out_dir / "artifacts.json"
+    csv_path = out_dir / "artifacts.csv"
     md_path = out_dir / "summary.md"
 
     payload = {"schema_version": 2, "experiment_dir": str(exp), "records": records}

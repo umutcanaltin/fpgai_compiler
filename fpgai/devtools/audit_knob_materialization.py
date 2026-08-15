@@ -1,4 +1,4 @@
-"""Audit whether paper-matrix tiling and memory knobs materialize in generated artifacts."""
+"""Audit whether benchmark-matrix tiling and memory knobs materialize in generated artifacts."""
 
 from __future__ import annotations
 
@@ -204,8 +204,8 @@ def _write_md(path: Path, title: str, records: list[dict], comparison: dict) -> 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="paper_experiments/full_pipeline_gate/sprint26_paper_matrix")
-    ap.add_argument("--out", default="paper_results/audits")
+    ap.add_argument("--base", default="benchmark_runs/full_pipeline_gate/benchmark_matrix")
+    ap.add_argument("--out", default="benchmark_results/audits")
     args = ap.parse_args()
 
     base = Path(args.base)

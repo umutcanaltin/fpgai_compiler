@@ -173,9 +173,9 @@ def _resolve_training_batch_accumulation_contract(raw: Dict[str, Any]) -> Dict[s
             "accumulate_gradients",
             "apply_accumulated_gradients",
         ] if native else [],
-        "truth_boundary": (
+        "validation_boundary": (
             "Native batch/gradient accumulation generates explicit HLS modes 3/4/5 for "
-            "reset, accumulate, and apply/update. Paper-safe correctness still requires the "
+            "reset, accumulate, and apply/update. Validation-qualified correctness still requires the "
             "training numeric comparison artifacts to pass for the selected model/config."
         ),
     }
@@ -243,9 +243,9 @@ def _write_execution_semantics_reports(
         "board_fit_limiting_dimension": board_fit.get("limiting_dimension"),
         "vivado_allowed_by_board_fit": board_fit.get("vivado_allowed"),
         "enforcement_status": "report_generated",
-        "truth_boundary": (
+        "validation_boundary": (
             "This contract records compiler-side feasibility and selected knobs. "
-            "Vivado/bitstream enforcement is paper-safe only when Vivado artifacts are present."
+            "Vivado/bitstream enforcement is validation-qualified only when Vivado artifacts are present."
         ),
     }
 
@@ -386,7 +386,7 @@ def _write_vivado_bd_contract_reports(
             "stream_dma": "PS DDR -> AXI DMA MM2S -> HLS AXIS input; HLS AXIS output -> AXI DMA S2MM -> PS DDR" if axis_ports else "not_required_by_generated_ports",
             "m_axi_memory": "HLS m_axi bundles -> AXI interconnect/smartconnect -> PS DDR HP/HPC port" if m_axi_ports else "not_required_by_generated_ports",
         },
-        "truth_boundary": "This report records the expected Vivado block-design wiring from generated HLS interfaces. It is not proof that Vivado implemented the design; Vivado reports/bitstream are required for that claim.",
+        "validation_boundary": "This report records the expected Vivado block-design wiring from generated HLS interfaces. It is not proof that Vivado implemented the design; Vivado reports/bitstream are required for that claim.",
     }
     json_path = reports_dir / "vivado_bd_contract.json"
     md_path = reports_dir / "vivado_bd_contract.md"
@@ -404,7 +404,7 @@ def _write_vivado_bd_contract_reports(
     return {"vivado_bd_contract_json": str(json_path), "vivado_bd_contract_md": str(md_path)}
 
 
-def _write_feature_truth_reports(
+def _write_feature_validation_reports(
     out_dir: Path,
     *,
     pipeline_mode: str,
@@ -413,7 +413,7 @@ def _write_feature_truth_reports(
     hls_run: Any | None,
     runtime_package: Any | None,
     numeric_validation_artifacts: Optional[Dict[str, Any]],
-    paper_verification_artifacts: Optional[Dict[str, Any]],
+    validation_summary_artifacts: Optional[Dict[str, Any]],
     vivado_bd_contract_artifacts: Optional[Dict[str, str]],
     vivado_handoff_artifacts: Optional[Dict[str, str]] = None,
 ) -> Dict[str, str]:
@@ -431,21 +431,21 @@ def _write_feature_truth_reports(
             numeric_validated = bool(nv.get("numeric_validated") or nv.get("passed"))
         except Exception:
             numeric_validated = False
-    paper_safe = False
-    if paper_verification_artifacts:
-        pv_path = paper_verification_artifacts.get("paper_verification_json") or paper_verification_artifacts.get("paper_row_json")
+    validation_ready = False
+    if validation_summary_artifacts:
+        pv_path = validation_summary_artifacts.get("validation_summary_json") or validation_summary_artifacts.get("benchmark_row_json")
         try:
             pv = json.loads(Path(pv_path).read_text(encoding="utf-8")) if pv_path else {}
-            paper_safe = bool(pv.get("paper_safe"))
+            validation_ready = bool(pv.get("validation_ready"))
         except Exception:
-            paper_safe = False
+            validation_ready = False
     features = [
-        {"feature": "source_generation", "status": "validated_by_generated_source" if source_generated else "not_generated", "paper_safe_for": ["source-exists claims"] if source_generated else []},
-        {"feature": "numeric_correctness", "status": "validated" if numeric_validated else "not_validated", "paper_safe_for": ["correctness claims"] if numeric_validated else []},
-        {"feature": "hls_resource_timing", "status": "validated_by_hls" if hls_synthesized else "not_validated", "paper_safe_for": ["HLS resource/timing claims"] if hls_synthesized else []},
-        {"feature": "vivado_bd_wiring", "status": "tcl_generated" if vivado_handoff_artifacts else ("contract_generated" if vivado_bd_contract_artifacts else "not_generated"), "paper_safe_for": ["BD Tcl generation claims"] if vivado_handoff_artifacts else (["BD contract claims"] if vivado_bd_contract_artifacts else [])},
-        {"feature": "runtime_package", "status": "packaged" if runtime_packaged else "not_packaged", "paper_safe_for": ["runtime package existence claims"] if runtime_packaged else []},
-        {"feature": "fpga_execution", "status": "not_validated", "paper_safe_for": []},
+        {"feature": "source_generation", "status": "validated_by_generated_source" if source_generated else "not_generated", "validation_ready_for": ["source-exists records"] if source_generated else []},
+        {"feature": "numeric_correctness", "status": "validated" if numeric_validated else "not_validated", "validation_ready_for": ["correctness records"] if numeric_validated else []},
+        {"feature": "hls_resource_timing", "status": "validated_by_hls" if hls_synthesized else "not_validated", "validation_ready_for": ["HLS resource/timing records"] if hls_synthesized else []},
+        {"feature": "vivado_bd_wiring", "status": "tcl_generated" if vivado_handoff_artifacts else ("contract_generated" if vivado_bd_contract_artifacts else "not_generated"), "validation_ready_for": ["BD Tcl generation records"] if vivado_handoff_artifacts else (["BD contract records"] if vivado_bd_contract_artifacts else [])},
+        {"feature": "runtime_package", "status": "packaged" if runtime_packaged else "not_packaged", "validation_ready_for": ["runtime package existence records"] if runtime_packaged else []},
+        {"feature": "fpga_execution", "status": "not_validated", "validation_ready_for": []},
     ]
     payload = {
         "format": "fpgai.feature_contract.v1",
@@ -455,17 +455,17 @@ def _write_feature_truth_reports(
         "numeric_validated": numeric_validated,
         "hls_synthesized": hls_synthesized,
         "runtime_packaged": runtime_packaged,
-        "paper_safe": paper_safe,
+        "validation_ready": validation_ready,
         "features": features,
-        "truth_boundary": "Each feature is paper-safe only at the verification level recorded here. Contract/report generation is not the same as HLS, Vivado, bitstream, or FPGA validation.",
+        "validation_boundary": "Each feature is validation-qualified only at the verification level recorded here. Contract/report generation is not the same as HLS, Vivado, bitstream, or FPGA validation.",
     }
     json_path = reports_dir / "feature_contract.json"
     audit_path = reports_dir / "claim_audit.md"
     json_path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    lines = ["# FPGAI claim audit", "", f"- pipeline_mode: `{pipeline_mode}`", f"- source_generated: `{source_generated}`", f"- numeric_validated: `{numeric_validated}`", f"- hls_synthesized: `{hls_synthesized}`", f"- runtime_packaged: `{runtime_packaged}`", f"- paper_safe: `{paper_safe}`", "", "| Feature | Status | Paper-safe for |", "|---|---|---|"]
+    lines = ["# FPGAI claim audit", "", f"- pipeline_mode: `{pipeline_mode}`", f"- source_generated: `{source_generated}`", f"- numeric_validated: `{numeric_validated}`", f"- hls_synthesized: `{hls_synthesized}`", f"- runtime_packaged: `{runtime_packaged}`", f"- validation_ready: `{validation_ready}`", "", "| Feature | Status | Validation-qualified for |", "|---|---|---|"]
     for item in features:
-        lines.append(f"| {item['feature']} | {item['status']} | {', '.join(item['paper_safe_for']) if item['paper_safe_for'] else 'none'} |")
-    lines.extend(["", "This audit must be used by paper table/plot generation to avoid intention-only claims.", ""])
+        lines.append(f"| {item['feature']} | {item['status']} | {', '.join(item['validation_ready_for']) if item['validation_ready_for'] else 'none'} |")
+    lines.extend(["", "This audit must be used by benchmark table/plot generation to avoid intention-only records.", ""])
     audit_path.write_text("\n".join(lines), encoding="utf-8")
     return {"feature_contract_json": str(json_path), "claim_audit_md": str(audit_path)}
 

@@ -28,7 +28,7 @@ void package_top(
 
 The manifest declares the scalar type and ordered operator attributes under
 `integration.hls`. FPGAI generates a stable top wrapper and reference
- testbench. Later sprints will add tensor-layout, streaming, multi-input,
+ testbench. Future cleanup work will add tensor-layout, streaming, multi-input,
 stateful, and training ABIs.
 
 ## Programmatic use

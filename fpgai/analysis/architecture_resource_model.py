@@ -129,7 +129,7 @@ def _embedded_parameter_bram_realization(
         return 0
 
     if weight_mode == "embedded":
-        # Small MLP/conv constants in the paper matrix are optimized heavily by
+        # Small MLP/conv constants in the benchmark matrix are optimized heavily by
         # HLS. Keep a tiny residual BRAM only when payload approaches BRAM scale.
         if bits < 4_096:
             return 0

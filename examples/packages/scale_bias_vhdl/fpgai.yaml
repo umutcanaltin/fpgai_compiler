@@ -40,6 +40,12 @@ entrypoints:
 implementation:
   operator_id: community.operator.scale_bias
   backend: vhdl
+integration:
+  vhdl:
+    abi: scalar_stream_v1
+    data_width: 16
+    signed: true
+    reference_behavior: identity
 interfaces:
   input:
     direction: input

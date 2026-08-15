@@ -56,7 +56,7 @@ def _as_int(value: Any) -> int | None:
 
 
 def validate_results(input_dir: str | Path) -> ResultsValidation:
-    """Validate paper experiment output for false pass / missing child output."""
+    """Validate benchmark output for false pass / missing child output."""
     root = Path(input_dir)
     issues: list[ValidationIssue] = []
 

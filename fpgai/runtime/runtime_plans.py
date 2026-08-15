@@ -293,7 +293,7 @@ def _emit_runtime_buffer_plans(
     buffer_plan = {
         "schema_version": 1,
         "package_kind": "fpgai_runtime_buffer_plan",
-        "truth_boundary": "Generated buffer allocation/binding metadata only; real board execution still requires deployed Vivado/bitstream artifacts.",
+        "validation_boundary": "Generated buffer allocation/binding metadata only; real board execution still requires deployed Vivado/bitstream artifacts.",
         "dataset": {
             "enabled": bool(dataset_manifest),
             "sample_count": dataset_sample_count,

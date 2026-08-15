@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from fpgai.compiler.architecture_capabilities import (
+from fpgai.capabilities.architecture_capabilities import (
     IMPLEMENTED,
     PLANNING_ONLY,
     validate_architecture_capabilities,

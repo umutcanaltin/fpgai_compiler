@@ -37,7 +37,7 @@ def test_numeric_validation_compares_inference_output_files(tmp_path: Path) -> N
 
     assert payload['status'] == 'passed'
     assert payload['passed'] is True
-    assert payload['paper_claim_allowed']['numeric_correctness'] is True
+    assert payload['validation_claim_allowed']['numeric_correctness'] is True
     assert payload['inference']['output_compare']['max_abs_error'] == 0.0
     assert payload['inference']['output_compare']['cosine_similarity'] == pytest.approx(1.0)
 
@@ -67,7 +67,7 @@ def test_numeric_validation_inference_failed_tolerance_is_explicit(tmp_path: Pat
 
     assert payload["status"] == "failed_tolerance"
     assert payload["passed"] is False
-    assert payload["paper_claim_allowed"]["numeric_correctness"] is False
+    assert payload["validation_claim_allowed"]["numeric_correctness"] is False
     assert payload["inference"]["output_compare"]["status"] == "compared"
     assert payload["inference"]["output_compare"]["passed"] is False
     assert "max_abs_error" in payload["reason"]
@@ -81,8 +81,8 @@ def _load_inference_config() -> dict:
 
 def _load_training_config() -> dict:
     for p in [
-        Path('paper_experiments/full_pipeline_gate/sprint26_paper_matrix/configs/training_kv260_aggressive_fx8_3.yml'),
-        Path('paper_experiments/full_pipeline_gate/sprint27h_full_rerun/configs_hls/training_kv260_aggressive_fx8_3.yml'),
+        Path('benchmark_runs/full_pipeline_gate/benchmark_matrix/configs/training_kv260_aggressive_fx8_3.yml'),
+        Path('benchmark_runs/full_pipeline_gate/full_hls_validation/configs_hls/training_kv260_aggressive_fx8_3.yml'),
         Path('configs/examples/training_compile_smoke.yml'),
     ]:
         if p.exists():
@@ -138,7 +138,7 @@ def test_compile_emits_explainable_hls_reports_for_inference_cpp_only(tmp_path: 
     manifest = json.loads((out_dir / 'manifest.json').read_text(encoding='utf-8'))
 
     assert explanation['generated_files']['top_source_exists'] is True
-    assert explanation['source_evidence']['checks']['top_function_deeplearn'] is True
+    assert explanation['source_artifacts']['checks']['top_function_deeplearn'] is True
     assert explanation['decisions']['runtime_sequence']['sequence'][0]['command'] == 'import_weights'
     assert decisions['top_name'] == 'deeplearn'
     assert (reports / 'generated_hls_explanation.md').exists()
@@ -168,8 +168,8 @@ def test_training_numeric_validation_records_gradient_export_status_and_explanat
     assert numeric['gradient_export']['requested'] is True
     assert numeric['gradient_export']['policy'] == 'tiled'
     assert numeric['gradient_export']['status'] in {'generated_not_captured_by_testbench', 'covered_by_training_gradient_compare'}
-    assert explanation['source_evidence']['checks']['runtime_mode_export_gradients'] is True
-    assert explanation['source_evidence']['checks']['m_axi_gradient_port'] is True
+    assert explanation['source_artifacts']['checks']['runtime_mode_export_gradients'] is True
+    assert explanation['source_artifacts']['checks']['m_axi_gradient_port'] is True
 
     tb_source = (out_dir / 'hls/src/tb.cpp').read_text(encoding='utf-8')
     assert 'FPGAI CSim automatic gradient-export capture' in tb_source
@@ -445,32 +445,32 @@ def test_codegen_readability_level_changes_generated_cpp_comment_density(tmp_pat
     assert high_report['status'] == 'passed'
 
 
-def test_hls_truth_reports_cpp_only_are_not_requested(tmp_path: Path) -> None:
+def test_hls_validation_reports_cpp_only_are_not_requested(tmp_path: Path) -> None:
     raw = copy.deepcopy(_load_inference_config())
-    raw.setdefault('project', {})['out_dir'] = str(tmp_path / 'hls_truth_cpp_only')
+    raw.setdefault('project', {})['out_dir'] = str(tmp_path / 'hls_validation_cpp_only')
     raw.setdefault('runtime', {})['sequence'] = ['run_inference']
     _cpp_only(raw)
 
     result = _compile_raw(raw, tmp_path)
     out_dir = Path(result.out_dir)
-    hls_truth = json.loads((out_dir / 'reports/hls_synthesis_report.json').read_text(encoding='utf-8'))
+    hls_validation = json.loads((out_dir / 'reports/hls_synthesis_report.json').read_text(encoding='utf-8'))
     estimate = json.loads((out_dir / 'reports/estimate_vs_hls.json').read_text(encoding='utf-8'))
     manifest = json.loads((out_dir / 'manifest.json').read_text(encoding='utf-8'))
 
-    assert hls_truth['status'] == 'not_requested'
-    assert hls_truth['claimed_success'] is False
-    assert hls_truth['paper_safe'] is False
+    assert hls_validation['status'] == 'not_requested'
+    assert hls_validation['claimed_success'] is False
+    assert hls_validation['validation_ready'] is False
     assert estimate['status'] == 'not_requested'
-    assert estimate['paper_safe'] is False
+    assert estimate['validation_ready'] is False
     assert estimate['comparison'] is None
-    assert manifest['hls_truth_artifacts']['hls_synthesis_report_json'].endswith('reports/hls_synthesis_report.json')
-    assert manifest['hls_truth_artifacts']['estimate_vs_hls_json'].endswith('reports/estimate_vs_hls.json')
+    assert manifest['hls_validation_artifacts']['hls_synthesis_report_json'].endswith('reports/hls_synthesis_report.json')
+    assert manifest['hls_validation_artifacts']['estimate_vs_hls_json'].endswith('reports/estimate_vs_hls.json')
 
 
-def test_hls_truth_parser_compares_fake_csynth_xml(tmp_path: Path) -> None:
-    from fpgai.reporting.hls_truth import emit_hls_truth_reports
+def test_hls_validation_parser_compares_fake_csynth_xml(tmp_path: Path) -> None:
+    from fpgai.reporting.hls_validation import emit_hls_validation_reports
 
-    out_dir = tmp_path / 'hls_truth_fake'
+    out_dir = tmp_path / 'hls_validation_fake'
     report_dir = out_dir / 'hls/fpgai_hls_proj/sol1/syn/report'
     report_dir.mkdir(parents=True)
     (report_dir / 'deeplearn_csynth.xml').write_text(
@@ -502,7 +502,7 @@ def test_hls_truth_parser_compares_fake_csynth_xml(tmp_path: Path) -> None:
         }
     }), encoding='utf-8')
 
-    artifacts = emit_hls_truth_reports(
+    artifacts = emit_hls_validation_reports(
         out_dir=out_dir,
         hls_dir=out_dir / 'hls',
         build_stages={'hls_project': True, 'hls_synthesis': True},
@@ -511,19 +511,19 @@ def test_hls_truth_parser_compares_fake_csynth_xml(tmp_path: Path) -> None:
         clock_mhz=200.0,
     )
 
-    hls_truth = json.loads(artifacts.hls_synthesis_report_json.read_text(encoding='utf-8'))
+    hls_validation = json.loads(artifacts.hls_synthesis_report_json.read_text(encoding='utf-8'))
     estimate = json.loads(artifacts.estimate_vs_hls_json.read_text(encoding='utf-8'))
 
-    assert hls_truth['status'] == 'parsed'
-    assert hls_truth['paper_safe'] is True
-    assert hls_truth['actual']['lut'] == 13190
-    assert hls_truth['actual']['ff'] == 15662
-    assert hls_truth['actual']['dsp'] == 21
-    assert hls_truth['actual']['bram18'] == 19
-    assert hls_truth['actual']['latency_cycles'] == pytest.approx(44340.0)
-    assert hls_truth['actual']['latency_ms'] == pytest.approx(0.2217)
+    assert hls_validation['status'] == 'parsed'
+    assert hls_validation['validation_ready'] is True
+    assert hls_validation['actual']['lut'] == 13190
+    assert hls_validation['actual']['ff'] == 15662
+    assert hls_validation['actual']['dsp'] == 21
+    assert hls_validation['actual']['bram18'] == 19
+    assert hls_validation['actual']['latency_cycles'] == pytest.approx(44340.0)
+    assert hls_validation['actual']['latency_ms'] == pytest.approx(0.2217)
     assert estimate['status'] == 'compared'
-    assert estimate['paper_safe'] is True
+    assert estimate['validation_ready'] is True
     assert estimate['comparison']['resources']['lut']['estimated'] == 4239
     assert estimate['comparison']['resources']['lut']['hls'] == 13190
     assert estimate['comparison']['latency']['ms']['hls'] == pytest.approx(0.2217)
@@ -549,15 +549,15 @@ def test_hls_synthesis_missing_tool_reports_tool_missing_without_fake_success(tm
 
     result = _compile_raw(raw, tmp_path)
     out_dir = Path(result.out_dir)
-    hls_truth = json.loads((out_dir / 'reports/hls_synthesis_report.json').read_text(encoding='utf-8'))
+    hls_validation = json.loads((out_dir / 'reports/hls_synthesis_report.json').read_text(encoding='utf-8'))
     estimate = json.loads((out_dir / 'reports/estimate_vs_hls.json').read_text(encoding='utf-8'))
 
-    assert hls_truth['status'] == 'tool_missing'
-    assert hls_truth['claimed_success'] is False
-    assert hls_truth['paper_safe'] is False
-    assert hls_truth['hls_run']['returncode'] == 127
+    assert hls_validation['status'] == 'tool_missing'
+    assert hls_validation['claimed_success'] is False
+    assert hls_validation['validation_ready'] is False
+    assert hls_validation['hls_run']['returncode'] == 127
     assert estimate['status'] == 'tool_missing'
-    assert estimate['paper_safe'] is False
+    assert estimate['validation_ready'] is False
 
 
 def _set_fixed_precision(raw: dict, *, mode: str, activation: int, weight: int, bias: int, accum: int) -> None:
@@ -595,7 +595,7 @@ def test_precision_effect_report_materializes_manual_precision_in_generated_type
     assert report['generated_artifacts']['expected_patterns_present']['activation'] is True
     assert 'typedef ap_fixed<8,' in types_h
     assert 'typedef ap_fixed<16,' in types_h
-    assert report['resource_effect']['paper_safe_hls_claim'] is False
+    assert report['resource_effect']['validation_ready_hls_claim'] is False
     assert manifest['precision_effect_artifacts']['precision_effect_json'].endswith('reports/precision_effect.json')
 
 
@@ -627,8 +627,8 @@ def test_precision_effect_distinguishes_fx8_and_fx16_layouts(tmp_path: Path) -> 
     assert types8 != types16
     assert 'typedef ap_fixed<8,' in types8
     assert 'typedef ap_fixed<16,' in types16
-    assert report8['truth_boundary']['paper_safe_hls_claim_requires_estimate_vs_hls_compared'] is True
-    assert report16['truth_boundary']['paper_safe_hls_claim_requires_estimate_vs_hls_compared'] is True
+    assert report8['validation_boundary']['validation_ready_hls_claim_requires_estimate_vs_hls_compared'] is True
+    assert report16['validation_boundary']['validation_ready_hls_claim_requires_estimate_vs_hls_compared'] is True
 
 
 def test_parallel_pipeline_effect_materializes_manual_hls_pragmas_and_macros(tmp_path: Path) -> None:
@@ -659,14 +659,14 @@ def test_parallel_pipeline_effect_materializes_manual_hls_pragmas_and_macros(tmp
     assert report['pipeline']['resolved'] == 2
     assert report['parallelization']['dense_out_unroll']['status'] == 'applied'
     assert report['parallelization']['dense_out_unroll']['resolved'] == 4
-    assert report['hls_effect']['paper_safe_hls_claim'] is False
-    assert '#define FPGAI_PIPELINE_II 2' in hls_source or '#define FPGAI_PIPELINE_II 2' in report['pipeline']['evidence']
-    assert '#define FPGAI_DENSE_OUT_UNROLL 4' in hls_source or '#define FPGAI_DENSE_OUT_UNROLL 4' in report['parallelization']['dense_out_unroll']['evidence']
-    assert '#define FPGAI_DENSE_IN_UNROLL 2' in hls_source or '#define FPGAI_DENSE_IN_UNROLL 2' in report['parallelization']['dense_in_unroll']['evidence']
-    assert '#define FPGAI_DENSE_PARTITION_WEIGHTS 4' in hls_source or '#define FPGAI_DENSE_PARTITION_WEIGHTS 4' in report['parallelization']['dense_weight_partition']['evidence']
-    assert '#pragma HLS PIPELINE' in hls_source or '#pragma HLS PIPELINE' in report['pipeline']['evidence']
-    assert '#pragma HLS UNROLL' in hls_source or any('#pragma HLS UNROLL' in e for e in report['parallelization']['dense_out_unroll']['evidence'])
-    assert '#pragma HLS ARRAY_PARTITION' in hls_source or any('#pragma HLS ARRAY_PARTITION' in e for e in report['parallelization']['dense_weight_partition']['evidence'])
+    assert report['hls_effect']['validation_ready_hls_claim'] is False
+    assert '#define FPGAI_PIPELINE_II 2' in hls_source or '#define FPGAI_PIPELINE_II 2' in report['pipeline']['artifacts']
+    assert '#define FPGAI_DENSE_OUT_UNROLL 4' in hls_source or '#define FPGAI_DENSE_OUT_UNROLL 4' in report['parallelization']['dense_out_unroll']['artifacts']
+    assert '#define FPGAI_DENSE_IN_UNROLL 2' in hls_source or '#define FPGAI_DENSE_IN_UNROLL 2' in report['parallelization']['dense_in_unroll']['artifacts']
+    assert '#define FPGAI_DENSE_PARTITION_WEIGHTS 4' in hls_source or '#define FPGAI_DENSE_PARTITION_WEIGHTS 4' in report['parallelization']['dense_weight_partition']['artifacts']
+    assert '#pragma HLS PIPELINE' in hls_source or '#pragma HLS PIPELINE' in report['pipeline']['artifacts']
+    assert '#pragma HLS UNROLL' in hls_source or any('#pragma HLS UNROLL' in e for e in report['parallelization']['dense_out_unroll']['artifacts'])
+    assert '#pragma HLS ARRAY_PARTITION' in hls_source or any('#pragma HLS ARRAY_PARTITION' in e for e in report['parallelization']['dense_weight_partition']['artifacts'])
     assert manifest['parallel_pipeline_effect_artifacts']['parallel_pipeline_effect_json'].endswith('reports/parallel_pipeline_effect.json')
 
 
@@ -682,9 +682,9 @@ def test_parallel_pipeline_effect_records_not_requested_defaults_without_manual_
 
     assert report['manual_yaml_sources'] == {}
     assert report['pipeline']['requested'] is False
-    assert report['resource_latency_hygiene']['unrequested_manual_claims'] == []
+    assert report['resource_latency_hygiene']['unrequested_manual_records'] == []
     assert report['parallelization']['dense_out_unroll']['status'] in {'not_requested', 'compiler_default'}
-    assert report['hls_effect']['paper_safe_hls_claim'] is False
+    assert report['hls_effect']['validation_ready_hls_claim'] is False
 
 
 def test_inference_reference_artifact_helper_uses_existing_hls_output_and_input_bin(tmp_path: Path, monkeypatch) -> None:
@@ -767,7 +767,7 @@ def test_numeric_validation_inference_uses_precision_aware_limits(tmp_path: Path
     payload = json.loads(artifacts["numeric_validation_json"].read_text(encoding="utf-8"))
 
     assert payload["status"] == "passed"
-    assert payload["paper_claim_allowed"]["numeric_correctness"] is True
+    assert payload["validation_claim_allowed"]["numeric_correctness"] is True
     compare = payload["inference"]["output_compare"]
     assert compare["max_abs_error"] == pytest.approx(0.0625)
     assert compare["limits"]["max_abs_error_limit"] >= 0.125

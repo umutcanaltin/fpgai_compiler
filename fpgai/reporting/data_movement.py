@@ -130,7 +130,7 @@ def _movement_cfg_for_role(raw_config: Mapping[str, Any] | None, role: str) -> d
 
     FPGAI currently accepts both the older nested spelling
     data_movement.inputs.import.interface and the newer direct spelling
-    data_movement.inputs.interface.  Sprint P keeps both visible here so reports,
+    data_movement.inputs.interface. Both remain visible here so reports,
     runtime contracts, and generated artifacts resolve the same user decision.
     """
     role_u = role.lower()
@@ -577,7 +577,7 @@ def emit_data_movement_reports(
     communication_plan: Any,
     runtime_sequence: Mapping[str, Any] | None,
 ) -> dict[str, str]:
-    """Emit the Sprint-P tensor movement and PS/PL transfer truth reports.
+    """Emit tensor movement and PS/PL transfer validation reports.
 
     The reports are generated from the already-resolved memory plan,
     communication plan, and runtime sequence.  They do not claim board execution;
@@ -620,7 +620,7 @@ def emit_data_movement_reports(
         "schema_version": 1,
         "artifact_kind": "data_movement_plan",
         "status": "validated",
-        "truth_boundary": "Compiler movement contract only; real HLS/Vivado/FPGA success requires corresponding truth artifacts.",
+        "validation_boundary": "Compiler movement contract only; real HLS/Vivado/FPGA success requires corresponding validation artifacts.",
         "pipeline_mode": pipeline,
         "weights_mode": wm,
         "runtime_commands": sorted(commands),
@@ -666,12 +666,12 @@ def emit_data_movement_reports(
         "limitations": [
             "HOST/PS placements are logical endpoints; they do not by themselves prove a specific physical PS-DDR allocation.",
             "BRAM/URAM placement is a compiler request until generated HLS bindings and synthesis reports confirm the realized primitive.",
-            "External-DDR execution is a paper-safe runtime claim only after generated HLS, Vivado implementation, and physical-board validation pass.",
+            "External-DDR execution is a validation-qualified runtime claim only after generated HLS, Vivado implementation, and physical-board validation pass.",
             *(
                 []
                 if pipeline != "training_on_device" or training_state_tensor_level
                 else [
-                    "Gradients and optimizer state are currently represented by aggregate training storage fields rather than tensor-level MemoryPlan placements; the scientific IR sprint must promote them to explicit state objects."
+                    "Gradients and optimizer state are currently represented by aggregate training storage fields rather than tensor-level MemoryPlan placements; the scientific IR work must promote them to explicit state objects."
                 ]
             ),
         ],
@@ -703,7 +703,7 @@ def emit_data_movement_reports(
         "schema_version": 1,
         "artifact_kind": "ps_pl_transfer_plan",
         "status": "validated",
-        "truth_boundary": "PS/PL transfer contract derived from resolved movement decisions; no board execution is claimed here.",
+        "validation_boundary": "PS/PL transfer contract derived from resolved movement decisions; no board execution is claimed here.",
         "pipeline_mode": pipeline,
         "runtime_commands": sorted(commands),
         "transfers": transfers,
@@ -730,13 +730,13 @@ def emit_data_movement_reports(
         reports_dir / "data_movement_plan.md",
         "Data movement plan",
         tensor_rows,
-        [data_payload["truth_boundary"]],
+        [data_payload["validation_boundary"]],
     )
     _write_md(
         reports_dir / "ps_pl_transfer_plan.md",
         "PS/PL transfer plan",
         tensor_rows,
-        [transfer_payload["truth_boundary"]],
+        [transfer_payload["validation_boundary"]],
     )
 
     return {
@@ -780,7 +780,7 @@ def _read_top_hls_source(root: Path) -> str:
     variable names even when the synthesized top in ``deeplearn.cpp`` is an
     m_axi design.  Primary interface validation must therefore read the actual
     top implementation file first and avoid using testbench declarations as top
-    port evidence.
+    port artifacts.
     """
     candidates = [
         root / "hls" / "src" / "deeplearn.cpp",
@@ -825,23 +825,23 @@ def _runtime_buffer_plan(root: Path) -> tuple[bool, set[str]]:
     return True, names
 
 
-def _check(name: str, expected: bool, actual: bool, *, evidence: str) -> dict[str, Any]:
+def _check(name: str, expected: bool, actual: bool, *, artifacts: str) -> dict[str, Any]:
     return {
         "name": name,
         "expected": bool(expected),
         "actual": bool(actual),
         "passed": bool(expected) == bool(actual),
-        "evidence": evidence,
+        "artifacts": artifacts,
     }
 
 
-def _check_value(name: str, expected: Any, actual: Any, *, evidence: str) -> dict[str, Any]:
+def _check_value(name: str, expected: Any, actual: Any, *, artifacts: str) -> dict[str, Any]:
     return {
         "name": name,
         "expected": expected,
         "actual": actual,
         "passed": expected == actual,
-        "evidence": evidence,
+        "artifacts": artifacts,
     }
 
 
@@ -965,7 +965,7 @@ def _signature_has_stream_port(signature: str, names: tuple[str, ...]) -> bool:
 
 
 def _source_io_actuals(source: str, role: str) -> dict[str, bool]:
-    """Return generated-source evidence for primary I/O movement.
+    """Return generated-source artifacts for primary I/O movement.
 
     Inference and training top functions intentionally use different stream port
     names today: inference uses ``in_stream``/``out_stream`` while the training
@@ -1007,42 +1007,42 @@ def _append_source_io_checks(checks: list[dict[str, Any]], source: str, role: st
     actual = _source_io_actuals(source, role)
     prefix = "input" if role == "inputs" else "output"
     if kind.startswith("m_axi"):
-        checks.append(_check(f"cpp_{prefix}_m_axi_port_matches_plan", True, actual["m_axi_port"], evidence=f"{prefix}_mem m_axi interface pragma"))
+        checks.append(_check(f"cpp_{prefix}_m_axi_port_matches_plan", True, actual["m_axi_port"], artifacts=f"{prefix}_mem m_axi interface pragma"))
         hybrid_training_axi = _source_has_training_hybrid_axi(source) and actual["m_axi_port"]
         checks.append(_check(
             f"cpp_{prefix}_stream_port_absent_for_m_axi",
             False,
             actual["stream_port"] and not hybrid_training_axi,
-            evidence=(
+            artifacts=(
                 f"hls::stream<axis_t>& {'in_stream/in' if role == 'inputs' else 'out_stream/out'}"
                 + ("; accepted as training hybrid control/runtime stream because tensor payload uses m_axi" if hybrid_training_axi else "")
             ),
         ))
         if kind == "m_axi_tiled":
             macros = _tile_macro_candidates_for(role, kind)
-            checks.append(_check(f"cpp_{prefix}_m_axi_tiling_matches_plan", True, actual["m_axi_tiled"], evidence=f"{'/'.join(macros)} and m_axi tiled {prefix}"))
+            checks.append(_check(f"cpp_{prefix}_m_axi_tiling_matches_plan", True, actual["m_axi_tiled"], artifacts=f"{'/'.join(macros)} and m_axi tiled {prefix}"))
             expected_tile = row.get("tile_size")
             if expected_tile:
                 actual_tile, macro = _source_macro_int_any(source, macros)
-                checks.append(_check_value(f"cpp_{prefix}_m_axi_tile_size_matches_plan", int(expected_tile), actual_tile, evidence=macro or "tile macro"))
+                checks.append(_check_value(f"cpp_{prefix}_m_axi_tile_size_matches_plan", int(expected_tile), actual_tile, artifacts=macro or "tile macro"))
     elif kind.startswith("axi_stream"):
-        checks.append(_check(f"cpp_{prefix}_stream_port_matches_plan", True, actual["stream_port"], evidence=f"hls::stream<axis_t>& {'in_stream/in' if role == 'inputs' else 'out_stream/out'}"))
-        checks.append(_check(f"cpp_{prefix}_m_axi_port_absent_for_stream", False, actual["m_axi_port"], evidence=f"{prefix}_mem m_axi interface pragma"))
+        checks.append(_check(f"cpp_{prefix}_stream_port_matches_plan", True, actual["stream_port"], artifacts=f"hls::stream<axis_t>& {'in_stream/in' if role == 'inputs' else 'out_stream/out'}"))
+        checks.append(_check(f"cpp_{prefix}_m_axi_port_absent_for_stream", False, actual["m_axi_port"], artifacts=f"{prefix}_mem m_axi interface pragma"))
         if kind == "axi_stream_tiled":
-            checks.append(_check(f"cpp_{prefix}_axis_tiling_matches_plan", True, actual["axis_tiled"], evidence=f"FPGAI_AXIS_{prefix.upper()}_TILE_SIZE and stream tile loop"))
+            checks.append(_check(f"cpp_{prefix}_axis_tiling_matches_plan", True, actual["axis_tiled"], artifacts=f"FPGAI_AXIS_{prefix.upper()}_TILE_SIZE and stream tile loop"))
             expected_tile = row.get("tile_size")
             if expected_tile:
                 macro = _tile_macro_for(role, kind)
-                checks.append(_check_value(f"cpp_{prefix}_axis_tile_size_matches_plan", int(expected_tile), _source_macro_int(source, macro or ""), evidence=macro or "tile macro"))
+                checks.append(_check_value(f"cpp_{prefix}_axis_tile_size_matches_plan", int(expected_tile), _source_macro_int(source, macro or ""), artifacts=macro or "tile macro"))
         if role == "outputs":
-            checks.append(_check("cpp_output_stream_tlast_matches_plan", True, actual["tlast"], evidence="packet.last/write_f32(out)"))
+            checks.append(_check("cpp_output_stream_tlast_matches_plan", True, actual["tlast"], artifacts="packet.last/write_f32(out)"))
 
 
 def _append_source_aux_role_checks(checks: list[dict[str, Any]], source: str, role: str, row: Mapping[str, Any]) -> None:
     """Validate non-primary I/O tensor roles against generated HLS tokens.
 
     These checks intentionally use concrete generated artifact tokens instead of
-    report-only intent.  They extend Sprint P's contract beyond input/output:
+    report-only intent.  They extend the movement contract beyond input/output:
     requested roles must have their HLS path, and unrequested export/import paths
     must stay absent.
     """
@@ -1057,20 +1057,20 @@ def _append_source_aux_role_checks(checks: list[dict[str, Any]], source: str, ro
         label_m_axi = "label_mem" in source and "m_axi port=label_mem" in source
         label_stream = "axis_label_tile" in source or "AXI-stream tiled label import" in source or "read_f32(aux)" in source
         if not requested:
-            checks.append(_check("cpp_labels_path_absent_when_not_requested", False, label_m_axi or label_stream, evidence="label_mem/axis_label_tile/read_f32(aux)"))
+            checks.append(_check("cpp_labels_path_absent_when_not_requested", False, label_m_axi or label_stream, artifacts="label_mem/axis_label_tile/read_f32(aux)"))
             return
         if kind.startswith("m_axi"):
-            checks.append(_check("cpp_labels_m_axi_port_matches_plan", True, label_m_axi, evidence="label_mem m_axi interface pragma"))
+            checks.append(_check("cpp_labels_m_axi_port_matches_plan", True, label_m_axi, artifacts="label_mem m_axi interface pragma"))
             hybrid_training_axi = _source_has_training_hybrid_axi(source) and label_m_axi
             checks.append(_check(
                 "cpp_labels_stream_path_absent_for_m_axi",
                 False,
                 label_stream and not hybrid_training_axi,
-                evidence="axis_label_tile/read_f32(aux)" + ("; accepted as training hybrid auxiliary stream because label_mem is the tensor payload path" if hybrid_training_axi else ""),
+                artifacts="axis_label_tile/read_f32(aux)" + ("; accepted as training hybrid auxiliary stream because label_mem is the tensor payload path" if hybrid_training_axi else ""),
             ))
         elif kind.startswith("axi_stream"):
-            checks.append(_check("cpp_labels_stream_path_matches_plan", True, label_stream, evidence="axis_label_tile/read_f32(aux)"))
-            checks.append(_check("cpp_labels_m_axi_port_absent_for_stream", False, label_m_axi, evidence="label_mem m_axi interface pragma"))
+            checks.append(_check("cpp_labels_stream_path_matches_plan", True, label_stream, artifacts="axis_label_tile/read_f32(aux)"))
+            checks.append(_check("cpp_labels_m_axi_port_absent_for_stream", False, label_m_axi, artifacts="label_mem m_axi interface pragma"))
         return
 
     if role_u == "weights":
@@ -1086,19 +1086,19 @@ def _append_source_aux_role_checks(checks: list[dict[str, Any]], source: str, ro
         explicit_import_command = "import_weights" in runtime_commands
         explicit_export_command = "export_weights" in runtime_commands
         if embedded and not import_requested and not export_requested:
-            checks.append(_check("cpp_embedded_weights_have_no_runtime_weight_port", False, weight_port or import_mode or export_mode, evidence="weights_mem/import/export weight mode tokens"))
+            checks.append(_check("cpp_embedded_weights_have_no_runtime_weight_port", False, weight_port or import_mode or export_mode, artifacts="weights_mem/import/export weight mode tokens"))
             return
         if import_requested or export_requested or bool(row.get("mutable")):
-            checks.append(_check("cpp_weight_m_axi_port_matches_plan", True, weight_port, evidence="weights_mem m_axi interface pragma"))
+            checks.append(_check("cpp_weight_m_axi_port_matches_plan", True, weight_port, artifacts="weights_mem m_axi interface pragma"))
             # Weight import/export handlers are available modes in the generated
             # training top.  Their presence does not mean a transfer was
             # requested for this run.  Validate required command handlers when
             # runtime_modes/runtime.sequence requests them, but never fail merely
             # because optional handlers are present and unused.
             if explicit_import_command:
-                checks.append(_check("cpp_weight_import_mode_matches_plan", True, import_mode, evidence="FPGAI_MODE_IMPORT_WEIGHTS or mode 1 import_weights"))
+                checks.append(_check("cpp_weight_import_mode_matches_plan", True, import_mode, artifacts="FPGAI_MODE_IMPORT_WEIGHTS or mode 1 import_weights"))
             if explicit_export_command:
-                checks.append(_check("cpp_weight_export_mode_matches_plan", True, export_mode, evidence="FPGAI_MODE_EXPORT_WEIGHTS or export_weights"))
+                checks.append(_check("cpp_weight_export_mode_matches_plan", True, export_mode, artifacts="FPGAI_MODE_EXPORT_WEIGHTS or export_weights"))
         return
 
     if role_u == "gradients":
@@ -1106,24 +1106,24 @@ def _append_source_aux_role_checks(checks: list[dict[str, Any]], source: str, ro
         grad_mode = "FPGAI_MODE_EXPORT_GRADIENTS" in source or "export_gradients" in source
         grad_tiled = "gradient_export_tile" in source or "gradient export tiled" in source
         if not export_requested:
-            checks.append(_check("cpp_gradient_export_path_absent_when_not_requested", False, grad_port or grad_mode, evidence="gradients_mem/export_gradients"))
+            checks.append(_check("cpp_gradient_export_path_absent_when_not_requested", False, grad_port or grad_mode, artifacts="gradients_mem/export_gradients"))
             return
-        checks.append(_check("cpp_gradient_export_mode_matches_plan", True, grad_mode and "gradients_mem" in source, evidence="FPGAI_MODE_EXPORT_GRADIENTS/export_gradients and gradients_mem"))
+        checks.append(_check("cpp_gradient_export_mode_matches_plan", True, grad_mode and "gradients_mem" in source, artifacts="FPGAI_MODE_EXPORT_GRADIENTS/export_gradients and gradients_mem"))
         if interface == "m_axi":
-            checks.append(_check("cpp_gradient_m_axi_port_matches_plan", True, grad_port, evidence="gradients_mem m_axi interface pragma"))
+            checks.append(_check("cpp_gradient_m_axi_port_matches_plan", True, grad_port, artifacts="gradients_mem m_axi interface pragma"))
         if kind == "m_axi_tiled":
-            checks.append(_check("cpp_gradient_tiled_export_matches_plan", True, grad_tiled, evidence="gradient_export_tile or tiled gradient export comment"))
+            checks.append(_check("cpp_gradient_tiled_export_matches_plan", True, grad_tiled, artifacts="gradient_export_tile or tiled gradient export comment"))
         return
 
     if role_u == "optimizer_state":
         opt_port = "optimizer_state_mem" in source and "m_axi port=optimizer_state_mem" in source
         opt_mode = "FPGAI_MODE_EXPORT_OPTIMIZER_STATE" in source or "export_optimizer_state" in source or "mode 9" in source
         if not export_requested:
-            checks.append(_check("cpp_optimizer_state_export_path_absent_when_not_requested", False, opt_port or opt_mode, evidence="optimizer_state_mem/export_optimizer_state"))
+            checks.append(_check("cpp_optimizer_state_export_path_absent_when_not_requested", False, opt_port or opt_mode, artifacts="optimizer_state_mem/export_optimizer_state"))
             return
-        checks.append(_check("cpp_optimizer_state_export_mode_matches_plan", True, opt_mode and "optimizer_state_mem" in source, evidence="FPGAI_MODE_EXPORT_OPTIMIZER_STATE/export_optimizer_state and optimizer_state_mem"))
+        checks.append(_check("cpp_optimizer_state_export_mode_matches_plan", True, opt_mode and "optimizer_state_mem" in source, artifacts="FPGAI_MODE_EXPORT_OPTIMIZER_STATE/export_optimizer_state and optimizer_state_mem"))
         if interface == "m_axi":
-            checks.append(_check("cpp_optimizer_state_m_axi_port_matches_plan", True, opt_port, evidence="optimizer_state_mem m_axi interface pragma"))
+            checks.append(_check("cpp_optimizer_state_m_axi_port_matches_plan", True, opt_port, artifacts="optimizer_state_mem m_axi interface pragma"))
         return
 
 
@@ -1146,7 +1146,7 @@ def _append_runtime_aux_role_checks(checks: list[dict[str, Any]], names: set[str
         expected = bool(row.get("export_requested"))
     else:
         expected = bool(row.get("requested"))
-    checks.append(_check(f"runtime_{role}_buffer_matches_plan", expected, buffer_name in names, evidence=f"runtime_package/buffer_plan.json contains {buffer_name}"))
+    checks.append(_check(f"runtime_{role}_buffer_matches_plan", expected, buffer_name in names, artifacts=f"runtime_package/buffer_plan.json contains {buffer_name}"))
 
 
 def _append_runtime_io_checks(checks: list[dict[str, Any]], manifest: Mapping[str, Any], role: str, row: Mapping[str, Any]) -> None:
@@ -1162,9 +1162,9 @@ def _append_runtime_io_checks(checks: list[dict[str, Any]], manifest: Mapping[st
         if expected_interface == "m_axi"
         else f"dma_stream_{'import' if role == 'inputs' else 'export'}_{'tiled' if bool(row.get('tiled')) or expected_policy == 'tiled' else 'full'}"
     )
-    checks.append(_check(f"runtime_{prefix}_interface_matches_plan", True, _normalise(entry.get("interface")) == expected_interface, evidence="runtime_package/package_manifest.json runtime_io"))
-    checks.append(_check(f"runtime_{prefix}_transport_matches_plan", True, _normalise(entry.get("transport")) == expected_transport, evidence="runtime_package/package_manifest.json runtime_io"))
-    checks.append(_check(f"runtime_{prefix}_resolved_movement_matches_plan", True, str(entry.get("resolved")) == expected_resolved, evidence="runtime_package/package_manifest.json runtime_io.resolved"))
+    checks.append(_check(f"runtime_{prefix}_interface_matches_plan", True, _normalise(entry.get("interface")) == expected_interface, artifacts="runtime_package/package_manifest.json runtime_io"))
+    checks.append(_check(f"runtime_{prefix}_transport_matches_plan", True, _normalise(entry.get("transport")) == expected_transport, artifacts="runtime_package/package_manifest.json runtime_io"))
+    checks.append(_check(f"runtime_{prefix}_resolved_movement_matches_plan", True, str(entry.get("resolved")) == expected_resolved, artifacts="runtime_package/package_manifest.json runtime_io.resolved"))
 
 def _movement_source_checks(root: Path, data_payload: Mapping[str, Any]) -> list[dict[str, Any]]:
     source = _read_all_hls_source(root)
@@ -1173,7 +1173,7 @@ def _movement_source_checks(root: Path, data_payload: Mapping[str, Any]) -> list
     checks: list[dict[str, Any]] = []
 
     if source:
-        # Primary input/output interface evidence must come from the generated
+        # Primary input/output interface artifacts must come from the generated
         # top implementation only.  The full HLS tree includes tb.cpp extern
         # declarations and helper streams that are not synthesized ports.
         io_source = top_source or ""
@@ -1182,7 +1182,7 @@ def _movement_source_checks(root: Path, data_payload: Mapping[str, Any]) -> list
         for role in ("labels", "weights", "gradients", "optimizer_state"):
             _append_source_aux_role_checks(checks, source, role, tensors.get(role, {}))
     else:
-        checks.append({"name": "cpp_source_available", "expected": True, "actual": False, "passed": False, "evidence": "hls/**/*.cpp|h|hpp"})
+        checks.append({"name": "cpp_source_available", "expected": True, "actual": False, "passed": False, "artifacts": "hls/**/*.cpp|h|hpp"})
     return checks
 
 
@@ -1196,12 +1196,12 @@ def _movement_runtime_checks(root: Path, data_payload: Mapping[str, Any]) -> lis
         for role in ("labels", "weights", "gradients", "optimizer_state"):
             _append_runtime_aux_role_checks(checks, names, role, tensors.get(role, {}))
     else:
-        checks.append({"name": "runtime_buffer_plan_available", "expected": True, "actual": False, "passed": False, "evidence": "runtime_package/buffer_plan.json"})
+        checks.append({"name": "runtime_buffer_plan_available", "expected": True, "actual": False, "passed": False, "artifacts": "runtime_package/buffer_plan.json"})
     if manifest:
         _append_runtime_io_checks(checks, manifest, "inputs", tensors.get("inputs", {}))
         _append_runtime_io_checks(checks, manifest, "outputs", tensors.get("outputs", {}))
     else:
-        checks.append({"name": "runtime_package_manifest_available", "expected": True, "actual": False, "passed": False, "evidence": "runtime_package/package_manifest.json"})
+        checks.append({"name": "runtime_package_manifest_available", "expected": True, "actual": False, "passed": False, "artifacts": "runtime_package/package_manifest.json"})
     return checks
 
 
@@ -1210,14 +1210,14 @@ def _movement_vivado_checks(root: Path, transfer_payload: Mapping[str, Any]) -> 
     req = transfer_payload.get("requirements", {}) if isinstance(transfer_payload.get("requirements", {}), Mapping) else {}
     checks: list[dict[str, Any]] = []
     if not vivado:
-        checks.append({"name": "vivado_bd_validation_available", "expected": True, "actual": False, "passed": False, "evidence": "reports/vivado_bd_validation.json"})
+        checks.append({"name": "vivado_bd_validation_available", "expected": True, "actual": False, "passed": False, "artifacts": "reports/vivado_bd_validation.json"})
         return checks
     if vivado.get("status") == "not_requested":
-        checks.append({"name": "vivado_not_requested_skips_interface_check", "expected": True, "actual": True, "passed": True, "evidence": "build.stages.vivado_project=false"})
+        checks.append({"name": "vivado_not_requested_skips_interface_check", "expected": True, "actual": True, "passed": True, "artifacts": "build.stages.vivado_project=false"})
         return checks
     bd_checks = vivado.get("checks", {}) if isinstance(vivado.get("checks", {}), Mapping) else {}
-    checks.append(_check("vivado_axi_dma_requirement_matches_transfer_plan", bool(req.get("axi_dma")), bool(bd_checks.get("axi_dma_required")), evidence="vivado_bd_validation.checks.axi_dma_required"))
-    checks.append(_check("vivado_m_axi_requirement_matches_transfer_plan", bool(req.get("m_axi")), bool(bd_checks.get("m_axi_memory_required")), evidence="vivado_bd_validation.checks.m_axi_memory_required"))
+    checks.append(_check("vivado_axi_dma_requirement_matches_transfer_plan", bool(req.get("axi_dma")), bool(bd_checks.get("axi_dma_required")), artifacts="vivado_bd_validation.checks.axi_dma_required"))
+    checks.append(_check("vivado_m_axi_requirement_matches_transfer_plan", bool(req.get("m_axi")), bool(bd_checks.get("m_axi_memory_required")), artifacts="vivado_bd_validation.checks.m_axi_memory_required"))
     return checks
 
 
@@ -1226,7 +1226,7 @@ def _movement_board_fit_checks(root: Path, transfer_payload: Mapping[str, Any]) 
     req = transfer_payload.get("requirements", {}) if isinstance(transfer_payload.get("requirements", {}), Mapping) else {}
     checks: list[dict[str, Any]] = []
     if not board_fit:
-        checks.append({"name": "board_fit_available", "expected": True, "actual": False, "passed": False, "evidence": "reports/board_fit.json"})
+        checks.append({"name": "board_fit_available", "expected": True, "actual": False, "passed": False, "artifacts": "reports/board_fit.json"})
         return checks
     iface = ((board_fit.get("derived_requirements") or {}).get("interface_requirements") or {}) if isinstance(board_fit.get("derived_requirements"), Mapping) else {}
     checks.append({
@@ -1234,14 +1234,14 @@ def _movement_board_fit_checks(root: Path, transfer_payload: Mapping[str, Any]) 
         "expected": True,
         "actual": not bool(req.get("axi_dma")) or int(iface.get("dma_count") or 0) >= 1,
         "passed": not bool(req.get("axi_dma")) or int(iface.get("dma_count") or 0) >= 1,
-        "evidence": "board_fit.derived_requirements.interface_requirements.dma_count",
+        "artifacts": "board_fit.derived_requirements.interface_requirements.dma_count",
     })
     checks.append({
         "name": "board_fit_counts_m_axi_when_transfer_plan_requires_it",
         "expected": bool(req.get("m_axi")),
         "actual": int(iface.get("m_axi_bundles") or 0) >= 1,
         "passed": (not bool(req.get("m_axi"))) or int(iface.get("m_axi_bundles") or 0) >= 1,
-        "evidence": "board_fit.derived_requirements.interface_requirements.m_axi_bundles",
+        "artifacts": "board_fit.derived_requirements.interface_requirements.m_axi_bundles",
     })
     return checks
 
@@ -1251,7 +1251,7 @@ def emit_movement_contract_validation(
     *,
     data_movement_artifacts: Mapping[str, Any] | None = None,
 ) -> dict[str, str]:
-    """Cross-check Sprint-P movement reports against generated artifacts.
+    """Cross-check movement reports against generated artifacts.
 
     This is still structural validation. It proves the compiler artifacts agree
     with the movement contract; it does not claim HLS synthesis, Vivado
@@ -1277,7 +1277,7 @@ def emit_movement_contract_validation(
             "name": str(check.get("name")),
             "expected": check.get("expected"),
             "actual": check.get("actual"),
-            "evidence": check.get("evidence"),
+            "artifacts": check.get("artifacts"),
         }
         for section, checks in sections.items()
         for check in checks
@@ -1303,7 +1303,7 @@ def emit_movement_contract_validation(
         },
         "failed_checks": failed_checks,
         "checks": sections,
-        "truth_boundary": "Static agreement check only; real transfer execution requires HLS/Vivado/bitstream/board runtime truth artifacts.",
+        "validation_boundary": "Static agreement check only; real transfer execution requires HLS/Vivado/bitstream/board runtime validation artifacts.",
     }
     json_path = reports_dir / "movement_contract_validation.json"
     md_path = reports_dir / "movement_contract_validation.md"
@@ -1321,12 +1321,12 @@ def emit_movement_contract_validation(
         lines.extend(["", f"### {section}"])
         for check in checks:
             marker = "PASS" if bool(check.get("passed")) else "FAIL"
-            lines.append(f"- **{marker}** {check.get('name')}: expected=`{check.get('expected')}` actual=`{check.get('actual')}` evidence=`{check.get('evidence')}`")
+            lines.append(f"- **{marker}** {check.get('name')}: expected=`{check.get('expected')}` actual=`{check.get('actual')}` artifacts=`{check.get('artifacts')}`")
     if failed_checks:
         lines.extend(["", "## Blocking failures"])
         for item in failed_checks:
-            lines.append(f"- `{item['section']}.{item['name']}` expected=`{item['expected']}` actual=`{item['actual']}` evidence=`{item['evidence']}`")
-    lines.extend(["", "## Truth boundary", str(payload["truth_boundary"])])
+            lines.append(f"- `{item['section']}.{item['name']}` expected=`{item['expected']}` actual=`{item['actual']}` artifacts=`{item['artifacts']}`")
+    lines.extend(["", "## Validation boundary", str(payload["validation_boundary"])])
     md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return {
         "movement_contract_validation_json": str(json_path),

@@ -40,7 +40,7 @@ def _loss_validation_payload(
             "status": "not_requested",
             "passed": False,
             "loss_type": loss_type,
-            "truth_boundary": "Cross-entropy validation is only requested when training.loss.type=cross_entropy.",
+            "validation_boundary": "Cross-entropy validation is only requested when training.loss.type=cross_entropy.",
         }
 
     ref_dir = Path(out_dir) / "training_reference"
@@ -134,8 +134,8 @@ def _loss_validation_payload(
             "dlogits_ref_exists": _exists(dlogits_ref),
         },
         "comparisons": comparisons,
-        "truth_boundary": (
-            "Cross-entropy is paper-safe only when generated/HLS/runtime loss-gradient evidence is compared with the stable-softmax Python reference. "
+        "validation_boundary": (
+            "Cross-entropy is validation-qualified only when generated/HLS/runtime loss-gradient artifacts is compared with the stable-softmax Python reference. "
             "Reference artifacts without captured generated outputs are artifact_missing, never a pass."
         ),
     }
@@ -190,7 +190,7 @@ def _training_tiled_io_validation_payload(
             "requested": False,
             "status": "not_requested",
             "passed": False,
-            "truth_boundary": "Training tiled-I/O validation is only requested when data_movement inputs/labels/outputs use policy=tiled.",
+            "validation_boundary": "Training tiled-I/O validation is only requested when data_movement inputs/labels/outputs use policy=tiled.",
         }
 
     interfaces = []
@@ -317,8 +317,8 @@ def _training_tiled_io_validation_payload(
             "weights_after_ref_exists": _exists(refs["weights_after"]),
         },
         "comparisons": comparisons,
-        "truth_boundary": (
-            "Training tiled I/O is paper-safe only when tiled input/label movement feeds the compute path and captured tiled outputs, gradients, and weights-after are compared against Python reference artifacts. "
+        "validation_boundary": (
+            "Training tiled I/O is validation-qualified only when tiled input/label movement feeds the compute path and captured tiled outputs, gradients, and weights-after are compared against Python reference artifacts. "
             "Generated tiled interfaces without captures are artifact_missing, never a pass."
         ),
     }
@@ -450,8 +450,8 @@ def _batch_accumulation_validation_payload(
             'accumulated_gradients': gradients_compare,
             'training_step': _training_compare_payload(training_compare_result),
         },
-        'truth_boundary': (
-            'Batch accumulation is paper-safe only when accumulated gradient and weights-after captures are compared against the Python schedule reference. '
+        'validation_boundary': (
+            'Batch accumulation is validation-qualified only when accumulated gradient and weights-after captures are compared against the Python schedule reference. '
             'A generated reference without captured HLS/runtime artifacts is recorded as artifact_missing, never as a pass.'
         ),
     }

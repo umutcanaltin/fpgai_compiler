@@ -80,7 +80,7 @@ def _scan_source_types(hls_dir: Path | None, bits: Mapping[str, Any]) -> Dict[st
         "bias": f"ap_fixed<{int(bits.get('bias', 0))},",
         "accum": f"ap_fixed<{int(bits.get('accum', 0))},",
     }
-    evidence = {role: (needle in text) for role, needle in expected.items() if needle != "ap_fixed<0,"}
+    artifacts = {role: (needle in text) for role, needle in expected.items() if needle != "ap_fixed<0,"}
     ap_fixed_typedefs = re.findall(r"typedef\s+ap_fixed<[^>]+>\s+\w+;", text)
     float_typedefs = re.findall(r"typedef\s+float\s+\w+;", text)
     return {
@@ -88,8 +88,8 @@ def _scan_source_types(hls_dir: Path | None, bits: Mapping[str, Any]) -> Dict[st
         "type_header_exists": bool(type_header is not None and type_header.is_file()),
         "source_files_scanned": [str(p) for p in source_files if p.is_file()],
         "expected_ap_fixed_patterns": expected,
-        "expected_patterns_present": evidence,
-        "type_changed": any(evidence.values()) or bool(ap_fixed_typedefs),
+        "expected_patterns_present": artifacts,
+        "type_changed": any(artifacts.values()) or bool(ap_fixed_typedefs),
         "ap_fixed_typedef_count": len(ap_fixed_typedefs),
         "float_typedef_count": len(float_typedefs),
     }
@@ -139,18 +139,18 @@ def _precision_sweep_status(sweep_result: Any) -> Dict[str, Any]:
     }
 
 
-def _hls_claim_status(hls_truth_artifacts: Any) -> Dict[str, Any]:
-    estimate_path = _artifact_path(hls_truth_artifacts, "estimate_vs_hls_json")
+def _hls_claim_status(hls_validation_artifacts: Any) -> Dict[str, Any]:
+    estimate_path = _artifact_path(hls_validation_artifacts, "estimate_vs_hls_json")
     estimate = _read_json(estimate_path)
     if estimate is None:
         return {
             "estimate_vs_hls_status": "artifact_missing",
-            "paper_safe_hls_claim": False,
+            "validation_ready_hls_claim": False,
             "estimate_vs_hls_json": str(estimate_path) if estimate_path else None,
         }
     return {
         "estimate_vs_hls_status": estimate.get("status"),
-        "paper_safe_hls_claim": bool(estimate.get("paper_safe", False)) and estimate.get("status") == "compared",
+        "validation_ready_hls_claim": bool(estimate.get("validation_ready", False)) and estimate.get("status") == "compared",
         "estimate_vs_hls_json": str(estimate_path),
     }
 
@@ -164,7 +164,7 @@ def _markdown(payload: Mapping[str, Any]) -> str:
         "# Precision effect report",
         "",
         f"Status: `{payload.get('status')}`",
-        f"Paper-safe HLS precision claim: `{resource.get('paper_safe_hls_claim')}`",
+        f"Validation-qualified HLS precision claim: `{resource.get('validation_ready_hls_claim')}`",
         "",
         "## Resolved precision",
         "",
@@ -175,21 +175,21 @@ def _markdown(payload: Mapping[str, Any]) -> str:
         f"- Bias bits: `{precision.get('bits', {}).get('bias')}`",
         f"- Accumulator bits: `{precision.get('bits', {}).get('accum')}`",
         "",
-        "## Generated C++ evidence",
+        "## Generated C++ artifacts",
         "",
         f"- Type header exists: `{artifacts.get('type_header_exists')}`",
         f"- Type changed/materialized: `{artifacts.get('type_changed')}`",
         f"- ap_fixed typedef count: `{artifacts.get('ap_fixed_typedef_count')}`",
         "",
-        "## Numeric/resource evidence",
+        "## Numeric/resource artifacts",
         "",
         f"- Numeric metrics status: `{numeric.get('status')}`",
         f"- Precision sweep status: `{payload.get('precision_sweep', {}).get('status')}`",
         f"- Estimate-vs-HLS status: `{resource.get('estimate_vs_hls_status')}`",
         "",
-        "## Truth boundary",
+        "## Validation boundary",
         "",
-        "Precision is considered generated/materialized when the resolved layout and generated C++ types agree. Real HLS resource/timing claims are paper-safe only when estimate_vs_hls is compared against parsed HLS reports.",
+        "Precision is considered generated/materialized when the resolved layout and generated C++ types agree. Real HLS resource/timing records are validation-qualified only when estimate_vs_hls is compared against parsed HLS reports.",
         "",
     ]
     return "\n".join(lines)
@@ -203,7 +203,7 @@ def emit_precision_effect_reports(
     precision_layout_artifacts: Mapping[str, Any] | None,
     quant_result: Any = None,
     sweep_result: Any = None,
-    hls_truth_artifacts: Any = None,
+    hls_validation_artifacts: Any = None,
 ) -> PrecisionEffectArtifacts:
     out = Path(out_dir)
     reports = out / "reports"
@@ -217,7 +217,7 @@ def emit_precision_effect_reports(
     generated = _scan_source_types(Path(hls_dir) if hls_dir is not None else None, bits)
     numeric = _quant_metrics(quant_result)
     sweep = _precision_sweep_status(sweep_result)
-    resource = _hls_claim_status(hls_truth_artifacts)
+    resource = _hls_claim_status(hls_validation_artifacts)
 
     status = "validated" if layout and generated.get("type_changed") else "artifact_missing"
     payload: Dict[str, Any] = {
@@ -239,10 +239,10 @@ def emit_precision_effect_reports(
             "hls_available": resource.get("estimate_vs_hls_status") == "compared",
             **resource,
         },
-        "truth_boundary": {
+        "validation_boundary": {
             "generated_precision_materialized": bool(generated.get("type_changed")),
             "numeric_metrics_required_for_accuracy_claim": numeric.get("status") == "available",
-            "paper_safe_hls_claim_requires_estimate_vs_hls_compared": True,
+            "validation_ready_hls_claim_requires_estimate_vs_hls_compared": True,
         },
     }
 

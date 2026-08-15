@@ -61,7 +61,7 @@ class ResultStore:
         self.plots_dir.mkdir(parents=True, exist_ok=True)
 
     def load_records(self) -> List[Dict[str, Any]]:
-        # JSONL is the append-only source of truth while a sweep is running.
+        # JSONL is the append-only source of validation while a sweep is running.
         # results.json is a materialized view and may lag behind during append.
         if self.jsonl_path.exists():
             rows = []

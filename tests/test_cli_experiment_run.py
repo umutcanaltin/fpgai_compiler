@@ -4,14 +4,14 @@ import sys
 import pytest
 
 from fpgai.cli import main as cli_main
-from fpgai.experiments.paper_runner import run_experiment_from_config
+from fpgai.experiments.benchmark_runner import run_experiment_from_config
 
 
 def test_experiment_run_dry_run_writes_manifest(tmp_path, monkeypatch):
-    config = Path("configs/experiments/arxiv_paper.yml")
-    assert config.exists(), "configs/experiments/arxiv_paper.yml is missing"
+    config = Path("configs/experiments/benchmark_suite.yml")
+    assert config.exists(), "configs/experiments/benchmark_suite.yml is missing"
 
-    out = tmp_path / "paper_experiment"
+    out = tmp_path / "benchmark"
 
     monkeypatch.setattr(
         sys,
@@ -42,7 +42,7 @@ def test_experiment_run_dry_run_writes_manifest(tmp_path, monkeypatch):
     assert status.exists()
 
     data = json.loads(manifest.read_text())
-    assert data["kind"] == "paper_experiment_run"
+    assert data["kind"] == "benchmark_run"
     assert data["dry_run"] is True
     assert "items" in data
     assert len(data["items"]) > 0
@@ -53,11 +53,11 @@ def test_experiment_run_propagates_child_sweep_failed_count(tmp_path):
     sweep_cfg = tmp_path / "toy_sweep.yml"
     sweep_cfg.write_text("name: toy_sweep\n")
 
-    experiment_cfg = tmp_path / "paper.yml"
+    experiment_cfg = tmp_path / "benchmark.yml"
     experiment_cfg.write_text(
         f"""
 version: 1
-paper:
+benchmark:
   title: Toy
   stage: test
 inputs:
@@ -82,7 +82,7 @@ inputs:
         )
         return 0
 
-    out_dir = tmp_path / "paper_out"
+    out_dir = tmp_path / "benchmark_out"
     rc = run_experiment_from_config(
         str(experiment_cfg),
         out_dir=str(out_dir),

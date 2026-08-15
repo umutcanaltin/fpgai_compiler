@@ -1,0 +1,40 @@
+version: 1
+project:
+  out_dir: build/mixed_external_residual_cnn
+  clean: true
+model:
+  path: models/mixed_external_residual_cnn.onnx
+pipeline:
+  mode: inference
+  outputs: {top_kernel_name: deeplearn}
+operators:
+  supported: [Conv, Relu, ScaleBias, Add]
+numerics:
+  kind: fixed
+  defaults:
+    activation: {type: ap_fixed, total_bits: 16, int_bits: 6}
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks: [{name: pl_clk0, target_mhz: 200}]
+build:
+  stages:
+    cpp: true
+    hls_project: true
+    hls_synthesis: false
+    reports: true
+    runtime_package: false
+ecosystem:
+  enabled: true
+  project_root: .
+  package_directories: [examples/packages]
+  strict_discovery: true
+  operator_packages: {enable: [community.scale_bias_operator]}
+  trust: {community.scale_bias_operator: approved_for_reference}
+implementations:
+  enable: [community.scale_bias_hls]
+  operators:
+    community.operator.scale_bias:
+      preferred: [community.scale_bias_hls]
+      allow_fallback: false

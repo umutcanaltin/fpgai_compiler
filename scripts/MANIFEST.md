@@ -29,8 +29,8 @@ Experiment runner scripts replaced by public CLI commands:
 
     python main.py sweep inspect --config configs/sweeps/precision_selection.yml
     python main.py sweep run --config configs/sweeps/precision_selection.yml --out experiments/precision_selection
-    python main.py experiment inspect --config configs/experiments/arxiv_paper.yml
-    python main.py experiment run --config configs/experiments/arxiv_paper.yml --out paper_experiments/arxiv
+    python main.py experiment inspect --config configs/experiments/benchmark_suite.yml
+    python main.py experiment run --config configs/experiments/benchmark_suite.yml --out benchmark_runs/publication
 
 Model-suite utilities moved to:
 

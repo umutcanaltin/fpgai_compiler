@@ -1,9 +1,9 @@
 # FPGAI testing guide
 
-FPGAI uses tests as compiler contracts. Sprint-specific tests may exist during
+FPGAI uses tests as compiler contracts. Feature-specific tests may exist during
 development, but public coverage should be organized around subsystem behavior:
 configuration, memory/data movement resolution, code generation, numeric
-validation, runtime packaging, and paper verification.
+validation, runtime packaging, and benchmark verification.
 
 ## Recommended quick smoke
 

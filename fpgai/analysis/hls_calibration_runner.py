@@ -176,7 +176,7 @@ def _try_build_dataset_from_validation_jsons(
 ) -> dict[str, Any]:
     """Build samples from existing FPGAI validation JSONs if available.
 
-    This is a compatibility bridge for the current Sprint 4/Sprint 5 branch.
+    This is a compatibility bridge for the current estimate-to-calibration artifact formats.
     Some runs print a good Layer-vs-HLS validation table but do not expose that
     same information under compile_plan.layers. This scanner accepts many JSON
     shapes and extracts rows containing both estimated/predicted and
@@ -459,7 +459,7 @@ def _compile_plan_to_payload(compile_plan: Any) -> dict[str, Any]:
     else:
         payload = {"raw_compile_plan": raw}
 
-    # The standalone Sprint 5 dataset builder expects one of these keys.
+    # The standalone calibration dataset builder expects one of these keys.
     if not any(isinstance(payload.get(k), list) for k in ("layers", "operators", "nodes", "estimates", "operator_estimates", "schedule")):
         extracted = _extract_entries_from_object(compile_plan)
         if extracted:

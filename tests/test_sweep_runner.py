@@ -164,7 +164,7 @@ def test_materialized_sweep_project_out_dir_is_absolute(tmp_path):
 
 
 def test_training_learning_ablation_reports_separate_exposure_and_updates(tmp_path):
-    from fpgai.experiments.report_writer import write_training_learning_ablation_reports
+    from fpgai.reporting.experiment_reports import write_training_learning_ablation_reports
 
     out_dir = tmp_path / "build"
     reports = out_dir / "reports"
@@ -227,7 +227,7 @@ def test_equal_update_budget_sweep_uses_canonical_max_updates_mapping():
 
 
 def test_training_learning_ablation_reports_classify_controls_and_normalize(tmp_path):
-    from fpgai.experiments.report_writer import write_training_learning_ablation_reports
+    from fpgai.reporting.experiment_reports import write_training_learning_ablation_reports
 
     def make_build(name: str, visits: int, updates: int, final_loss: float) -> Path:
         out_dir = tmp_path / name
@@ -282,7 +282,7 @@ def test_training_learning_ablation_reports_classify_controls_and_normalize(tmp_
 
 
 def test_paired_training_batch_ablation_report_keeps_bases_separate(tmp_path):
-    from fpgai.experiments.report_writer import write_paired_training_batch_ablation_reports
+    from fpgai.reporting.experiment_reports import write_paired_training_batch_ablation_reports
 
     fields = [
         "design_name", "comparison_basis", "comparison_role", "batch_size",
@@ -291,7 +291,7 @@ def test_paired_training_batch_ablation_report_keeps_bases_separate(tmp_path):
         "loss_reduction_per_record_visit", "loss_reduction_per_optimizer_update",
         "initial_accuracy", "final_accuracy", "accuracy_delta", "seed_count",
         "replicate_count", "variance_available", "statistical_claim_eligible",
-        "claim_scope", "paper_claim_eligible", "confounders",
+        "claim_scope", "benchmark_eligible", "confounders",
     ]
     dirs = {}
     for basis in ("equal_sample_exposure", "equal_update_budget"):
@@ -312,7 +312,7 @@ def test_paired_training_batch_ablation_report_keeps_bases_separate(tmp_path):
                 "accuracy_delta": 0.2, "seed_count": 1, "replicate_count": 1,
                 "variance_available": False, "statistical_claim_eligible": False,
                 "claim_scope": "small_sample_learning_smoke_only",
-                "paper_claim_eligible": False, "confounders": "small_sample_learning_smoke_only",
+                "benchmark_eligible": False, "confounders": "small_sample_learning_smoke_only",
             })
         dirs[basis] = d
     paths = write_paired_training_batch_ablation_reports(tmp_path / "paired", dirs)
@@ -326,7 +326,7 @@ def test_paired_training_batch_ablation_report_keeps_bases_separate(tmp_path):
 
 
 def test_paired_training_batch_ablation_report_accepts_legacy_summary_without_role(tmp_path):
-    from fpgai.experiments.report_writer import write_paired_training_batch_ablation_reports
+    from fpgai.reporting.experiment_reports import write_paired_training_batch_ablation_reports
 
     legacy_dir = tmp_path / "legacy_equal_updates"
     legacy_dir.mkdir()
@@ -334,7 +334,7 @@ def test_paired_training_batch_ablation_report_accepts_legacy_summary_without_ro
         "design_name", "comparison_basis", "batch_size",
         "record_visits_executed", "optimizer_updates",
         "initial_loss", "final_loss", "initial_accuracy", "final_accuracy",
-        "claim_scope", "paper_claim_eligible",
+        "claim_scope", "benchmark_eligible",
     ]
     with (legacy_dir / "training_learning_ablation_summary.csv").open(
         "w", encoding="utf-8", newline=""
@@ -352,7 +352,7 @@ def test_paired_training_batch_ablation_report_accepts_legacy_summary_without_ro
             "initial_accuracy": 0.0,
             "final_accuracy": 0.1,
             "claim_scope": "small_sample_learning_smoke_only",
-            "paper_claim_eligible": False,
+            "benchmark_eligible": False,
         })
 
     paths = write_paired_training_batch_ablation_reports(

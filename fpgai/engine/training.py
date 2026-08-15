@@ -445,7 +445,7 @@ def _resolve_implementation_stack(raw_cfg: Dict[str, Any], gradient_mechanism: D
     """Normalize implementation provenance without requiring the future plugin runtime.
 
     The contract is intentionally stable across built-in and community implementations.
-    It records selections now; later registry/ABI sprints will validate and instantiate them.
+    It records selections now; later registry/ABI work will validate and instantiate them.
     """
     def selected(path: str, default: str) -> str:
         value = _cfg_get(raw_cfg, path, default)
@@ -479,7 +479,7 @@ def _resolve_implementation_stack(raw_cfg: Dict[str, Any], gradient_mechanism: D
         "toolchain": toolchain,
         "board": board,
         "extension_resolution_status": "built_in_or_declared_selection",
-        "registry_validation_status": "not_available_until_extension_abi_sprint",
+        "registry_validation_status": "not_available_until_extension_abi_support",
     }
 
 

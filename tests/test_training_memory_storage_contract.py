@@ -9,8 +9,8 @@ import yaml
 
 def _load_training_config() -> dict:
     candidates = [
-        Path("paper_experiments/full_pipeline_gate/sprint26_paper_matrix/configs/training_kv260_aggressive_fx8_3.yml"),
-        Path("paper_experiments/full_pipeline_gate/sprint27h_full_rerun/configs_hls/training_kv260_aggressive_fx8_3.yml"),
+        Path("benchmark_runs/full_pipeline_gate/benchmark_matrix/configs/training_kv260_aggressive_fx8_3.yml"),
+        Path("benchmark_runs/full_pipeline_gate/full_hls_validation/configs_hls/training_kv260_aggressive_fx8_3.yml"),
         Path("configs/examples/training_compile_smoke.yml"),
     ]
     for p in candidates:
@@ -27,7 +27,7 @@ def _force_dense_training_model(raw: dict) -> None:
     """Use a Dense-only ONNX graph for DDR tiled mutable training tests.
 
     The default training smoke config is CNN-based in some repo snapshots.
-    Sprint 29J intentionally implements Dense DDR tiled mutable training first; Sprint 29K extends the same path to Conv graphs,
+    Dense DDR tiled mutable training is implemented first; the same path extends to Conv graphs,
     so the Dense positive compile test still uses a Dense-only model.
     """
     candidates = [

@@ -91,7 +91,7 @@ def test_model_compatibility_scanner_is_honest_about_unsupported_ops() -> None:
     assert contract["all_layers_have_knob_contract"] is True
     dense_precision = contract["layers"][0]["knobs"]["precision"]
     assert dense_precision["status"] == "applied"
-    assert "precision_layout.json" in dense_precision["evidence"]
+    assert "precision_layout.json" in dense_precision["artifacts"]
 
 
 def test_compile_emits_model_compatibility_and_layer_knob_contract(tmp_path: Path) -> None:
@@ -134,7 +134,7 @@ def test_compile_emits_model_compatibility_and_layer_knob_contract(tmp_path: Pat
         assert set(knob_contract["knobs"]).issubset(set(layer["knobs"]))
         for knob_name, knob in layer["knobs"].items():
             assert knob["status"] in {"applied", "not_applicable", "not_requested", "compiler_default", "rejected"}
-            assert "evidence" in knob
+            assert "artifacts" in knob
 
 
 def test_priority_layer_registry_marks_all_requested_layers_supported() -> None:

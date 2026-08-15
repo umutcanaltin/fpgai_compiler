@@ -17,7 +17,7 @@ from dataclasses import replace
 from .design_matrix import DesignPoint, expand_design_matrix, load_sweep_config, render_template
 from .config_materializer import materialize_design_config
 from .result_store import ResultStore, get_git_commit
-from .report_writer import (
+from fpgai.reporting.experiment_reports import (
     write_paired_training_batch_ablation_reports,
     write_summary_markdown,
     write_training_learning_ablation_reports,

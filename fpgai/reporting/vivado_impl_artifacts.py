@@ -245,7 +245,7 @@ def json_number_from_files(design_dir: Path, key_sets: list[set[str]], prefer_na
             penalty += 100
         if any(name in s for name in prefer_names):
             penalty -= 50
-        if any(name in s for name in ("vivado", "impl", "summary", "evidence", "result", "metrics")):
+        if any(name in s for name in ("vivado", "impl", "summary", "artifacts", "result", "metrics")):
             penalty -= 10
         return (penalty, len(s), s)
 
@@ -306,29 +306,29 @@ def collect_row(exp: Path, design_dir: Path) -> ImplRow:
         if row.power_w is not None:
             break
 
-    # JSON fallback, but only from likely summary/evidence files, not broad HLS internals.
+    # JSON fallback, but only from likely summary/artifacts files, not broad HLS internals.
     if row.lut is None:
-        v = json_number_from_files(design_dir, [{"lut", "luts", "vivado_lut", "lut_used", "used_lut"}], ("vivado", "summary", "evidence"))
+        v = json_number_from_files(design_dir, [{"lut", "luts", "vivado_lut", "lut_used", "used_lut"}], ("vivado", "summary", "artifacts"))
         if isinstance(v, (int, float)) and v > 10:
             row.lut = int(v)
     if row.ff is None:
-        v = json_number_from_files(design_dir, [{"ff", "ffs", "vivado_ff", "ff_used", "used_ff"}], ("vivado", "summary", "evidence"))
+        v = json_number_from_files(design_dir, [{"ff", "ffs", "vivado_ff", "ff_used", "used_ff"}], ("vivado", "summary", "artifacts"))
         if isinstance(v, (int, float)) and v > 10:
             row.ff = int(v)
     if row.bram is None:
-        v = json_number_from_files(design_dir, [{"bram", "brams", "vivado_bram", "bram_used", "used_bram"}], ("vivado", "summary", "evidence"))
+        v = json_number_from_files(design_dir, [{"bram", "brams", "vivado_bram", "bram_used", "used_bram"}], ("vivado", "summary", "artifacts"))
         if isinstance(v, (int, float)):
             row.bram = int(round(float(v)))
     if row.dsp is None:
-        v = json_number_from_files(design_dir, [{"dsp", "dsps", "vivado_dsp", "dsp_used", "used_dsp"}], ("vivado", "summary", "evidence"))
+        v = json_number_from_files(design_dir, [{"dsp", "dsps", "vivado_dsp", "dsp_used", "used_dsp"}], ("vivado", "summary", "artifacts"))
         if isinstance(v, (int, float)):
             row.dsp = int(round(float(v)))
     if row.wns_ns is None:
-        v = json_number_from_files(design_dir, [{"wns", "wns_ns", "worst_negative_slack", "timing_wns_ns"}], ("vivado", "summary", "evidence"))
+        v = json_number_from_files(design_dir, [{"wns", "wns_ns", "worst_negative_slack", "timing_wns_ns"}], ("vivado", "summary", "artifacts"))
         if isinstance(v, (int, float)):
             row.wns_ns = float(v)
     if row.power_w is None:
-        v = json_number_from_files(design_dir, [{"power_w", "total_power_w", "total_on_chip_power_w", "vivado_power_w"}], ("vivado", "summary", "evidence"))
+        v = json_number_from_files(design_dir, [{"power_w", "total_power_w", "total_on_chip_power_w", "vivado_power_w"}], ("vivado", "summary", "artifacts"))
         if isinstance(v, (int, float)) and v > 0:
             row.power_w = float(v)
 

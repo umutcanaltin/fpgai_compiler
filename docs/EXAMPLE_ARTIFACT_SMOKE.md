@@ -1,6 +1,6 @@
 # Example artifact smoke validation
 
-Artifact smoke validation checks FPGAI compile output directories after examples are compiled. It does not run Vitis HLS, Vivado, or FPGA board execution. It reads generated artifacts and truth reports, then separates compiler-estimated evidence from HLS/Vivado/bitstream/FPGA truth.
+Artifact smoke validation checks FPGAI compile output directories after examples are compiled. It does not run Vitis HLS, Vivado, or FPGA board execution. It reads generated artifacts and validation reports, then separates compiler-estimated artifacts from HLS/Vivado/bitstream/FPGA validation.
 
 ## Batch 2 smoke command
 
@@ -21,17 +21,17 @@ For normal compiler-estimated examples, the audit expects:
 - `manifest.json`
 - `hls/` and `hls/src/`
 - `runtime_package/package_manifest.json` when runtime package is requested
-- config, generated C++, data movement, movement validation, board-fit, HLS truth, Vivado truth, and bitstream truth reports
+- config, generated C++, data movement, movement validation, board-fit, HLS validation, Vivado validation, and bitstream validation reports
 
 When `build.stages.vivado_project=true`, the audit also requires:
 
 - `vivado/project.tcl`
 - `vivado/bd.tcl`
 
-## Truth boundary
+## Validation boundary
 
-A passed artifact smoke report proves generated artifacts and reports are structurally present and internally consistent. It does not prove HLS synthesis, Vivado implementation, bitstream generation, or real FPGA execution unless the corresponding truth report has real evidence.
+A passed artifact smoke report proves generated artifacts and reports are structurally present and internally consistent. It does not prove HLS synthesis, Vivado implementation, bitstream generation, or real FPGA execution unless the corresponding validation report has real artifacts.
 
-## Training truth reports
+## Training validation reports
 
-Training compile outputs must emit the same HLS/Vivado/bitstream truth-status report files as inference outputs. If the stage is not requested, the report should exist with `not_requested` or equivalent non-paper-safe status rather than being missing.
+Training compile outputs must emit the same HLS/Vivado/bitstream validation-status report files as inference outputs. If the stage is not requested, the report should exist with `not_requested` or equivalent non-benchmark-safe status rather than being missing.

@@ -2,7 +2,7 @@ from pathlib import Path
 import re
 
 
-RUN_ROOT = Path("paper_experiments/full_pipeline_gate/sprint26_paper_matrix/runs")
+RUN_ROOT = Path("benchmark_runs/full_pipeline_gate/benchmark_matrix/runs")
 
 
 def _source(design: str) -> str:
@@ -19,7 +19,7 @@ def _types(design: str) -> str:
     return p.read_text()
 
 
-def test_paper_tiling_designs_emit_distinct_dense_tiles_if_generated() -> None:
+def test_benchmark_tiling_designs_emit_distinct_dense_tiles_if_generated() -> None:
     designs = {
         "kv260_tiling_small": ("1", "1"),
         "kv260_tiling_medium": ("2", "2"),

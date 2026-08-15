@@ -193,7 +193,7 @@ def build_precision_layout(
 ) -> Dict[str, Any]:
     """Build one shared precision/storage/communication layout.
 
-    This is the central truth used by codegen, runtime packing, estimators,
+    This is the central validation used by codegen, runtime packing, estimators,
     and reports. Precision must affect not only compute types, but also
     activation/weight/bias storage and AXIS/AXI transfer sizes.
     """

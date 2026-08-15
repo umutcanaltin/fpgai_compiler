@@ -8,7 +8,7 @@ from typing import Any, Dict
 
 from fpgai.config.access import get_path
 from fpgai.backends.vivado.run_bridge import run_vivado_bridge_flow
-from fpgai.paper.experiment_artifacts import emit_experiment_artifact_reports
+from fpgai.benchmark.experiment_artifacts import emit_experiment_artifact_reports
 from fpgai.runtime.package import emit_runtime_package
 from fpgai.util.fs import write_text
 
@@ -189,6 +189,9 @@ def _run_yaml_requested_vivado_bridge(
         run_impl = False
         run_bitstream = False
 
+    target_clock_mhz = float(
+        _cfg_get(raw, "targets.platform.clocks.0.target_mhz", 100.0) or 100.0
+    )
     payload = run_vivado_bridge_flow(
         out_dir,
         board=board,
@@ -197,6 +200,7 @@ def _run_yaml_requested_vivado_bridge(
         run_vivado_impl=run_impl,
         run_bitstream=run_bitstream,
         timeout_sec=_vivado_bridge_timeout_sec(raw),
+        target_clock_mhz=target_clock_mhz,
     )
     _update_manifest_after_vivado_bridge(out_dir, payload)
     if build_stages.get("runtime_package"):

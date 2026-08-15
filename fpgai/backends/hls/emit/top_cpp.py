@@ -1196,7 +1196,7 @@ def emit_top_cpp(
                 ">("
                 f"{current_buffer}, "
                 f"{output_buffer}, "
-                f"W{parameter_index}, "
+                f"reinterpret_cast<const {weight_type}*>(W{parameter_index}), "
                 f"B{parameter_index}"
                 ");"
             )

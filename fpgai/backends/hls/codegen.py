@@ -833,16 +833,36 @@ def emit_hls_stub(
         )
 
         if graph_has_inference_body:
-            top_src = emit_top_cpp(
-                graph=graph,
-                top_name=top_name,
-                weights_mode=weights_mode,
-                compile_plan=compile_plan,
-                memory_plan=memory_plan,
-                communication_plan=communication_plan,
-                raw_cfg=hls_options.get("raw_cfg", {}) or {},
-                external_composition_plan=external_composition_plan,
-            )
+            from fpgai.ir.liveness import analyze_tensor_liveness
+            tensor_liveness = analyze_tensor_liveness(graph)
+            if bool(tensor_liveness.get("has_branching", False)) and hasattr(graph, "get_tensor"):
+                from fpgai.backends.hls.buffer_allocation import build_hls_buffer_allocation
+                from fpgai.backends.hls.emit.dag_top_cpp import emit_dag_top_cpp
+                dag_buffer_allocation = build_hls_buffer_allocation(
+                    graph,
+                    raw_cfg=hls_options.get("raw_cfg", {}) or {},
+                    tensor_liveness=tensor_liveness,
+                )
+                top_src = emit_dag_top_cpp(
+                    graph=graph,
+                    top_name=top_name,
+                    weights_mode=weights_mode,
+                    raw_cfg=hls_options.get("raw_cfg", {}) or {},
+                    external_composition_plan=external_composition_plan,
+                    tensor_liveness=tensor_liveness,
+                    buffer_allocation=dag_buffer_allocation,
+                )
+            else:
+                top_src = emit_top_cpp(
+                    graph=graph,
+                    top_name=top_name,
+                    weights_mode=weights_mode,
+                    compile_plan=compile_plan,
+                    memory_plan=memory_plan,
+                    communication_plan=communication_plan,
+                    raw_cfg=hls_options.get("raw_cfg", {}) or {},
+                    external_composition_plan=external_composition_plan,
+                )
         else:
             # Safe fallback for metadata/unit-test paths that do not construct
             # a full IR graph. Real inference compilation must pass a graph
@@ -991,7 +1011,7 @@ def emit_hls_stub(
 
 
 # ---------------------------------------------------------------------------
-# FPGAI Sprint 29R/29T safety finalizer: postprocess generated training tb.cpp
+# FPGAI training-testbench safety finalizer: postprocess generated training tb.cpp
 # ---------------------------------------------------------------------------
 # Some repository states contain older training testbench emitters/wrappers that
 # bypass the helper-level CSim capture injection above.  This final wrapper runs

@@ -78,5 +78,5 @@ analysis:
   comparison_basis: equal_sample_exposure
   primary_epochs: 3
   paired_experiment_dirs:
-    equal_sample_exposure: paper_experiments/training_batch_equal_exposure_strict3
-    equal_update_budget: paper_experiments/training_batch_equal_updates6
+    equal_sample_exposure: benchmark_runs/training_batch_equal_exposure_strict3
+    equal_update_budget: benchmark_runs/training_batch_equal_updates6

@@ -107,31 +107,31 @@ def _contains(source: str, needle: str) -> bool:
     return needle in source
 
 
-def _hls_paper_safe(hls_truth_artifacts: Any) -> bool:
-    if hls_truth_artifacts is None:
+def _hls_validation_ready(hls_validation_artifacts: Any) -> bool:
+    if hls_validation_artifacts is None:
         return False
     candidates: Iterable[Path] = []
-    if hasattr(hls_truth_artifacts, "estimate_vs_hls_json"):
-        candidates = [Path(getattr(hls_truth_artifacts, "estimate_vs_hls_json"))]
-    elif isinstance(hls_truth_artifacts, Mapping):
-        path = hls_truth_artifacts.get("estimate_vs_hls_json")
+    if hasattr(hls_validation_artifacts, "estimate_vs_hls_json"):
+        candidates = [Path(getattr(hls_validation_artifacts, "estimate_vs_hls_json"))]
+    elif isinstance(hls_validation_artifacts, Mapping):
+        path = hls_validation_artifacts.get("estimate_vs_hls_json")
         candidates = [Path(path)] if path else []
     for path in candidates:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             continue
-        if payload.get("status") == "compared" or payload.get("paper_safe") is True:
+        if payload.get("status") == "compared" or payload.get("validation_ready") is True:
             return True
     return False
 
 
-def _decision(status: str, *, evidence: list[str] | None = None, reason: str | None = None, requested: bool = False, resolved: Any = None) -> Dict[str, Any]:
+def _decision(status: str, *, artifacts: list[str] | None = None, reason: str | None = None, requested: bool = False, resolved: Any = None) -> Dict[str, Any]:
     return {
         "requested": bool(requested),
         "status": status,
         "resolved": resolved,
-        "evidence": evidence or [],
+        "artifacts": artifacts or [],
         "reason": reason,
     }
 
@@ -141,7 +141,7 @@ def _markdown(payload: Mapping[str, Any]) -> str:
         "# Parallelization and pipelining effect",
         "",
         f"Status: `{payload.get('status')}`",
-        f"Paper-safe HLS claim: `{str(payload.get('hls_effect', {}).get('paper_safe_hls_claim')).lower()}`",
+        f"Validation-qualified HLS claim: `{str(payload.get('hls_effect', {}).get('validation_ready_hls_claim')).lower()}`",
         "",
         "## Pipeline",
         f"- Status: `{payload.get('pipeline', {}).get('status')}`",
@@ -154,11 +154,11 @@ def _markdown(payload: Mapping[str, Any]) -> str:
             lines.append(f"- {name}: `{entry.get('status')}` resolved=`{entry.get('resolved')}`")
     lines.extend([
         "",
-        "## Source evidence",
+        "## Source artifacts",
     ])
-    for item in payload.get("source_evidence", []):
+    for item in payload.get("source_artifacts", []):
         lines.append(f"- {item}")
-    if not payload.get("source_evidence"):
+    if not payload.get("source_artifacts"):
         lines.append("- None")
     return "\n".join(lines) + "\n"
 
@@ -168,7 +168,7 @@ def emit_parallel_pipeline_effect_reports(
     out_dir: str | Path,
     raw_config: Mapping[str, Any] | None,
     hls_dir: str | Path | None,
-    hls_truth_artifacts: Any = None,
+    hls_validation_artifacts: Any = None,
 ) -> ParallelPipelineEffectArtifacts:
     out_dir = Path(out_dir)
     reports = out_dir / "reports"
@@ -190,12 +190,12 @@ def emit_parallel_pipeline_effect_reports(
         for k in manual
     )
     ii = _int_macro(combined, "FPGAI_PIPELINE_II", None)
-    pipeline_evidence = []
+    pipeline_artifacts = []
     if "#pragma HLS PIPELINE" in combined:
-        pipeline_evidence.append("#pragma HLS PIPELINE")
+        pipeline_artifacts.append("#pragma HLS PIPELINE")
     if ii is not None:
-        pipeline_evidence.append(f"#define FPGAI_PIPELINE_II {ii}")
-    pipeline_status = "applied" if pipeline_evidence else ("rejected" if pipeline_requested else "not_requested")
+        pipeline_artifacts.append(f"#define FPGAI_PIPELINE_II {ii}")
+    pipeline_status = "applied" if pipeline_artifacts else ("rejected" if pipeline_requested else "not_requested")
 
     parallel_checks = {
         "dense_out_unroll": ("FPGAI_DENSE_OUT_UNROLL", ("optimization.parallel.pe", "hls.dense.out_unroll")),
@@ -216,14 +216,14 @@ def emit_parallel_pipeline_effect_reports(
             or any(p.startswith("parallelization") for p in manual)
             or any(p.startswith("optimization.parallel") for p in manual)
         )
-        evidence: list[str] = []
+        artifacts: list[str] = []
         if resolved is not None:
-            evidence.append(f"#define {macro} {resolved}")
+            artifacts.append(f"#define {macro} {resolved}")
         if "UNROLL" in key.upper() and "#pragma HLS UNROLL" in combined:
-            evidence.append("#pragma HLS UNROLL")
+            artifacts.append("#pragma HLS UNROLL")
         if "partition" in key and "#pragma HLS ARRAY_PARTITION" in combined:
-            evidence.append("#pragma HLS ARRAY_PARTITION")
-        if requested and evidence:
+            artifacts.append("#pragma HLS ARRAY_PARTITION")
+        if requested and artifacts:
             status = "applied"
             reason = None
         elif requested:
@@ -235,18 +235,18 @@ def emit_parallel_pipeline_effect_reports(
         else:
             status = "not_requested"
             reason = "No manual parallelization request for this knob."
-        parallel_payload[key] = _decision(status, evidence=evidence, reason=reason, requested=requested, resolved=resolved)
+        parallel_payload[key] = _decision(status, artifacts=artifacts, reason=reason, requested=requested, resolved=resolved)
 
-    source_evidence = []
+    source_artifacts = []
     for needle in ["#pragma HLS PIPELINE", "#pragma HLS UNROLL", "#pragma HLS ARRAY_PARTITION", "FPGAI_PIPELINE_II", "FPGAI_DENSE_OUT_UNROLL", "FPGAI_CONV_OC_UNROLL"]:
         if _contains(combined, needle):
-            source_evidence.append(needle)
+            source_artifacts.append(needle)
 
     requested_any = bool(manual)
     rejected = ["pipeline"] if pipeline_status == "rejected" else []
     rejected += [name for name, entry in parallel_payload.items() if entry.get("status") == "rejected"]
-    status = "failed" if rejected else ("validated" if source_evidence else "not_requested")
-    paper_safe_hls = _hls_paper_safe(hls_truth_artifacts)
+    status = "failed" if rejected else ("validated" if source_artifacts else "not_requested")
+    validation_ready_hls = _hls_validation_ready(hls_validation_artifacts)
 
     payload: Dict[str, Any] = {
         "artifact_kind": "parallel_pipeline_effect",
@@ -256,22 +256,22 @@ def emit_parallel_pipeline_effect_reports(
         "manual_yaml_sources": manual,
         "pipeline": _decision(
             pipeline_status,
-            evidence=pipeline_evidence,
-            reason=(None if pipeline_evidence else "No generated pipeline pragma or II macro evidence was found."),
+            artifacts=pipeline_artifacts,
+            reason=(None if pipeline_artifacts else "No generated pipeline pragma or II macro artifacts was found."),
             requested=pipeline_requested,
             resolved=ii,
         ),
         "parallelization": parallel_payload,
-        "source_evidence": source_evidence,
+        "source_artifacts": source_artifacts,
         "resource_latency_hygiene": {
             "rule": "Unrequested parallel/pipeline code must not be claimed as manual user intent.",
             "manual_requests_only": sorted(manual.keys()),
-            "unrequested_manual_claims": [],
+            "unrequested_manual_records": [],
         },
         "hls_effect": {
-            "available": paper_safe_hls,
-            "paper_safe_hls_claim": paper_safe_hls,
-            "reason": None if paper_safe_hls else "No real HLS estimate-vs-HLS comparison was parsed for this compile.",
+            "available": validation_ready_hls,
+            "validation_ready_hls_claim": validation_ready_hls,
+            "reason": None if validation_ready_hls else "No real HLS estimate-vs-HLS comparison was parsed for this compile.",
         },
     }
 

@@ -1,0 +1,75 @@
+schema: fpgai.package/v1
+package:
+  id: community.split_grouped_ready_valid_vhdl
+  name: Split Grouped Ready/Valid VHDL
+  version: 1.0.0
+  asset_type: implementation
+  provider: community
+  description: Research VHDL implementation that duplicates one tensor into a grouped two-output ready/valid transaction.
+usage:
+  platform_scope: research
+  permitted_uses: [research, experimentation, validation, benchmarking, education]
+  production_path: morfics
+license:
+  category: open_source
+  identifier: Apache-2.0
+compatibility:
+  fpgai_contract: ">=1.0,<2.0"
+  boards: [kv260, kr260]
+  precisions: [int16]
+  toolchains:
+    - name: vivado
+      versions: ["2023.2"]
+capabilities:
+  inference: true
+  training:
+    forward: false
+    backward_input: false
+    parameter_gradients: false
+    bias_gradients: false
+    optimizer_update: false
+entrypoints:
+  implementation:
+    language: vhdl
+    backend: vhdl
+    top: split_grouped_ready_valid_vhdl
+    sources: [rtl/split_grouped_ready_valid_vhdl.vhd]
+    source_order: [rtl/split_grouped_ready_valid_vhdl.vhd]
+implementation:
+  operator_id: community.operator.split
+  backend: vhdl
+integration:
+  vhdl:
+    abi: tensor_ports_ready_valid_v1
+    data_width: 16
+    signed: true
+    handshake_policy: grouped_transaction
+    inputs:
+      - name: input
+        data: input_data
+    outputs:
+      - name: left
+        data: left_data
+      - name: right
+        data: right_data
+interfaces:
+  input:
+    direction: input
+    protocol: axi_stream
+    data_type: int16
+  left:
+    direction: output
+    protocol: axi_stream
+    data_type: int16
+  right:
+    direction: output
+    protocol: axi_stream
+    data_type: int16
+memory:
+  supported_weight_storage: [embedded]
+  supported_activation_storage: [bram, uram]
+validation:
+  declared_level: rtl_simulation_validated
+metrics:
+  latency_cycles: 1
+  initiation_interval: 1

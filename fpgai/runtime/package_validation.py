@@ -22,13 +22,13 @@ def _rel(path: Path, root: Path) -> str:
         return path.as_posix()
 
 
-def _check(name: str, passed: bool, *, expected: Any = True, actual: Any = None, evidence: str = "", severity: str = "error") -> dict[str, Any]:
+def _check(name: str, passed: bool, *, expected: Any = True, actual: Any = None, artifacts: str = "", severity: str = "error") -> dict[str, Any]:
     return {
         "name": name,
         "status": "passed" if bool(passed) else "failed",
         "expected": expected,
         "actual": actual,
-        "evidence": evidence,
+        "artifacts": artifacts,
         "severity": severity,
     }
 
@@ -126,7 +126,7 @@ def _validate_required_files(package_dir: Path, manifest: Mapping[str, Any]) -> 
                 f"required_file_present:{relpath}",
                 present,
                 actual={"present": present, "bytes": size},
-                evidence=relpath,
+                artifacts=relpath,
             )
         )
 
@@ -144,7 +144,7 @@ def _validate_required_files(package_dir: Path, manifest: Mapping[str, Any]) -> 
                 size_ok,
                 expected={"present": True, "bytes": expected_bytes},
                 actual={"present": present, "bytes": size},
-                evidence=relpath,
+                artifacts=relpath,
             )
         )
     return checks
@@ -163,14 +163,14 @@ def _validate_hardware(package_dir: Path, manifest: Mapping[str, Any]) -> list[d
     bit_present = bool(bit.get("present"))
     hwh_present = bool(hwh.get("present"))
     xsa_present = bool(xsa.get("present"))
-    checks.append(_check("hardware_bitstream_status_matches_request", (not bitstream_requested) or bit_present, expected=bitstream_requested, actual=bit_present, evidence="hardware.bitstream.present"))
-    checks.append(_check("hardware_xsa_status_matches_request", (not bitstream_requested) or xsa_present, expected=bitstream_requested, actual=xsa_present, evidence="hardware.xsa.present"))
-    checks.append(_check("hardware_deployable_overlay_consistent", deployable == (bit_present and (hwh_present or xsa_present)), expected=bit_present and (hwh_present or xsa_present), actual=deployable, evidence="hardware.deployable_overlay_present"))
+    checks.append(_check("hardware_bitstream_status_matches_request", (not bitstream_requested) or bit_present, expected=bitstream_requested, actual=bit_present, artifacts="hardware.bitstream.present"))
+    checks.append(_check("hardware_xsa_status_matches_request", (not bitstream_requested) or xsa_present, expected=bitstream_requested, actual=xsa_present, artifacts="hardware.xsa.present"))
+    checks.append(_check("hardware_deployable_overlay_consistent", deployable == (bit_present and (hwh_present or xsa_present)), expected=bit_present and (hwh_present or xsa_present), actual=deployable, artifacts="hardware.deployable_overlay_present"))
     if bitstream_requested:
-        checks.append(_check("hardware_package_contains_bitstream_file", (package_dir / "hardware").exists() and any((package_dir / "hardware").glob("*.bit")), evidence="runtime_package/hardware/*.bit"))
-        checks.append(_check("hardware_package_contains_handoff_file", (package_dir / "hardware").exists() and (any((package_dir / "hardware").glob("*.hwh")) or any((package_dir / "hardware").glob("*.xsa"))), evidence="runtime_package/hardware/*.hwh or *.xsa"))
+        checks.append(_check("hardware_package_contains_bitstream_file", (package_dir / "hardware").exists() and any((package_dir / "hardware").glob("*.bit")), artifacts="runtime_package/hardware/*.bit"))
+        checks.append(_check("hardware_package_contains_handoff_file", (package_dir / "hardware").exists() and (any((package_dir / "hardware").glob("*.hwh")) or any((package_dir / "hardware").glob("*.xsa"))), artifacts="runtime_package/hardware/*.hwh or *.xsa"))
     else:
-        checks.append(_check("hardware_bitstream_not_required_for_impl_only", not bit_present and not xsa_present if vivado_impl_requested else True, expected=False, actual={"bitstream_present": bit_present, "xsa_present": xsa_present}, evidence="implementation-only package should not include stale bitstream/xsa"))
+        checks.append(_check("hardware_bitstream_not_required_for_impl_only", not bit_present and not xsa_present if vivado_impl_requested else True, expected=False, actual={"bitstream_present": bit_present, "xsa_present": xsa_present}, artifacts="implementation-only package should not include stale bitstream/xsa"))
     return checks
 
 
@@ -190,7 +190,7 @@ def _validate_buffers_and_sequence(package_dir: Path, manifest: Mapping[str, Any
             resolved_input is not None,
             expected="input/input_mem alias group",
             actual={"available_buffers": sorted(names), "resolved": resolved_input},
-            evidence="buffer_plan.json; generated m_axi packages may expose input_mem while logical runtime uses input",
+            artifacts="buffer_plan.json; generated m_axi packages may expose input_mem while logical runtime uses input",
         )
     )
     checks.append(
@@ -199,7 +199,7 @@ def _validate_buffers_and_sequence(package_dir: Path, manifest: Mapping[str, Any
             resolved_output is not None,
             expected="output/output_mem alias group",
             actual={"available_buffers": sorted(names), "resolved": resolved_output},
-            evidence="buffer_plan.json; generated m_axi packages may expose output_mem while logical runtime uses output",
+            artifacts="buffer_plan.json; generated m_axi packages may expose output_mem while logical runtime uses output",
         )
     )
 
@@ -213,12 +213,12 @@ def _validate_buffers_and_sequence(package_dir: Path, manifest: Mapping[str, Any
             nbytes = entry.get("bytes")
             direction = str(entry.get("direction") or "")
             valid = bool(entry.get("name")) and direction in {"ps_to_pl", "pl_to_ps", "bidirectional"} and int(words or 0) >= 1 and int(nbytes or 0) >= 4
-            checks.append(_check(f"buffer_entry_valid:{name}", valid, actual={"direction": direction, "words": words, "bytes": nbytes}, evidence="buffer_plan.json"))
+            checks.append(_check(f"buffer_entry_valid:{name}", valid, actual={"direction": direction, "words": words, "bytes": nbytes}, artifacts="buffer_plan.json"))
 
     commands = _commands_from_sequence(run_sequence)
     seq = execution_plan.get("sequence", [])
     actual_commands = [str(item.get("command")) for item in seq if isinstance(item, Mapping) and item.get("command")] if isinstance(seq, list) else []
-    checks.append(_check("runtime_execution_plan_matches_run_sequence", actual_commands == commands, expected=commands, actual=actual_commands, evidence="runtime_execution_plan.json/run_sequence.json"))
+    checks.append(_check("runtime_execution_plan_matches_run_sequence", actual_commands == commands, expected=commands, actual=actual_commands, artifacts="runtime_execution_plan.json/run_sequence.json"))
 
     if "export_gradients" in commands:
         resolved_gradients = _resolve_buffer_reference("gradients", names)
@@ -228,7 +228,7 @@ def _validate_buffers_and_sequence(package_dir: Path, manifest: Mapping[str, Any
                 resolved_gradients is not None,
                 expected="gradients/gradients_mem alias group",
                 actual={"available_buffers": sorted(names), "resolved": resolved_gradients},
-                evidence="export_gradients requires a gradient export buffer; generated packages may use gradients_mem",
+                artifacts="export_gradients requires a gradient export buffer; generated packages may use gradients_mem",
             )
         )
     if "export_optimizer_state" in commands:
@@ -239,7 +239,7 @@ def _validate_buffers_and_sequence(package_dir: Path, manifest: Mapping[str, Any
                 resolved_optimizer is not None,
                 expected="optimizer_state/optimizer_state_mem alias group",
                 actual={"available_buffers": sorted(names), "resolved": resolved_optimizer},
-                evidence="export_optimizer_state requires an optimizer-state export buffer; generated packages may use optimizer_state_mem",
+                artifacts="export_optimizer_state requires an optimizer-state export buffer; generated packages may use optimizer_state_mem",
             )
         )
     if any(command in {"run_training", "accumulate_gradients"} for command in commands):
@@ -251,7 +251,7 @@ def _validate_buffers_and_sequence(package_dir: Path, manifest: Mapping[str, Any
                 bool(present_labels),
                 expected=sorted(label_candidates),
                 actual={"available_buffers": sorted(names), "matched_label_buffers": present_labels},
-                evidence="training commands require a label buffer; generated m_axi training packages use label_mem",
+                artifacts="training commands require a label buffer; generated m_axi training packages use label_mem",
             )
         )
 
@@ -268,7 +268,7 @@ def _validate_buffers_and_sequence(package_dir: Path, manifest: Mapping[str, Any
                     not missing,
                     expected="all sync buffers in buffer_plan",
                     actual={"missing": missing, "resolved": resolved, "available_buffers": sorted(names)},
-                    evidence="runtime_execution_plan.json; common buffer aliases are accepted for generated m_axi training ABI",
+                    artifacts="runtime_execution_plan.json; common buffer aliases are accepted for generated m_axi training ABI",
                 )
             )
     return checks
@@ -282,13 +282,13 @@ def _validate_runtime_api(package_dir: Path, manifest: Mapping[str, Any]) -> lis
     board = board_path.read_text(encoding="utf-8", errors="replace") if board_path.exists() else ""
     required_api = ["load_manifest", "load_buffer_plan", "allocate_runtime_buffers", "bind_backend", "run_sequence"]
     for name in required_api:
-        checks.append(_check(f"runtime_api_function_present:{name}", f"def {name}" in api, evidence="runtime_api.py"))
+        checks.append(_check(f"runtime_api_function_present:{name}", f"def {name}" in api, artifacts="runtime_api.py"))
     required_backend = ["FPGAIBoardRuntime", "PynqDmaMmioBackend", "create_pynq_backend", "FPGAI_MODE_RUN_TRAINING"]
     for name in required_backend:
-        checks.append(_check(f"board_runtime_symbol_present:{name}", name in board, evidence="board_runtime.py"))
+        checks.append(_check(f"board_runtime_symbol_present:{name}", name in board, artifacts="board_runtime.py"))
     functions = manifest.get("runtime_api", {}).get("functions", []) if isinstance(manifest.get("runtime_api"), Mapping) else []
     for name in functions if isinstance(functions, list) else []:
-        checks.append(_check(f"runtime_api_manifest_function_present:{name}", f"def {name}" in api or str(name) in api, evidence="runtime_api.functions/runtime_api.py", severity="warning"))
+        checks.append(_check(f"runtime_api_manifest_function_present:{name}", f"def {name}" in api or str(name) in api, artifacts="runtime_api.functions/runtime_api.py", severity="warning"))
     return checks
 
 
@@ -304,7 +304,7 @@ def emit_runtime_package_validation(out_dir: str | Path, package_dir: str | Path
     manifest_path = pkg / "package_manifest.json"
     manifest = _read_json(manifest_path)
     checks: dict[str, list[dict[str, Any]]] = {
-        "package_files": [_check("package_manifest_readable", bool(manifest), actual=manifest_path.exists(), evidence=_rel(manifest_path, root))],
+        "package_files": [_check("package_manifest_readable", bool(manifest), actual=manifest_path.exists(), artifacts=_rel(manifest_path, root))],
         "hardware": [],
         "buffers_and_sequence": [],
         "runtime_api": [],
@@ -328,7 +328,7 @@ def emit_runtime_package_validation(out_dir: str | Path, package_dir: str | Path
             "name": str(row.get("name", "")),
             "expected": row.get("expected"),
             "actual": row.get("actual"),
-            "evidence": row.get("evidence", ""),
+            "artifacts": row.get("artifacts", ""),
         }
         for group, rows in checks.items()
         for row in rows
@@ -353,7 +353,7 @@ def emit_runtime_package_validation(out_dir: str | Path, package_dir: str | Path
             "package_dir": pkg.as_posix(),
             "package_manifest": manifest_path.as_posix(),
         },
-        "truth_boundary": "Static runtime-package validation only. It validates files, metadata, buffer plans, and generated runtime APIs; it does not execute on the FPGA board.",
+        "validation_boundary": "Static runtime-package validation only. It validates files, metadata, buffer plans, and generated runtime APIs; it does not execute on the FPGA board.",
     }
 
     pkg_report_json = pkg / "runtime_package_validation.json"
@@ -385,8 +385,8 @@ def emit_runtime_package_validation(out_dir: str | Path, package_dir: str | Path
     for group, rows in checks.items():
         lines.extend(["", f"### {group}", ""])
         for row in rows:
-            lines.append(f"- **{row['status'].upper()}** {row['name']}: expected=`{row.get('expected')}` actual=`{row.get('actual')}` evidence=`{row.get('evidence', '')}`")
-    lines.extend(["", "## Boundary", "", str(report["truth_boundary"]), ""])
+            lines.append(f"- **{row['status'].upper()}** {row['name']}: expected=`{row.get('expected')}` actual=`{row.get('actual')}` artifacts=`{row.get('artifacts', '')}`")
+    lines.extend(["", "## Boundary", "", str(report["validation_boundary"]), ""])
     md = "\n".join(lines)
     pkg_report_md.write_text(md, encoding="utf-8")
     root_report_md.write_text(md, encoding="utf-8")

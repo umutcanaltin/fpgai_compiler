@@ -12,6 +12,11 @@ from .hls_calibration_model import (
     mean_absolute_percentage_error,
 )
 from .hls_estimate_report import write_estimate_vs_hls_report
+from .hls_synthesis_characterization import (
+    HLSSynthesisCharacterization,
+    characterize_hls_synthesis,
+    write_hls_synthesis_characterization,
+)
 
 __all__ = [
     "CalibrationSample",
@@ -22,4 +27,7 @@ __all__ = [
     "fit_calibration_model",
     "mean_absolute_percentage_error",
     "write_estimate_vs_hls_report",
+    "HLSSynthesisCharacterization",
+    "characterize_hls_synthesis",
+    "write_hls_synthesis_characterization",
 ]

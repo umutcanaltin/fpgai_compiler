@@ -5,8 +5,8 @@ Usage:
   python -m fpgai.reporting.hardware_feasibility experiments/<run_dir>
 
 Inputs:
-  <run_dir>/vivado_bridge_evidence/evidence.json
-  <run_dir>/vivado_bridge_run_evidence.json, if present
+  <run_dir>/vivado_bridge_artifacts/artifacts.json
+  <run_dir>/vivado_bridge_run_artifacts.json, if present
 Outputs:
   <run_dir>/hardware_feasibility/feasibility.csv
   <run_dir>/hardware_feasibility/feasibility.md
@@ -79,11 +79,11 @@ def _load_json(path: Path) -> Any:
     return json.loads(path.read_text())
 
 
-def _records_from_evidence(data: Any) -> List[Dict[str, Any]]:
+def _records_from_artifacts(data: Any) -> List[Dict[str, Any]]:
     if isinstance(data, list):
         return data
     if isinstance(data, dict):
-        for key in ("records", "designs", "evidence"):
+        for key in ("records", "designs", "artifacts"):
             if isinstance(data.get(key), list):
                 return data[key]
         # maybe dict keyed by design
@@ -94,11 +94,11 @@ def _records_from_evidence(data: Any) -> List[Dict[str, Any]]:
                 vv.setdefault("design", k)
                 out.append(vv)
             return out
-    raise SystemExit("Could not find artifact records in evidence.json")
+    raise SystemExit("Could not find artifact records in artifacts.json")
 
 
 def _run_map(run_path: Path) -> Dict[str, Dict[str, Any]]:
-    p = run_path / "vivado_bridge_run_evidence.json"
+    p = run_path / "vivado_bridge_run_artifacts.json"
     if not p.exists():
         return {}
     data = _load_json(p)
@@ -688,7 +688,7 @@ def _suggest_yaml_actions(fit: Dict[str, Any]) -> list[str]:
         return [
             "This design is within the current board-fit guide rails.",
             "You can keep the current YAML settings for this board-fit stage.",
-            "Still validate timing, power, and runtime on real Vivado/board artifacts before deployment claims.",
+            "Still validate timing, power, and runtime on real Vivado/board artifacts before deployment records.",
         ]
 
     if limiting == "dsp":
@@ -733,7 +733,7 @@ def _suggest_yaml_actions(fit: Dict[str, Any]) -> list[str]:
     if limiting == "target_clock_mhz":
         return [
             "The requested clock is above the board safe/default guide rail.",
-            "This is allowed as an experiment, but it requires Vitis HLS/Vivado timing validation before deployment claims.",
+            "This is allowed as an experiment, but it requires Vitis HLS/Vivado timing validation before deployment records.",
             "Lower targets.platform.clocks[0].target_mhz for a safer first implementation, or keep the higher clock and require timing reports.",
             "Use pipeline settings to improve timing, but do not claim timing closure until Vivado reports pass.",
         ]
@@ -807,7 +807,7 @@ def board_fit_markdown(payload: Dict[str, Any]) -> str:
 
     lines.extend([
         "",
-        "## Truth boundary",
+        "## Validation boundary",
         "",
         "- This report classifies board fit from the available resource/memory/clock data.",
         "- Prediction-based board fit is not a replacement for Vitis HLS, Vivado implementation, timing, power, or real-board runtime validation.",
@@ -873,11 +873,11 @@ def emit_board_fit_report(
         "interface_fit": interface_fit,
         "fit": fit,
         "suggested_yaml_actions": _suggest_yaml_actions(fit),
-        "truth_boundary": {
+        "validation_boundary": {
             "prediction_based": source == "prediction",
-            "requires_hls_for_synthesis_truth": True,
-            "requires_vivado_for_implementation_truth": True,
-            "requires_board_runtime_for_deployment_truth": True,
+            "requires_hls_for_synthesis_validation": True,
+            "requires_vivado_for_implementation_validation": True,
+            "requires_board_runtime_for_deployment_validation": True,
             "unrequested_paths_not_counted": True,
         },
     }
@@ -983,10 +983,10 @@ def main(argv: List[str]) -> int:
         print(__doc__)
         return 2
     run_path = Path(argv[1])
-    ev_path = run_path / "vivado_bridge_evidence" / "evidence.json"
+    ev_path = run_path / "vivado_bridge_artifacts" / "artifacts.json"
     if not ev_path.exists():
         raise SystemExit(f"Missing {ev_path}")
-    records = _records_from_evidence(_load_json(ev_path))
+    records = _records_from_artifacts(_load_json(ev_path))
     runs = _run_map(run_path)
     rows = []
     for rec in records:

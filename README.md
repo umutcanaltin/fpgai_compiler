@@ -58,7 +58,7 @@ fpgai sweep run \
 Inspect an experiment config:
 
 ```bash
-fpgai experiment inspect --config configs/experiments/arxiv_paper.yml
+fpgai experiment inspect --config configs/experiments/benchmark_suite.yml
 ```
 
 ## Main generated artifacts
@@ -120,7 +120,7 @@ Compile emits runtime package metadata under:
 <out_dir>/runtime_package/package_manifest.json
 ```
 
-The runtime package copies runtime-facing artifacts that already exist and records truthful hardware handoff status:
+The runtime package copies runtime-facing artifacts that already exist and records accurate hardware handoff status:
 
 ```text
 bitstream_present

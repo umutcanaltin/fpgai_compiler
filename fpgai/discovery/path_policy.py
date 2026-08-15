@@ -7,7 +7,7 @@ from typing import Any, Iterable, Mapping
 SKIPPED_DIRECTORY_NAMES = frozenset({
     ".git", ".venv", "venv", "env", "__pycache__", ".pytest_cache",
     ".mypy_cache", "build", "dist", "generated", "dev_audits",
-    "paper_results", "node_modules",
+    "benchmark_results", "node_modules",
 })
 
 _PATH_KEYS = frozenset({"path", "sources", "headers", "source_order", "testbench", "reference", "python_module"})

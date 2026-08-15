@@ -24,9 +24,16 @@ class ExternalNodeBinding:
     output_words: int
     wrapper_symbol: str
     conversion_buffers: bool = False
+    input_tensors: tuple[str, ...] = ()
+    output_tensors: tuple[str, ...] = ()
+    port_words: int | None = None
+    input_port_words: Mapping[str, int] = field(default_factory=dict)
+    output_port_words: Mapping[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "attributes", MappingProxyType(dict(self.attributes)))
+        object.__setattr__(self, "input_port_words", MappingProxyType(dict(self.input_port_words)))
+        object.__setattr__(self, "output_port_words", MappingProxyType(dict(self.output_port_words)))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -45,6 +52,11 @@ class ExternalNodeBinding:
             "output_words": self.output_words,
             "wrapper_symbol": self.wrapper_symbol,
             "conversion_buffers": self.conversion_buffers,
+            "input_tensors": list(self.input_tensors or (self.input_tensor,)),
+            "output_tensors": list(self.output_tensors or (self.output_tensor,)),
+            "port_words": self.port_words,
+            "input_port_words": dict(self.input_port_words),
+            "output_port_words": dict(self.output_port_words),
             "attributes": dict(self.attributes),
         }
 
@@ -53,6 +65,7 @@ class ExternalNodeBinding:
 class HLSCompositionPlan:
     bindings: tuple[ExternalNodeBinding, ...] = ()
     selection_reports: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
+    graph_mode: str = "sequential_mixed_graph"
 
     def __post_init__(self) -> None:
         names = [item.node_name for item in self.bindings]
@@ -75,7 +88,7 @@ class HLSCompositionPlan:
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema": "fpgai.mixed-hls-composition/v1",
-            "graph_mode": "sequential_mixed_graph",
+            "graph_mode": self.graph_mode,
             "nodes": [item.to_dict() for item in self.bindings],
             "selection_reports": {key: dict(value) for key, value in self.selection_reports.items()},
             "usage": {"platform_scope": "research", "production_path": "morfics"},

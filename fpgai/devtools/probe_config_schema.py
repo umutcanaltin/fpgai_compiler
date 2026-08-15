@@ -11,7 +11,7 @@ from fpgai.experiments.config_materializer import probe_parameter_paths
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Probe FPGAI config paths available for Sprint 8 materialization")
+    parser = argparse.ArgumentParser(description="Probe FPGAI configuration paths available for materialization")
     parser.add_argument("--config", default="fpgai.yml")
     args = parser.parse_args()
     path = Path(args.config)

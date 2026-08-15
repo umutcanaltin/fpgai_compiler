@@ -15,7 +15,7 @@ except Exception:  # pragma: no cover
 class KeySpec:
     path: str
     purpose: str
-    evidence: Tuple[str, ...] = ()
+    artifacts: Tuple[str, ...] = ()
     prefix: bool = False
 
 
@@ -59,8 +59,8 @@ CANONICAL_KEYS: Tuple[KeySpec, ...] = (
     KeySpec("training.batch", "Training batch and epoch schedule", ("numeric_validation.batch_accumulation", "training_dataset_execution"), prefix=True),
     KeySpec("training.validation", "Training execution validation and learning-curve controls", ("training_dataset_execution", "training_learning_behavior"), prefix=True),
     KeySpec("training.accumulation", "Gradient accumulation controls", ("numeric_validation.batch_accumulation",), prefix=True),
-    KeySpec("toolchain.vitis_hls", "Vitis HLS tool execution/import", ("hls_truth_artifacts",), prefix=True),
-    KeySpec("toolchain.vivado", "Vivado tool execution/import", ("vivado_truth_artifacts",), prefix=True),
+    KeySpec("toolchain.vitis_hls", "Vitis HLS tool execution/import", ("hls_validation_artifacts",), prefix=True),
+    KeySpec("toolchain.vivado", "Vivado tool execution/import", ("vivado_validation_artifacts",), prefix=True),
     KeySpec("reports", "Report switches", ("manifest",), prefix=True),
     KeySpec("ecosystem", "External research package discovery and trust configuration", ("package_discovery", "package-lock.yml"), prefix=True),
     KeySpec("implementations", "External hardware implementation selection", ("implementation_selection", "manifest"), prefix=True),
@@ -69,7 +69,7 @@ CANONICAL_KEYS: Tuple[KeySpec, ...] = (
 DEPRECATED_ALIASES: Dict[str, Dict[str, str]] = {
     "hls.pipeline_ii": {
         "replacement": "optimization.pipeline.ii",
-        "reason": "Sprint O made optimization.pipeline.ii the canonical pipeline-II key.",
+        "reason": "The canonical configuration contract uses optimization.pipeline.ii for pipeline initiation interval.",
     },
     "optimization.pipeline_ii": {
         "replacement": "optimization.pipeline.ii",
@@ -109,19 +109,19 @@ DEPRECATED_ALIASES: Dict[str, Dict[str, str]] = {
     },
     "data_movement.inputs.import.interface": {
         "replacement": "data_movement.inputs.interface",
-        "reason": "Sprint P direct movement style is canonical.",
+        "reason": "The direct movement configuration style is canonical.",
     },
     "data_movement.inputs.import.transport": {
         "replacement": "data_movement.inputs.transport",
-        "reason": "Sprint P direct movement style is canonical.",
+        "reason": "The direct movement configuration style is canonical.",
     },
     "data_movement.outputs.export.interface": {
         "replacement": "data_movement.outputs.interface",
-        "reason": "Sprint P direct movement style is canonical.",
+        "reason": "The direct movement configuration style is canonical.",
     },
     "data_movement.outputs.export.transport": {
         "replacement": "data_movement.outputs.transport",
-        "reason": "Sprint P direct movement style is canonical.",
+        "reason": "The direct movement configuration style is canonical.",
     },
     "data_movement.ps_pl.weights.mode": {
         "replacement": "weights.mode",
@@ -129,19 +129,19 @@ DEPRECATED_ALIASES: Dict[str, Dict[str, str]] = {
     },
     "data_movement.ps_pl.input.mode": {
         "replacement": "data_movement.inputs.interface",
-        "reason": "Sprint P direct input movement style is canonical; mode aliases should map to interface/transport.",
+        "reason": "The direct input movement configuration is canonical; mode aliases should map to interface/transport.",
     },
     "data_movement.ps_pl.output.mode": {
         "replacement": "data_movement.outputs.interface",
-        "reason": "Sprint P direct output movement style is canonical; mode aliases should map to interface/transport.",
+        "reason": "The direct output movement configuration is canonical; mode aliases should map to interface/transport.",
     },
     "data_movement.ps_pl.input": {
         "replacement": "data_movement.inputs",
-        "reason": "Sprint P direct movement style is canonical.",
+        "reason": "The direct movement configuration style is canonical.",
     },
     "data_movement.pl_ps.output": {
         "replacement": "data_movement.outputs",
-        "reason": "Sprint P direct movement style is canonical.",
+        "reason": "The direct movement configuration style is canonical.",
     },
     "memory.storage.weights": {
         "replacement": "memory.weight_storage",
@@ -232,11 +232,11 @@ SWEEP_TEMPLATE_TOP_LEVEL = {
     "description",
 }
 
-PAPER_ARTIFACT_SPEC_TOP_LEVEL = {
-    "claim_levels",
+BENCHMARK_ARTIFACT_SPEC_TOP_LEVEL = {
+    "validation_levels",
     "inputs",
     "limitations",
-    "paper",
+    "benchmark",
     "vivado",
 }
 
@@ -344,7 +344,7 @@ def classify_config_path(path: str) -> Dict[str, Any]:
             "status": "canonical",
             "canonical_root": spec.path,
             "purpose": spec.purpose,
-            "evidence": list(spec.evidence),
+            "artifacts": list(spec.artifacts),
         }
     top = path.split(".", 1)[0]
     if top in SWEEP_TEMPLATE_TOP_LEVEL:
@@ -353,11 +353,11 @@ def classify_config_path(path: str) -> Dict[str, Any]:
             "status": "sweep_template",
             "reason": "Sweep/materialization YAML key; not a direct compiler config key.",
         }
-    if top in PAPER_ARTIFACT_SPEC_TOP_LEVEL:
+    if top in BENCHMARK_ARTIFACT_SPEC_TOP_LEVEL:
         return {
             "path": path,
-            "status": "paper_artifact_spec",
-            "reason": "Paper/report aggregation YAML key; not a direct compiler config key.",
+            "status": "benchmark_artifact_spec",
+            "reason": "Benchmark/report aggregation YAML key; not a direct compiler config key.",
         }
     if path in CONTAINER_SECTION_PATHS:
         return {
@@ -413,7 +413,7 @@ def build_config_contract_report(raw: Dict[str, Any]) -> Dict[str, Any]:
         "policy": {
             "priority_order": "manual YAML override > policy default > compiler default",
             "w0_lite_scope": "Report canonical/deprecated/unknown keys without global unknown-key rejection yet.",
-            "future_w_scope": "Unknown-key rejection and legacy alias removal happen in later YAML cleanup sprints.",
+            "future_w_scope": "Unknown-key rejection and legacy alias removal are handled by the YAML cleanup roadmap.",
         },
         "summary": {
             "total_paths": len(paths),
@@ -427,7 +427,7 @@ def build_config_contract_report(raw: Dict[str, Any]) -> Dict[str, Any]:
                 "path": spec.path,
                 "prefix": spec.prefix,
                 "purpose": spec.purpose,
-                "evidence": list(spec.evidence),
+                "artifacts": list(spec.artifacts),
             }
             for spec in CANONICAL_KEYS
         ],
@@ -488,8 +488,8 @@ def render_config_contract_markdown(report: Dict[str, Any]) -> str:
     lines += ["", "## Canonical public key roots", ""]
     for item in report.get("canonical_keys", []):
         suffix = ".*" if item.get("prefix") else ""
-        evidence = ", ".join(item.get("evidence", []))
-        lines.append(f"- `{item.get('path')}{suffix}` — {item.get('purpose', '')}; evidence: {evidence}")
+        artifacts = ", ".join(item.get("artifacts", []))
+        lines.append(f"- `{item.get('path')}{suffix}` — {item.get('purpose', '')}; artifacts: {artifacts}")
     return "\n".join(lines) + "\n"
 
 def build_repo_yaml_audit_report(root: str | Path, *, relative_dirs: Sequence[str] = ("configs", "examples")) -> Dict[str, Any]:
@@ -497,7 +497,7 @@ def build_repo_yaml_audit_report(root: str | Path, *, relative_dirs: Sequence[st
 
     W0-lite scope: classify existing config/example YAML paths with the same
     contract used for a single compile. This is intentionally report-only;
-    later W0/W sprints can turn selected findings into migration or rejection.
+    later YAML cleanup work can turn selected findings into migration or rejection.
     """
     root_path = Path(root)
     yaml_files: List[Path] = []
@@ -596,7 +596,7 @@ def build_repo_yaml_audit_report(root: str | Path, *, relative_dirs: Sequence[st
         "policy": {
             "scope": "W0-lite repo-level audit of configs/ and examples/ YAML files.",
             "priority_order": "manual YAML override > policy default > compiler default",
-            "future_w_scope": "Unknown-key rejection and legacy alias removal happen in later YAML cleanup sprints.",
+            "future_w_scope": "Unknown-key rejection and legacy alias removal are handled by the YAML cleanup roadmap.",
         },
         "summary": {
             "files_scanned": len(file_reports),

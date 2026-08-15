@@ -5,7 +5,7 @@ from fpgai.ir.graph import Graph
 from fpgai.implementations import HLSCompositionError, build_hls_composition_plan, implementation_contract_from_manifest
 
 
-def test_rejects_external_node_that_does_not_consume_current_tensor():
+def test_branching_graph_allows_external_node_on_non_current_tensor():
     graph = Graph("branch")
     graph.inputs = ["input"]
     graph.outputs = ["scaled"]
@@ -16,5 +16,6 @@ def test_rejects_external_node_that_does_not_consume_current_tensor():
         "_fpgai_external_operator": {"operator_id": "community.operator.scale_bias"},
     })
     contract = implementation_contract_from_manifest(Path("examples/packages/scale_bias_hls"))
-    with pytest.raises(HLSCompositionError, match="HLSCOMP003"):
-        build_hls_composition_plan(graph, selected_contracts={"scale_bias_0": contract})
+    plan = build_hls_composition_plan(graph, selected_contracts={"scale_bias_0": contract})
+    assert plan.graph_mode == "dag_mixed_graph"
+    assert plan.bindings[0].input_tensor == "input"

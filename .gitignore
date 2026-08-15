@@ -1,50 +1,230 @@
+# ============================================================
 # Python
+# ============================================================
+
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
+
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
+.coverage.*
 htmlcov/
 
+# ============================================================
 # Virtual environments
+# ============================================================
+
 .venv/
 venv/
 env/
+ENV/
 
-# Packaging
+# ============================================================
+# Packaging / distribution
+# ============================================================
+
 build/
 dist/
 *.egg-info/
+.eggs/
+pip-wheel-metadata/
 
-# IDE / OS
-.vscode/
-.idea/
-.DS_Store
+# ============================================================
+# FPGAI generated artifacts
+# ============================================================
 
-# Generated outputs
-experiments/*
-paper_experiments/*
-reports/*
-repo_audit/
-patches/
+generated/
+artifacts/
+runtime_packages/
+reports/generated/
 
-# Keep directory documentation tracked
-!experiments/README.md
-!paper_experiments/README.md
-!reports/README.md
+# ============================================================
+# Benchmark / experiment outputs
+# ============================================================
 
-# Local handoff / backup archives
-/*.zip
-# Python/runtime generated files
-# Local virtual environments
-# Local backup / patch artifacts
+benchmark_results/
+benchmark_runs/
+experiment_results/
+experiment_runs/
+
+# ============================================================
+# Private paper / publication material
+# ============================================================
+
+paper_results/
+paper_experiments/
+paper_outputs/
+paper_tables/
+paper_figures/
+paper_artifacts/
+
+publication_results/
+publication_artifacts/
+publication_outputs/
+publication_tables/
+publication_figures/
+
+arxiv_results/
+arxiv_outputs/
+
+# ============================================================
+# FPGA tool generated files
+# ============================================================
+
+.Xil/
+
+vivado*.jou
+vivado*.log
+vivado*.str
+
+vitis_hls*.log
+vitis*.log
+
+*.wdb
+*.xpr
+*.xsa
+*.hwh
+*.bit
+*.ltx
+
+*.runs/
+*.cache/
+*.gen/
+*.sim/
+*.hw/
+*.ip_user_files/
+
+# ============================================================
+# HLS generated projects
+# ============================================================
+
+fpgai_hls_proj/
+solution*/
+sol*/
+csim/
+csynth/
+syn/
+impl/
+
+# ============================================================
+# Vivado generated projects
+# ============================================================
+
+vivado_project/
+vivado_projects/
+project_*/
+*.srcs/
+*.runs/
+*.cache/
+*.gen/
+*.sim/
+*.hw/
+
+# ============================================================
+# Simulation artifacts
+# ============================================================
+
+xsim.dir/
+xvhdl.log
+xvlog.log
+xelab.log
+xsim.log
+
+*.vcd
+*.fst
+*.wcfg
+
+# ============================================================
+# Local test outputs
+# ============================================================
+
+test_results/
+test_outputs/
+pytest_results/
+
+# ============================================================
+# Temporary / backup files
+# ============================================================
+
 *.bak
 *.bak_*
 *.orig
 *.rej
 *.tmp
+*.temp
+*.old
+*.swp
+*.swo
 *~
-sprint*_inspection.txt
+
+# ============================================================
+# Internal development / handoff artifacts
+# ============================================================
+
+handoff/
+handoffs/
+internal_notes/
+internal_docs/
+scratch/
+scratchpad/
+
+*sprint*.txt
+*sprint*.md
+*handoff*.txt
+*handoff*.md
+*patch*.txt
+*patch*.md
+
+# ============================================================
+# Local data / caches
+# ============================================================
+
+.cache/
+cache/
+tmp/
+temp/
+
+# ============================================================
+# IDE / editor
+# ============================================================
+
+.vscode/
+.idea/
+*.code-workspace
+
+# ============================================================
+# Operating system
+# ============================================================
+
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================================
+# Local environment / secrets
+# ============================================================
+
+.env
+.env.*
+!.env.example
+
+*.local
+*.secret
+secrets/
+
+# ============================================================
+# Jupyter
+# ============================================================
+
+.ipynb_checkpoints/
+
+# ============================================================
+# Logs
+# ============================================================
+
+*.log
+logs/

@@ -32,7 +32,7 @@ def _write_smoke_tree(root: Path) -> None:
         encoding="utf-8",
     )
     status = {
-        "kind": "paper_experiment_status",
+        "kind": "benchmark_status",
         "failed_count": 0,
         "passed_count": 1,
         "skipped_count": 0,
@@ -56,7 +56,7 @@ def _write_smoke_tree(root: Path) -> None:
 
 
 def test_build_report_writes_public_artifacts(tmp_path: Path):
-    src = tmp_path / "paper"
+    src = tmp_path / "benchmark"
     src.mkdir()
     _write_smoke_tree(src)
 
@@ -71,7 +71,7 @@ def test_build_report_writes_public_artifacts(tmp_path: Path):
 
 
 def test_validate_results_accepts_consistent_tree(tmp_path: Path):
-    src = tmp_path / "paper"
+    src = tmp_path / "benchmark"
     src.mkdir()
     _write_smoke_tree(src)
 
@@ -83,7 +83,7 @@ def test_validate_results_accepts_consistent_tree(tmp_path: Path):
 
 
 def test_validate_results_rejects_false_pass(tmp_path: Path):
-    src = tmp_path / "paper"
+    src = tmp_path / "benchmark"
     src.mkdir()
     _write_smoke_tree(src)
 
@@ -116,18 +116,18 @@ def test_report_cli_exposes_existing_reporting_subcommands():
     result = _run_main_help("report")
 
     assert result.returncode == 0
-    assert "paper-artifacts" in result.stdout
+    assert "benchmark-artifacts" in result.stdout
     assert "frontier" in result.stdout
     assert "estimator" in result.stdout
 
 
-def test_report_paper_artifacts_help_is_public():
-    result = _run_main_help("report", "paper-artifacts")
+def test_report_benchmark_artifacts_help_is_public():
+    result = _run_main_help("report", "benchmark-artifacts")
 
     assert result.returncode == 0
     assert "--csv" in result.stdout
     assert "--out" in result.stdout
-    assert "generated paper artifacts" in result.stdout
+    assert "generated benchmark artifacts" in result.stdout
 
 
 def test_report_frontier_help_is_public():
@@ -161,9 +161,9 @@ def _run_main(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_report_paper_artifacts_runs_on_tiny_csv(tmp_path: Path):
-    csv_path = tmp_path / "paper.csv"
-    out_dir = tmp_path / "paper_out"
+def test_report_benchmark_artifacts_runs_on_tiny_csv(tmp_path: Path):
+    csv_path = tmp_path / "benchmark.csv"
+    out_dir = tmp_path / "benchmark_out"
     csv_path.write_text(
         "\n".join(
             [
@@ -177,7 +177,7 @@ def test_report_paper_artifacts_runs_on_tiny_csv(tmp_path: Path):
 
     result = _run_main(
         "report",
-        "paper-artifacts",
+        "benchmark-artifacts",
         "--csv",
         str(csv_path),
         "--out",
@@ -218,7 +218,7 @@ def test_report_frontier_runs_on_tiny_csv(tmp_path: Path):
     assert result.returncode == 0, result.stderr
     assert (out_dir / "frontier_points.csv").is_file()
     assert (out_dir / "frontier_knees.csv").is_file()
-    assert (out_dir / "paper_discussion.txt").is_file()
+    assert (out_dir / "design_frontier_discussion.txt").is_file()
 
 
 def test_report_estimator_runs_on_tiny_csv(tmp_path: Path):

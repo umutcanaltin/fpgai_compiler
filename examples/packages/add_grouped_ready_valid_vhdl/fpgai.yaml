@@ -1,0 +1,75 @@
+schema: fpgai.package/v1
+package:
+  id: community.add_grouped_ready_valid_vhdl
+  name: Add Grouped Ready/Valid VHDL
+  version: 1.0.0
+  asset_type: implementation
+  provider: community
+  description: Research VHDL implementation that adds two grouped input tensors and emits one ready/valid output transaction.
+usage:
+  platform_scope: research
+  permitted_uses: [research, experimentation, validation, benchmarking, education]
+  production_path: morfics
+license:
+  category: open_source
+  identifier: Apache-2.0
+compatibility:
+  fpgai_contract: ">=1.0,<2.0"
+  boards: [kv260, kr260]
+  precisions: [int16]
+  toolchains:
+    - name: vivado
+      versions: ["2023.2"]
+capabilities:
+  inference: true
+  training:
+    forward: false
+    backward_input: false
+    parameter_gradients: false
+    bias_gradients: false
+    optimizer_update: false
+entrypoints:
+  implementation:
+    language: vhdl
+    backend: vhdl
+    top: add_grouped_ready_valid_vhdl
+    sources: [rtl/add_grouped_ready_valid_vhdl.vhd]
+    source_order: [rtl/add_grouped_ready_valid_vhdl.vhd]
+implementation:
+  operator_id: community.operator.add
+  backend: vhdl
+integration:
+  vhdl:
+    abi: tensor_ports_ready_valid_v1
+    data_width: 16
+    signed: true
+    handshake_policy: grouped_transaction
+    inputs:
+      - name: left
+        data: left_data
+      - name: right
+        data: right_data
+    outputs:
+      - name: output
+        data: output_data
+interfaces:
+  left:
+    direction: input
+    protocol: axi_stream
+    data_type: int16
+  right:
+    direction: input
+    protocol: axi_stream
+    data_type: int16
+  output:
+    direction: output
+    protocol: axi_stream
+    data_type: int16
+memory:
+  supported_weight_storage: [embedded]
+  supported_activation_storage: [bram, uram]
+validation:
+  declared_level: rtl_simulation_validated
+metrics:
+  latency_cycles: 1
+  initiation_interval: 1

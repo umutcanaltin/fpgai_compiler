@@ -1,0 +1,58 @@
+schema: fpgai.package/v1
+package:
+  id: community.split_scale_tensor_ports_hls
+  name: SplitScale tensor ports HLS
+  version: 1.0.0
+  asset_type: implementation
+  provider: community
+  description: Maintained tensor_ports_v1 multi-output HLS implementation for SplitScale.
+usage:
+  platform_scope: research
+  permitted_uses: [research, experimentation, validation, benchmarking, education]
+  production_path: morfics
+license:
+  category: open_source
+  identifier: Apache-2.0
+compatibility:
+  fpgai_contract: ">=1.0,<2.0"
+  boards: [kv260, kr260, pynq_z2]
+  precisions: [fp32]
+  toolchains:
+    - name: vitis_hls
+      versions: ["2023.2"]
+capabilities:
+  inference: true
+  training:
+    forward: true
+    backward_input: false
+    parameter_gradients: false
+    bias_gradients: false
+    optimizer_update: false
+entrypoints:
+  implementation:
+    language: hls_cpp
+    backend: vitis_hls
+    top: split_scale_tensor_ports_hls
+    sources: [src/split_scale_tensor_ports.cpp]
+    headers: [include/split_scale_tensor_ports.hpp]
+implementation:
+  operator_id: community.operator.split_scale
+  backend: vitis_hls
+interfaces:
+  input: {direction: input, protocol: axi_stream, data_type: fp32}
+  identity: {direction: output, protocol: axi_stream, data_type: fp32}
+  scaled: {direction: output, protocol: axi_stream, data_type: fp32}
+integration:
+  hls:
+    abi: tensor_ports_v1
+    scalar_type: float
+    count_mode: shared
+    inputs:
+      - {name: input}
+    outputs:
+      - {name: identity}
+      - {name: scaled}
+    attributes:
+      - {name: scale, cpp_type: float, default: 2.0}
+validation:
+  declared_level: reference_tested

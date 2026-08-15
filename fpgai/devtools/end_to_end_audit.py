@@ -2,7 +2,7 @@
 """End-to-end FPGAI audit runner.
 
 This module is intentionally under fpgai.devtools instead of a loose script.
-It creates a small truth-audit matrix that checks whether YAML hardware
+It creates a small validation-audit matrix that checks whether YAML hardware
 settings materialize into compile plans, predictions, HLS/Vivado artifacts,
 and validation artifacts where the local toolchain is available.
 """
@@ -115,7 +115,7 @@ def _configure_target(
 
 
 def _cases(base_infer: Dict[str, Any], base_train: Dict[str, Any], root: Path) -> Dict[str, Dict[str, Any]]:
-    out_root = root / "paper_experiments" / "full_pipeline_gate" / "sprint25_e2e_audit"
+    out_root = root / "benchmark_runs" / "full_pipeline_gate" / "end_to_end_audit"
 
     safe_knobs = {
         "pe": 2,
@@ -273,7 +273,7 @@ def _case_summary(name: str, cfg_path: Path, out_dir: Path, compile_result: Dict
         "compile_plan_clock": None if not isinstance(compile_plan, dict) else compile_plan.get("clock_mhz"),
         "compile_plan_policy": None if not isinstance(compile_plan, dict) else compile_plan.get("policy"),
         "board_fit_format": None if not isinstance(board_fit, dict) else board_fit.get("format"),
-        "board_fit_truth_boundary": None if not isinstance(board_fit, dict) else board_fit.get("truth_boundary"),
+        "board_fit_validation_boundary": None if not isinstance(board_fit, dict) else board_fit.get("validation_boundary"),
         "contract": _contract_summary(out_dir),
     }
 
@@ -282,7 +282,7 @@ def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--inference-base", default="configs/examples/inference_compile.yml")
     ap.add_argument("--training-base", default="configs/examples/training_compile.yml")
-    ap.add_argument("--out-root", default="paper_experiments/full_pipeline_gate/sprint25_e2e_audit")
+    ap.add_argument("--out-root", default="benchmark_runs/full_pipeline_gate/end_to_end_audit")
     args = ap.parse_args(argv)
 
     root = _repo_root()
@@ -312,7 +312,7 @@ def main(argv: List[str] | None = None) -> int:
             "configs/examples/training_inference.yml",
             "fpgai_train.yml",
             "configs/sweeps/training_accelerator.yml",
-            "configs/sweeps/sprint13a_training_accelerator.yml",
+            "configs/sweeps/training_accelerator.yml",
         ],
     )
 
@@ -321,7 +321,7 @@ def main(argv: List[str] | None = None) -> int:
     cases = _cases(base_infer, base_train, root)
 
     results = {
-        "format": "fpgai.sprint25_e2e_audit.v1",
+        "format": "fpgai.end-to-end-audit/v1",
         "inference_base": str(inference_base_path),
         "training_base": str(training_base_path),
         "tool_availability": {
@@ -348,7 +348,7 @@ def main(argv: List[str] | None = None) -> int:
     summary_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
     md = out_root / "summary.md"
-    lines = ["# Sprint 25 end-to-end audit", ""]
+    lines = ["# End-to-end audit", ""]
     lines.append("## Base configs")
     lines.append(f"- inference_base: `{results['inference_base']}`")
     lines.append(f"- training_base: `{results['training_base']}`")

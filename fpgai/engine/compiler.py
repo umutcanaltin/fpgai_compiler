@@ -10,7 +10,7 @@ import numpy as np
 from fpgai.config.access import get_path
 from fpgai.config.loader import FPGAIConfig
 from fpgai.config.contract import build_config_contract_report, render_config_contract_markdown
-from fpgai.compiler.architecture_capabilities import (
+from fpgai.capabilities.architecture_capabilities import (
     validate_architecture_capabilities,
 )
 from fpgai.engine.analysis import analyze_graph
@@ -75,14 +75,14 @@ from fpgai.validation.dataset import (
     emit_training_validation_dataset_artifacts,
     emit_training_validation_split_contract,
 )
-from fpgai.paper.verification import emit_paper_verification_artifacts
-from fpgai.paper.experiment_artifacts import emit_experiment_artifact_reports
+from fpgai.benchmark.verification import emit_validation_summary_artifacts
+from fpgai.benchmark.experiment_artifacts import emit_experiment_artifact_reports
 from fpgai.backends.vivado.boards import get_board
-from fpgai.backends.vivado.vivado_bridge import emit_vivado_project_handoff, emit_vivado_truth_reports
+from fpgai.backends.vivado.vivado_bridge import emit_vivado_project_handoff, emit_vivado_validation_reports
 from fpgai.backends.vivado.run_bridge import run_vivado_bridge_flow
 from fpgai.reporting.hardware_feasibility import emit_board_fit_report
 from fpgai.reporting.hls_explanation import emit_generated_hls_explanation_reports
-from fpgai.reporting.hls_truth import emit_hls_truth_reports
+from fpgai.reporting.hls_validation import emit_hls_validation_reports
 from fpgai.reporting.precision_effect import emit_precision_effect_reports
 from fpgai.reporting.parallel_pipeline_effect import emit_parallel_pipeline_effect_reports
 from fpgai.reporting.data_movement import emit_data_movement_reports, emit_movement_contract_validation, movement_contract_validation_summary
@@ -122,7 +122,7 @@ from fpgai.engine.training_contracts import (
     _runtime_support_from_semantics,
     _scan_hls_top_ports,
     _write_execution_semantics_reports,
-    _write_feature_truth_reports,
+    _write_feature_validation_reports,
     _write_runtime_sequence_report,
     _write_training_movement_reports,
     _write_training_optimizer_loss_reports,
@@ -455,14 +455,14 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             runtime_sequence=runtime_sequence,
             source_ports=_scan_hls_top_ports(hls_dir),
         ) if enable_reports else None
-        vivado_truth_artifacts = emit_vivado_truth_reports(
+        vivado_validation_artifacts = emit_vivado_validation_reports(
             out_dir,
             raw_config=raw,
             build_stages=build_stages,
             vivado_handoff_artifacts=vivado_handoff_artifacts,
             board_fit_artifacts=(prediction_artifacts.get("board_fit") if isinstance(prediction_artifacts, dict) else None),
         ) if enable_reports else None
-        hls_truth_artifacts = emit_hls_truth_reports(
+        hls_validation_artifacts = emit_hls_validation_reports(
             out_dir=out_dir,
             hls_dir=hls_dir,
             build_stages=build_stages,
@@ -483,13 +483,13 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             precision_layout_artifacts=precision_layout_artifacts_for_effect,
             quant_result=quant_result,
             sweep_result=sweep_result,
-            hls_truth_artifacts=hls_truth_artifacts,
+            hls_validation_artifacts=hls_validation_artifacts,
         ) if enable_reports else None
         parallel_pipeline_effect_artifacts = emit_parallel_pipeline_effect_reports(
             out_dir=out_dir,
             raw_config=raw,
             hls_dir=hls_dir,
-            hls_truth_artifacts=hls_truth_artifacts,
+            hls_validation_artifacts=hls_validation_artifacts,
         ) if enable_reports else None
 
         inference_reference_artifacts = _emit_inference_reference_artifacts(
@@ -530,7 +530,7 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             data_movement_artifacts = dict(data_movement_artifacts)
             data_movement_artifacts.update(movement_contract_validation_artifacts)
 
-        paper_verification_artifacts = emit_paper_verification_artifacts(
+        validation_summary_artifacts = emit_validation_summary_artifacts(
             out_dir,
             pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
             source_generated=(hls_dir is not None),
@@ -543,7 +543,7 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             hls_ok=(hls_run.ok if hls_run is not None else None),
             build_stages=build_stages,
         ) if enable_reports else None
-        feature_truth_artifacts = _write_feature_truth_reports(
+        feature_validation_artifacts = _write_feature_validation_reports(
             out_dir,
             pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
             build_stages=build_stages,
@@ -551,7 +551,7 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             hls_run=hls_run,
             runtime_package=runtime_package,
             numeric_validation_artifacts=numeric_validation_artifacts,
-            paper_verification_artifacts=paper_verification_artifacts,
+            validation_summary_artifacts=validation_summary_artifacts,
             vivado_bd_contract_artifacts=vivado_bd_contract_artifacts,
             vivado_handoff_artifacts=vivado_handoff_artifacts,
         ) if enable_reports else None
@@ -571,12 +571,12 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
                 precision_effect_artifacts=precision_effect_artifacts,
                 parallel_pipeline_effect_artifacts=parallel_pipeline_effect_artifacts,
                 data_movement_artifacts=data_movement_artifacts,
-                paper_verification_artifacts=paper_verification_artifacts,
+                validation_summary_artifacts=validation_summary_artifacts,
                 vivado_bd_contract_artifacts=vivado_bd_contract_artifacts,
                 vivado_handoff_artifacts=vivado_handoff_artifacts,
-                vivado_truth_artifacts=vivado_truth_artifacts,
-                hls_truth_artifacts=hls_truth_artifacts,
-                feature_truth_artifacts=feature_truth_artifacts,
+                vivado_validation_artifacts=vivado_validation_artifacts,
+                hls_validation_artifacts=hls_validation_artifacts,
+                feature_validation_artifacts=feature_validation_artifacts,
                 out_dir=out_dir,
                 top_name=top_name,
                 weights_mode=weights_mode,
@@ -1224,14 +1224,14 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             runtime_sequence=runtime_sequence,
             source_ports=_scan_hls_top_ports(hls_dir),
         ) if enable_reports else None
-        vivado_truth_artifacts = emit_vivado_truth_reports(
+        vivado_validation_artifacts = emit_vivado_validation_reports(
             out_dir,
             raw_config=raw,
             build_stages=build_stages,
             vivado_handoff_artifacts=vivado_handoff_artifacts,
             board_fit_artifacts=(prediction_artifacts.get("board_fit") if isinstance(prediction_artifacts, dict) else None),
         ) if enable_reports else None
-        hls_truth_artifacts = emit_hls_truth_reports(
+        hls_validation_artifacts = emit_hls_validation_reports(
             out_dir=out_dir,
             hls_dir=hls_dir,
             build_stages=build_stages,
@@ -1470,13 +1470,13 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             precision_layout_artifacts=precision_layout_artifacts_for_effect,
             quant_result=None,
             sweep_result=None,
-            hls_truth_artifacts=hls_truth_artifacts,
+            hls_validation_artifacts=hls_validation_artifacts,
         ) if enable_reports else None
         parallel_pipeline_effect_artifacts = emit_parallel_pipeline_effect_reports(
             out_dir=out_dir,
             raw_config=raw,
             hls_dir=hls_dir,
-            hls_truth_artifacts=hls_truth_artifacts,
+            hls_validation_artifacts=hls_validation_artifacts,
         ) if enable_reports else None
         movement_contract_validation_artifacts = emit_movement_contract_validation(
             out_dir,
@@ -1486,7 +1486,7 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             data_movement_artifacts = dict(data_movement_artifacts)
             data_movement_artifacts.update(movement_contract_validation_artifacts)
 
-        paper_verification_artifacts = emit_paper_verification_artifacts(
+        validation_summary_artifacts = emit_validation_summary_artifacts(
             out_dir,
             pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
             source_generated=(hls_dir is not None),
@@ -1499,7 +1499,7 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             hls_ok=(hls_run.ok if hls_run is not None else None),
             build_stages=build_stages,
         ) if enable_reports else None
-        feature_truth_artifacts = _write_feature_truth_reports(
+        feature_validation_artifacts = _write_feature_validation_reports(
             out_dir,
             pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
             build_stages=build_stages,
@@ -1507,7 +1507,7 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             hls_run=hls_run,
             runtime_package=runtime_package,
             numeric_validation_artifacts=numeric_validation_artifacts,
-            paper_verification_artifacts=paper_verification_artifacts,
+            validation_summary_artifacts=validation_summary_artifacts,
             vivado_bd_contract_artifacts=vivado_bd_contract_artifacts,
         ) if enable_reports else None
 
@@ -1525,12 +1525,12 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
                 precision_effect_artifacts=precision_effect_artifacts,
                 parallel_pipeline_effect_artifacts=parallel_pipeline_effect_artifacts,
                 data_movement_artifacts=data_movement_artifacts,
-                paper_verification_artifacts=paper_verification_artifacts,
+                validation_summary_artifacts=validation_summary_artifacts,
                 vivado_bd_contract_artifacts=vivado_bd_contract_artifacts,
                 vivado_handoff_artifacts=vivado_handoff_artifacts,
-                vivado_truth_artifacts=vivado_truth_artifacts,
-                hls_truth_artifacts=hls_truth_artifacts,
-                feature_truth_artifacts=feature_truth_artifacts,
+                vivado_validation_artifacts=vivado_validation_artifacts,
+                hls_validation_artifacts=hls_validation_artifacts,
+                feature_validation_artifacts=feature_validation_artifacts,
                 out_dir=out_dir,
                 top_name=top_name,
                 weights_mode=weights_mode,
@@ -2391,7 +2391,7 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
                 "recommendation_scope",
                 "search_enabled",
                 "recommendation_kind",
-                "dse_truth",
+                "dse_validation",
                 "recommended_smallest_valid",
                 "recommended_balanced",
                 "recommended_best_accuracy",
@@ -3415,7 +3415,7 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             "board_fit_status": "not_evaluated",
             "board_fit_reason": (
                 "Capacity/resource feasibility is recorded as a contract placeholder here; "
-                "full board-fit enforcement is handled by the dedicated board-fit sprint/report."
+                "full board-fit enforcement is handled by the dedicated board-fit validation/report path."
             ),
             "precedence": [
                 "manual_yaml_override",
@@ -3423,7 +3423,7 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
                 "policy_preset",
                 "compiler_default",
             ],
-            "truth_boundary": {
+            "validation_boundary": {
                 "planner_trace": True,
                 "hls_trace": "through generated macros/comments/template args where available",
                 "vivado_trace": "requires Vivado report/bitstream stages",
@@ -3466,12 +3466,12 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
         lines.extend(
             [
                 "",
-                "## Truth boundary",
+                "## Validation boundary",
                 "",
                 "- This report proves YAML-to-planner traceability.",
                 "- HLS traceability is proven where generated macros, comments, template arguments, or pragmas expose the knob.",
-                "- Vivado and runtime truth require real Vivado reports, bitstreams, and board execution artifacts.",
-                "- If a manual YAML knob appears as `unknown`, `not_requested`, `changed_or_clamped`, or `report_only`, it must not be claimed as fully implemented until a later sprint fixes or validates it.",
+                "- Vivado and runtime validation require real Vivado reports, bitstreams, and board execution artifacts.",
+                "- If a manual YAML knob appears as `unknown`, `not_requested`, `changed_or_clamped`, or `report_only`, it must not be claimed as fully implemented until a later implementation change fixes or validates it.",
                 "",
             ]
         )
@@ -3756,8 +3756,8 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             "generated_hls_explanation_artifacts": None if kwargs.get("generated_hls_explanation_artifacts") is None else {
                 key: str(value) for key, value in kwargs.get("generated_hls_explanation_artifacts", {}).items()
             },
-            "paper_verification_artifacts": None if kwargs.get("paper_verification_artifacts") is None else {
-                key: str(value) for key, value in kwargs.get("paper_verification_artifacts", {}).items()
+            "validation_summary_artifacts": None if kwargs.get("validation_summary_artifacts") is None else {
+                key: str(value) for key, value in kwargs.get("validation_summary_artifacts", {}).items()
             },
             "vivado_bd_contract_artifacts": None if kwargs.get("vivado_bd_contract_artifacts") is None else {
                 key: str(value) for key, value in kwargs.get("vivado_bd_contract_artifacts", {}).items()
@@ -3765,11 +3765,11 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             "vivado_handoff_artifacts": None if kwargs.get("vivado_handoff_artifacts") is None else {
                 key: str(value) for key, value in kwargs.get("vivado_handoff_artifacts", {}).items()
             },
-            "vivado_truth_artifacts": None if kwargs.get("vivado_truth_artifacts") is None else {
-                key: str(value) for key, value in kwargs.get("vivado_truth_artifacts", {}).items()
+            "vivado_validation_artifacts": None if kwargs.get("vivado_validation_artifacts") is None else {
+                key: str(value) for key, value in kwargs.get("vivado_validation_artifacts", {}).items()
             },
-            "hls_truth_artifacts": None if kwargs.get("hls_truth_artifacts") is None else {
-                key: str(value) for key, value in kwargs.get("hls_truth_artifacts", {}).items()
+            "hls_validation_artifacts": None if kwargs.get("hls_validation_artifacts") is None else {
+                key: str(value) for key, value in kwargs.get("hls_validation_artifacts", {}).items()
             },
             "precision_effect_artifacts": None if kwargs.get("precision_effect_artifacts") is None else {
                 key: str(value) for key, value in kwargs.get("precision_effect_artifacts", {}).items()
@@ -3781,8 +3781,8 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
                 key: str(value) for key, value in kwargs.get("data_movement_artifacts", {}).items()
             },
             "movement_contract_validation": movement_contract_validation_summary(out_dir),
-            "feature_truth_artifacts": None if kwargs.get("feature_truth_artifacts") is None else {
-                key: str(value) for key, value in kwargs.get("feature_truth_artifacts", {}).items()
+            "feature_validation_artifacts": None if kwargs.get("feature_validation_artifacts") is None else {
+                key: str(value) for key, value in kwargs.get("feature_validation_artifacts", {}).items()
             },
             "runtime_package": kwargs.get("runtime_package"),
             "pipeline_stages": self._build_pipeline_stages(**kwargs),

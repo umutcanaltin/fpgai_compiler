@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Mapping
 
-from fpgai.compiler.capabilities import capability_for
+from fpgai.capabilities.capabilities import capability_for
 
 
 @dataclass(frozen=True)

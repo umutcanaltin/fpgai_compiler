@@ -14,7 +14,7 @@ Future stable workflow target:
 ```bash
 fpgai compile --config configs/examples/inference_compile.yml
 fpgai sweep --config configs/sweeps/example.yml
-fpgai paper collect --config configs/experiments/arxiv_paper.yml
+fpgai benchmark collect --config configs/experiments/benchmark_suite.yml
 ```
 
 ## Repository policy
@@ -26,7 +26,7 @@ Allowed script categories:
 | Category | Purpose |
 |---|---|
 | public | Stable user-facing wrappers while CLI commands mature |
-| paper | Artifact/experiment collection for manuscripts |
+| benchmark | Artifact/experiment collection for manuscripts |
 | dev | Maintainer diagnostics and migration tools |
 | legacy_workflow | Historical development utilities; not recommended for new users |
 

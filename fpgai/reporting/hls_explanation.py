@@ -1,6 +1,6 @@
 """Explainable generated-HLS project report helpers.
 
-These reports are intentionally evidence-based: they summarize what the
+These reports are intentionally artifacts-based: they summarize what the
 compiler generated and point to concrete files/strings that a reviewer can
 inspect.  They do not claim numeric/HLS/Vivado success unless the corresponding
 artifacts exist elsewhere.
@@ -71,7 +71,7 @@ def _memory_summary(memory_plan: Any) -> dict[str, Any]:
     }
 
 
-def _source_evidence(source: str) -> dict[str, Any]:
+def _source_artifacts(source: str) -> dict[str, Any]:
     checks = {
         "top_function_deeplearn": "void deeplearn(" in source,
         "runtime_mode_run_inference": "FPGAI_MODE_RUN_INFERENCE" in source,
@@ -323,7 +323,7 @@ def _emit_cpp_readability_and_validation_reports(
             "## Checks",
             *[f"- {name}: `{str(value).lower()}`" for name, value in validation_checks.items()],
             "",
-            "## Truth boundary",
+            "## Validation boundary",
             "This report does not claim HLS synthesis, Vivado implementation, or FPGA execution success.",
         ]) + "\n",
         encoding="utf-8",
@@ -400,7 +400,7 @@ def emit_generated_hls_explanation_reports(
         "decisions": decisions,
         "memory_summary": _memory_summary(memory_plan),
         "communication_summary": _communication_kinds(communication_plan),
-        "source_evidence": _source_evidence(source),
+        "source_artifacts": _source_artifacts(source),
         "verification_artifacts": {
             key: str(value) for key, value in (numeric_validation_artifacts or {}).items()
         },
@@ -415,7 +415,7 @@ def emit_generated_hls_explanation_reports(
 
     explanation_json.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
-    evidence = payload["source_evidence"]["checks"]
+    artifacts = payload["source_artifacts"]["checks"]
     explanation_lines = [
         "# Generated HLS explanation",
         "",
@@ -431,13 +431,13 @@ def emit_generated_hls_explanation_reports(
         if key.endswith("_exists"):
             continue
         explanation_lines.append(f"- {key}: `{value}`")
-    explanation_lines += ["", "## Source evidence"]
-    for key, value in sorted(evidence.items()):
+    explanation_lines += ["", "## Source artifacts"]
+    for key, value in sorted(artifacts.items()):
         explanation_lines.append(f"- {key}: `{str(bool(value)).lower()}`")
     explanation_lines += [
         "",
         "## Review note",
-        "This report explains generated artifacts and source-level evidence. Numeric, HLS, Vivado, and FPGA claims remain governed by their dedicated validation reports.",
+        "This report explains generated artifacts and source-level artifacts. Numeric, HLS, Vivado, and FPGA records remain governed by their dedicated validation reports.",
     ]
     explanation_md.write_text("\n".join(explanation_lines) + "\n", encoding="utf-8")
 
@@ -449,7 +449,7 @@ def emit_generated_hls_explanation_reports(
         "memory_summary": payload["memory_summary"],
         "communication_summary": payload["communication_summary"],
         "runtime_sequence": runtime_sequence,
-        "source_evidence": payload["source_evidence"],
+        "source_artifacts": payload["source_artifacts"],
     }
     decisions_json.write_text(json.dumps(design_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     decisions_md.write_text(
@@ -470,8 +470,8 @@ def emit_generated_hls_explanation_reports(
                     for edge in payload["communication_summary"].get("edges", [])
                 ],
                 "",
-                "## Evidence",
-                *[f"- {name}: `{str(value).lower()}`" for name, value in sorted(evidence.items())],
+                "## Artifacts",
+                *[f"- {name}: `{str(value).lower()}`" for name, value in sorted(artifacts.items())],
             ]
         )
         + "\n",
@@ -491,8 +491,8 @@ def emit_generated_hls_explanation_reports(
                 "- [ ] Does DDR storage avoid full local weight replicas?",
                 "- [ ] Are tile buffers actually used when tiled movement is requested?",
                 "- [ ] Does the testbench preserve Python/reference comparison artifacts?",
-                "- [ ] Did `reports/numeric_validation.json` pass for correctness claims?",
-                "- [ ] Are HLS/Vivado reports present before resource/timing claims?",
+                "- [ ] Did `reports/numeric_validation.json` pass for correctness records?",
+                "- [ ] Are HLS/Vivado reports present before resource/timing records?",
             ]
         )
         + "\n",

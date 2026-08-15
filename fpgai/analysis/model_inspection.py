@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Mapping, Sequence
 
 import numpy as np
 
-from fpgai.compiler.capabilities import capability_for
+from fpgai.capabilities.capabilities import capability_for
 
 
 def _tensor_dict(

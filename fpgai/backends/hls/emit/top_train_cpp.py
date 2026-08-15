@@ -2682,7 +2682,7 @@ def _fpgai_insert_training_ddr_tiled_mutable(source: str, *, graph: Graph, compi
         "#pragma HLS BIND_STORAGE variable=grad_tile type=ram_2p impl=bram",
         "#pragma HLS BIND_STORAGE variable=conv_weight_tile type=ram_2p impl=bram",
         "#pragma HLS BIND_STORAGE variable=conv_grad_tile type=ram_2p impl=bram",
-        "  // weights_mem is the architectural source of truth for DDR tiled mutable training.",
+        "  // weights_mem is the architectural source of validation for DDR tiled mutable training.",
     ]
     offset = 0
     pre_lines = ["  if (mode == FPGAI_MODE_RUN_TRAINING || mode == FPGAI_MODE_DDR_TILED_TRAINING) {", "    // Import Dense parameter tiles from DDR before the local update step."]
@@ -2959,10 +2959,10 @@ def _fpgai_insert_training_io_and_gradient_ports(source: str, *, raw_cfg: Any) -
     # data scheduler is implemented.  Earlier versions rewrote the first ``read_f32``
     # assignment with an ``i``-indexed m_axi load, but some generated training tops
     # read scalar values outside an ``i`` loop.  That produced invalid C++ such as
-    # ``buf_input[i] = ...`` with no ``i`` in scope.  For Sprint 29Q the contract is
+    # ``buf_input[i] = ...`` with no ``i`` in scope.  For the current training codegen contract the behavior is
     # an honest interface/report/codegen hook: expose the m_axi ports and local tile
     # buffers, preserve the existing numeric comparison path, and leave compute-fused
-    # tiled scheduling for the later numeric-validation/codegen refactor sprint.
+    # tiled scheduling for later numeric-validation/codegen refactoring.
     if output_tiled and "output_mem[i] = f32_to_u32" not in updated:
         # Export final training forward output before gradient/loss computation.
         loss_anchor = "  loss_t loss_value = (loss_t)0;\n"

@@ -45,29 +45,29 @@ def _load_json(path: Path) -> Dict[str, Any]:
 
 def _status_from_report(path: Path) -> Dict[str, Any]:
     if not path.exists():
-        return {"exists": False, "status": "missing", "paper_safe": False}
+        return {"exists": False, "status": "missing", "validation_ready": False}
     data = _load_json(path)
-    status = data.get("status") or data.get("evidence_status") or "present"
-    paper_safe = bool(
-        data.get("paper_safe")
-        or data.get("paper_claim_allowed") is True
-        or (isinstance(data.get("paper_claim_allowed"), Mapping) and any(bool(v) for v in data.get("paper_claim_allowed", {}).values()))
+    status = data.get("status") or data.get("artifact_status") or "present"
+    validation_ready = bool(
+        data.get("validation_ready")
+        or data.get("validation_claim_allowed") is True
+        or (isinstance(data.get("validation_claim_allowed"), Mapping) and any(bool(v) for v in data.get("validation_claim_allowed", {}).values()))
     )
     return {
         "exists": True,
         "status": str(status),
         "passed": data.get("passed"),
         "blocking_failure": data.get("blocking_failure"),
-        "paper_safe": paper_safe,
+        "validation_ready": validation_ready,
     }
 
 
 def audit_compile_artifacts(out_dir: str | Path) -> Dict[str, Any]:
     """Audit compiler outputs produced by one FPGAI compile directory.
 
-    This is intentionally evidence-only: it does not run HLS, Vivado, or board
-    execution. It reads artifacts/reports and summarizes which claims are only
-    estimated, which have tool-backed evidence, and which are missing.
+    This is intentionally artifacts-only: it does not run HLS, Vivado, or board
+    execution. It reads artifacts/reports and summarizes which records are only
+    estimated, which have tool-backed artifacts, and which are missing.
     """
     root = Path(out_dir)
     manifest = _load_json(root / "manifest.json")
@@ -83,8 +83,8 @@ def audit_compile_artifacts(out_dir: str | Path) -> Dict[str, Any]:
     build_stages = manifest.get("build_stages") or manifest.get("resolved_config_artifacts", {})
     movement = reports.get("movement_contract_validation", {})
     board_fit = reports.get("board_fit", {})
-    hls_truth = reports.get("hls_synthesis_report", {})
-    vivado_truth = reports.get("vivado_validation_report", {})
+    hls_validation = reports.get("hls_synthesis_report", {})
+    vivado_validation = reports.get("vivado_validation_report", {})
     bitstream = reports.get("bitstream_report", {})
     required_baseline = [
         "manifest",
@@ -122,12 +122,12 @@ def audit_compile_artifacts(out_dir: str | Path) -> Dict[str, Any]:
         "artifacts": artifacts,
         "reports": reports,
         "hls_sources": hls_sources,
-        "evidence_levels": {
+        "validation_levels": {
             "compiler_estimated": bool(reports.get("generated_hls_explanation", {}).get("exists") and reports.get("board_fit", {}).get("exists")),
-            "hls_truth": hls_truth.get("status") in {"synthesized", "parsed", "compared", "passed"},
-            "vivado_truth": vivado_truth.get("status") in {"validated", "implemented", "passed"},
-            "bitstream_truth": bitstream.get("status") in {"validated", "generated", "passed"},
-            "fpga_execution_truth": False,
+            "hls_validation": hls_validation.get("status") in {"synthesized", "parsed", "compared", "passed"},
+            "vivado_validation": vivado_validation.get("status") in {"validated", "implemented", "passed"},
+            "bitstream_validation": bitstream.get("status") in {"validated", "generated", "passed"},
+            "fpga_runtime_validation": False,
         },
     }
 

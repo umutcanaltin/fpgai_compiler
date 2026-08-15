@@ -713,7 +713,7 @@ def run_design_space_report(
 
 
 
-# FPGAI DSE recommendation-truth wrapper.
+# FPGAI DSE recommendation-validation wrapper.
 #
 # DSE is intentionally a recommendation/report layer over configured
 # candidates. It is not an exhaustive search optimizer. Recommendations are
@@ -768,7 +768,7 @@ def _fpgai_dse_materialization_metadata(row=None):
         "estimate_only_outputs": list(_FPGAI_DSE_ESTIMATE_ONLY_OUTPUTS),
         "estimate_only_knobs": [],
         "unsupported_knobs": [],
-        "truth_note": (
+        "validation_note": (
             "DSE recommends among configured YAML candidates only. "
             "Resource/timing values are pre-HLS estimates; no exhaustive "
             "search or measured HLS/Vivado optimization is claimed."
@@ -795,7 +795,7 @@ def _annotate_design_space_payload(payload):
     payload["recommendation_scope"] = "configured_candidates_only"
     payload["search_enabled"] = False
     payload["recommendation_kind"] = "estimate_based_recommendation"
-    payload["dse_truth"] = {
+    payload["dse_validation"] = {
         "configured_candidates_only": True,
         "search_enabled": False,
         "estimate_based": True,
@@ -810,7 +810,7 @@ def _annotate_design_space_payload(payload):
         policy.setdefault("search_enabled", False)
         policy.setdefault("recommendation_kind", "estimate_based_recommendation")
         policy.setdefault(
-            "truth_note",
+            "validation_note",
             "Recommendations are selected from configured candidates only.",
         )
     else:
@@ -818,7 +818,7 @@ def _annotate_design_space_payload(payload):
             "scope": "configured_candidates_only",
             "search_enabled": False,
             "recommendation_kind": "estimate_based_recommendation",
-            "truth_note": "Recommendations are selected from configured candidates only.",
+            "validation_note": "Recommendations are selected from configured candidates only.",
         }
 
     rows = payload.get("results")
@@ -856,14 +856,14 @@ def run_design_space_report(*args, **kwargs):
 
         summary_note = (
             "\n"
-            "DSE recommendation truth:\n"
+            "DSE recommendation validation:\n"
             "- Scope: configured YAML candidates only.\n"
             "- Search: disabled; no exhaustive optimizer is run.\n"
             "- Recommendation kind: estimate-based pre-HLS recommendation.\n"
             "- Compile-ready: true only for materialized compiler knobs.\n"
         )
         summary_text = result.summary_txt.read_text(encoding="utf-8")
-        if "DSE recommendation truth:" not in summary_text:
+        if "DSE recommendation validation:" not in summary_text:
             result.summary_txt.write_text(
                 summary_text.rstrip() + "\n" + summary_note,
                 encoding="utf-8",

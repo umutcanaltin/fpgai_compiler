@@ -6,6 +6,7 @@ import onnx
 from fpgai.ir import Graph
 from fpgai.ir.ops import Op, make_name
 from fpgai.ir.types import TensorSpec
+from fpgai.ir.passes.infer_shapes import infer_shapes as infer_ir_shapes
 
 from .parsing import (
     shape_from_value_info,
@@ -103,7 +104,7 @@ def import_onnx(
 
     if not canonicalize:
         g.ops = raw_ops
-        return g
+        return infer_ir_shapes(g) if infer_shapes else g
 
     # Canonicalize per-op
     ops = [canonicalize_op(op) for op in raw_ops]
@@ -115,4 +116,8 @@ def import_onnx(
     # Annotate Dense features from weight shapes
     annotate_dense_features(g)
 
-    return g
+    # Run the conservative FPGAI IR shape pass on the final canonical graph.
+    # External callbacks may have resolved custom-op outputs only after ONNX's
+    # own shape inference stopped at the custom domain; downstream built-ins
+    # such as Add must then be propagated from those newly known tensors.
+    return infer_ir_shapes(g) if infer_shapes else g

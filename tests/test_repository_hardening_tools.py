@@ -12,14 +12,14 @@ def test_repository_audit_reports_generated_roots_and_oversized_source(tmp_path:
     source_dir.mkdir()
     (source_dir / "large_module.py").write_text("value = 1\n" * 1201, encoding="utf-8")
 
-    generated_dir = tmp_path / "paper_results"
+    generated_dir = tmp_path / "benchmark_results"
     generated_dir.mkdir()
     (generated_dir / "result.json").write_text("{}", encoding="utf-8")
 
     report = audit_repository(tmp_path)
 
     assert report.status == "failed"
-    assert report.generated_roots_present == ["paper_results"]
+    assert report.generated_roots_present == ["benchmark_results"]
     assert any(
         finding.category == "oversized_source_module"
         and finding.path == "fpgai/large_module.py"

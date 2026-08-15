@@ -65,7 +65,7 @@ Use these terms instead of ambiguous `ddr`:
 
 ## Current implementation status after P2H inspection
 
-The earlier Sprint 28A boundary was correct at the time: generic `ddr` should not be claimed as scalable DDR-resident execution unless generated HLS proves tiled behavior. The current repository is further along now.
+The earlier implementation boundary was correct at the time: generic `ddr` should not be claimed as scalable DDR-resident execution unless generated HLS proves tiled behavior. The current repository is further along now.
 
 Validated focused memory tests now cover structural generated-source and packaging behavior for:
 
@@ -98,7 +98,7 @@ FPGAI has structural generated-HLS, testbench, runtime-package, and memory-seman
 
 Not yet safe claim:
 
-FPGAI has fully validated scalable DDR-resident large-network execution across the full paper suite and real board runtime. That requires selected compile-level HLS/Vivado validation and later physical-board runtime validation.
+FPGAI has fully validated scalable DDR-resident large-network execution across the full benchmark suite and real board runtime. That requires selected compile-level HLS/Vivado validation and later physical-board runtime validation.
 
 ## Required next validation
 
@@ -120,7 +120,7 @@ This distinction prevents the following incorrect interpretation:
 
 > Any weight tensor transferred through DDR is a DDR-resident weight tensor.
 
-A BRAM/URAM full-preload design reads its initial payload from external DDR, but its complete working copy is on chip during compute. A DDR-tiled design keeps the authoritative parameter tensor in external memory and uses only a local tile buffer. These are different hardware architectures and must remain different in the IR, generated source, reports, and paper experiments.
+A BRAM/URAM full-preload design reads its initial payload from external DDR, but its complete working copy is on chip during compute. A DDR-tiled design keeps the authoritative parameter tensor in external memory and uses only a local tile buffer. These are different hardware architectures and must remain different in the IR, generated source, reports, and benchmark experiments.
 
 The same model applies independently to:
 
@@ -131,4 +131,4 @@ The same model applies independently to:
 - optimizer state,
 - outputs and exported checkpoints.
 
-`reports/memory_residency_contract.json` now records these axes for every tensor class. The report also records an explicit current limitation: gradients and optimizer state are still represented through aggregate training storage fields rather than tensor-level `MemoryPlan` objects. Promoting those states into the scientific FPGAI IR remains a planned IR sprint.
+`reports/memory_residency_contract.json` now records these axes for every tensor class. The report also records an explicit current limitation: gradients and optimizer state are still represented through aggregate training storage fields rather than tensor-level `MemoryPlan` objects. Promoting those states into the scientific FPGAI IR remains a planned IR work.

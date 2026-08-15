@@ -145,8 +145,8 @@ def _manifest_path(project_dir: Path) -> Path:
 def _compile_output_dir_from_project_dir(project_dir: Path) -> Path:
     """Return the original compiler output directory.
 
-    In paper bridge wrappers, build/manifest.json may be a symlink to the real
-    build/paper/<design>/manifest.json. Resolving it lets the bridge update the
+    In benchmark bridge wrappers, build/manifest.json may be a symlink to the real
+    build/benchmark/<design>/manifest.json. Resolving it lets the bridge update the
     original build reports/package instead of only the temporary wrapper.
     """
     manifest = _manifest_path(project_dir)
@@ -263,57 +263,57 @@ def _write_md_report(path: Path, payload: Dict[str, Any], title: str) -> None:
         lines.extend(["", "## Artifact", f"- `{artifact}`"])
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-def _refresh_paper_verification_after_bridge(
+def _refresh_validation_summary_after_bridge(
     reports_dir: Path,
     impl_payload: Dict[str, Any],
     bit_payload: Dict[str, Any],
 ) -> None:
-    verification_json = reports_dir / "paper_verification.json"
-    paper_row_json = reports_dir / "paper_row.json"
-    verification_md = reports_dir / "paper_verification.md"
+    verification_json = reports_dir / "validation_summary.json"
+    benchmark_row_json = reports_dir / "benchmark_row.json"
+    verification_md = reports_dir / "validation_summary.md"
     payload = _load_json(verification_json) or {}
     if not isinstance(payload, dict) or not payload:
         return
 
-    flags = payload.get("verification_flags")
+    flags = payload.get("validation_flags")
     if not isinstance(flags, dict):
         flags = {}
     flags["vivado_implemented"] = bool(impl_payload.get("claimed_success"))
     flags["bitstream_generated"] = bool(bit_payload.get("claimed_success"))
-    payload["verification_flags"] = flags
+    payload["validation_flags"] = flags
 
-    allowed = payload.get("allowed_claims")
+    allowed = payload.get("validated_capabilities")
     if not isinstance(allowed, dict):
         allowed = {}
     allowed["vivado_implementation"] = flags["vivado_implemented"]
     allowed["bitstream"] = flags["bitstream_generated"]
-    payload["allowed_claims"] = allowed
+    payload["validated_capabilities"] = allowed
     _write_json(verification_json, payload)
 
-    row = _load_json(paper_row_json) or {}
+    row = _load_json(benchmark_row_json) or {}
     if isinstance(row, dict):
         row["vivado_implemented"] = flags["vivado_implemented"]
         row["bitstream_generated"] = flags["bitstream_generated"]
-        _write_json(paper_row_json, row)
+        _write_json(benchmark_row_json, row)
 
     lines = [
-        "# Paper verification",
+        "# Benchmark verification",
         "",
         f"- Pipeline mode: `{payload.get('pipeline_mode', 'inference')}`",
-        f"- Paper safe: `{str(bool(payload.get('paper_safe'))).lower()}`",
+        f"- Validation qualified: `{str(bool(payload.get('validation_ready'))).lower()}`",
         "",
         "## Verification flags",
     ]
     for key, value in flags.items():
         lines.append(f"- {key}: `{str(bool(value)).lower()}`")
-    lines += ["", "## Allowed claims"]
+    lines += ["", "## Allowed records"]
     for key, value in allowed.items():
         lines.append(f"- {key}: `{str(bool(value)).lower()}`")
     verification_md.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _sync_bridge_result_to_compile_output(artifact: Path, bridge: Path, row: Dict[str, Any]) -> None:
-    """Synchronize successful external Vivado bridge evidence into the real build.
+    """Synchronize successful external Vivado bridge artifacts into the real build.
 
     This replaces stale compile-time placeholder reports such as tool_missing only
     after the bridge has real Vivado reports/bitstream/XSA artifacts.
@@ -377,7 +377,7 @@ def _sync_bridge_result_to_compile_output(artifact: Path, bridge: Path, row: Dic
         "power_report": str(power) if power else None,
         "stdout_log": row.get("vivado_stdout_log"),
         "stderr_log": row.get("vivado_stderr_log"),
-        "truth_boundary": "Vivado implementation success is claimed only from a completed bridge run and real Vivado reports or implementation artifacts.",
+        "validation_boundary": "Vivado implementation success is claimed only from a completed bridge run and real Vivado reports or implementation artifacts.",
     }
 
     bit_payload = {
@@ -398,14 +398,14 @@ def _sync_bridge_result_to_compile_output(artifact: Path, bridge: Path, row: Dic
         "hwh_path": str(hwh) if hwh else None,
         "xsa_path": str(xsa) if xsa else None,
         "vivado_bridge_dir": target_bridge.as_posix(),
-        "truth_boundary": "Bitstream success is claimed only when real .bit and XSA artifacts exist after a completed Vivado bridge implementation run.",
+        "validation_boundary": "Bitstream success is claimed only when real .bit and XSA artifacts exist after a completed Vivado bridge implementation run.",
     }
 
     _write_json(reports_dir / "vivado_implementation_report.json", impl_payload)
     _write_json(reports_dir / "bitstream_report.json", bit_payload)
     _write_md_report(reports_dir / "vivado_implementation_report.md", impl_payload, "Vivado implementation report")
     _write_md_report(reports_dir / "bitstream_report.md", bit_payload, "Bitstream report")
-    _refresh_paper_verification_after_bridge(reports_dir, impl_payload, bit_payload)
+    _refresh_validation_summary_after_bridge(reports_dir, impl_payload, bit_payload)
 
     # Refresh runtime package so package_manifest sees vivado_bridge/bitstream.
     try:
@@ -791,6 +791,7 @@ def run_vivado_bridge_flow(
     run_bitstream: bool | None = None,
     max_designs: Optional[int] = None,
     timeout_sec: int | None = 3600,
+    target_clock_mhz: float | None = None,
 ) -> Dict[str, Any]:
     """Run the Vivado bridge flow for an experiment or direct build directory.
 
@@ -804,12 +805,14 @@ def run_vivado_bridge_flow(
     run_impl_default = bool(run_vivado_impl)
     run_bitstream_default = bool(run_vivado_impl) if run_bitstream is None else bool(run_bitstream)
 
-    gen_rows = generate_vivado_bridge_for_experiment(
-        exp,
-        board_name=board,
-        run_impl_default=run_impl_default,
-        run_bitstream_default=run_bitstream_default,
-    )
+    generate_kwargs = {
+        "board_name": board,
+        "run_impl_default": run_impl_default,
+        "run_bitstream_default": run_bitstream_default,
+    }
+    if target_clock_mhz is not None:
+        generate_kwargs["target_clock_mhz"] = target_clock_mhz
+    gen_rows = generate_vivado_bridge_for_experiment(exp, **generate_kwargs)
 
     run_rows: List[Dict[str, Any]] = []
     tool_artifacts = _limited(_iter_artifacts(exp), max_designs)

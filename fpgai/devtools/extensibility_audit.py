@@ -250,7 +250,7 @@ EXTENSION_FAMILIES: tuple[ExtensionFamilySpec, ...] = (
     ),
     ExtensionFamilySpec(
         "reporter",
-        ("fpgai/reporting", "fpgai/reports", "fpgai/paper"),
+        ("fpgai/reporting", "fpgai/reports", "fpgai/benchmark"),
         "direct_report_calls",
         "ReporterRegistry",
         "medium",

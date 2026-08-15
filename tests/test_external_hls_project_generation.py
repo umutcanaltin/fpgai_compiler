@@ -67,3 +67,20 @@ def test_external_hls_project_is_deterministic(tmp_path: Path) -> None:
     first_report = first.report_path.read_text(encoding="utf-8")
     second = emit_external_hls_operator_project(_request(tmp_path))
     assert second.report_path.read_text(encoding="utf-8") == first_report
+
+def test_tensor_ports_v1_external_project_generation(tmp_path: Path) -> None:
+    contract = implementation_contract_from_manifest(Path("examples/packages/add_tensor_ports_hls"))
+    result = emit_external_hls_operator_project(ExternalHLSProjectRequest(
+        out_dir=tmp_path / "multi",
+        contract=contract,
+        operator_name="Add",
+        operator_attributes={},
+        input_words=4,
+        output_words=4,
+    ))
+    assert result.ok, result.issues
+    text = result.top_cpp.read_text(encoding="utf-8")
+    assert "const float lhs[4]" in text
+    assert "const float rhs[4]" in text
+    assert "float output[4]" in text
+    assert "add_tensor_ports_hls(lhs, rhs, output, 4);" in text

@@ -12,7 +12,7 @@ import torch.nn as nn
 ROOT = Path(__file__).resolve().parents[2]
 MODELS_DIR = ROOT / "models" / "suite"
 CONFIGS_DIR = ROOT / "configs" / "suite"
-PAPER_CONFIGS_DIR = ROOT / "examples" / "paper" / "models"
+BENCHMARK_CONFIGS_DIR = ROOT / "examples" / "benchmark" / "models"
 
 
 class MLPMNIST(nn.Module):
@@ -132,7 +132,7 @@ class MLPLeakyRelu(nn.Module):
 
 
 class CIFARSmallCNN(nn.Module):
-    """Medium paper CNN workload with CIFAR-like 3x32x32 input."""
+    """Medium benchmark CNN workload with CIFAR-like 3x32x32 input."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -240,7 +240,7 @@ MODEL_SPECS: list[tuple[str, nn.Module, tuple[int, ...]]] = [
 ]
 
 
-PAPER_MODEL_CONFIGS: dict[str, dict] = {
+BENCHMARK_MODEL_CONFIGS: dict[str, dict] = {
     "compact_onchip_mnist_mlp": {
         "model_name": "mlp_mnist",
         "mode": "inference",
@@ -283,7 +283,7 @@ PAPER_MODEL_CONFIGS: dict[str, dict] = {
 def ensure_dirs() -> None:
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
     CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
-    PAPER_CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
+    BENCHMARK_CONFIGS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def export_onnx(
@@ -426,16 +426,16 @@ def make_base_config(model_rel_path: str, project_name: str) -> dict:
     }
 
 
-def make_paper_config(config_name: str, spec: dict) -> dict:
+def make_benchmark_config(config_name: str, spec: dict) -> dict:
     model_name = str(spec["model_name"])
     cfg = make_base_config(
         model_rel_path=f"models/suite/{model_name}.onnx",
-        project_name=f"paper_{config_name}",
+        project_name=f"benchmark_{config_name}",
     )
-    cfg["project"]["out_dir"] = f"build/paper/{config_name}"
+    cfg["project"]["out_dir"] = f"build/benchmark/{config_name}"
     cfg["pipeline"]["mode"] = spec["mode"]
-    cfg.setdefault("paper", {})["model_class"] = config_name
-    cfg["paper"]["memory_regime"] = spec["memory_regime"]
+    cfg.setdefault("benchmark", {})["model_class"] = config_name
+    cfg["benchmark"]["memory_regime"] = spec["memory_regime"]
 
     weights_mode = str(spec["weights_mode"])
     cfg["data_movement"]["ps_pl"]["weights"]["mode"] = weights_mode
@@ -465,9 +465,9 @@ def _schema_compatible_config(cfg: dict) -> dict:
     """Normalize generated example YAMLs to the public FPGAI config schema."""
     out = copy.deepcopy(cfg)
 
-    # Paper metadata belongs in paper_results/master_results, not as an
+    # Benchmark metadata belongs in benchmark_results/master_results, not as an
     # unsupported top-level compile config section.
-    out.pop("paper", None)
+    out.pop("benchmark", None)
 
     weights = (
         out.get("data_movement", {})
@@ -517,17 +517,17 @@ def create_suite() -> None:
         print(f"[OK] model  : {onnx_path}")
         print(f"[OK] config : {cfg_path}")
 
-    for config_name, spec in PAPER_MODEL_CONFIGS.items():
-        cfg = make_paper_config(config_name, spec)
-        cfg_path = PAPER_CONFIGS_DIR / f"{config_name}.yml"
+    for config_name, spec in BENCHMARK_MODEL_CONFIGS.items():
+        cfg = make_benchmark_config(config_name, spec)
+        cfg_path = BENCHMARK_CONFIGS_DIR / f"{config_name}.yml"
         write_yaml(cfg, cfg_path)
-        print(f"[OK] paper config : {cfg_path}")
+        print(f"[OK] benchmark config : {cfg_path}")
 
     print()
     print("Suite generation complete.")
     print(f"Models       : {MODELS_DIR}")
     print(f"Configs      : {CONFIGS_DIR}")
-    print(f"Paper configs: {PAPER_CONFIGS_DIR}")
+    print(f"Benchmark configs: {BENCHMARK_CONFIGS_DIR}")
     print()
     print("Example run:")
     print("python -m fpgai.experiments.model_suite")

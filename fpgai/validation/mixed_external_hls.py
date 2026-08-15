@@ -36,30 +36,148 @@ def _builtin_reference(op_type: str, value: np.ndarray, attrs: Mapping[str, Any]
     raise ValueError(f"No maintained mixed-HLS reference implementation for built-in operator {op_type!r}")
 
 
+
+def _shape_of(graph: Any, tensor_name: str) -> tuple[int, ...] | None:
+    spec = getattr(graph, "tensors", {}).get(tensor_name) if hasattr(graph, "tensors") else None
+    shape = getattr(spec, "shape", None)
+    if not shape:
+        return None
+    try:
+        dims = tuple(int(x) for x in shape)
+    except (TypeError, ValueError):
+        return None
+    return dims if all(x > 0 for x in dims) else None
+
+
+def _normalize_declared_tensor_shape(graph: Any, tensor_name: str, value: np.ndarray) -> np.ndarray:
+    array = np.asarray(value, dtype=np.float32)
+    declared = _shape_of(graph, tensor_name)
+    if declared is None:
+        return array
+    expected_words = int(np.prod(declared))
+    if array.size != expected_words:
+        raise ValueError(
+            f"Reference output for {tensor_name!r} has {array.size} values; "
+            f"declared FPGAI tensor shape {declared} requires {expected_words}"
+        )
+    return array.reshape(declared)
+
+
+def _conv2d_reference_nchw(
+    value: np.ndarray,
+    weight: np.ndarray,
+    bias: np.ndarray | None,
+    attrs: Mapping[str, Any],
+) -> np.ndarray:
+    x = np.asarray(value, dtype=np.float32)
+    w = np.asarray(weight, dtype=np.float32)
+    if x.ndim != 4 or w.ndim != 4:
+        raise ValueError("Maintained Conv reference currently requires NCHW input and OIHW weights")
+    n, cin, ih, iw = x.shape
+    cout, wcin, kh, kw = w.shape
+    group = int(attrs.get("group", 1))
+    if group != 1 or wcin != cin:
+        raise ValueError("Maintained Conv reference currently supports group=1 with matching input channels")
+    strides = tuple(int(v) for v in attrs.get("strides", (1, 1)))
+    dilations = tuple(int(v) for v in attrs.get("dilations", (1, 1)))
+    pads = tuple(int(v) for v in attrs.get("pads", (0, 0, 0, 0)))
+    if len(strides) != 2 or len(dilations) != 2 or len(pads) != 4:
+        raise ValueError("Maintained Conv reference requires 2D strides/dilations and four ONNX pads")
+    sh, sw = strides; dh, dw = dilations
+    pt, pl, pb, pr = pads
+    eff_kh = dh * (kh - 1) + 1
+    eff_kw = dw * (kw - 1) + 1
+    oh = (ih + pt + pb - eff_kh) // sh + 1
+    ow = (iw + pl + pr - eff_kw) // sw + 1
+    if oh <= 0 or ow <= 0:
+        raise ValueError("Conv reference produced non-positive output dimensions")
+    padded = np.pad(x, ((0, 0), (0, 0), (pt, pb), (pl, pr)), mode="constant")
+    out = np.zeros((n, cout, oh, ow), dtype=np.float32)
+    for ni in range(n):
+        for co in range(cout):
+            for oy in range(oh):
+                iy0 = oy * sh
+                for ox in range(ow):
+                    ix0 = ox * sw
+                    acc = 0.0
+                    for ci in range(cin):
+                        for ky in range(kh):
+                            iy = iy0 + ky * dh
+                            for kx in range(kw):
+                                ix = ix0 + kx * dw
+                                acc += float(padded[ni, ci, iy, ix]) * float(w[co, ci, ky, kx])
+                    if bias is not None:
+                        acc += float(np.asarray(bias, dtype=np.float32).reshape(-1)[co])
+                    out[ni, co, oy, ox] = acc
+    return out
+
 def execute_mixed_graph_reference(graph: Any, external_context: Any, input_values: np.ndarray) -> np.ndarray:
     if len(graph.inputs) != 1 or len(graph.outputs) != 1:
         raise ValueError("Mixed external validation currently requires one graph input and one graph output")
-    tensors: dict[str, np.ndarray] = {graph.inputs[0]: np.asarray(input_values, dtype=np.float32).reshape(-1)}
+    input_array = np.asarray(input_values, dtype=np.float32)
+    input_shape = _shape_of(graph, graph.inputs[0])
+    if input_shape is not None:
+        expected_words = int(np.prod(input_shape))
+        if input_array.size != expected_words:
+            raise ValueError(
+                f"Reference input for {graph.inputs[0]!r} has {input_array.size} values; expected {expected_words} from shape {input_shape}"
+            )
+        input_array = input_array.reshape(input_shape)
+    tensors: dict[str, np.ndarray] = {graph.inputs[0]: input_array}
+    constants_map = getattr(graph, "constants", {}) or {}
+    constants = set(constants_map)
     for op in graph.ops:
-        if len(op.inputs) != 1 or len(op.outputs) != 1:
-            raise ValueError(f"Reference validation requires one input/output for node {op.name!r}")
-        value = tensors[op.inputs[0]]
+        runtime_inputs = [name for name in op.inputs if name not in constants]
         provenance = op.attrs.get("_fpgai_external_operator")
         if isinstance(provenance, Mapping):
+            if not runtime_inputs:
+                raise ValueError(f"External reference node {op.name!r} requires at least one runtime input")
+            missing = [name for name in runtime_inputs if name not in tensors]
+            if missing:
+                raise ValueError(f"External reference node {op.name!r} is missing runtime tensors {missing}")
             operator_id = str(provenance.get("operator_id", ""))
             callback = external_context.reference_for(operator_id)
             if callback is None:
                 raise ValueError(f"External operator {operator_id!r} has no numeric reference callback")
             clean_attrs = {k: v for k, v in op.attrs.items() if not str(k).startswith("_fpgai_")}
-            result = callback(ReferenceExecutionContext(attributes=clean_attrs, inputs=(value,)))
-            if len(result.outputs) != 1:
-                raise ValueError(f"External reference for {operator_id!r} returned {len(result.outputs)} outputs")
-            output = np.asarray(result.outputs[0], dtype=np.float32).reshape(-1)
-        else:
-            output = _builtin_reference(op.op_type, value, op.attrs)
-        tensors[op.outputs[0]] = output
-    return tensors[graph.outputs[0]].astype(np.float32, copy=False)
+            result = callback(ReferenceExecutionContext(
+                attributes=clean_attrs,
+                inputs=tuple(tensors[name] for name in runtime_inputs),
+            ))
+            if len(result.outputs) != len(op.outputs):
+                raise ValueError(
+                    f"External reference for {operator_id!r} returned {len(result.outputs)} outputs; "
+                    f"node {op.name!r} declares {len(op.outputs)}"
+                )
+            for tensor_name, value in zip(op.outputs, result.outputs):
+                tensors[tensor_name] = _normalize_declared_tensor_shape(graph, tensor_name, value)
+            continue
 
+        if len(op.outputs) != 1:
+            raise ValueError(f"Built-in reference node {op.name!r} requires one output in the maintained profile")
+        if str(op.op_type).lower() == "add":
+            if len(runtime_inputs) != 2:
+                raise ValueError(f"Add reference node {op.name!r} requires two runtime inputs")
+            left = tensors[runtime_inputs[0]]
+            right = tensors[runtime_inputs[1]]
+            if left.shape != right.shape:
+                raise ValueError(f"Add reference node {op.name!r} requires equal shapes")
+            output = (left + right).astype(np.float32)
+        elif str(op.op_type).lower() in {"conv", "conv2d"}:
+            if len(runtime_inputs) != 1:
+                raise ValueError(f"Conv reference node {op.name!r} requires one runtime activation input")
+            constant_inputs = [name for name in op.inputs if name in constants]
+            if not constant_inputs:
+                raise ValueError(f"Conv reference node {op.name!r} requires constant weights")
+            weight = constants_map[constant_inputs[0]]
+            bias = constants_map[constant_inputs[1]] if len(constant_inputs) > 1 else None
+            output = _conv2d_reference_nchw(tensors[runtime_inputs[0]], weight, bias, op.attrs)
+        else:
+            if len(runtime_inputs) != 1:
+                raise ValueError(f"Reference validation requires one runtime input for node {op.name!r}")
+            output = _builtin_reference(op.op_type, tensors[runtime_inputs[0]], op.attrs)
+        tensors[op.outputs[0]] = _normalize_declared_tensor_shape(graph, op.outputs[0], output)
+    return tensors[graph.outputs[0]].astype(np.float32, copy=False).reshape(-1)
 
 def _write_f32(path: Path, values: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -142,14 +260,24 @@ def run_portable_host_cpp_validation(
     compiler = shutil.which("g++") or shutil.which("c++")
     if compiler is None:
         return {"status": "skipped", "reason": "cxx_compiler_not_found"}
+
+    import re
+
+    def symbol(name: str) -> str:
+        token = re.sub(r"[^A-Za-z0-9_]", "_", str(name))
+        return f"tensor_{token}"
+
     work = artifacts.report_path.parent / "host_cpp"
     work.mkdir(parents=True, exist_ok=True)
     source = work / "mixed_graph_host.cpp"
     executable = work / "mixed_graph_host"
     host_output = work / "output.bin"
     input_values = list(artifacts.input_values)
+    constants = set(getattr(graph, "constants", {}) or {})
+
     lines = [
-        "#include <algorithm>", "#include <cmath>", "#include <cstdio>", "#include <fstream>", "#include <vector>", "",
+        "#include <algorithm>", "#include <cmath>", "#include <cstdio>",
+        "#include <fstream>", "#include <vector>", "",
     ]
     declared: set[str] = set()
     for binding in composition_plan.bindings:
@@ -160,55 +288,91 @@ def run_portable_host_cpp_validation(
             suffix = "".join(f", {kind}" for kind in attr_types)
             lines.append(f"void {binding.contract.top}(const float*, float*, int{suffix});")
             declared.add(binding.contract.top)
-    lines += ["", "int main() {", f"  std::vector<float> current = {{{', '.join(repr(float(v))+'f' for v in input_values)}}};"]
+
+    input_var = symbol(graph.inputs[0])
+    lines += [
+        "",
+        "int main() {",
+        f"  std::vector<float> {input_var} = {{{', '.join(repr(float(v))+'f' for v in input_values)}}};",
+    ]
+
     for op in graph.ops:
+        runtime_inputs = [str(x) for x in op.inputs if str(x) not in constants]
+        if len(op.outputs) != 1:
+            return {"status": "skipped", "reason": f"unsupported_host_outputs:{op.name}"}
+        out_var = symbol(op.outputs[0])
         binding = composition_plan.binding_for_node(op.name)
         if binding is not None:
+            if len(runtime_inputs) != 1:
+                return {"status": "skipped", "reason": f"unsupported_external_arity:{op.name}"}
+            in_var = symbol(runtime_inputs[0])
             integration = dict(binding.contract.metadata.get("integration", {})).get("hls", {})
             attr_specs = integration.get("attributes", []) if isinstance(integration, Mapping) else []
-            args=[]
+            args = []
             for item in attr_specs:
                 if not isinstance(item, Mapping):
                     continue
-                name=str(item.get("name", "")); default=item.get("default", 0.0)
-                args.append(repr(float(binding.attributes.get(name, default)))+"f")
-            extra = "".join(", "+arg for arg in args)
+                name = str(item.get("name", ""))
+                default = item.get("default", 0.0)
+                args.append(repr(float(binding.attributes.get(name, default))) + "f")
+            extra = "".join(", " + arg for arg in args)
             lines += [
-                "  {", "    std::vector<float> next(current.size());",
-                f"    {binding.contract.top}(current.data(), next.data(), (int)current.size(){extra});",
-                "    current.swap(next);", "  }",
+                f"  std::vector<float> {out_var}({in_var}.size());",
+                f"  {binding.contract.top}({in_var}.data(), {out_var}.data(), (int){in_var}.size(){extra});",
+            ]
+        elif str(op.op_type).lower() == "add":
+            if len(runtime_inputs) != 2:
+                return {"status": "skipped", "reason": f"unsupported_add_arity:{op.name}"}
+            left = symbol(runtime_inputs[0])
+            right = symbol(runtime_inputs[1])
+            lines += [
+                f"  if ({left}.size() != {right}.size()) return 3;",
+                f"  std::vector<float> {out_var}({left}.size());",
+                f"  for (size_t i = 0; i < {out_var}.size(); ++i) {out_var}[i] = {left}[i] + {right}[i];",
             ]
         elif str(op.op_type).lower() == "relu":
-            lines.append("  for (float& value : current) value = std::max(0.0f, value);")
+            in_var = symbol(runtime_inputs[0])
+            lines += [
+                f"  std::vector<float> {out_var} = {in_var};",
+                f"  for (float& value : {out_var}) value = std::max(0.0f, value);",
+            ]
         elif str(op.op_type).lower() == "sigmoid":
-            lines.append("  for (float& value : current) value = 1.0f / (1.0f + std::exp(-value));")
+            in_var = symbol(runtime_inputs[0])
+            lines += [
+                f"  std::vector<float> {out_var} = {in_var};",
+                f"  for (float& value : {out_var}) value = 1.0f / (1.0f + std::exp(-value));",
+            ]
         elif str(op.op_type).lower() in {"identity", "flatten", "reshape"}:
-            pass
+            in_var = symbol(runtime_inputs[0])
+            lines.append(f"  std::vector<float> {out_var} = {in_var};")
         else:
             return {"status": "skipped", "reason": f"unsupported_host_operator:{op.op_type}"}
+
+    final_var = symbol(graph.outputs[0])
     lines += [
         f'  std::ofstream out("{host_output.as_posix()}", std::ios::binary);',
-        "  out.write(reinterpret_cast<const char*>(current.data()), (std::streamsize)(current.size()*sizeof(float)));",
+        f"  out.write(reinterpret_cast<const char*>({final_var}.data()), (std::streamsize)({final_var}.size()*sizeof(float)));",
         "  return out ? 0 : 2;", "}",
     ]
-    source.write_text("\n".join(lines)+"\n", encoding="utf-8")
+    source.write_text("\n".join(lines) + "\n", encoding="utf-8")
     external_sources = sorted((hls_dir / "src" / "external").rglob("*.cpp"))
     include_dirs = sorted({path.parent for path in (hls_dir / "include" / "external").rglob("*.hpp")})
-    command=[compiler,"-std=c++17","-O2",str(source),*(str(path) for path in external_sources)]
+    command = [compiler, "-std=c++17", "-O2", str(source), *(str(path) for path in external_sources)]
     for include_dir in include_dirs:
-        command.extend(["-I",str(include_dir)])
-    command.extend(["-o",str(executable)])
+        command.extend(["-I", str(include_dir)])
+    command.extend(["-o", str(executable)])
     try:
         subprocess.check_call(command, cwd=str(work))
         subprocess.check_call([str(executable)], cwd=str(work))
     except subprocess.CalledProcessError as exc:
-        return {"status":"failed","returncode":int(exc.returncode),"source":str(source),"command":command}
-    actual=np.fromfile(host_output,dtype=np.float32)
-    expected=np.asarray(artifacts.expected_values,dtype=np.float32)
-    diff=np.abs(actual-expected) if actual.size==expected.size else np.array([],dtype=np.float32)
-    ok=actual.size==expected.size and bool(np.allclose(actual,expected,atol=1e-6,rtol=1e-6))
+        return {"status": "failed", "returncode": int(exc.returncode), "source": str(source), "command": command}
+    actual = np.fromfile(host_output, dtype=np.float32)
+    expected = np.asarray(artifacts.expected_values, dtype=np.float32)
+    diff = np.abs(actual - expected) if actual.size == expected.size else np.array([], dtype=np.float32)
+    ok = actual.size == expected.size and bool(np.allclose(actual, expected, atol=1e-6, rtol=1e-6))
     return {
-        "status":"passed" if ok else "failed", "source":str(source), "executable":str(executable),
-        "output_bin":str(host_output), "outputs":int(actual.size),
-        "max_abs":float(diff.max()) if diff.size else None, "mean_abs":float(diff.mean()) if diff.size else None,
+        "status": "passed" if ok else "failed", "source": str(source), "executable": str(executable),
+        "output_bin": str(host_output), "outputs": int(actual.size),
+        "max_abs": float(diff.max()) if diff.size else None, "mean_abs": float(diff.mean()) if diff.size else None,
     }
+

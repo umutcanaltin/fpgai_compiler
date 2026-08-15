@@ -8,63 +8,60 @@ from pathlib import Path
 from typing import Any
 
 from fpgai.implementations.implementation_contract import ImplementationContract
-
-from .abi import HLSFlatArrayABI, parse_flat_array_abi, validate_hls_integration_contract
+from .abi import HLSFlatArrayABI, HLSTensorPortsABI, parse_hls_abi, validate_hls_integration_contract
 from .errors import HLSIntegrationIssue
 from .types import ExternalHLSProjectRequest, ExternalHLSProjectResult
 
 
 def _slug(package_id: str) -> str:
-    return package_id.replace(".", "_").replace("-", "_")
+    return package_id.replace('.', '_').replace('-', '_')
 
 
 def _safe_package_file(root: Path, relative: str) -> Path:
     candidate = root / relative
     if candidate.is_symlink():
-        raise ValueError(f"HLSINT007: symlinked package file is not allowed: {relative}")
+        raise ValueError(f'HLSINT007: symlinked package file is not allowed: {relative}')
     resolved_root = root.resolve()
     resolved = candidate.resolve()
     try:
         resolved.relative_to(resolved_root)
     except ValueError as exc:
-        raise ValueError(f"HLSINT008: package file escapes package root: {relative}") from exc
+        raise ValueError(f'HLSINT008: package file escapes package root: {relative}') from exc
     if not resolved.is_file():
-        raise ValueError(f"HLSINT009: package file does not exist: {relative}")
+        raise ValueError(f'HLSINT009: package file does not exist: {relative}')
     return resolved
 
 
 def _cpp_literal(value: Any, cpp_type: str) -> str:
-    if cpp_type in {"int", "unsigned"}:
-        return str(int(value)) + ("u" if cpp_type == "unsigned" else "")
+    if cpp_type in {'int', 'unsigned'}:
+        return str(int(value)) + ('u' if cpp_type == 'unsigned' else '')
     numeric = float(value)
     if not math.isfinite(numeric):
-        raise ValueError("HLSINT010: non-finite operator attribute")
-    text = f"{numeric:.9g}"
-    if "." not in text and "e" not in text.lower():
-        text += ".0"
-    return text + ("f" if cpp_type == "float" else "")
+        raise ValueError('HLSINT010: non-finite operator attribute')
+    text = f'{numeric:.9g}'
+    if '.' not in text and 'e' not in text.lower():
+        text += '.0'
+    return text + ('f' if cpp_type == 'float' else '')
 
 
-def _copy_files(contract: ImplementationContract, hls_dir: Path) -> tuple[tuple[Path, ...], tuple[Path, ...], Path, Path]:
+def _copy_files(contract: ImplementationContract, hls_dir: Path):
     if contract.package_root is None:
-        raise ValueError("HLSINT011: implementation contract has no package_root")
+        raise ValueError('HLSINT011: implementation contract has no package_root')
     package_root = Path(contract.package_root)
     slug = _slug(contract.package_id)
-    external_root = hls_dir / "external" / slug
-    src_root = external_root / "src"
-    include_root = external_root / "include"
+    external_root = hls_dir / 'external' / slug
+    src_root = external_root / 'src'
+    include_root = external_root / 'include'
     src_root.mkdir(parents=True, exist_ok=True)
     include_root.mkdir(parents=True, exist_ok=True)
-
     copied_sources: list[Path] = []
     copied_headers: list[Path] = []
-    ordered_sources = contract.source_order or contract.sources
-    for index, relative in enumerate(ordered_sources):
+    for index, relative in enumerate(contract.source_order or contract.sources):
         source = _safe_package_file(package_root, relative)
-        destination = src_root / f"{index:03d}_{source.name}"
+        destination = src_root / f'{index:03d}_{source.name}'
         shutil.copy2(source, destination)
         copied_sources.append(destination)
-    for index, relative in enumerate(contract.headers):
+    for relative in contract.headers:
         source = _safe_package_file(package_root, relative)
         destination = include_root / source.name
         shutil.copy2(source, destination)
@@ -72,82 +69,113 @@ def _copy_files(contract: ImplementationContract, hls_dir: Path) -> tuple[tuple[
     return tuple(copied_sources), tuple(copied_headers), src_root, include_root
 
 
-def _wrapper_header(request: ExternalHLSProjectRequest, abi: HLSFlatArrayABI) -> str:
+
+
+def _port_words(request: ExternalHLSProjectRequest, abi: HLSTensorPortsABI, port, direction: str) -> int:
+    mapping = request.input_port_words if direction == "input" else request.output_port_words
+    if mapping and port.name in mapping:
+        return int(mapping[port.name])
+    return int(request.input_words if direction == "input" else request.output_words)
+
+def _ports(request: ExternalHLSProjectRequest, abi: HLSFlatArrayABI | HLSTensorPortsABI):
+    if isinstance(abi, HLSFlatArrayABI):
+        return [('input', 'input', request.input_words, abi.scalar_type), ('output', 'output', request.output_words, abi.scalar_type)]
     return (
-        "#pragma once\n\n"
-        f"extern \"C\" void {request.top_name}(\n"
-        f"    const {abi.scalar_type} input[{request.input_words}],\n"
-        f"    {abi.scalar_type} output[{request.output_words}]\n"
-        ");\n"
+        [(p.name, 'input', _port_words(request, abi, p, 'input'), abi.scalar_for(p)) for p in abi.inputs]
+        + [(p.name, 'output', _port_words(request, abi, p, 'output'), abi.scalar_for(p)) for p in abi.outputs]
     )
 
 
-def _package_declaration(contract: ImplementationContract, abi: HLSFlatArrayABI) -> str:
-    params = [f"const {abi.scalar_type}* input", f"{abi.scalar_type}* output", "int count"]
-    params.extend(f"{item.cpp_type} {item.name}" for item in abi.attributes)
+def _wrapper_header(request: ExternalHLSProjectRequest, abi: HLSFlatArrayABI | HLSTensorPortsABI) -> str:
+    params = []
+    for name, direction, words, scalar_type in _ports(request, abi):
+        const = 'const ' if direction == 'input' else ''
+        params.append(f'    {const}{scalar_type} {name}[{words}]')
+    return '#pragma once\n\nextern "C" void ' + request.top_name + '(\n' + ',\n'.join(params) + '\n);\n'
+
+
+def _package_declaration(contract: ImplementationContract, abi: HLSFlatArrayABI | HLSTensorPortsABI) -> str:
+    if isinstance(abi, HLSFlatArrayABI):
+        params = [f'const {abi.scalar_type}* input', f'{abi.scalar_type}* output', 'int count']
+    else:
+        params = [*(f'const {abi.scalar_for(p)}* {p.name}' for p in abi.inputs), *(f'{abi.scalar_for(p)}* {p.name}' for p in abi.outputs)]
+        if abi.count_mode == 'shared':
+            params.append('int count')
+        else:
+            params.extend(f'int {p.name}_count' for p in (*abi.inputs, *abi.outputs))
+    params.extend(f'{a.cpp_type} {a.name}' for a in abi.attributes)
     return f"void {contract.top}({', '.join(params)});"
 
 
-def _wrapper_source(request: ExternalHLSProjectRequest, abi: HLSFlatArrayABI) -> str:
-    contract = request.contract
-    values = []
-    for item in abi.attributes:
-        value = request.operator_attributes.get(item.name, item.default)
-        values.append(_cpp_literal(value, item.cpp_type))
-    call_args = ["input", "output", str(request.output_words), *values]
-    return "\n".join(
-        [
-            '#include "external_wrapper.h"',
-            "",
-            _package_declaration(contract, abi),
-            "",
-            f'extern "C" void {request.top_name}(',
-            f"    const {abi.scalar_type} input[{request.input_words}],",
-            f"    {abi.scalar_type} output[{request.output_words}]",
-            ") {",
-            "#pragma HLS INTERFACE m_axi port=input offset=slave bundle=gmem0",
-            "#pragma HLS INTERFACE m_axi port=output offset=slave bundle=gmem1",
-            "#pragma HLS INTERFACE s_axilite port=input bundle=control",
-            "#pragma HLS INTERFACE s_axilite port=output bundle=control",
-            "#pragma HLS INTERFACE s_axilite port=return bundle=control",
-            f"    {contract.top}({', '.join(call_args)});",
-            "}",
-            "",
-        ]
-    )
+def _wrapper_source(request: ExternalHLSProjectRequest, abi: HLSFlatArrayABI | HLSTensorPortsABI) -> str:
+    values = [_cpp_literal(request.operator_attributes.get(a.name, a.default), a.cpp_type) for a in abi.attributes]
+    ports = _ports(request, abi)
+    if isinstance(abi, HLSFlatArrayABI):
+        args = ['input', 'output', str(request.output_words), *values]
+    else:
+        args = [*(p.name for p in abi.inputs), *(p.name for p in abi.outputs)]
+        if abi.count_mode == 'shared':
+            args.append(str(request.output_words))
+        else:
+            args.extend(str(_port_words(request, abi, p, 'input')) for p in abi.inputs)
+            args.extend(str(_port_words(request, abi, p, 'output')) for p in abi.outputs)
+        args.extend(values)
+    signature = []
+    for name, direction, words, scalar_type in ports:
+        const = 'const ' if direction == 'input' else ''
+        signature.append(f'    {const}{scalar_type} {name}[{words}]')
+    lines = ['#include "external_wrapper.h"', '', _package_declaration(request.contract, abi), '', f'extern "C" void {request.top_name}(', ',\n'.join(signature), ') {']
+    for index, (name, _direction, _words, _scalar_type) in enumerate(ports):
+        lines.append(f'#pragma HLS INTERFACE m_axi port={name} offset=slave bundle=gmem{index}')
+        lines.append(f'#pragma HLS INTERFACE s_axilite port={name} bundle=control')
+    lines.append('#pragma HLS INTERFACE s_axilite port=return bundle=control')
+    lines.append(f"    {request.contract.top}({', '.join(args)});")
+    lines.extend(['}', ''])
+    return '\n'.join(lines)
 
 
-def _testbench_source(request: ExternalHLSProjectRequest, abi: HLSFlatArrayABI) -> str:
-    attrs = {item.name: request.operator_attributes.get(item.name, item.default) for item in abi.attributes}
-    scale = float(attrs.get("scale", 1.0))
-    bias = float(attrs.get("bias", 0.0))
-    return f'''#include "external_wrapper.h"
-#include <cmath>
-#include <cstdio>
+def _flat_testbench(request: ExternalHLSProjectRequest, abi: HLSFlatArrayABI) -> str:
+    attrs = {a.name: request.operator_attributes.get(a.name, a.default) for a in abi.attributes}
+    scale = float(attrs.get('scale', 1.0))
+    bias = float(attrs.get('bias', 0.0))
+    return '\n'.join([
+        '#include "external_wrapper.h"', '#include <cmath>', '#include <cstdio>', '', 'int main() {',
+        f'    {abi.scalar_type} input[{request.input_words}];', f'    {abi.scalar_type} output[{request.output_words}] = {{0}};',
+        f'    for (int i = 0; i < {request.input_words}; ++i) input[i] = ({abi.scalar_type})(i - 2);',
+        f'    {request.top_name}(input, output);', '    int failures = 0;',
+        f'    for (int i = 0; i < {request.output_words}; ++i) {{',
+        f'        {abi.scalar_type} expected = input[i] * ({abi.scalar_type}){_cpp_literal(scale, abi.scalar_type)} + ({abi.scalar_type}){_cpp_literal(bias, abi.scalar_type)};',
+        '        if (std::fabs((double)(output[i] - expected)) > 1.0e-6) ++failures;', '    }',
+        '    std::printf("[FPGAI-EXTERNAL-HLS] failures=%d\\n", failures);', '    return failures == 0 ? 0 : 1;', '}', ''
+    ])
 
-int main() {{
-    {abi.scalar_type} input[{request.input_words}];
-    {abi.scalar_type} output[{request.output_words}] = {{0}};
-    for (int i = 0; i < {request.input_words}; ++i) input[i] = ({abi.scalar_type})(i - 2);
-    {request.top_name}(input, output);
-    int failures = 0;
-    for (int i = 0; i < {request.output_words}; ++i) {{
-        {abi.scalar_type} expected = input[i] * ({abi.scalar_type}){_cpp_literal(scale, abi.scalar_type)} + ({abi.scalar_type}){_cpp_literal(bias, abi.scalar_type)};
-        if (std::fabs((double)(output[i] - expected)) > 1.0e-6) ++failures;
-    }}
-    std::printf("[FPGAI-EXTERNAL-HLS] failures=%d\\n", failures);
-    return failures == 0 ? 0 : 1;
-}}
-'''
+
+def _tensor_ports_testbench(request: ExternalHLSProjectRequest, abi: HLSTensorPortsABI) -> str:
+    lines = ['#include "external_wrapper.h"', '#include <cstdio>', '', 'int main() {']
+    args: list[str] = []
+    for index, port in enumerate(abi.inputs):
+        lines.append(f'    {abi.scalar_for(port)} {port.name}[{_port_words(request, abi, port, "input")}];')
+        lines.append(f'    for (int i = 0; i < {_port_words(request, abi, port, "input")}; ++i) {port.name}[i] = ({abi.scalar_for(port)})(i + {index});')
+        args.append(port.name)
+    for port in abi.outputs:
+        lines.append(f'    {abi.scalar_for(port)} {port.name}[{_port_words(request, abi, port, "output")}] = {{0}};')
+        args.append(port.name)
+    lines.append(f"    {request.top_name}({', '.join(args)});")
+    lines.append('    std::printf("[FPGAI-EXTERNAL-HLS] tensor_ports_v1 smoke passed\\n");')
+    lines.extend(['    return 0;', '}', ''])
+    return '\n'.join(lines)
+
+
+def _testbench_source(request: ExternalHLSProjectRequest, abi: HLSFlatArrayABI | HLSTensorPortsABI) -> str:
+    return _flat_testbench(request, abi) if isinstance(abi, HLSFlatArrayABI) else _tensor_ports_testbench(request, abi)
 
 
 def _run_tcl(request: ExternalHLSProjectRequest, hls_dir: Path, copied_sources: tuple[Path, ...], external_include: Path) -> str:
-    source_lines = []
     include_rel = external_include.relative_to(hls_dir).as_posix()
-    for path in copied_sources:
-        source_rel = path.relative_to(hls_dir).as_posix()
-        source_lines.append(f'add_files "./{source_rel}" -cflags "-I./include -I./{include_rel}"')
-    source_text = "\n".join(source_lines)
+    source_text = '\n'.join(
+        f'add_files "./{p.relative_to(hls_dir).as_posix()}" -cflags "-I./include -I./{include_rel}"'
+        for p in copied_sources
+    )
     return f'''# Auto-generated by FPGAI external HLS integration
 open_project -reset fpgai_external_hls
 set_top {request.top_name}
@@ -165,71 +193,45 @@ exit
 
 
 def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    digest.update(path.read_bytes())
-    return "sha256:" + digest.hexdigest()
+    digest = hashlib.sha256(); digest.update(path.read_bytes()); return 'sha256:' + digest.hexdigest()
 
 
 def emit_external_hls_operator_project(request: ExternalHLSProjectRequest) -> ExternalHLSProjectResult:
     issues = list(validate_hls_integration_contract(request.contract))
     if request.input_words <= 0 or request.output_words <= 0:
-        issues.append(HLSIntegrationIssue("HLSINT012", "tensor_words", "Input and output word counts must be positive"))
-    if request.input_words != request.output_words:
-        issues.append(HLSIntegrationIssue("HLSINT013", "tensor_words", "flat_array_v1 currently requires equal input and output sizes"))
+        issues.append(HLSIntegrationIssue('HLSINT012', 'tensor_words', 'Input and output word counts must be positive'))
+    try:
+        parsed_abi = parse_hls_abi(request.contract)
+        if isinstance(parsed_abi, HLSFlatArrayABI) and request.input_words != request.output_words:
+            issues.append(HLSIntegrationIssue('HLSINT013', 'tensor_words', 'flat_array_v1 requires equal input and output sizes'))
+        if isinstance(parsed_abi, HLSTensorPortsABI) and parsed_abi.count_mode == 'shared':
+            sizes = [_port_words(request, parsed_abi, p, 'input') for p in parsed_abi.inputs] + [_port_words(request, parsed_abi, p, 'output') for p in parsed_abi.outputs]
+            if len(set(sizes)) != 1:
+                issues.append(HLSIntegrationIssue('HLSINT013', 'tensor_words', 'tensor_ports_v1 count_mode=shared requires equal tensor sizes'))
+    except Exception:
+        pass
     if issues:
         return ExternalHLSProjectResult(False, None, None, None, None, None, issues=tuple(issues))
-
     try:
-        abi = parse_flat_array_abi(request.contract)
-        out_dir = Path(request.out_dir)
-        hls_dir = out_dir / "hls"
-        if hls_dir.exists():
-            shutil.rmtree(hls_dir)
-        (hls_dir / "src").mkdir(parents=True)
-        (hls_dir / "include").mkdir(parents=True)
-        (out_dir / "reports").mkdir(parents=True, exist_ok=True)
+        abi = parse_hls_abi(request.contract)
+        out_dir = Path(request.out_dir); hls_dir = out_dir / 'hls'
+        if hls_dir.exists(): shutil.rmtree(hls_dir)
+        (hls_dir / 'src').mkdir(parents=True); (hls_dir / 'include').mkdir(parents=True); (out_dir / 'reports').mkdir(parents=True, exist_ok=True)
         copied_sources, copied_headers, _src_root, include_root = _copy_files(request.contract, hls_dir)
-
-        header = hls_dir / "include" / "external_wrapper.h"
-        top_cpp = hls_dir / "src" / f"{request.top_name}.cpp"
-        tb_cpp = hls_dir / "src" / "tb.cpp"
-        run_tcl = hls_dir / "run_hls.tcl"
-        header.write_text(_wrapper_header(request, abi), encoding="utf-8")
-        top_cpp.write_text(_wrapper_source(request, abi), encoding="utf-8")
-        tb_cpp.write_text(_testbench_source(request, abi), encoding="utf-8")
-        run_tcl.write_text(_run_tcl(request, hls_dir, copied_sources, include_root), encoding="utf-8")
-
-        report_path = out_dir / "reports" / "external_hls_integration.json"
+        header = hls_dir / 'include' / 'external_wrapper.h'; top_cpp = hls_dir / 'src' / f'{request.top_name}.cpp'; tb_cpp = hls_dir / 'src' / 'tb.cpp'; run_tcl = hls_dir / 'run_hls.tcl'
+        header.write_text(_wrapper_header(request, abi), encoding='utf-8'); top_cpp.write_text(_wrapper_source(request, abi), encoding='utf-8'); tb_cpp.write_text(_testbench_source(request, abi), encoding='utf-8'); run_tcl.write_text(_run_tcl(request, hls_dir, copied_sources, include_root), encoding='utf-8')
+        report_path = out_dir / 'reports' / 'external_hls_integration.json'
         report = {
-            "schema": "fpgai.external-hls-integration/v1",
-            "status": "generated",
-            "usage": {"platform_scope": "research", "production_path": "morfics"},
-            "operator": {"name": request.operator_name, "attributes": dict(request.operator_attributes)},
-            "implementation": request.contract.to_dict(),
-            "abi": {"name": abi.abi, "scalar_type": abi.scalar_type, "input_words": request.input_words, "output_words": request.output_words},
-            "ownership": {
-                "package_sources": "user_owned_source_copied_read_only",
-                "generated_wrapper": "compiler_owned",
-                "package_root_modified": False,
-            },
-            "artifacts": [
-                {"path": str(path), "sha256": _sha256(path), "kind": "copied_source"} for path in copied_sources
-            ] + [
-                {"path": str(path), "sha256": _sha256(path), "kind": "copied_header"} for path in copied_headers
-            ] + [
-                {"path": str(path), "sha256": _sha256(path), "kind": "generated"} for path in (header, top_cpp, tb_cpp, run_tcl)
-            ],
-            "validation": {
-                "reference_testbench_generated": True,
-                "c_simulation_requested": False,
-                "hls_synthesis_requested": False,
-                "tool_result": "not_run",
-            },
+            'schema':'fpgai.external-hls-integration/v1','status':'generated','usage':{'platform_scope':'research','production_path':'morfics'},
+            'operator':{'name':request.operator_name,'attributes':dict(request.operator_attributes)},'implementation':request.contract.to_dict(),
+            'abi':{'name':abi.abi,'scalar_type':abi.scalar_type,'input_words':request.input_words,'output_words':request.output_words,'inputs':[p.name for p in getattr(abi,'inputs',())],'outputs':[p.name for p in getattr(abi,'outputs',())]},
+            'ownership':{'package_sources':'user_owned_source_copied_read_only','generated_wrapper':'compiler_owned','package_root_modified':False},
+            'artifacts':[{'path':str(p),'sha256':_sha256(p),'kind':'copied_source'} for p in copied_sources]+[{'path':str(p),'sha256':_sha256(p),'kind':'copied_header'} for p in copied_headers]+[{'path':str(p),'sha256':_sha256(p),'kind':'generated'} for p in (header,top_cpp,tb_cpp,run_tcl)],
+            'validation':{'reference_testbench_generated':isinstance(abi,HLSFlatArrayABI),'smoke_testbench_generated':True,'c_simulation_requested':False,'hls_synthesis_requested':False,'tool_result':'not_run'},
         }
-        report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        generated = (header, top_cpp, tb_cpp, run_tcl, report_path)
-        return ExternalHLSProjectResult(True, hls_dir, top_cpp, tb_cpp, run_tcl, report_path, copied_sources, copied_headers, generated)
+        report_path.write_text(json.dumps(report, indent=2, sort_keys=True)+'\n', encoding='utf-8')
+        generated=(header,top_cpp,tb_cpp,run_tcl,report_path)
+        return ExternalHLSProjectResult(True,hls_dir,top_cpp,tb_cpp,run_tcl,report_path,copied_sources,copied_headers,generated)
     except ValueError as exc:
-        code, _, message = str(exc).partition(": ")
-        issue = HLSIntegrationIssue(code or "HLSINT014", "integration", message or str(exc))
-        return ExternalHLSProjectResult(False, None, None, None, None, None, issues=(issue,))
+        code,_,message=str(exc).partition(': ')
+        return ExternalHLSProjectResult(False,None,None,None,None,None,issues=(HLSIntegrationIssue(code or 'HLSINT014','integration',message or str(exc)),))

@@ -90,7 +90,7 @@ def test_documented_multi_epoch_sweep_command_includes_required_out_argument() -
     assert readme.count(marker) == 1
     assert "python -m fpgai.cli sweep run" in command_block
     assert marker in command_block
-    assert "--out paper_experiments/training_multi_epoch_convergence" in command_block
+    assert "--out benchmark_runs/training_multi_epoch_convergence" in command_block
 
 
 

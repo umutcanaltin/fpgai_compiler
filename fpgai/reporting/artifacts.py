@@ -44,7 +44,7 @@ def _status_counts(rows: list[dict[str, Any]]) -> tuple[int, int, int]:
 
 
 def collect_result_rows(input_dir: str | Path) -> list[dict[str, Any]]:
-    """Collect flattened result records from a paper experiment output directory."""
+    """Collect flattened result records from a benchmark output directory."""
     root = Path(input_dir)
     rows: list[dict[str, Any]] = []
 
@@ -204,7 +204,7 @@ def _write_claim_traceability(path: Path, input_dir: Path, rows: list[dict[str, 
 
 
 def build_report(input_dir: str | Path, out_dir: str | Path) -> ReportBuildResult:
-    """Build a small public report from a paper experiment output directory."""
+    """Build a small public report from a benchmark output directory."""
     input_path = Path(input_dir)
     output_path = Path(out_dir)
     if not input_path.exists():

@@ -39,7 +39,7 @@ def emit_runtime_package(
 
     This function does not run Vivado, deploy to a board, or infer that hardware
     artifacts exist. It packages files that are already present and records
-    bitstream/XSA/HWH status truthfully.
+    bitstream/XSA/HWH status accurately.
     """
 
     root = Path(out_dir).resolve()
@@ -273,7 +273,7 @@ def emit_runtime_package(
             "apply_accumulated_gradients",
             "run_sequence",
         ],
-        "truth_boundary": "Generated API can allocate/bind PYNQ-style buffers and bind a real board backend object; physical execution still requires a deployed bitstream and board-specific DMA/MMIO implementation.",
+        "validation_boundary": "Generated API can allocate/bind PYNQ-style buffers and bind a real board backend object; physical execution still requires a deployed bitstream and board-specific DMA/MMIO implementation.",
     }
 
     manifest_path = package_dir / "package_manifest.json"
@@ -304,7 +304,7 @@ def emit_runtime_package(
                 f"- runtime sequence: `{json.dumps(runtime_sequence_payload.get('sequence', []), sort_keys=True)}`",
                 f"- runtime buffers: `{len(runtime_buffer_plans['buffer_plan'].get('buffers', []))}`",
                 "",
-                "The package is truthful: missing hardware handoff files are recorded as missing.",
+                "The package is accurate: missing hardware handoff files are recorded as missing.",
                 "Use the Vivado bridge flow to generate bitstream/XSA artifacts before board deployment.",
                 "",
             ]

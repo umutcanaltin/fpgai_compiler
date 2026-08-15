@@ -164,23 +164,23 @@ def test_compile_cpp_only_emits_sources_without_hls_run_script_and_records_manif
     assert (out_dir / "reports/config_contract.json").exists()
     assert (out_dir / "reports/runtime_sequence.json").exists()
     assert (out_dir / "reports/numeric_validation.json").exists()
-    assert (out_dir / "reports/paper_verification.json").exists()
-    assert (out_dir / "reports/paper_row.json").exists()
+    assert (out_dir / "reports/validation_summary.json").exists()
+    assert (out_dir / "reports/benchmark_row.json").exists()
     assert (out_dir / "reports/model_compatibility.json").exists()
     assert (out_dir / "reports/layer_knob_contract.json").exists()
 
     numeric_validation = json.loads((out_dir / "reports/numeric_validation.json").read_text(encoding="utf-8"))
     assert numeric_validation["status"] == "not_run"
-    assert numeric_validation["paper_claim_allowed"]["numeric_correctness"] is False
+    assert numeric_validation["validation_claim_allowed"]["numeric_correctness"] is False
 
-    paper_row = json.loads((out_dir / "reports/paper_row.json").read_text(encoding="utf-8"))
-    assert paper_row["source_generated"] is True
-    assert paper_row["numeric_validated"] is False
-    assert paper_row["paper_safe"] is False
+    benchmark_row = json.loads((out_dir / "reports/benchmark_row.json").read_text(encoding="utf-8"))
+    assert benchmark_row["source_generated"] is True
+    assert benchmark_row["numeric_validated"] is False
+    assert benchmark_row["validation_ready"] is False
 
     manifest = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["numeric_validation_artifacts"]["numeric_validation_json"].endswith("reports/numeric_validation.json")
-    assert manifest["paper_verification_artifacts"]["paper_row_json"].endswith("reports/paper_row.json")
+    assert manifest["validation_summary_artifacts"]["benchmark_row_json"].endswith("reports/benchmark_row.json")
 
     runtime_manifest = json.loads((out_dir / "runtime_package/package_manifest.json").read_text(encoding="utf-8"))
     assert runtime_manifest["build_stages"]["cpp"] is True

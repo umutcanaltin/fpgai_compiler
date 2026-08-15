@@ -36,12 +36,12 @@ A feature is `supported` only when all of these are true:
 | HLS generation | Compiler emits HLS C++/headers/testbench/project artifacts. | supported | supported | supported | Keep generated artifact tests. |
 | HLS run/artifact collection | When enabled and tools exist, compiler runs/collects HLS logs/reports. | supported | supported | supported | Keep optional-tool boundary documented. |
 | Vivado bridge generation | Board-aware Vivado bridge scripts are generated for supported boards. | supported | supported | supported | Keep Vivado implementation clearly separate from compile. |
-| Runtime package | Compile emits runtime package metadata and copies existing runtime-facing files. | supported | supported | supported | Keep hardware presence flags truthful. |
+| Runtime package | Compile emits runtime package metadata and copies existing runtime-facing files. | supported | supported | supported | Keep hardware presence flags accurate. |
 | Inference correctness benchmark | Supported inference flows compare outputs against reference/ONNX Runtime. | supported | not_applicable | supported | Keep benchmark limitations documented; training validation is separate. |
 | Training code generation | Training configs generate HLS artifacts for forward, loss, gradient, update, optimizer, and training-specific data movement paths. | not_applicable | supported | supported | This is a generated-artifact/codegen claim, not a physical-board convergence claim. |
 | Training single-step reference reports | Compile reports can record CPU/reference single-step training summaries such as loss_before, loss_after, and training estimate metadata. | not_applicable | supported | supported | This covers report generation and reference-summary traceability; numerical tolerance scope must remain in tests. |
 | Deterministic multi-epoch training schedule | One canonical epoch/batch/order contract drives the HLS CSim testbench, float reference, fixed-point reference, execution counts, curves, and checkpoints. | not_applicable | supported | supported | This is a schedule/artifact claim. Real-board training and convergence remain separate. |
-| Training multi-step convergence | Multi-step training/convergence sweeps and loss-curve artifacts exist for research validation. | not_applicable | experimental | experimental | Do not claim stable convergence/generalization until reproducible task metrics and real FPGA runs are validated and summarized as paper artifacts. |
+| Training multi-step convergence | Multi-step training/convergence sweeps and loss-curve artifacts exist for research validation. | not_applicable | experimental | experimental | Do not claim stable convergence/generalization until reproducible task metrics and real FPGA runs are validated and summarized as benchmark artifacts. |
 | Training on-board runtime | Physical FPGA training runs and board-measured loss/timing artifacts. | not_applicable | experimental | experimental | Not stable until board runtime artifacts record bitstream, board, dataset, loss/timing, and reference comparison. |
 | Communication optimization | Compiler models input/weight/output/aux tensor-edge data movement, per-edge precision/compression, transfer estimates, and generated HLS communication annotations. | supported | supported | supported | Compression codecs are modeled unless implemented_in_hls=true; measured board DMA speedup remains outside this claim. |
 
@@ -52,7 +52,7 @@ A feature is `supported` only when all of these are true:
 3. Tiling selection
 4. Pipeline selection
 5. Parallelization selection
-6. DSE knob truth
+6. DSE knob validation
 7. Training code generation
 8. Training single-step reference reports
 9. Training multi-step convergence
@@ -95,7 +95,7 @@ A YAML option must not be presented as fully supported unless it has a real arti
 
 Future work must change, refactor, or complete the existing owner implementation when one exists. Do not add duplicate compiler paths, detached code generators, detached report systems, or one-off scripts.
 
-Before each implementation sprint:
+Before each implementation change:
 
 1. Inspect the current owner files.
 2. Explain the mechanism and artifact effect.
@@ -118,7 +118,7 @@ Before each implementation sprint:
 |---|---|---|---|---|---|---|---|---|
 | `build.stages.cpp` | boolean | `fpgai/engine/build_stages.py`, `fpgai/engine/compiler.py` | Enables generated HLS C++ source. | Emits generated C++/headers. | Pipeline stage summary records `generate_cpp`. | `tests/test_build_stages.py` | `implemented` | Keep as canonical. |
 | `build.stages.host_cpp` | boolean | `fpgai/engine/build_stages.py`, `fpgai/engine/compiler.py`, `fpgai/runtime/hostcpp.py` | Enables host C++ generation. | Emits host C++ artifacts. | Result summary reports host C++ dir. | `tests/test_build_stages.py` | `implemented` | Keep as canonical. |
-| `build.stages.testbench` | boolean | `fpgai/engine/build_stages.py`, `fpgai/backends/hls/testbench.py`, `fpgai/backends/hls/testbench_train.py` | Enables testbench artifact generation. | Emits inference/training testbench C++. | HLS artifacts and generated file metadata expose testbench when present. | HLS/testbench tests. | `implemented` | Expand later in model-behavior sprints. |
+| `build.stages.testbench` | boolean | `fpgai/engine/build_stages.py`, `fpgai/backends/hls/testbench.py`, `fpgai/backends/hls/testbench_train.py` | Enables testbench artifact generation. | Emits inference/training testbench C++. | HLS artifacts and generated file metadata expose testbench when present. | HLS/testbench tests. | `implemented` | Expand later in model-behavior work. |
 | `build.stages.hls_project` | boolean | `fpgai/engine/build_stages.py`, `fpgai/engine/compiler.py` | Enables HLS project generation. | Emits HLS project/TCL/source layout. | Pipeline stage summary records `generate_hls_project`. | `tests/test_build_stages.py` | `implemented` | Keep stable. |
 | `build.stages.hls_synthesis` | boolean | `fpgai/engine/build_stages.py`, `fpgai/engine/compiler.py` | Runs HLS when toolchain is available. | Creates HLS logs/reports/csynth artifacts. | Result summary and manifest report HLS status. | Optional-tool tests and live runs. | `implemented` | Keep optional-tool boundary clear. |
 | `build.stages.vivado_project` | boolean | `fpgai/engine/build_stages.py`, `fpgai/engine/compiler.py`, `fpgai/backends/vivado/run_bridge.py` | Requests Vivado bridge/project flow. | Generates/runs Vivado bridge project artifacts when enabled. | Vivado bridge summary and pipeline stages. | Vivado bridge tests and live P2E2 validation. | `implemented` | Keep YAML-driven flow. |
@@ -251,11 +251,11 @@ Use precise terms in reports and docs:
 | Power/energy metrics | power report + runtime latency | Same as above plus runtime owners | Parses power when available; energy requires latency. | Report-only until runtime latency exists. | Power/energy fields when available. | Needs validation. | `partially_implemented` | Do not claim energy without measured/validated latency source. |
 | AXI/DMA/BD summary | Vivado BD artifacts | `fpgai/backends/vivado/vivado_bridge.py`, reporting modules | Generates/records board design wiring. | BD/TCL/HWH artifacts show interfaces. | Vivado bridge reports. | Vivado bridge tests. | `implemented/needs_validation` | P2O should add clear interface summary. |
 
-## 14. Paper/reporting integration
+## 14. Benchmark/reporting integration
 
 | YAML path / feature | Accepted values / example | Owner files | Compiler/planner effect | Artifact effect | Report effect | Validation coverage | Status | Next action |
 |---|---|---|---|---|---|---|---|---|
-| Paper master results | build dirs → result rows | `fpgai/reporting/paper_results.py` | Aggregates generated artifacts. | Reads reports/manifests, does not create hardware. | `master_results.json/csv/md`, schema docs. | Paper results schema tests; live P2E2 refresh. | `implemented` | Keep runtime rows honest. |
+| Benchmark master results | build dirs → result rows | `fpgai/reporting/benchmark_results.py` | Aggregates generated artifacts. | Reads reports/manifests, does not create hardware. | `master_results.json/csv/md`, schema docs. | Benchmark results schema tests; live P2E2 refresh. | `implemented` | Keep runtime rows honest. |
 | HLS/Vivado artifact status | report files/artifacts | `fpgai/reporting/*`, `fpgai/analysis/*` | Classifies artifact status. | Reads real generated artifacts. | Tables and summaries. | Reporting tests. | `implemented/needs_validation` | Prefer artifact-backed claims only. |
 | Static validation | generated-source/report checks | `fpgai/validation/*`, `fpgai/devtools/*`, tests | Validates artifact structure. | No hardware run. | Static validation rows. | Existing tests/audits. | `implemented/needs_validation` | Keep separate from runtime validation. |
 
@@ -272,20 +272,20 @@ These paths are accepted or referenced today, but require canonicalization befor
 | `memory.storage.weights` vs `memory.weight_storage` | Prefer one canonical spelling | `fpgai/engine/planner.py`, `fpgai/engine/memory.py` | `duplicate_or_legacy` | Keep fallback until migration guide and tests are updated. |
 | `optimization.pipeline_ii` | `optimization.pipeline.ii` | `fpgai/engine/planner.py` | `duplicate_or_legacy` | Mark deprecated after examples migrate. |
 | `optimization.parallel.pipeline_style` | `optimization.pipeline.style` | `fpgai/engine/planner.py` | `duplicate_or_legacy` | Keep fallback; document canonical path. |
-| Informal `truth` terminology in older reports/modules | Professional artifact/validation terminology | Existing reporting modules and tests | `duplicate_or_legacy` | Rename gradually without breaking artifact compatibility. |
+| Informal `validation` terminology in older reports/modules | Professional artifact/validation terminology | Existing reporting modules and tests | `duplicate_or_legacy` | Rename gradually without breaking artifact compatibility. |
 
 ## P2F completion criteria
 
 P2F is complete when:
 
 1. This matrix exists in the repo-owned feature matrix document.
-2. Future sprints refer to the existing owner files listed here before implementation.
+2. Future work should refer to the existing owner files listed here before implementation.
 3. Unsupported or partial behavior is not described as fully supported in user-facing docs.
-4. Cleanup/refactor sprints use this matrix to decide whether to modify, deprecate, or remove paths.
+4. Cleanup/refactor work uses this matrix to decide whether to modify, deprecate, or remove paths.
 
-## Immediate next sprint after P2F
+## Immediate next implementation step after P2F
 
-The recommended next implementation sprint is memory completion because the repo already documents the largest remaining architecture boundary: current DDR behavior is mostly `ddr_preload_weights`, while real scalable external DDR execution requires validated `ddr_tiled_weights`.
+The recommended next implementation change is memory completion because the repo already documents the largest remaining architecture boundary: current DDR behavior is mostly `ddr_preload_weights`, while real scalable external DDR execution requires validated `ddr_tiled_weights`.
 
 Start with existing owners only:
 

@@ -202,7 +202,7 @@ def build_calibration_dataset(
         # extractor. The generic path can produce stale missing_or_zero_estimate
         # warnings because compile_plan_for_calibration.json stores scheduling
         # choices, not numeric LUT/FF/DSP/BRAM predictions. Suppress those old
-        # warnings so the final HLS calibration artifact is clean and paper-ready.
+        # warnings so the final HLS calibration artifact is clean and benchmark-ready.
         suppressed_warning_count = len(warnings)
         samples = text_bridge_samples
         warnings = [{"warning": "used_text_summary_bridge", "sample_count": str(len(text_bridge_samples))}]
@@ -214,7 +214,7 @@ def build_calibration_dataset(
                 "reason": "text_summary_bridge_preferred_for_numeric_estimates",
             })
 
-    # Sprint 5.2/5.3 bridge fallback: if text summaries are not available, use
+    # Calibration bridge fallback: if text summaries are not available, use
     # JSON artifacts and raw HLS reports.
     if not samples:
         bridge_samples, bridge_warnings = _build_samples_from_project_artifacts(project_root, reports)
@@ -361,7 +361,7 @@ def _discover_reports(root: Path) -> list[Path]:
     if not root.exists():
         return []
     # Prefer text .rpt reports for module-level parsing. In the current FPGAI
-    # Sprint 4 artifacts some .xml companions are not valid XML for every
+    # Some historical artifacts include .xml companions that are not valid XML for every
     # generated helper, which previously caused bridge_hls_parse_failed.
     patterns = ("*_csynth.rpt", "csynth.rpt", "*_csynth.xml", "csynth.xml")
     reports: list[Path] = []
@@ -494,11 +494,11 @@ def _samples_have_zero_resource_predictions(samples: list[dict[str, Any]]) -> bo
 
 
 def _build_samples_from_text_summaries(project_root: Path) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    """Build samples from Sprint 4 human-readable summaries.
+    """Build samples from human-readable estimate/HLS summaries.
 
-    This bridge is intentionally practical: Sprint 4 already emits two paper-
+    This bridge is intentionally practical: the estimate/HLS flow already emits two benchmark-
     useful reports, one with module resources and one with layer-vs-module
-    errors. This function combines them into nonzero Sprint 5 calibration
+    errors. This function combines them into nonzero calibration
     samples without reparsing raw HLS helper reports.
     """
     warnings: list[dict[str, str]] = []
@@ -664,7 +664,7 @@ def _reconstruct_prediction_from_layer_errors(entry: dict[str, Any], actual: Res
             values[metric] = 0.0
             continue
         frac = float(err) / 100.0
-        # The current Sprint 4 report does not include per-layer direction. Most
+        # The current report does not include per-layer direction. Most
         # FPGAI analytical models currently underestimate LUT/FF/latency. The
         # denominator form yields a positive nonzero estimate even for >100%
         # error and is enough to fit calibration scales.
@@ -680,7 +680,7 @@ def _percent_or_none(value: str) -> float | None:
 
 
 # ---------------------------------------------------------------------------
-# Sprint 5.2 bridge helpers
+# Calibration bridge helpers
 # ---------------------------------------------------------------------------
 
 def _infer_project_root_from_compile_plan(compile_plan_path: Path) -> Path:
@@ -691,7 +691,7 @@ def _infer_project_root_from_compile_plan(compile_plan_path: Path) -> Path:
 
 
 def _build_samples_from_project_artifacts(project_root: Path, reports: list[Path]) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
-    """Build calibration samples from existing Sprint 4 estimate-vs-HLS artifacts.
+    """Build calibration samples from existing estimate-vs-HLS artifacts.
 
     The real compiler already writes files such as:
 
@@ -702,7 +702,7 @@ def _build_samples_from_project_artifacts(project_root: Path, reports: list[Path
 
     These files contain better layer/module matching than the generic compile
     plan. This bridge scans them recursively and converts matching entries into
-    Sprint 5 calibration samples.
+    calibration samples.
     """
     warnings: list[dict[str, str]] = []
     if not project_root.exists():

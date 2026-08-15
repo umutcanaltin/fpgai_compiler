@@ -229,7 +229,7 @@ def _model_inference_resource_sharing(
     """Model HLS resource sharing/collapse for inference datapaths.
 
     This is intentionally not a global estimator multiplier. It models a
-    Vitis HLS behavior seen in the paper matrix: multiplier lanes requested by
+    Vitis HLS behavior seen in the benchmark matrix: multiplier lanes requested by
     PE/SIMD/unroll/partition do not always materialize as independent DSPs,
     especially for small fixed-point MLP datapaths and aggressive fx8 designs.
 

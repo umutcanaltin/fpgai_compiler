@@ -105,7 +105,7 @@ def test_bridge_sync_overwrites_stale_reports_and_refreshes_package(tmp_path: Pa
     assert (real / "runtime_package" / "package_manifest.json").exists()
 
 
-def test_bridge_sync_impl_only_clears_unrequested_bitstream_and_refreshes_paper(tmp_path: Path) -> None:
+def test_bridge_sync_impl_only_clears_unrequested_bitstream_and_refreshes_benchmark(tmp_path: Path) -> None:
     real = tmp_path / "real_build"
     wrapper_art = tmp_path / "exp" / "artifacts" / "d0"
     wrapper_build = wrapper_art / "build"
@@ -117,12 +117,12 @@ def test_bridge_sync_impl_only_clears_unrequested_bitstream_and_refreshes_paper(
     (wrapper_build / "manifest.json").symlink_to(real / "manifest.json")
 
     (real / "reports").mkdir()
-    (real / "reports" / "paper_verification.json").write_text(
+    (real / "reports" / "validation_summary.json").write_text(
         json.dumps(
             {
                 "pipeline_mode": "training_on_device",
-                "paper_safe": False,
-                "verification_flags": {
+                "validation_ready": False,
+                "validation_flags": {
                     "source_generated": True,
                     "numeric_validated": False,
                     "hls_synthesized": True,
@@ -130,7 +130,7 @@ def test_bridge_sync_impl_only_clears_unrequested_bitstream_and_refreshes_paper(
                     "bitstream_generated": False,
                     "fpga_executed": False,
                 },
-                "allowed_claims": {
+                "validated_capabilities": {
                     "source_generation": True,
                     "numeric_correctness": False,
                     "hls_resource_timing": True,
@@ -142,7 +142,7 @@ def test_bridge_sync_impl_only_clears_unrequested_bitstream_and_refreshes_paper(
         ),
         encoding="utf-8",
     )
-    (real / "reports" / "paper_row.json").write_text(
+    (real / "reports" / "benchmark_row.json").write_text(
         json.dumps({"vivado_implemented": False, "bitstream_generated": False}),
         encoding="utf-8",
     )
@@ -172,7 +172,7 @@ def test_bridge_sync_impl_only_clears_unrequested_bitstream_and_refreshes_paper(
 
     impl = json.loads((real / "reports" / "vivado_implementation_report.json").read_text())
     bit = json.loads((real / "reports" / "bitstream_report.json").read_text())
-    paper = json.loads((real / "reports" / "paper_verification.json").read_text())
+    benchmark = json.loads((real / "reports" / "validation_summary.json").read_text())
     package = json.loads((real / "runtime_package" / "package_manifest.json").read_text())
 
     assert impl["status"] == "passed"
@@ -180,8 +180,8 @@ def test_bridge_sync_impl_only_clears_unrequested_bitstream_and_refreshes_paper(
     assert bit["status"] == "not_requested"
     assert bit["bitstream_exists"] is False
     assert bit["xsa_exists"] is False
-    assert paper["verification_flags"]["vivado_implemented"] is True
-    assert paper["verification_flags"]["bitstream_generated"] is False
+    assert benchmark["validation_flags"]["vivado_implemented"] is True
+    assert benchmark["validation_flags"]["bitstream_generated"] is False
     assert package["hardware"]["bitstream"]["present"] is False
     assert not (real / "runtime_package" / "hardware" / "stale.bit").exists()
     assert not (real / "vivado_bridge" / "bitstream" / "stale.bit").exists()

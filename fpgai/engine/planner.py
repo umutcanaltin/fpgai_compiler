@@ -818,7 +818,7 @@ def _dense_tile_from_cfg(
 ) -> Dict[str, int]:
     aliases = {
         # Dense/Gemm tiling can be written either as explicit in/out names or
-        # as matrix-style tm/tn/tk values produced by the paper config
+        # as matrix-style tm/tn/tk values produced by the benchmark config
         # generator.  For Dense, OUT maps to tm and IN maps to tk.  Accept tn
         # as an additional input-tile alias for older/generated configs.
         "in": (

@@ -131,6 +131,41 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
     external_ops = [op for op in graph.ops if isinstance(op.attrs.get("_fpgai_external_operator"), Mapping)]
     if not external_ops:
         raise RuntimeError("Ecosystem compilation was enabled but the model contains no activated external operator")
+
+    from fpgai.ir.liveness import analyze_tensor_liveness, write_tensor_liveness_report
+    tensor_liveness = analyze_tensor_liveness(graph)
+    liveness_json, liveness_md = write_tensor_liveness_report(tensor_liveness, reports_dir)
+
+    from fpgai.backends.hls.buffer_allocation import (
+        build_hls_buffer_allocation,
+        build_legacy_buffer_provenance,
+        write_hls_buffer_allocation_report,
+    )
+    if bool(tensor_liveness.get("has_branching", False)):
+        hls_buffer_allocation = build_hls_buffer_allocation(
+            graph, raw_cfg=raw, tensor_liveness=tensor_liveness
+        )
+        generated_buffer_provenance = dict(hls_buffer_allocation.get("resource_provenance", {}))
+    else:
+        generated_buffer_provenance = build_legacy_buffer_provenance(graph)
+        hls_buffer_allocation = {
+            "schema": "fpgai.hls-buffer-allocation/v1",
+            "mode": "legacy_sequential",
+            "graph_name": str(getattr(graph, "name", "main")),
+            "slot_count": len(generated_buffer_provenance),
+            "slots": [
+                {"slot": index, "name": name, "cpp_type": None, "words": None, "tensors": list(entry.get("tensors", []))}
+                for index, (name, entry) in enumerate(generated_buffer_provenance.items())
+            ],
+            "tensor_to_buffer": {
+                tensor: name
+                for name, entry in generated_buffer_provenance.items()
+                for tensor in entry.get("tensors", [])
+            },
+            "resource_provenance": generated_buffer_provenance,
+            "policy": "Historical sequential buffer naming is preserved for non-branching graphs.",
+        }
+    buffer_json, buffer_md = write_hls_buffer_allocation_report(hls_buffer_allocation, reports_dir)
     impl_root = get_path(raw, "implementations", {}) or {}
     if not isinstance(impl_root, Mapping):
         raise RuntimeError("implementations must be a mapping")
@@ -272,6 +307,41 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
             rtol=float(validation_cfg.get("rtol", 1e-5)),
         )
 
+    synthesis_characterization = None
+    synthesis_characterization_paths = None
+    if hls_run is not None and bool(getattr(hls_run, "csynth_ran", False)):
+        from fpgai.analysis.hls_synthesis_characterization import (
+            characterize_hls_synthesis,
+            write_hls_synthesis_characterization,
+        )
+        declared_metrics = {
+            node_name: contract.metrics.to_dict()
+            for node_name, contract in selected_contracts.items()
+        }
+        synthesis_characterization = characterize_hls_synthesis(
+            csynth_report_path=getattr(hls_run, "csynth_report", None),
+            target_clock_mhz=clock_mhz,
+            top_name=str(get_path(raw, "pipeline.outputs.top_kernel_name", "deeplearn")),
+            participating_external_packages=tuple(dict.fromkeys(contract.package_id for contract in selected_contracts.values())),
+            declared_implementation_metrics=declared_metrics,
+            scope="mixed_graph_top",
+        )
+        synth_json, synth_md = write_hls_synthesis_characterization(
+            synthesis_characterization, reports_dir
+        )
+        synthesis_characterization_paths = {
+            "json": str(synth_json),
+            "markdown": str(synth_md),
+        }
+
+    from fpgai.analysis.hls_bottleneck_diagnostics import analyze_hls_bottlenecks, write_hls_bottleneck_diagnostics
+    bottleneck_diagnostics = analyze_hls_bottlenecks(
+        None if hls_run is None else getattr(hls_run, "stdout_log", None),
+        tensor_liveness=tensor_liveness,
+        resource_provenance=generated_buffer_provenance,
+    )
+    bottleneck_json, bottleneck_md = write_hls_bottleneck_diagnostics(bottleneck_diagnostics, reports_dir)
+
     external_operator_records = [
         {"name": op.name, "op_type": op.op_type, **dict(op.attrs["_fpgai_external_operator"])}
         for op in external_ops
@@ -288,6 +358,24 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
         "operator_loading_report": str(loading_path),
         "selection_reports": node_selection_paths,
         "composition_reports": {"json": str(composition_json), "markdown": str(composition_md)},
+        "tensor_liveness": {"json": str(liveness_json), "markdown": str(liveness_md), "summary": {
+            "activation_buffer_slots": tensor_liveness["activation_buffer_slots"],
+            "maximum_simultaneously_live_tensors": tensor_liveness["maximum_simultaneously_live_tensors"],
+            "has_branching": tensor_liveness["has_branching"],
+            "sequential_current_buffer_compatible": tensor_liveness["sequential_current_buffer_compatible"],
+        }},
+        "hls_buffer_allocation": {
+            "json": str(buffer_json),
+            "markdown": str(buffer_md),
+            "mode": hls_buffer_allocation.get("mode"),
+            "slot_count": hls_buffer_allocation.get("slot_count"),
+            "tensor_to_buffer": hls_buffer_allocation.get("tensor_to_buffer", {}),
+        },
+        "hls_bottleneck_diagnostics": {"json": str(bottleneck_json), "markdown": str(bottleneck_md), "summary": {
+            "warning_count": bottleneck_diagnostics.get("warning_count", 0),
+            "ii_violation_count": bottleneck_diagnostics.get("ii_violation_count", 0),
+            "categories": bottleneck_diagnostics.get("categories", []),
+        }},
         "hls_composition": composition_plan.to_dict(),
         "hls_project": {"hls_dir": str(project.hls_dir), "top_cpp": str(project.top_cpp), "run_tcl": str(project.run_tcl)},
         "validation": None if validation_artifacts is None else {
@@ -297,6 +385,13 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
             "hls_output_bin": str(validation_artifacts.output_bin),
             "status": validation_report.get("status") if validation_report else "prepared",
         },
+        "synthesis_characterization": None if synthesis_characterization is None else {
+            "status": synthesis_characterization.status,
+            "validation_level": "hls_synthesized" if synthesis_characterization.status == "passed" else "unavailable",
+            "reports": synthesis_characterization_paths,
+            "scope": synthesis_characterization.scope,
+            "target_met": synthesis_characterization.target_met,
+        },
     }
     # Preserve the E4B single-operator manifest API for existing users while
     # exposing the E4C plural node-level representation for mixed graphs.
@@ -305,10 +400,19 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
         external_ecosystem_manifest["operator"] = external_operator_records[0]
         external_ecosystem_manifest["selected_implementation"] = selected_implementation_records[only_node]
 
+    synthesis_required = bool(build_stages.get("hls_synthesis", False))
+    synthesis_characterization_ok = (
+        not synthesis_required
+        or (synthesis_characterization is not None and synthesis_characterization.status == "passed")
+    )
     manifest = {
         "version": compiler.cfg.version,
         "schema": "fpgai.external-ecosystem-compile/v1",
-        "status": "passed" if hls_run is None or hls_run.ok else "failed",
+        "status": (
+            "passed"
+            if (hls_run is None or hls_run.ok) and synthesis_characterization_ok
+            else "failed"
+        ),
         "model_path": compiler.cfg.model.path,
         "pipeline_mode": compiler.cfg.pipeline.mode,
         "top_kernel_name": str(get_path(raw, "pipeline.outputs.top_kernel_name", "deeplearn")),
@@ -323,9 +427,52 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
             {"name": "select_implementations_per_node", "status": "done"},
             {"name": "compose_mixed_hls_project", "status": "done"},
             {"name": "run_hls", "status": "skipped" if hls_run is None else ("done" if hls_run.ok else "failed")},
+            {
+                "name": "characterize_hls_synthesis",
+                "status": (
+                    "skipped"
+                    if hls_run is None or not bool(getattr(hls_run, "csynth_ran", False))
+                    else ("done" if synthesis_characterization is not None and synthesis_characterization.status == "passed" else "failed")
+                ),
+            },
+            {"name": "analyze_hls_bottlenecks", "status": "skipped" if hls_run is None else "done"},
+            {"name": "analyze_tensor_liveness", "status": "done"},
+            {"name": "allocate_hls_buffers", "status": "done"},
         ],
         "seconds": round(time.time() - started, 6),
         "usage": {"platform_scope": "research", "production_path": "morfics"},
     }
     _write_json(out_dir / "manifest.json", manifest)
+
+    vivado_requested = bool(build_stages.get("vivado_project") or build_stages.get("vivado_implementation") or build_stages.get("bitstream"))
+    if vivado_requested:
+        from fpgai.engine.vivado_pipeline import _run_yaml_requested_vivado_bridge
+        _run_yaml_requested_vivado_bridge(out_dir, raw, dict(build_stages))
+        from fpgai.analysis.vivado_implementation_characterization import (
+            characterize_vivado_implementation,
+            write_vivado_implementation_characterization,
+        )
+        vivado_characterization = characterize_vivado_implementation(
+            out_dir,
+            target_clock_mhz=clock_mhz,
+            external_provenance={
+                "operators": external_operator_records,
+                "selected_implementations": selected_implementation_records,
+                "package_lock": str(lock_path),
+            },
+        )
+        vivado_json, vivado_md = write_vivado_implementation_characterization(vivado_characterization, reports_dir)
+        refreshed = json.loads((out_dir / "manifest.json").read_text(encoding="utf-8"))
+        refreshed.setdefault("external_ecosystem", {})["vivado_implementation_characterization"] = {
+            "status": vivado_characterization["status"],
+            "validation_level": vivado_characterization["validation_level"],
+            "reports": {"json": str(vivado_json), "markdown": str(vivado_md)},
+            "scope": vivado_characterization["scope"],
+        }
+        refreshed.setdefault("pipeline_stages", []).append({
+            "name": "characterize_vivado_implementation",
+            "status": "done" if vivado_characterization["status"] == "passed" else ("skipped" if vivado_characterization["status"] == "not_run" else "failed"),
+        })
+        _write_json(out_dir / "manifest.json", refreshed)
+
     return ExternalEcosystemCompileResult(True, graph, project.hls_dir, hls_run, manifest["external_ecosystem"])

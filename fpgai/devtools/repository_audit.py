@@ -23,9 +23,9 @@ TEST_DIRECTORY = "tests"
 GENERATED_ROOTS = (
     "build",
     "dev_audits",
-    "paper_results",
-    "paper_outputs",
-    "paper_tables",
+    "benchmark_results",
+    "benchmark_outputs",
+    "benchmark_tables",
     "repo_audit",
     "reports",
 )

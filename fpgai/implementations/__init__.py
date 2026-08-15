@@ -44,3 +44,22 @@ __all__ += [
     "build_hls_composition_plan",
     "write_composition_report",
 ]
+
+from .vhdl_integration import (
+    ExternalVHDLProjectRequest,
+    ExternalVHDLProjectResult,
+    VHDLScalarStreamABI,
+    emit_external_vhdl_operator_project,
+    parse_vhdl_scalar_stream_abi,
+    validate_vhdl_integration_contract,
+    run_external_vhdl_project,
+)
+
+__all__ += [
+    "ExternalVHDLProjectRequest",
+    "ExternalVHDLProjectResult",
+    "VHDLScalarStreamABI",
+    "emit_external_vhdl_operator_project",
+    "parse_vhdl_scalar_stream_abi",
+    "validate_vhdl_integration_contract", "run_external_vhdl_project",
+]

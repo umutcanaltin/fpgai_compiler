@@ -51,15 +51,15 @@ command_template: "fpgai compile --config {config}"
     assert rc == 1
 
 
-def test_experiment_inspect_accepts_paper_schema(tmp_path):
-    cfg = tmp_path / "paper.yml"
+def test_experiment_inspect_accepts_benchmark_schema(tmp_path):
+    cfg = tmp_path / "benchmark.yml"
     cfg.write_text(
         """
 version: 1
-paper:
+benchmark:
   title: "FPGAI: test"
 inputs:
-  vivado_summary: paper_experiments/vivado.csv
+  vivado_summary: benchmark_runs/vivado.csv
 claim_levels:
   supported: "supported by artifacts"
 limitations:
@@ -68,22 +68,22 @@ limitations:
         + "\n",
         encoding="utf-8",
     )
-    out = tmp_path / "paper.json"
+    out = tmp_path / "benchmark.json"
 
     rc = cli.inspect_experiment_config(str(cfg), json_output=str(out))
 
     assert rc == 0
     text = out.read_text(encoding="utf-8")
-    assert '"kind": "paper_experiment"' in text
+    assert '"kind": "benchmark"' in text
     assert '"valid": true' in text
 
 
 def test_experiment_inspect_rejects_missing_sections(tmp_path):
-    cfg = tmp_path / "bad_paper.yml"
+    cfg = tmp_path / "bad_benchmark.yml"
     cfg.write_text(
         """
 version: 1
-paper:
+benchmark:
   title: "Missing sections"
 """.strip()
         + "\n",

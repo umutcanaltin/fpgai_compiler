@@ -7,8 +7,8 @@ from fpgai.cli import main as cli_main
 
 
 def test_experiment_inspect_json_output(tmp_path, monkeypatch):
-    config = Path("configs/experiments/arxiv_paper.yml")
-    assert config.exists(), "configs/experiments/arxiv_paper.yml is missing"
+    config = Path("configs/experiments/benchmark_suite.yml")
+    assert config.exists(), "configs/experiments/benchmark_suite.yml is missing"
 
     out = tmp_path / "experiment_inspection.json"
 
@@ -34,5 +34,5 @@ def test_experiment_inspect_json_output(tmp_path, monkeypatch):
 
     data = json.loads(out.read_text())
     assert isinstance(data, dict)
-    assert data.get("kind") == "paper_experiment"
+    assert data.get("kind") == "benchmark"
     assert data.get("valid") is True

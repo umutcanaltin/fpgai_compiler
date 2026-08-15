@@ -1,6 +1,6 @@
 # Adding an FPGAI Research Operator
 
-This document describes the target contributor path. E3A establishes the contract model; external execution and importer registration are implemented in later sprints.
+This document describes the target contributor path. E3A establishes the contract model; external execution and importer registration are implemented in later work.
 
 A research operator contribution will eventually provide:
 

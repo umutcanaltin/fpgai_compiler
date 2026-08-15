@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from fpgai.reports.memory_semantics import classify_generated_memory_semantics
+from fpgai.analysis.generated_memory_semantics import classify_generated_memory_semantics
 
 
-ROOT = Path("paper_experiments/full_pipeline_gate/sprint27j_paper_validation/runs_hls")
+ROOT = Path("benchmark_runs/full_pipeline_gate/memory_semantics_validation/runs_hls")
 
 
 def _run(name: str) -> Path:
@@ -124,7 +124,7 @@ const op0_bias_t B0[2] = {0};
 
 
 def test_synthetic_ddr_tiled_source_is_classified_as_ddr_tiled(tmp_path: Path) -> None:
-    from fpgai.reports.memory_semantics import classify_generated_memory_semantics
+    from fpgai.analysis.generated_memory_semantics import classify_generated_memory_semantics
 
     run = tmp_path
     src = run / "hls/src"

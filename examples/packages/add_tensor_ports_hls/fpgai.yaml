@@ -1,0 +1,55 @@
+schema: fpgai.package/v1
+package:
+  id: community.add_tensor_ports_hls
+  name: Add tensor ports HLS
+  version: 1.0.0
+  asset_type: implementation
+  provider: community
+  description: Maintained multi-input HLS ABI example for Add.
+usage:
+  platform_scope: research
+  permitted_uses: [research, experimentation, validation, benchmarking, education]
+  production_path: morfics
+license:
+  category: open_source
+  identifier: Apache-2.0
+compatibility:
+  fpgai_contract: ">=1.0,<2.0"
+  boards: [kv260, kr260, pynq_z2]
+  precisions: [fp32]
+  toolchains:
+    - name: vitis_hls
+      versions: ["2023.2"]
+capabilities:
+  inference: true
+  training:
+    forward: true
+    backward_input: false
+    parameter_gradients: false
+    bias_gradients: false
+    optimizer_update: false
+entrypoints:
+  implementation:
+    language: hls_cpp
+    backend: vitis_hls
+    top: add_tensor_ports_hls
+    sources: [src/add_tensor_ports.cpp]
+    headers: [include/add_tensor_ports.hpp]
+implementation:
+  operator_id: fpgai.operator.add
+  backend: vitis_hls
+interfaces:
+  lhs: {direction: input, protocol: axi_stream, data_type: fp32}
+  rhs: {direction: input, protocol: axi_stream, data_type: fp32}
+  output: {direction: output, protocol: axi_stream, data_type: fp32}
+integration:
+  hls:
+    abi: tensor_ports_v1
+    scalar_type: float
+    inputs:
+      - {name: lhs}
+      - {name: rhs}
+    outputs:
+      - {name: output}
+validation:
+  declared_level: reference_tested

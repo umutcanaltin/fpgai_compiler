@@ -2,7 +2,7 @@
 
 ## Goal
 
-The first ecosystem sprint records where contributors currently need to edit FPGAI core files and defines the migration order toward external research packages.
+The extensibility audit records where contributors currently need to edit FPGAI core files and defines the migration order toward external research packages.
 
 The audit is read-only. It must not import plugin modules, execute package code, alter compiler behavior, or create build artifacts.
 
@@ -52,4 +52,4 @@ Generated reports are written under `dev_audits/extensibility/` by default and s
 
 ## Next approval gate
 
-The audit does not create registries. After its findings are reviewed, the next proposed sprint must define `fpgai.package/v1`, package identity, capabilities, validation levels, and safe metadata-only discovery. Implementation begins only after approval.
+The audit does not create registries. After its findings are reviewed, the next implementation step defines `fpgai.package/v1`, package identity, capabilities, validation levels, and safe metadata-only discovery. Implementation begins only after approval.

@@ -103,7 +103,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--root",
-        default="paper_experiments/full_pipeline_gate/sprint25_e2e_audit",
+        default="benchmark_runs/full_pipeline_gate/end_to_end_audit",
     )
     args = ap.parse_args()
 

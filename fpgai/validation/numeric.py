@@ -56,7 +56,7 @@ def emit_numeric_validation_report(
       artifacts are provided;
     - training is marked ``passed`` only when the training comparison result
       exists and exposes a summary/results file;
-    - missing HLS/testbench artifacts are recorded as missing evidence, not as
+    - missing HLS/testbench artifacts are recorded as missing artifacts, not as
       success.
     """
 
@@ -194,7 +194,7 @@ def emit_numeric_validation_report(
         "batch_accumulation": batch_accumulation_validation,
         "loss_validation": loss_validation,
         "training_tiled_io": training_tiled_io_validation,
-        "paper_claim_allowed": {
+        "validation_claim_allowed": {
             "numeric_correctness": status == "passed",
         },
     }
@@ -216,7 +216,7 @@ def emit_numeric_validation_report(
     if pipeline_mode == "training_on_device":
         lines += [
             "",
-            "## Training evidence",
+            "## Training artifacts",
             f"- Python reference: `{ 'yes' if training_reference is not None else 'no' }`",
             f"- Generated/testbench comparison: `{ 'yes' if training_compare is not None else 'no' }`",
             f"- Gradient export validation: `{gradient_export_validation.get('status', 'not_requested')}`",
@@ -230,7 +230,7 @@ def emit_numeric_validation_report(
     else:
         lines += [
             "",
-            "## Inference evidence",
+            "## Inference artifacts",
             "- Final output comparison: `not available`" if output_compare is None else f"- Final output comparison: `{output_compare.get('status', 'available')}`",
             f"- Task quality: `{task_quality.get('decision_status', 'not_applicable')}`",
             f"- Task quality reason: {task_quality.get('decision_reason', 'not applicable')}",

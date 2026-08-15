@@ -136,7 +136,7 @@ def test_memory_storage_bram_keeps_embedded_mode() -> None:
 def test_generated_uram_memory_design_has_real_uram_source_if_present() -> None:
     from pathlib import Path
 
-    run = Path("paper_experiments/full_pipeline_gate/sprint26_paper_matrix/runs/kv260_memory_uram")
+    run = Path("benchmark_runs/full_pipeline_gate/benchmark_matrix/runs/kv260_memory_uram")
     src = run / "hls/src/deeplearn.cpp"
     if not src.exists():
         return
@@ -154,7 +154,7 @@ def test_generated_uram_memory_design_has_nonzero_hls_uram_if_present() -> None:
     import xml.etree.ElementTree as ET
 
     p = Path(
-        "paper_experiments/full_pipeline_gate/sprint26_paper_matrix/runs/"
+        "benchmark_runs/full_pipeline_gate/benchmark_matrix/runs/"
         "kv260_memory_uram/hls/fpgai_hls_proj/sol1/syn/report/deeplearn_csynth.xml"
     )
     if not p.exists():
@@ -170,7 +170,7 @@ def test_generated_uram_memory_design_has_nonzero_hls_uram_if_present() -> None:
 def test_generated_ddr_memory_design_has_real_ddr_source_if_present() -> None:
     from pathlib import Path
 
-    run = Path("paper_experiments/full_pipeline_gate/sprint26_paper_matrix/runs/kv260_memory_ddr")
+    run = Path("benchmark_runs/full_pipeline_gate/benchmark_matrix/runs/kv260_memory_ddr")
     src = run / "hls/src/deeplearn.cpp"
     if not src.exists():
         return
@@ -189,7 +189,7 @@ def test_generated_ddr_runtime_package_has_weight_payload_if_present() -> None:
     from pathlib import Path
     import json
 
-    run = Path("paper_experiments/full_pipeline_gate/sprint26_paper_matrix/runs/kv260_memory_ddr")
+    run = Path("benchmark_runs/full_pipeline_gate/benchmark_matrix/runs/kv260_memory_ddr")
     manifest_path = run / "runtime_package/package_manifest.json"
     if not manifest_path.exists():
         return
