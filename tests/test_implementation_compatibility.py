@@ -25,3 +25,15 @@ def test_compatibility_reports_specific_rejection_reasons() -> None:
     assert rejected.compatible is False
     assert "backend_mismatch" in rejected.reasons
     assert "precision_not_supported" in rejected.reasons
+
+
+def test_semantic_operator_version_is_part_of_implementation_compatibility():
+    contract = implementation_contract_from_manifest("examples/packages/scale_bias_hls")
+    from dataclasses import replace
+    contract = replace(contract, semantics_version=2)
+    result = evaluate_implementation_compatibility(
+        contract,
+        CompatibilityRequest(mode="inference", operator_semantics_version=1),
+    )
+    assert not result.compatible
+    assert "operator_semantics_version_mismatch" in result.reasons

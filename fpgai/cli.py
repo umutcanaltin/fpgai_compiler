@@ -959,6 +959,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print only a minimal compile summary.",
     )
 
+    export_parser = subparsers.add_parser(
+        "export",
+        help="Export selected compiler artifacts without running full implementation",
+    )
+    export_subparsers = export_parser.add_subparsers(dest="export_command")
+    export_block = export_subparsers.add_parser(
+        "block",
+        help="Export an FPGAI-IR operator/subgraph as backend source without Vitis/Vivado/bitstream execution",
+    )
+    export_block.add_argument("--config", required=True, help="Compile configuration used to resolve the source model and architecture")
+    export_block.add_argument("--op", action="append", required=True, help="Operator name to include; may be repeated")
+    export_block.add_argument("--format", default="hls", choices=["hls", "hls_cpp"], help="Generated backend source format")
+    export_block.add_argument("--out", required=True, help="Standalone export directory")
+
     benchmark_parser = subparsers.add_parser(
         "benchmark",
         help=(
@@ -1274,6 +1288,12 @@ def build_parser() -> argparse.ArgumentParser:
     ecosystem_discover.add_argument("--max-depth", type=int, default=2)
     ecosystem_discover.add_argument("--strict", action="store_true")
     ecosystem_discover.add_argument("--json", action="store_true", dest="json_output")
+    ecosystem_export = ecosystem_subparsers.add_parser("export", help="Export a discovered HLS/VHDL/RTL implementation block without running synthesis or Vivado")
+    ecosystem_export.add_argument("--id", dest="package_id", required=True, help="Implementation package ID")
+    ecosystem_export.add_argument("--out", required=True, help="Standalone export directory")
+    ecosystem_export.add_argument("--project-root", default=".", help="Project root containing packages/")
+    ecosystem_export.add_argument("--directory", action="append", default=[], help="Additional ecosystem package directory; may be repeated")
+    ecosystem_export.add_argument("--force", action="store_true")
     ecosystem_subparsers.add_parser("types", help="List supported FPGAI Ecosystem contribution asset types")
 
     frontend_parser = subparsers.add_parser(
@@ -1310,6 +1330,19 @@ def main() -> None:
             )
         )
 
+
+    if args.command == "export":
+        if getattr(args, "export_command", None) == "block":
+            from fpgai.engine.compiler import Compiler
+            root = Compiler.from_yaml(args.config).export_subgraph(
+                op_names=tuple(args.op or ()),
+                out_dir=args.out,
+                artifact_format=args.format,
+            )
+            print(str(root))
+            return
+        parser.error("export requires a subcommand")
+        return 2
 
     if args.command == "report":
         if getattr(args, "report_command", None) == "build":
@@ -1379,12 +1412,20 @@ def main() -> None:
                 for item in payload["packages"]:
                     print(f"{item['status']:12} {item['asset_type']:16} {item['package_id']}@{item['version']}")
             raise SystemExit(0 if result.ok else 1)
+        if ecosystem_command == "export":
+            from fpgai.ecosystem import export_implementation_artifact
+            root = export_implementation_artifact(
+                args.package_id, args.out, project_root=args.project_root,
+                directories=tuple(args.directory or ()), force=args.force,
+            )
+            print(str(root))
+            return
         if ecosystem_command == "types":
             from fpgai.ecosystem import supported_contribution_types
             for asset_type in supported_contribution_types():
                 print(asset_type)
             return
-        parser.error("ecosystem requires 'init', 'validate', 'inventory', 'discover', or 'types'")
+        parser.error("ecosystem requires 'init', 'validate', 'inventory', 'discover', 'export', or 'types'")
 
     if args.command == "frontend":
         from fpgai.frontend import frontend_registry, import_model_source

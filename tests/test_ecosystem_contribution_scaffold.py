@@ -60,3 +60,50 @@ def test_scaffold_generic_ecosystem_asset_types_validate(tmp_path: Path) -> None
 def test_supported_types_include_core_ecosystem_assets() -> None:
     types = set(supported_contribution_types())
     assert {"model", "operator", "implementation", "board", "backend", "optimizer", "loss", "dataset", "reporter"} <= types
+
+
+def test_ecosystem_exports_existing_hls_and_vhdl_blocks_without_tool_execution(tmp_path: Path) -> None:
+    import json
+    from fpgai.ecosystem import export_implementation_artifact
+
+    for package_id, expected_suffix, expected_language in (
+        ("community.scale_bias_hls", "src/scale_bias.cpp", "hls_cpp"),
+        ("community.scale_bias_vhdl", "rtl/scale_bias_vhdl.vhd", "vhdl"),
+    ):
+        out = export_implementation_artifact(
+            package_id,
+            tmp_path / package_id,
+            project_root=Path(".").resolve(),
+            directories=(Path("examples/packages").resolve(),),
+        )
+        manifest = json.loads((out / "artifact_manifest.json").read_text(encoding="utf-8"))
+        assert manifest["language"] == expected_language
+        assert manifest["tool_execution"] == {"vitis_hls": False, "vivado": False, "bitstream": False}
+        assert (out / expected_suffix).is_file()
+        assert (out / "implementation_contract.json").is_file()
+        assert (out / "fpgai.yaml").is_file()
+
+
+def test_scaffolded_hardware_implementation_has_loadable_contract_and_export_policy(tmp_path: Path) -> None:
+    import yaml
+    from fpgai.implementations import implementation_contract_from_manifest
+
+    root = scaffold_contribution(tmp_path / "impl", asset_type="vhdl", package_id="example.impl.demo")
+    contract = implementation_contract_from_manifest(root)
+    raw = yaml.safe_load((root / "fpgai.yaml").read_text(encoding="utf-8"))
+    assert contract.language == "vhdl"
+    assert contract.backend == "vhdl"
+    assert contract.operator_id == "example.impl.demo.operator"
+    assert raw["export"]["requires_bitstream"] is False
+
+
+def test_scaffold_declares_ecosystem_roles_and_numeric_validation(tmp_path: Path) -> None:
+    import yaml
+    expected = {"model": "model", "operator": "operator_semantics", "vhdl": "operator_implementation"}
+    for kind, role in expected.items():
+        root = scaffold_contribution(tmp_path / kind, asset_type=kind, package_id=f"example.{kind}.role")
+        raw = yaml.safe_load((root / "fpgai.yaml").read_text())
+        assert raw["ecosystem"]["role"] == role
+        assert raw["validation"]["numeric"]["required"] is True
+        if role == "operator_implementation":
+            assert raw["implementation"]["implements"]["version"] == 1

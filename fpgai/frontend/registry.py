@@ -171,5 +171,8 @@ def import_model_source(
         "frontend_provider": spec.provider,
         "frontend_version": spec.version,
         "ingress_route": source_framework_route(source_framework, key),
+        "mlir_interop": key in {"mlir", "stablehlo"},
     })
+    from fpgai.ir.semantics import attach_source_provenance
+    attach_source_provenance(graph)
     return graph

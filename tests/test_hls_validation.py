@@ -149,3 +149,4 @@ def test_run_and_write_hls_validation_records_runner_errors(tmp_path) -> None:
     assert report["ok"] is False
     assert report["error"] == "vitis unavailable"
     assert manifest["hls_validation"]["ok"] is False
+

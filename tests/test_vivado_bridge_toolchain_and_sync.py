@@ -587,3 +587,21 @@ def test_vitis_hls_runner_marks_internal_csim_failure_when_tool_exits_zero(tmp_p
     assert result.csim_ok is False
     assert result.failure_stage == "csim"
     assert result.failure_reason and "C simulation failed" in result.failure_reason
+
+
+def test_hls_artifact_guard_blocks_pathological_single_rtl_growth(tmp_path) -> None:
+    from fpgai.reporting.hls_validation import evaluate_hls_artifact_guards
+
+    ip = tmp_path / "fpgai_hls_proj" / "sol1" / "impl" / "ip" / "hdl" / "vhdl"
+    ip.mkdir(parents=True)
+    (ip / "small.vhd").write_bytes(b"x" * 1024)
+    report = evaluate_hls_artifact_guards(tmp_path, max_single_rtl_bytes=2048)
+    assert report["passed"] is True
+    pathological = ip / "deeplearn.vhd"
+    with pathological.open("wb") as fh:
+        fh.truncate(4096)
+    report = evaluate_hls_artifact_guards(tmp_path, max_single_rtl_bytes=2048)
+    assert report["passed"] is False
+    check = next(item for item in report["checks"] if item["id"] == "HLS_GUARD_SINGLE_RTL_SIZE")
+    assert check["artifact"].endswith("deeplearn.vhd")
+    assert check["observed_bytes"] == 4096

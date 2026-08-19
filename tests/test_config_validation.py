@@ -379,3 +379,41 @@ def test_training_validation_dataset_reuses_dataset_schema_validation(tmp_path: 
         match="validation.training_validation.dataset.name",
     ):
         load_config(str(_write_config(tmp_path, raw)))
+
+
+def test_numeric_validation_and_compiler_guard_contracts_are_accepted(tmp_path: Path) -> None:
+    model_path = tmp_path / "model.onnx"
+    model_path.touch()
+    raw = _base_config(model_path)
+    raw["validation"] = {
+        "numeric": {
+            "enabled": True,
+            "levels": ["model", "layer", "intermediate", "state"],
+            "reference": {"source": "framework", "compare_ir": True},
+            "compare": {"outputs": True, "gradients": True, "optimizer_state": True},
+            "tolerances": {"policy": "precision_aware"},
+            "backends": ["cpp", "hls_csim", "rtl_sim", "runtime"],
+        }
+    }
+    raw["guards"] = {
+        "enabled": True,
+        "policy": "block",
+        "hls_artifacts": {
+            "max_single_rtl_bytes": 33554432,
+            "max_total_ip_bytes": 268435456,
+        },
+    }
+    raw.setdefault("toolchain", {})["vivado"] = {"jobs": 1}
+    cfg = load_config(str(_write_config(tmp_path, raw)))
+    assert cfg.raw["validation"]["numeric"]["levels"][1] == "layer"
+    assert cfg.raw["guards"]["policy"] == "block"
+    assert cfg.raw["toolchain"]["vivado"]["jobs"] == 1
+
+
+def test_invalid_compiler_guard_policy_is_rejected(tmp_path: Path) -> None:
+    model_path = tmp_path / "model.onnx"
+    model_path.touch()
+    raw = _base_config(model_path)
+    raw["guards"] = {"policy": "ignore-everything"}
+    with pytest.raises(ConfigError, match="guards.policy"):
+        load_config(str(_write_config(tmp_path, raw)))

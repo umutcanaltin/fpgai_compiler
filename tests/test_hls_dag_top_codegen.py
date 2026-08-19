@@ -293,3 +293,56 @@ def test_branch_aware_embedded_uram_materializes_function_scope_weight_storage()
     assert "B0[i] = fpgai::B0[i];" in source
     assert "static bool fpgai_static_weights_initialized = false;" in source
     assert "static op0_wgt_t W0[12] = {" not in source
+
+
+def test_branch_aware_add_compile_plan_materially_changes_hls_template_arguments():
+    graph = Graph("add_arch")
+    graph.inputs = ["left", "right"]
+    graph.outputs = ["out"]
+    for name in ("left", "right", "out"):
+        graph.add_tensor(name, (1, 8), "float32")
+    graph.add_op("Add", ["left", "right"], ["out"], name="add0")
+    compile_plan = {"layer_plans": [{
+        "node_name": "add0",
+        "architecture": {
+            "pipeline": {"ii": 2},
+            "parallelism": {"pe": 4, "simd": 1, "unroll": {"element": 4}},
+            "partitioning": {"factor": 1, "targets": {"input": 2, "output": 4}},
+            "tiling": {"sizes": {}},
+        },
+    }]}
+    source = emit_dag_top_cpp(
+        graph, top_name="deeplearn", weights_mode="embedded", compile_plan=compile_plan,
+        raw_cfg={"numerics": {"defaults": {"activation": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6}}}},
+    )
+    assert "FPGAI_ARCH_EFFECT op=Add name=add0 pipeline_ii=2 element_unroll=4" in source
+    assert ", 2, 4, 2, 4>(" in source
+
+
+def test_branch_aware_rejects_explicit_architecture_controls_when_kernel_cannot_realize_them():
+    graph = Graph("relu_arch_unsupported")
+    graph.inputs = ["input"]
+    graph.outputs = ["out"]
+    graph.add_tensor("input", (1, 4), "float32")
+    graph.add_tensor("out", (1, 4), "float32")
+    graph.add_op("Relu", ["input"], ["out"], name="relu0")
+    compile_plan = {"layer_plans": [{
+        "node_name": "relu0",
+        "architecture": {
+            "pipeline": {"ii": 2},
+            "parallelism": {"pe": 2, "simd": 1, "unroll": {"element": 2}},
+            "partitioning": {"factor": 1, "targets": {}},
+            "tiling": {"sizes": {}},
+        },
+        "notes": {
+            "architecture_control_sources": {
+                "effective_request": {"pipeline": {"ii": 2}, "parallelism": {"pe": 2}}
+            }
+        },
+    }]}
+    import pytest
+    with pytest.raises(RuntimeError, match="HLSDAG105"):
+        emit_dag_top_cpp(
+            graph, top_name="deeplearn", weights_mode="embedded", compile_plan=compile_plan,
+            raw_cfg={"numerics": {"defaults": {"activation": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6}}}},
+        )

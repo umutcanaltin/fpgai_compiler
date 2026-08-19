@@ -40,21 +40,23 @@ def analyze_ir_architecture(graph: Graph) -> Dict[str, Any]:
                 "owned_by_fpgai": False,
             },
             "mlir": {
-                "role": "optional multi-level compiler interoperability and dialect conversion path",
+                "role": "frontend interoperability/canonicalization layer for StableHLO and supported MLIR dialects before FPGAI architectural semantics",
                 "owned_by_fpgai": False,
                 "bridge_schema": "fpgai.mlir-bridge/v1",
             },
             "fpgai_ir": {
-                "role": "authoritative FPGAI domain IR for quantization, memory, transport, training, implementation candidates, backend partition and runtime contracts",
+                "role": "authoritative FPGA architecture IR that preserves functional semantics while adding hierarchical model/layer/loop execution, memory, transport, training state, implementation and validation contracts",
                 "owned_by_fpgai": True,
             },
         },
         "scientific_positioning": {
-            "claim": "FPGAI IR complements rather than replaces general compiler infrastructure: ONNX supplies model interchange, MLIR/StableHLO supply reusable multi-level compiler interoperability, and FPGAI IR owns FPGA architecture, memory, transport, training, persistent-state, implementation-selection and runtime semantic contracts.",
+            "claim": "FPGAI IR complements rather than replaces MLIR: framework-native paths lower through MLIR/StableHLO, ONNX remains a parallel interchange frontend, and FPGAI IR is the boundary where functional computation becomes explicit configurable FPGA architecture with model/layer/loop scheduling, memory, transport, persistent training/inference state, implementation selection, validation provenance and runtime contracts.",
             "mlir_replacement_claim": False,
             "contribution_axes": [
+                "MLIR/StableHLO interoperability plus ONNX interchange ingress",
                 "source-framework-independent computation normalization",
-                "explicit user-selectable FPGA architecture semantics",
+                "explicit user-selectable hierarchical FPGA architecture semantics",
+                "model-wise, layer-wise and loop-wise parallelism/pipelining",
                 "unified inference/training tensor and operator semantics",
                 "memory/transport/persistent-state semantics",
                 "backend implementation-selection semantics",
@@ -156,6 +158,8 @@ def resolved_ir_snapshot(
             "transport": "FPGAI IR tensor.transport + existing communication plan",
             "training": "FPGAI IR tensor/op training semantics + existing training plan",
             "persistent_state": "FPGAI IR tensor.state",
+            "hierarchical_execution": "FPGAI graph/op execution semantics + existing compile plan",
+            "provenance": "FPGAI graph/op provenance + lowering history",
             "runtime": "FPGAI graph runtime contract + runtime sequence",
             "implementation": "FPGAI IR implementation candidates/selection",
         },
@@ -190,6 +194,10 @@ def ir_scientific_capability_matrix(graph: Graph) -> Dict[str, Any]:
         "persistent_state": any(t.semantics.state.persistent_across_invocations for t in tensors),
         "runtime": bool(graph.semantics.runtime_contract),
         "implementation_selection": any(bool(op.semantics.implementation_candidates) or bool(op.semantics.selected_backend) for op in ops),
+        "hierarchical_execution": any(bool(getattr(op.semantics, "execution", {})) for op in ops) or bool(getattr(graph.semantics, "execution", {})),
+        "source_provenance": bool(getattr(graph.semantics, "provenance", {})) or any(bool(getattr(op.semantics, "provenance", {})) for op in ops),
+        "progressive_lowering": bool(getattr(graph.semantics, "lowering_history", ())),
+        "memory_initialization": any(t.semantics.memory.initialization_mode != "unspecified" or t.semantics.memory.initialization_source != "unspecified" for t in tensors),
     }
     return {
         "schema": "fpgai.ir-scientific-capability-matrix/v1",

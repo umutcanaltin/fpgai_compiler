@@ -6,7 +6,7 @@ from fpgai.operators import (
 )
 from fpgai.operators.external import (
     ExternalOperatorDefinition, ImportedOperator, ReferenceExecutionResult,
-    ShapeInferenceResult, TypeInferenceResult,
+    ShapeInferenceResult, TypeInferenceResult, BackwardInputReferenceResult,
 )
 
 def _import(ctx):
@@ -18,13 +18,17 @@ def _type(ctx): return TypeInferenceResult((ctx.input_dtypes[0],))
 def _reference(ctx):
     x=np.asarray(ctx.inputs[0]); return ReferenceExecutionResult((x*float(ctx.attributes.get("scale",1.0))+float(ctx.attributes.get("bias",0.0)),))
 
+def _backward_input_reference(ctx):
+    grad=np.asarray(ctx.grad_outputs[0]); scale=float(ctx.attributes.get("scale",1.0))
+    return BackwardInputReferenceResult((grad*scale,))
+
 def define_operator():
     contract=OperatorContract(
         operator_id="community.operator.scale_bias", canonical_op_type="ScaleBias", version=1, category="elementwise",
         inputs=(TensorPortContract("input"),), outputs=(TensorPortContract("output"),),
         attributes=(AttributeContract("scale","float",False,1.0),AttributeContract("bias","float",False,0.0)),
         onnx_bindings=(OnnxBinding("community.fpgai","ScaleBias",1,None),),
-        capabilities=OperatorCapabilities(inference=True,shape_inference=True,type_inference=True,numeric_reference=True),
-        entrypoints=OperatorEntrypoints(shape_inference="_shape",type_inference="_type",numeric_reference="_reference"),
+        capabilities=OperatorCapabilities(inference=True,training_forward=True,backward_input=True,shape_inference=True,type_inference=True,numeric_reference=True),
+        entrypoints=OperatorEntrypoints(shape_inference="_shape",type_inference="_type",numeric_reference="_reference",training_reference="_reference",gradient="_backward_input_reference"),
     )
-    return ExternalOperatorDefinition(1,contract,_import,_shape,_type,_reference)
+    return ExternalOperatorDefinition(1,contract,_import,_shape,_type,_reference,_backward_input_reference)

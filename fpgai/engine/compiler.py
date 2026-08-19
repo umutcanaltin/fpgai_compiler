@@ -69,7 +69,7 @@ from fpgai.analysis.hls_calibration_runner import run_hls_calibration
 from fpgai.util.binio import write_f32_bin
 from fpgai.runtime.package import emit_runtime_package
 from fpgai.runtime.runtime_plans import build_persistent_state_plan
-from fpgai.validation.numeric import emit_numeric_validation_report
+from fpgai.validation.numeric import emit_and_enforce_compiler_numeric_validation
 from fpgai.validation.dataset import (
     emit_dataset_artifacts,
     emit_dataset_model_contract,
@@ -149,7 +149,7 @@ from fpgai.analysis.ir_architecture import (
     write_ir_architecture_analysis,
     write_resolved_ir_snapshot,
 )
-from fpgai.ir.semantics import write_graph_semantics_report
+from fpgai.ir.semantics import write_graph_semantics_report, attach_source_provenance, mark_ir_level
 from fpgai.ir.passes.mechanism_resolution import materialize_compile_plan_semantics
 
 from fpgai.engine.memory_semantics import MemorySemanticsMixin
@@ -230,7 +230,17 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
         mode = str(self.cfg.pipeline.mode).lower()
         raw = self.cfg.raw
         ecosystem_cfg = _cfg_get(raw, "ecosystem", None)
-        if isinstance(ecosystem_cfg, dict) and bool(ecosystem_cfg.get("enabled", False)):
+        implementation_cfg = _cfg_get(raw, "implementations", {}) or {}
+        operator_package_cfg = (ecosystem_cfg or {}).get("operator_packages", {}) if isinstance(ecosystem_cfg, dict) else {}
+        external_composition_requested = bool(
+            isinstance(ecosystem_cfg, dict)
+            and bool(ecosystem_cfg.get("enabled", False))
+            and (
+                bool((operator_package_cfg or {}).get("enable", ()))
+                or bool((implementation_cfg or {}).get("enable", ()))
+            )
+        )
+        if external_composition_requested:
             from fpgai.ecosystem import compile_external_hls_if_configured
 
             out_dir = self._prepare_out_dir(raw)
@@ -258,6 +268,18 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
         if mode == "training_on_device":
             return self._compile_training()
         raise RuntimeError(f"Unsupported pipeline mode: {self.cfg.pipeline.mode}")
+
+    def _enforce_numeric_validation_policy(self, *, out_dir: Path, numeric_validation_artifacts: Any) -> None:
+        from fpgai.validation.numeric import enforce_numeric_validation_policy
+        enforce_numeric_validation_policy(raw_config=self.cfg.raw, numeric_validation_artifacts=numeric_validation_artifacts)
+
+    def export_subgraph(
+        self, *, op_names, out_dir: str | Path, artifact_format: str = "hls"
+    ) -> Path:
+        from fpgai.engine.subgraph_export import export_compiler_subgraph
+        return export_compiler_subgraph(
+            self, op_names=op_names, out_dir=out_dir, artifact_format=artifact_format
+        )
 
     def _compile_inference(self) -> CompileResult:
         raw = self.cfg.raw
@@ -510,17 +532,13 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             raw_config=raw,
         ) if enable_reports else None
 
-        numeric_validation_artifacts = emit_numeric_validation_report(
-            out_dir,
-            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "inference")),
-            source_generated=(hls_dir is not None),
-            hls_ran=(hls_run is not None),
-            hls_ok=(hls_run.ok if hls_run is not None else None),
-            hls_csynth_report=(hls_run.csynth_report if hls_run is not None else None),
-            inference_reference_artifacts=inference_reference_artifacts,
-            raw_config=raw,
-            runtime_sequence=runtime_sequence,
-        ) if enable_reports else None
+        numeric_validation_artifacts = emit_and_enforce_compiler_numeric_validation(
+            graph=g, model_path=self.cfg.model.path, model_format=self.cfg.model.format,
+            raw_config=raw, out_dir=out_dir, pipeline_mode=str(self.cfg.pipeline.mode),
+            source_generated=(hls_dir is not None), enabled=enable_reports, hls_ran=(hls_run is not None),
+            hls_ok=(hls_run.ok if hls_run is not None else None), hls_csynth_report=(hls_run.csynth_report if hls_run is not None else None),
+            inference_reference_artifacts=inference_reference_artifacts, runtime_sequence=runtime_sequence,
+        )
         generated_hls_explanation_artifacts = emit_generated_hls_explanation_reports(
             out_dir,
             raw_config=raw,
@@ -1449,21 +1467,15 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             "ref": _parameter_update_ref_file,
             "got": _parameter_update_got_file,
         }
-        numeric_validation_artifacts = emit_numeric_validation_report(
-            out_dir,
-            pipeline_mode=str(getattr(self.cfg.pipeline, "mode", "training_on_device")),
-            source_generated=(hls_dir is not None),
-            hls_ran=(hls_run is not None),
-            hls_ok=(hls_run.ok if hls_run is not None else None),
-            hls_csynth_report=(hls_run.csynth_report if hls_run is not None else None),
-            training_reference_result=training_reference_result,
-            training_compare_result=training_compare_result,
-            gradient_export_artifacts=_gradient_export_artifacts,
-            optimizer_state_artifacts=_optimizer_state_artifacts,
-            parameter_update_artifacts=_parameter_update_artifacts,
-            raw_config=raw,
-            runtime_sequence=runtime_sequence,
-        ) if enable_reports else None
+        numeric_validation_artifacts = emit_and_enforce_compiler_numeric_validation(
+            graph=g, model_path=self.cfg.model.path, model_format=self.cfg.model.format,
+            raw_config=raw, out_dir=out_dir, pipeline_mode=str(self.cfg.pipeline.mode),
+            source_generated=(hls_dir is not None), enabled=enable_reports, hls_ran=(hls_run is not None),
+            hls_ok=(hls_run.ok if hls_run is not None else None), hls_csynth_report=(hls_run.csynth_report if hls_run is not None else None),
+            training_reference_result=training_reference_result, training_compare_result=training_compare_result,
+            gradient_export_artifacts=_gradient_export_artifacts, optimizer_state_artifacts=_optimizer_state_artifacts,
+            parameter_update_artifacts=_parameter_update_artifacts, runtime_sequence=runtime_sequence,
+        )
         generated_hls_explanation_artifacts = emit_generated_hls_explanation_reports(
             out_dir,
             raw_config=raw,
@@ -1949,11 +1961,49 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
         self, out_dir: Path, g, descriptors, compile_plan, memory_plan, communication_plan,
         *, runtime_sequence=None, training_plan=None,
     ) -> None:
+        attach_source_provenance(g)
         materialize_compile_plan_semantics(g, compile_plan)
+        # Mirror the existing memory/communication plans into authoritative IR
+        # tensor semantics.  Residency is distinct from initialization source.
+        memory_notes = dict(getattr(memory_plan, "notes", {}) or {})
+        memory_mode = str(memory_notes.get("memory_semantics_mode", "") or "").lower()
+        for placement in list(getattr(memory_plan, "placements", ()) or ()):
+            tensor = g.get_tensor(str(getattr(placement, "tensor_name", "")))
+            if tensor is None:
+                continue
+            region = str(getattr(placement, "region", "unspecified") or "unspecified").lower()
+            tensor.semantics.memory.storage = {"host": "host", "bram": "bram", "uram": "uram", "ddr": "ddr"}.get(region, region)
+            tensor.semantics.memory.residency = "external" if region in {"ddr", "host"} else "on_chip"
+            if str(getattr(placement, "kind", "")) == "weight":
+                tensor.semantics.memory.persistence = "model"
+                if memory_mode.endswith("_static"):
+                    tensor.semantics.memory.initialization_mode = "embedded"
+                    tensor.semantics.memory.initialization_source = "embedded_rom"
+                    tensor.semantics.memory.mutable = False
+                elif "import" in memory_mode:
+                    tensor.semantics.memory.initialization_mode = "runtime_preload"
+                    tensor.semantics.memory.initialization_source = str(memory_notes.get("weight_import_interface", "m_axi") or "m_axi")
+                    tensor.semantics.memory.mutable = "export" in memory_mode or str(getattr(self.cfg.pipeline, "mode", "")) == "training_on_device"
+                elif memory_mode.startswith("ddr_tiled"):
+                    tensor.semantics.memory.initialization_mode = "external_resident"
+                    tensor.semantics.memory.initialization_source = "ddr"
+                    tensor.semantics.memory.mutable = memory_mode.endswith("mutable")
+        for edge in list(getattr(communication_plan, "edges", ()) or ()):
+            tensor = g.get_tensor(str(getattr(edge, "tensor_name", "")))
+            if tensor is None:
+                continue
+            notes = dict(getattr(edge, "notes", {}) or {})
+            tensor.semantics.transport.protocol = str(notes.get("interface") or getattr(edge, "encoding", "unspecified") or "unspecified")
+            tensor.semantics.transport.packing = str(getattr(edge, "encoding", "raw") or "raw")
         if runtime_sequence is not None:
             g.semantics.runtime_contract["sequence"] = runtime_sequence
         if training_plan is not None:
             g.semantics.runtime_contract["training_plan"] = training_plan.to_dict() if hasattr(training_plan, "to_dict") else training_plan
+        mark_ir_level(
+            g,
+            "lowered",
+            reason="backend-ready execution, memory, transport, runtime, and training contracts materialized",
+        )
         write_text(out_dir / "ir_summary.txt", g.summary())
         part_plan = single_device_plan(g, device_id="fpga0")
         write_text(out_dir / "partition_plan.json", json.dumps(part_plan.to_dict(), indent=2))
@@ -2272,6 +2322,22 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             run_enabled = bool(build_stages.get("hls_synthesis", False))
         if not run_enabled:
             return None
+        guards_cfg = raw.get("guards", {}) if isinstance(raw.get("guards", {}), dict) else {}
+        if bool(guards_cfg.get("enabled", True)):
+            from fpgai.reporting.hls_validation import evaluate_hls_source_guards
+            source_guard = evaluate_hls_source_guards(hls_dir)
+            reports_dir = hls_dir.parent / "reports"
+            reports_dir.mkdir(parents=True, exist_ok=True)
+            (reports_dir / "compiler_guards_pre_hls.json").write_text(
+                json.dumps(source_guard, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            if not source_guard.get("passed", True) and str(guards_cfg.get("policy", "block")) == "block":
+                blocked = [item for item in source_guard.get("checks", []) if item.get("status") == "blocked"]
+                detail = "; ".join(
+                    f"{item.get('id')} variable={item.get('variable')} elements={item.get('elements')} storage={item.get('storage')}"
+                    for item in blocked
+                )
+                raise RuntimeError(f"FPGAI compiler guard blocked Vitis HLS execution: {detail}")
         vitis_exe = str(
             _cfg_get(
                 raw,
@@ -3873,6 +3939,7 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             "build_stages": _build_stage_summary(kwargs.get("build_stages") or _resolve_build_stages(self.cfg.raw)),
             "runtime_sequence": kwargs.get("runtime_sequence"),
             "toolchain": _resolved_toolchain_summary(self.cfg.raw),
+            "guards": dict(self.cfg.raw.get("guards", {}) or {}),
             "resolved_config_artifacts": kwargs.get("resolved_config_artifacts"),
             "numeric_validation_artifacts": None if kwargs.get("numeric_validation_artifacts") is None else {
                 key: str(value) for key, value in kwargs.get("numeric_validation_artifacts", {}).items()

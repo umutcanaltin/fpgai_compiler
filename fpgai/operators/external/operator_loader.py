@@ -16,6 +16,8 @@ class ExternalOperatorContext:
     provenance: dict[str,dict[str,Any]] = field(default_factory=dict)
     def reference_for(self, operator_id: str):
         d=self.definitions.get(operator_id); return d.numeric_reference if d else None
+    def backward_input_reference_for(self, operator_id: str):
+        d=self.definitions.get(operator_id); return d.backward_input_reference if d else None
 
 @dataclass(frozen=True)
 class OperatorLoadResult:

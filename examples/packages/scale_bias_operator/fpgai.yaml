@@ -5,16 +5,21 @@ package:
   version: 1.0.0
   asset_type: operator
   provider: community
-  description: Custom ONNX-domain ScaleBias operator for FPGAI research integration tests.
+  description: Custom ONNX-domain ScaleBias operator for FPGAI research integration
+    tests.
 usage:
   platform_scope: research
-  permitted_uses: [research, experimentation, validation, benchmarking]
+  permitted_uses:
+  - research
+  - experimentation
+  - validation
+  - benchmarking
   production_path: morfics
 license:
   category: open_source
   identifier: Apache-2.0
 compatibility:
-  fpgai_contract: ">=1.0,<2.0"
+  fpgai_contract: '>=1.0,<2.0'
 capabilities:
   inference: true
   training:
@@ -25,3 +30,8 @@ entrypoints:
     symbol: define_operator
 validation:
   declared_level: reference_tested
+  numeric:
+    required: true
+    reference: operator_numeric_reference
+ecosystem:
+  role: operator_semantics

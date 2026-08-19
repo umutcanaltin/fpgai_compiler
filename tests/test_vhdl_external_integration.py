@@ -13,3 +13,15 @@ def test_vhdl_scalar_stream_contract_and_project_generation(tmp_path):
     assert result.run_tcl and result.run_tcl.exists()
     assert "scale_bias_vhdl" in result.wrapper.read_text()
     assert "synth_design" in result.run_tcl.read_text()
+
+
+def test_vhdl_architecture_mapping_becomes_entity_generic(tmp_path):
+    from dataclasses import replace
+    contract = implementation_contract_from_manifest(Path("examples/packages/scale_bias_vhdl"))
+    contract = replace(contract, architecture_mapping={"parallelism.pe": {"target": "vhdl_generic", "name": "PE"}})
+    result = emit_external_vhdl_operator_project(ExternalVHDLProjectRequest(
+        out_dir=tmp_path, contract=contract, architecture={"parallelism": {"pe": 8}}
+    ))
+    assert result.ok
+    text = result.wrapper.read_text()
+    assert "generic map (PE=>8)" in text

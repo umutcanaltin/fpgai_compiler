@@ -22,7 +22,14 @@ def deterministic_graph_inputs(graph: Graph) -> dict[str, np.ndarray]:
     return result
 
 
-def execute_graph_reference(graph: Graph, inputs: Mapping[str, np.ndarray]) -> np.ndarray:
+def execute_graph_reference_trace(graph: Graph, inputs: Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
+    """Execute the functional FPGAI IR and return every materialized tensor.
+
+    This reference is intentionally architecture-neutral: architecture-only lowering
+    must preserve these values within the configured numeric tolerance.  Returning a
+    trace makes the same owner usable for model-, layer-, and intermediate-level
+    compiler validation and standalone block reference capture.
+    """
     values: dict[str, np.ndarray] = {str(k): np.asarray(v, dtype=np.float32) for k, v in inputs.items()}
     for name, value in (getattr(graph, "constants", {}) or {}).items():
         values[str(name)] = np.asarray(value, dtype=np.float32)
@@ -68,6 +75,63 @@ def execute_graph_reference(graph: Graph, inputs: Mapping[str, np.ndarray]) -> n
                 out = np.reshape(ins[0], target)
             else:
                 out = np.array(ins[0], copy=True)
+        elif op.op_type == "Relu":
+            out = np.maximum(ins[0], 0.0)
+        elif op.op_type == "LeakyRelu":
+            alpha = float(attrs.get("alpha", 0.01))
+            out = np.where(ins[0] >= 0.0, ins[0], alpha * ins[0])
+        elif op.op_type == "Sigmoid":
+            out = 1.0 / (1.0 + np.exp(-ins[0]))
+        elif op.op_type == "Tanh":
+            out = np.tanh(ins[0])
+        elif op.op_type == "Dense":
+            from fpgai.engine.training_graph_utils import resolve_dense_arrays
+            weights, bias, input_features, output_features = resolve_dense_arrays(graph, op)
+            x = np.asarray(ins[0], dtype=np.float32).reshape((-1, input_features))
+            y = np.matmul(x, np.asarray(weights, dtype=np.float32).T) + np.asarray(bias, dtype=np.float32)
+            target = tuple(int(v) for v in graph.get_tensor(op.outputs[0]).shape)
+            out = y.reshape(target) if int(np.prod(target)) == int(y.size) else y
+        elif op.op_type == "Conv":
+            from fpgai.engine.training_graph_utils import resolve_conv_arrays
+            weights, bias, weight_shape = resolve_conv_arrays(graph, op)
+            x = np.asarray(ins[0], dtype=np.float32)
+            # ONNX Conv is NCHW. FPGAI also accepts CHW for batch-one graphs.
+            restore_batch = x.ndim == 4
+            if x.ndim == 3:
+                x = x[None, ...]
+            if x.ndim != 4:
+                raise ValueError(f"REF003: Conv reference requires CHW/NCHW input, got shape {x.shape}")
+            n, cin, hin, win = x.shape
+            cout, wcin, kh, kw = tuple(int(v) for v in weight_shape)
+            groups = int(attrs.get("group", attrs.get("groups", 1)))
+            if groups != 1 or wcin != cin:
+                raise ValueError("REF004: Conv reference currently supports group=1 with matching input channels")
+            strides = attrs.get("strides", [1, 1])
+            dilations = attrs.get("dilations", [1, 1])
+            pads = attrs.get("pads", [0, 0, 0, 0])
+            sh, sw = int(strides[0]), int(strides[1])
+            dh, dw = int(dilations[0]), int(dilations[1])
+            if len(pads) == 2:
+                pt = pb = int(pads[0]); pl = pr = int(pads[1])
+            else:
+                pt, pl, pb, pr = (int(v) for v in pads[:4])
+            xp = np.pad(x, ((0, 0), (0, 0), (pt, pb), (pl, pr)), mode="constant")
+            hout = (hin + pt + pb - dh * (kh - 1) - 1) // sh + 1
+            wout = (win + pl + pr - dw * (kw - 1) - 1) // sw + 1
+            y = np.empty((n, cout, hout, wout), dtype=np.float32)
+            for bn in range(n):
+                for co in range(cout):
+                    for oy in range(hout):
+                        for ox in range(wout):
+                            total = float(bias[co])
+                            for ci in range(cin):
+                                for ky in range(kh):
+                                    for kx in range(kw):
+                                        iy = oy * sh + ky * dh
+                                        ix = ox * sw + kx * dw
+                                        total += float(xp[bn, ci, iy, ix]) * float(weights[co, ci, ky, kx])
+                            y[bn, co, oy, ox] = total
+            out = y if restore_batch else y[0]
         elif op.op_type == "SiLU":
             x = np.asarray(ins[0], dtype=np.float32)
             out = x / (1.0 + np.exp(-x))
@@ -149,7 +213,12 @@ def execute_graph_reference(graph: Graph, inputs: Mapping[str, np.ndarray]) -> n
             raise ValueError(f"REF000: unsupported reference op {op.op_type!r}")
         values[str(op.outputs[0])] = np.asarray(out, dtype=np.float32)
 
-    return np.asarray(values[str(graph.outputs[0])], dtype=np.float32)
+    return {name: np.asarray(value, dtype=np.float32) for name, value in values.items()}
 
 
-__all__ = ["deterministic_graph_inputs", "execute_graph_reference"]
+def execute_graph_reference(graph: Graph, inputs: Mapping[str, np.ndarray]) -> np.ndarray:
+    trace = execute_graph_reference_trace(graph, inputs)
+    return np.asarray(trace[str(graph.outputs[0])], dtype=np.float32)
+
+
+__all__ = ["deterministic_graph_inputs", "execute_graph_reference", "execute_graph_reference_trace"]

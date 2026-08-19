@@ -33,6 +33,14 @@ class BenchmarkResult:
 _cfg_get = get_path
 
 
+
+
+def _numeric_validation_levels(raw: dict) -> set[str]:
+    levels = _cfg_get(raw, "validation.numeric.levels", []) or []
+    if isinstance(levels, str):
+        levels = [levels]
+    return {str(level).strip().lower() for level in levels}
+
 def _write_input_bin_from_npy(input_npy: Path, build_dir: Path) -> Path:
     build_dir.mkdir(parents=True, exist_ok=True)
     x = np.load(input_npy).astype(np.float32).reshape(-1)
@@ -146,7 +154,11 @@ def run_compile_correctness_benchmark(
     min_cosine_similarity = precision_limits["min_cosine_similarity"]
     fail_on_mismatch = bool(_cfg_get(raw, "benchmark.fail_on_mismatch", False))
 
-    intermediate_enabled = bool(_cfg_get(raw, "benchmark.intermediate.enabled", False))
+    validation_levels = _numeric_validation_levels(raw)
+    intermediate_enabled = (
+        bool(_cfg_get(raw, "benchmark.intermediate.enabled", False))
+        or bool({"layer", "layerwise", "intermediate"} & validation_levels)
+    )
     fail_on_layer_mismatch = bool(_cfg_get(raw, "benchmark.intermediate.fail_on_layer_mismatch", False))
     stop_on_first_bad_layer = bool(_cfg_get(raw, "benchmark.intermediate.stop_on_first_bad_layer", False))
 
@@ -350,6 +362,15 @@ def run_compile_training_benchmark(
     training_reference = manifest.get("training_reference") or {}
     training_compare = manifest.get("training_compare") or {}
     training_estimate = manifest.get("training_estimate") or {}
+    numeric_validation_path = out_dir / "reports" / "numeric_validation.json"
+    numeric_validation = {}
+    if numeric_validation_path.exists():
+        try:
+            numeric_validation = json.loads(numeric_validation_path.read_text(encoding="utf-8"))
+        except Exception:
+            numeric_validation = {}
+    numeric_validation_passed = bool(numeric_validation.get("passed") is True)
+    numeric_validation_status = str(numeric_validation.get("status") or "missing")
 
     loss_before = _training_metric_float(training_reference.get("loss_before"))
     loss_after = _training_metric_float(training_reference.get("loss_after"))
@@ -360,8 +381,10 @@ def run_compile_training_benchmark(
     training_reference_found = bool(training_reference)
     training_compare_found = bool(training_compare)
 
+    benchmark_passed = bool(compile_result.hls_ok is True and numeric_validation_passed)
+
     metrics = {
-        "passed": True,
+        "passed": benchmark_passed,
         "benchmark_mode": "training_on_device",
         "training_reference_found": training_reference_found,
         "training_compare_found": training_compare_found,
@@ -376,8 +399,11 @@ def run_compile_training_benchmark(
         "hls_stderr_log": compile_result.hls_stderr_log,
         "hls_csynth_report": compile_result.hls_csynth_report,
         "training_estimate": training_estimate,
+        "numeric_validation_json": str(numeric_validation_path) if numeric_validation_path.exists() else None,
+        "numeric_validation_status": numeric_validation_status,
+        "numeric_validation_passed": numeric_validation_passed,
         "notes": [
-            "Training benchmark validates compile/HLS completion and generated training reference/report artifacts.",
+            "Training benchmark requires HLS completion and the compiler numeric-validation report to pass.",
             "On-board training timing is not claimed unless Vivado/board runtime artifacts are present separately.",
         ],
     }
@@ -437,7 +463,7 @@ def run_compile_training_benchmark(
 
     manifest_update = {
         "benchmark": {
-            "passed": True,
+            "passed": benchmark_passed,
             "benchmark_mode": "training_on_device",
             "metrics_json": str(metrics_json.resolve()),
             "summary_txt": str(summary_txt.resolve()),
@@ -463,7 +489,7 @@ def run_compile_training_benchmark(
     return BenchmarkResult(
         build_dir=out_dir,
         bench_dir=bench_dir,
-        passed=True,
+        passed=benchmark_passed,
         metrics_json=metrics_json,
         summary_txt=summary_txt,
         reference_output_npy=reference_marker_npy,

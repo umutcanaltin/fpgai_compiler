@@ -39,6 +39,7 @@ class ImplementationContract:
     backend: str
     top: str
     sources: tuple[str, ...]
+    semantics_version: int = 1
     headers: tuple[str, ...] = ()
     source_order: tuple[str, ...] = ()
     inference: bool = True
@@ -56,10 +57,12 @@ class ImplementationContract:
     license_category: str = "research_only"
     package_root: Path | None = None
     manifest_hash: str = ""
+    architecture_mapping: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "toolchains", MappingProxyType({key: tuple(value) for key, value in self.toolchains.items()}))
+        object.__setattr__(self, "architecture_mapping", MappingProxyType({str(k): MappingProxyType(dict(v)) for k, v in self.architecture_mapping.items()}))
         object.__setattr__(self, "metadata", MappingProxyType(dict(self.metadata)))
         errors = [issue for issue in validate_implementation_contract(self) if issue.severity == "error"]
         if errors:
@@ -71,6 +74,8 @@ class ImplementationContract:
             "package_id": self.package_id,
             "version": self.version,
             "operator_id": self.operator_id,
+            "contribution_role": "operator_implementation",
+            "implements": {"operator_id": self.operator_id, "version": self.semantics_version},
             "language": self.language,
             "backend": self.backend,
             "top": self.top,
@@ -92,6 +97,7 @@ class ImplementationContract:
             },
             "validation_level": self.validation_level,
             "metrics": self.metrics.to_dict(),
+            "architecture_mapping": {key: dict(value) for key, value in self.architecture_mapping.items()},
             "license_category": self.license_category,
             "manifest_hash": self.manifest_hash,
             "metadata": dict(self.metadata),
@@ -105,6 +111,13 @@ def validate_implementation_contract(contract: ImplementationContract) -> tuple[
         issues.append(ImplementationIssue("IMPL001", "package_id", "Package ID must be namespace-qualified and lowercase"))
     if not _ID_RE.fullmatch(contract.operator_id):
         issues.append(ImplementationIssue("IMPL002", "operator_id", "Implemented operator ID must be namespace-qualified and lowercase"))
+    if contract.semantics_version < 1:
+        issues.append(ImplementationIssue("IMPL013", "implementation.implements.version", "Implemented semantic contract version must be positive"))
+    for source, mapping in contract.architecture_mapping.items():
+        target = str(mapping.get("target", ""))
+        name = str(mapping.get("name", ""))
+        if not source.strip() or target not in {"hls_attribute", "vhdl_generic"} or not name.strip():
+            issues.append(ImplementationIssue("IMPL014", f"architecture_mapping.{source}", "Architecture mapping requires target=hls_attribute|vhdl_generic and a target name"))
     if contract.language not in {item.value for item in ImplementationLanguage}:
         issues.append(ImplementationIssue("IMPL003", "language", "Unsupported implementation language"))
     if contract.backend not in _VALID_BACKENDS:
@@ -172,11 +185,20 @@ def implementation_contract_from_manifest(package_root: str | Path, *, manifest_
     metrics_raw = dict(raw.get("metrics", {}))
     validation = dict(raw.get("validation", {}))
     license_cfg = dict(raw.get("license", {}))
-    operator_id = str(implementation.get("operator_id") or implementation.get("implements") or "")
+    implements = implementation.get("implements")
+    semantics_version = 1
+    if isinstance(implements, Mapping):
+        operator_id = str(implements.get("operator_id") or implementation.get("operator_id") or "")
+        semantics_version = int(implements.get("version", 1) or 1)
+    else:
+        operator_id = str(implementation.get("operator_id") or implements or "")
+    architecture_mapping_raw = raw.get("architecture_mapping", implementation.get("architecture_mapping", {}))
+    architecture_mapping = architecture_mapping_raw if isinstance(architecture_mapping_raw, Mapping) else {}
     return ImplementationContract(
         package_id=manifest.package_id,
         version=manifest.version,
         operator_id=operator_id,
+        semantics_version=semantics_version,
         language=str(entrypoint.get("language", "")),
         backend=str(implementation.get("backend") or entrypoint.get("backend") or entrypoint.get("language", "")),
         top=str(entrypoint.get("top", "")),
@@ -204,13 +226,46 @@ def implementation_contract_from_manifest(package_root: str | Path, *, manifest_
         license_category=str(license_cfg.get("category", "research_only")),
         package_root=manifest.package_root,
         manifest_hash=manifest_hash,
+        architecture_mapping={str(k): dict(v) for k, v in architecture_mapping.items() if isinstance(v, Mapping)},
         metadata={
             "name": str(package.get("name", manifest.package_id)),
             "description": str(package.get("description", "")),
             "integration": dict(raw.get("integration", {})) if isinstance(raw.get("integration", {}), Mapping) else {},
+            "validation": dict(raw.get("validation", {})) if isinstance(raw.get("validation", {}), Mapping) else {},
+            "ecosystem": dict(raw.get("ecosystem", {})) if isinstance(raw.get("ecosystem", {}), Mapping) else {},
         },
     )
 
+
+
+def _architecture_value(architecture: Mapping[str, Any], path: str) -> Any:
+    current: Any = architecture
+    for part in str(path).split("."):
+        if not isinstance(current, Mapping) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def resolve_architecture_parameters(
+    contract: ImplementationContract, architecture: Mapping[str, Any] | None
+) -> dict[str, dict[str, Any]]:
+    """Resolve FPGAI architectural IR values into implementation parameters.
+
+    Hardware-semantic mappings are explicit: HLS attributes become function
+    parameters and VHDL mappings become entity generics. Missing source values
+    are ignored, while malformed mappings are rejected by the contract.
+    """
+    resolved = {"hls_attribute": {}, "vhdl_generic": {}}
+    arch = architecture if isinstance(architecture, Mapping) else {}
+    for source, mapping in contract.architecture_mapping.items():
+        value = _architecture_value(arch, source)
+        if value is None:
+            continue
+        target = str(mapping.get("target", ""))
+        name = str(mapping.get("name", ""))
+        resolved[target][name] = value
+    return resolved
 
 def validation_rank(level: str) -> int:
     return _VALIDATION_RANK.get(level, -1)

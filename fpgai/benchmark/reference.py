@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Tuple
 
 import numpy as np
-import onnxruntime as ort
 
 
 @dataclass(frozen=True)
@@ -44,6 +43,10 @@ def run_onnx_reference(
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    try:
+        import onnxruntime as ort
+    except ImportError as exc:
+        raise RuntimeError("ONNX reference execution requires the optional onnxruntime dependency") from exc
     sess = ort.InferenceSession(str(model_path), providers=["CPUExecutionProvider"])
 
     inputs = sess.get_inputs()

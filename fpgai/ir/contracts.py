@@ -11,6 +11,12 @@ class MemoryContract:
     lifetime: str = "graph"
     banking: Optional[str] = None
     alignment_bytes: Optional[int] = None
+    # Physical residence and initialization are intentionally distinct.  A tensor
+    # may execute from URAM while being initialized from an embedded ROM/image.
+    initialization_mode: str = "unspecified"
+    initialization_source: str = "unspecified"
+    mutable: bool = False
+    persistence: str = "invocation"
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -92,8 +98,13 @@ class OpSemantics:
     selected_implementation_id: Optional[str] = None
     buffering: Dict[str, Any] = field(default_factory=dict)
     schedule: Dict[str, Any] = field(default_factory=dict)
+    # Explicit hierarchy owned by FPGAI IR.  Existing schedule remains for
+    # backwards compatibility; execution mirrors model/layer/loop decisions.
+    execution: Dict[str, Any] = field(default_factory=dict)
     training: Dict[str, Any] = field(default_factory=dict)
     resource_constraints: Dict[str, Any] = field(default_factory=dict)
+    provenance: Dict[str, Any] = field(default_factory=dict)
+    lowering_history: Tuple[Dict[str, Any], ...] = ()
     tags: Tuple[str, ...] = ()
 
     def to_dict(self) -> Dict[str, Any]:
@@ -103,8 +114,11 @@ class OpSemantics:
             "selected_implementation_id": self.selected_implementation_id,
             "buffering": dict(self.buffering),
             "schedule": dict(self.schedule),
+            "execution": dict(self.execution),
             "training": dict(self.training),
             "resource_constraints": dict(self.resource_constraints),
+            "provenance": dict(self.provenance),
+            "lowering_history": [dict(item) for item in self.lowering_history],
             "tags": list(self.tags),
         }
 
@@ -113,10 +127,16 @@ class OpSemantics:
 class GraphSemantics:
     pipeline_mode: str = "inference"
     target_board: Optional[str] = None
+    # FPGAI uses progressive levels rather than replacing MLIR.  Functional is
+    # source semantics; architectural adds FPGA choices; lowered is backend-ready.
+    ir_level: str = "functional"
     runtime_contract: Dict[str, Any] = field(default_factory=dict)
     resource_constraints: Dict[str, Any] = field(default_factory=dict)
+    execution: Dict[str, Any] = field(default_factory=dict)
     source_ir: str = "fpgai"
     source_metadata: Dict[str, Any] = field(default_factory=dict)
+    provenance: Dict[str, Any] = field(default_factory=dict)
+    lowering_history: Tuple[Dict[str, Any], ...] = ()
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

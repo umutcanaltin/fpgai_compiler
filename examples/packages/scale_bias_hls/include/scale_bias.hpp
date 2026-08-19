@@ -7,3 +7,11 @@ void scale_bias_hls(
     float scale,
     float bias
 );
+
+void scale_bias_backward_input_hls(
+    const float* grad_output,
+    float* grad_input,
+    int count,
+    float scale,
+    float bias
+);

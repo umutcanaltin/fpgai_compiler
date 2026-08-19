@@ -43,6 +43,7 @@ def emit_numeric_validation_report(
     training_reference_result: Any = None,
     training_compare_result: Any = None,
     inference_reference_artifacts: dict[str, Any] | None = None,
+    frontend_ir_validation: dict[str, Any] | None = None,
     gradient_export_artifacts: dict[str, Any] | None = None,
     optimizer_state_artifacts: dict[str, Any] | None = None,
     parameter_update_artifacts: dict[str, Any] | None = None,
@@ -99,8 +100,21 @@ def emit_numeric_validation_report(
     task_quality: dict[str, Any] = {"status": "not_applicable", "task": "not_applicable", "decision_status": "not_applicable"}
     if pipeline_mode == "training_on_device":
         if training_compare is not None:
-            status = "passed"
-            reason = "training reference and generated/testbench comparison artifacts are available"
+            cosine_checks = {
+                "gradients": training_compare.get("grad_cosine"),
+                "weights_after": training_compare.get("weight_after_cosine"),
+                "weight_delta": training_compare.get("weight_delta_cosine"),
+            }
+            failed_training_checks = [
+                name for name, value in cosine_checks.items()
+                if value is not None and float(value) < 0.99
+            ]
+            if failed_training_checks:
+                status = "failed_tolerance"
+                reason = "training comparison failed tolerance check(s): " + ", ".join(failed_training_checks)
+            else:
+                status = "passed"
+                reason = "training reference and generated/testbench comparison artifacts passed numeric checks"
         elif training_reference is not None:
             status = "reference_only"
             reason = "Python training reference exists, but generated/testbench comparison artifacts are missing"
@@ -156,6 +170,34 @@ def emit_numeric_validation_report(
                 status = "failed_numeric_validation"
                 reason = f"inference output comparison failed with status={compare_status}"
 
+    # A functional ingress/IR mismatch invalidates the compile independently of
+    # backend accuracy.  Unavailable source execution is reported separately and
+    # can be enforced by the caller when compare_ir is required.
+    if isinstance(frontend_ir_validation, dict) and frontend_ir_validation.get("passed") is False:
+        status = "failed_numeric_validation"
+        reason = (
+            "frontend/source to FPGAI functional IR numeric validation failed; "
+            f"status={frontend_ir_validation.get('status', 'failed_numeric_validation')}"
+        )
+
+    if pipeline_mode == "training_on_device" and status == "passed":
+        component_checks = {
+            "gradient_export": gradient_export_validation,
+            "optimizer_state": optimizer_state_validation,
+            "parameter_update": parameter_update_validation,
+            "batch_accumulation": batch_accumulation_validation,
+            "loss": loss_validation,
+            "training_tiled_io": training_tiled_io_validation,
+        }
+        failed_components = [
+            name for name, component in component_checks.items()
+            if isinstance(component, dict) and component.get("passed") is False
+            and str(component.get("status", "")) not in {"not_applicable", "not_requested", "not_validated", "not_run"}
+        ]
+        if failed_components:
+            status = "failed_numeric_validation"
+            reason = "training numeric validation failed component(s): " + ", ".join(failed_components)
+
     payload: dict[str, Any] = {
         "schema_version": 1,
         "artifact_kind": "numeric_validation",
@@ -194,8 +236,15 @@ def emit_numeric_validation_report(
         "batch_accumulation": batch_accumulation_validation,
         "loss_validation": loss_validation,
         "training_tiled_io": training_tiled_io_validation,
+        "frontend_to_fpgai_ir": frontend_ir_validation or {
+            "status": "not_run",
+            "passed": None,
+            "reason": "frontend-to-FPGAI-IR validation was not executed",
+        },
+        "validation_contract": dict(((raw_config or {}).get("validation") or {}).get("numeric") or {}),
         "validation_claim_allowed": {
             "numeric_correctness": status == "passed",
+            "frontend_to_fpgai_ir": bool((frontend_ir_validation or {}).get("passed") is True),
         },
     }
 
@@ -346,3 +395,77 @@ def emit_numeric_validation_report(
         "training_command_latency_json": command_latency_json_path,
         "training_command_latency_md": command_latency_md_path,
     }
+
+
+def enforce_numeric_validation_policy(
+    *, raw_config: dict[str, Any], numeric_validation_artifacts: Any
+) -> None:
+    """Apply the public compiler numeric-validation enforcement contract."""
+    numeric_cfg = ((raw_config or {}).get("validation") or {}).get("numeric", {}) or {}
+    if not isinstance(numeric_cfg, dict) or not bool(numeric_cfg.get("enabled", False)):
+        return
+    if str(numeric_cfg.get("policy", "report_only")).strip().lower() != "enforce":
+        return
+    if not numeric_validation_artifacts:
+        raise RuntimeError(
+            "NUMVAL001: numeric validation policy=enforce but no numeric validation report was generated"
+        )
+    path = numeric_validation_artifacts.get("numeric_validation_json")
+    if path is None or not Path(path).is_file():
+        raise RuntimeError(
+            "NUMVAL001: numeric validation policy=enforce but reports/numeric_validation.json is missing"
+        )
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    reference_cfg = numeric_cfg.get("reference", {}) if isinstance(numeric_cfg.get("reference", {}), dict) else {}
+    if bool(reference_cfg.get("compare_ir", False)):
+        frontend = payload.get("frontend_to_fpgai_ir", {})
+        if not isinstance(frontend, dict) or frontend.get("passed") is not True:
+            raise RuntimeError(
+                "NUMVAL003: validation.numeric.reference.compare_ir=true but frontend/source "
+                "to FPGAI IR numeric validation did not pass; "
+                f"status={(frontend or {}).get('status', 'missing')}"
+            )
+    if str(payload.get("status", "not_run")) != "passed":
+        raise RuntimeError(
+            "NUMVAL002: numeric validation did not pass under policy=enforce; "
+            f"status={payload.get('status', 'not_run')} reason={payload.get('reason', 'unspecified')}"
+        )
+
+
+def emit_and_enforce_compiler_numeric_validation(
+    *,
+    graph: Any,
+    model_path: str | None,
+    model_format: str | None,
+    raw_config: dict[str, Any],
+    out_dir: str | Path,
+    pipeline_mode: str,
+    source_generated: bool,
+    enabled: bool,
+    **kwargs: Any,
+) -> dict[str, Path] | None:
+    """Run the normal frontend→IR + backend numeric validation contract."""
+    if not enabled:
+        return None
+    from .frontend_ir import validate_frontend_to_fpgai_ir
+
+    frontend = validate_frontend_to_fpgai_ir(
+        graph=graph,
+        model_path=model_path,
+        model_format=model_format,
+        raw_config=raw_config,
+        out_dir=Path(out_dir),
+    )
+    artifacts = emit_numeric_validation_report(
+        out_dir,
+        pipeline_mode=pipeline_mode,
+        source_generated=source_generated,
+        frontend_ir_validation=frontend,
+        raw_config=raw_config,
+        **kwargs,
+    )
+    enforce_numeric_validation_policy(
+        raw_config=raw_config,
+        numeric_validation_artifacts=artifacts,
+    )
+    return artifacts

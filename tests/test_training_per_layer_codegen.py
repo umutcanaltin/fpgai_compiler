@@ -554,3 +554,52 @@ def test_training_top_materializes_loss_optimizer_modes_and_stream_io() -> None:
     assert "if (mode == 6)" in source
     assert "write_f32(out, (float)loss_value, true);" in source
 
+
+
+def test_training_parameters_use_compact_mutable_initialization_and_pass_source_guard(tmp_path) -> None:
+    from fpgai.reporting.hls_validation import evaluate_hls_source_guards
+
+    graph = _dense_graph()
+    plan = CompilePlan(
+        layer_plans=[
+            LayerPlan(
+                node_name="dense0",
+                op_type="Dense",
+                architecture=_architecture(
+                    ii=1,
+                    input_unroll=1,
+                    output_unroll=1,
+                    partition=1,
+                ),
+            )
+        ],
+        notes={"resolved_weight_storage": "bram"},
+    )
+    source = emit_top_train_cpp(
+        graph=graph,
+        top_name="deeplearn_train",
+        weights_mode="embedded",
+        training_cfg={
+            "loss": {"type": "mse"},
+            "optimizer": {"learning_rate": 0.01},
+        },
+        compile_plan=plan,
+    )
+
+    assert "static const wgt_t FPGAI_INIT_W_dense0[12] =" in source
+    assert "static wgt_t W_dense0[12];" in source
+    assert "static const bias_t FPGAI_INIT_B_dense0[3] =" in source
+    assert "static bias_t B_dense0[3];" in source
+    assert "static bool FPGAI_PARAMETERS_INITIALIZED = false;" in source
+    assert "W_dense0[i] = FPGAI_INIT_W_dense0[i];" in source
+    assert "B_dense0[i] = FPGAI_INIT_B_dense0[i];" in source
+    assert "#pragma HLS BIND_STORAGE variable=W_dense0 type=ram_2p impl=bram" in source
+    assert "static wgt_t W_dense0[12] =" not in source
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "deeplearn.cpp").write_text(source, encoding="utf-8")
+    # Deliberately lower the threshold below this tiny test model so this
+    # catches a regression back to direct aggregate initialization.
+    guard = evaluate_hls_source_guards(tmp_path, max_direct_static_memory_elements=8)
+    assert guard["passed"] is True

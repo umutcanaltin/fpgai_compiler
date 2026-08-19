@@ -381,3 +381,147 @@ def run_portable_host_cpp_validation(
         "max_abs": float(diff.max()) if diff.size else None, "mean_abs": float(diff.mean()) if diff.size else None,
     }
 
+
+
+def run_portable_host_cpp_training_validation(
+    *, graph: Any, composition_plan: Any, external_context: Any, out_dir: Path
+) -> dict[str, Any]:
+    """Numerically validate supported external HLS backward-input kernels.
+
+    This is a layerwise semantic check: deterministic output gradients are sent
+    through the contributed implementation's declared backward-input top and
+    compared with the trusted external operator semantic reference.  It does not
+    claim parameter-gradient/update support for ABIs that do not implement it.
+    """
+    compiler = shutil.which("g++") or shutil.which("c++")
+    if compiler is None:
+        return {"status": "skipped", "reason": "cxx_compiler_not_found", "nodes": {}}
+
+    from fpgai.implementations.hls_integration import parse_hls_abi, HLSFlatArrayABI
+
+    root = Path(out_dir) / "reports" / "external_training_numeric"
+    root.mkdir(parents=True, exist_ok=True)
+    node_results: dict[str, Any] = {}
+    all_ok = True
+    tested = 0
+
+    for binding in composition_plan.bindings:
+        contract = binding.contract
+        if not contract.training.backward_input:
+            continue
+        tested += 1
+        callback = external_context.backward_input_reference_for(binding.operator_id)
+        if callback is None:
+            node_results[binding.node_name] = {
+                "status": "failed",
+                "reason": "operator_backward_input_reference_missing",
+                "operator_id": binding.operator_id,
+            }
+            all_ok = False
+            continue
+        abi = parse_hls_abi(contract)
+        if not isinstance(abi, HLSFlatArrayABI):
+            node_results[binding.node_name] = {"status": "failed", "reason": "unsupported_training_abi"}
+            all_ok = False
+            continue
+        integration = dict(contract.metadata.get("integration", {}) or {})
+        hls_cfg = integration.get("hls", {}) if isinstance(integration, Mapping) else {}
+        training_cfg = hls_cfg.get("training", {}) if isinstance(hls_cfg, Mapping) else {}
+        backward_top = str(training_cfg.get("backward_input_top", "")).strip() if isinstance(training_cfg, Mapping) else ""
+        if not backward_top:
+            node_results[binding.node_name] = {"status": "failed", "reason": "backward_input_top_missing"}
+            all_ok = False
+            continue
+
+        count = int(binding.input_words)
+        if count != int(binding.output_words):
+            node_results[binding.node_name] = {"status": "failed", "reason": "flat_array_word_count_mismatch"}
+            all_ok = False
+            continue
+        input_values = np.linspace(-0.75, 0.75, count, dtype=np.float32)
+        grad_output = np.linspace(0.25, 1.0, count, dtype=np.float32)
+        clean_attrs = dict(binding.attributes)
+        reference = callback(__import__(
+            "fpgai.operators.external.external_api", fromlist=["BackwardInputReferenceContext"]
+        ).BackwardInputReferenceContext(
+            attributes=clean_attrs,
+            inputs=(input_values,),
+            grad_outputs=(grad_output,),
+        ))
+        if len(reference.grad_inputs) != 1:
+            node_results[binding.node_name] = {"status": "failed", "reason": "reference_gradient_arity"}
+            all_ok = False
+            continue
+        expected = np.asarray(reference.grad_inputs[0], dtype=np.float32).reshape(-1)
+        if expected.size != count:
+            node_results[binding.node_name] = {"status": "failed", "reason": "reference_gradient_size"}
+            all_ok = False
+            continue
+
+        work = root / binding.wrapper_symbol
+        work.mkdir(parents=True, exist_ok=True)
+        source = work / "validate_backward.cpp"
+        executable = work / "validate_backward"
+        output_bin = work / "grad_input.bin"
+        attr_specs = list(abi.attributes)
+        params = ", ".join(["const float*", "float*", "int", *(a.cpp_type for a in attr_specs)])
+        attr_values = []
+        for a in attr_specs:
+            value = clean_attrs.get(a.name, a.default)
+            if a.cpp_type in {"int", "unsigned"}:
+                attr_values.append(str(int(value)) + ("u" if a.cpp_type == "unsigned" else ""))
+            else:
+                attr_values.append(repr(float(value)) + ("f" if a.cpp_type == "float" else ""))
+        grad_literal = ", ".join(repr(float(v)) + "f" for v in grad_output)
+        source.write_text(
+            "#include <fstream>\n#include <vector>\n"
+            f"void {backward_top}({params});\n"
+            "int main(){\n"
+            f"  std::vector<float> go = {{{grad_literal}}};\n"
+            f"  std::vector<float> gi({count}, 0.0f);\n"
+            f"  {backward_top}(go.data(), gi.data(), {count}{''.join(', '+v for v in attr_values)});\n"
+            f"  std::ofstream out(\"{output_bin.as_posix()}\", std::ios::binary);\n"
+            "  out.write(reinterpret_cast<const char*>(gi.data()), (std::streamsize)(gi.size()*sizeof(float)));\n"
+            "  return out ? 0 : 2;\n}\n",
+            encoding="utf-8",
+        )
+        package_root = Path(contract.package_root).resolve()
+        sources = [package_root / rel for rel in (contract.source_order or contract.sources)]
+        include_dirs = sorted({str((package_root / rel).resolve().parent) for rel in contract.headers})
+        command = [compiler, "-std=c++17", "-O2", str(source), *(str(p.resolve()) for p in sources)]
+        for include_dir in include_dirs:
+            command.extend(["-I", include_dir])
+        command.extend(["-o", str(executable)])
+        try:
+            subprocess.check_call(command, cwd=str(work))
+            subprocess.check_call([str(executable)], cwd=str(work))
+            actual = np.fromfile(output_bin, dtype=np.float32)
+            ok = actual.size == expected.size and bool(np.allclose(actual, expected, atol=1e-6, rtol=1e-6))
+            diff = np.abs(actual - expected) if actual.size == expected.size else np.asarray([], dtype=np.float32)
+            node_results[binding.node_name] = {
+                "status": "passed" if ok else "failed",
+                "operator_id": binding.operator_id,
+                "implementation": contract.package_id,
+                "comparison": "backward_input",
+                "outputs": int(actual.size),
+                "max_abs": float(diff.max()) if diff.size else None,
+                "mean_abs": float(diff.mean()) if diff.size else None,
+                "output_bin": str(output_bin),
+            }
+            all_ok = all_ok and ok
+        except subprocess.CalledProcessError as exc:
+            node_results[binding.node_name] = {
+                "status": "failed", "reason": "host_compile_or_run_failed", "returncode": int(exc.returncode)
+            }
+            all_ok = False
+
+    status = "passed" if tested > 0 and all_ok else ("not_applicable" if tested == 0 else "failed")
+    payload = {
+        "schema": "fpgai.external-training-numeric-validation/v1",
+        "status": status,
+        "tested_nodes": tested,
+        "nodes": node_results,
+        "scope": "layerwise_backward_input_semantics",
+    }
+    (root / "report.json").write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return payload

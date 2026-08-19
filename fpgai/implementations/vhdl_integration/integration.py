@@ -5,9 +5,9 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
-from typing import Any
+from typing import Any, Mapping
 
-from fpgai.implementations.implementation_contract import ImplementationContract
+from fpgai.implementations.implementation_contract import ImplementationContract, resolve_architecture_parameters
 
 from .abi import (
     VHDLScalarStreamABI,
@@ -35,6 +35,7 @@ class ExternalVHDLProjectRequest:
     wrapper_top: str = "fpgai_vhdl_wrapper"
     part: str = "xck26-sfvc784-2LV-c"
     clock_period_ns: float = 5.0
+    architecture: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -133,7 +134,25 @@ end architecture;
 '''
 
 
-def _scalar_wrapper_source(top: str, contract_top: str, abi: VHDLScalarStreamABI) -> str:
+def _vhdl_generic_literal(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    raise ValueError(f"VHDLINT018: unsupported architecture generic value {value!r}; use integer/boolean FPGAI architecture values")
+
+
+def _generic_map(contract: ImplementationContract, architecture: Mapping[str, Any] | None) -> str:
+    values = resolve_architecture_parameters(contract, architecture).get("vhdl_generic", {})
+    if not values:
+        return ""
+    assignments = ", ".join(f"{name}=>{_vhdl_generic_literal(value)}" for name, value in sorted(values.items()))
+    return f" generic map ({assignments})"
+
+
+def _scalar_wrapper_source(top: str, contract_top: str, abi: VHDLScalarStreamABI, *, generic_map: str = "") -> str:
     hi = abi.data_width - 1
     data_type = "signed" if abi.signed else "std_logic_vector"
     if abi.abi == "scalar_ready_valid_v1":
@@ -148,7 +167,7 @@ entity {top} is port (
   output_data: out {data_type}({hi} downto 0)
 ); end entity;
 architecture rtl of {top} is begin
-  u_impl: entity work.{contract_top} port map (
+  u_impl: entity work.{contract_top}{generic_map} port map (
     {abi.clock}=>clk, {abi.reset_n}=>rst_n,
     {abi.input_valid}=>input_valid, {abi.input_ready}=>input_ready, {abi.input_data}=>input_data,
     {abi.output_valid}=>output_valid, {abi.output_ready}=>output_ready, {abi.output_data}=>output_data
@@ -164,7 +183,7 @@ entity {top} is port (
   output_valid: out std_logic; output_data: out {data_type}({hi} downto 0)
 ); end entity;
 architecture rtl of {top} is begin
-  u_impl: entity work.{contract_top} port map (
+  u_impl: entity work.{contract_top}{generic_map} port map (
     {abi.clock}=>clk, {abi.reset_n}=>rst_n,
     {abi.input_valid}=>input_valid, {abi.input_data}=>input_data,
     {abi.output_valid}=>output_valid, {abi.output_data}=>output_data
@@ -205,7 +224,8 @@ def emit_external_vhdl_operator_project(request: ExternalVHDLProjectRequest) -> 
             copied.append(destination)
 
         wrapper = rtl_dir / f"{request.wrapper_top}.vhd"
-        wrapper.write_text(_scalar_wrapper_source(request.wrapper_top, contract.top, abi), encoding="utf-8")
+        generic_map = _generic_map(contract, request.architecture)
+        wrapper.write_text(_scalar_wrapper_source(request.wrapper_top, contract.top, abi, generic_map=generic_map), encoding="utf-8")
         testbench = sim_dir / f"{request.wrapper_top}_tb.vhd"
         testbench.write_text(_tb_source(request.wrapper_top, abi), encoding="utf-8")
 
@@ -243,6 +263,7 @@ exit
                 "run_tcl": str(run_tcl),
                 "sources": [str(path) for path in copied],
             },
+            "architecture_parameters": resolve_architecture_parameters(contract, request.architecture),
             "validation_level": "simulation_and_synthesis_project_generated",
             "usage": {"platform_scope": "research", "production_path": "morfics"},
         }

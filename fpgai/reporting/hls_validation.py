@@ -298,3 +298,152 @@ def emit_hls_validation_reports(
         estimate_vs_hls_json=estimate_json,
         estimate_vs_hls_md=estimate_md,
     )
+
+
+def evaluate_hls_artifact_guards(
+    hls_dir: str | Path | None,
+    *,
+    max_single_rtl_bytes: int = 32 * 1024 * 1024,
+    max_total_ip_bytes: int = 256 * 1024 * 1024,
+) -> dict[str, Any]:
+    """Inspect generated HLS artifacts before expensive downstream implementation.
+
+    This is deliberately backend-agnostic and conservative.  It catches the class
+    of regression where a small writable BRAM/URAM aggregate initializer expands
+    into tens of megabytes of RTL before Vivado is launched.  Thresholds are
+    guardrails, not FPGA resource limits, and callers may override them.
+    """
+    if hls_dir is None:
+        return {
+            "schema": "fpgai.hls-artifact-guards/v1",
+            "status": "not_available",
+            "passed": True,
+            "checks": [],
+        }
+    root = Path(hls_dir)
+    ip_root = root / "fpgai_hls_proj" / "sol1" / "impl" / "ip"
+    if not ip_root.exists():
+        return {
+            "schema": "fpgai.hls-artifact-guards/v1",
+            "status": "not_available",
+            "passed": True,
+            "checks": [],
+            "ip_root": str(ip_root),
+        }
+    rtl_exts = {".v", ".sv", ".vhd", ".vhdl"}
+    rtl_files = [p for p in ip_root.rglob("*") if p.is_file() and p.suffix.lower() in rtl_exts]
+    largest = max(rtl_files, key=lambda p: p.stat().st_size, default=None)
+    largest_bytes = largest.stat().st_size if largest is not None else 0
+    total_ip_bytes = sum(p.stat().st_size for p in ip_root.rglob("*") if p.is_file())
+    checks = [
+        {
+            "id": "HLS_GUARD_SINGLE_RTL_SIZE",
+            "status": "passed" if largest_bytes <= int(max_single_rtl_bytes) else "blocked",
+            "observed_bytes": largest_bytes,
+            "limit_bytes": int(max_single_rtl_bytes),
+            "artifact": None if largest is None else str(largest),
+            "reason": "large generated RTL can indicate pathological HLS elaboration/static-memory initialization expansion",
+        },
+        {
+            "id": "HLS_GUARD_TOTAL_IP_SIZE",
+            "status": "passed" if total_ip_bytes <= int(max_total_ip_bytes) else "blocked",
+            "observed_bytes": total_ip_bytes,
+            "limit_bytes": int(max_total_ip_bytes),
+            "artifact": str(ip_root),
+            "reason": "unexpected IP-package growth can make downstream implementation unstable",
+        },
+    ]
+    passed = all(item["status"] == "passed" for item in checks)
+    return {
+        "schema": "fpgai.hls-artifact-guards/v1",
+        "status": "passed" if passed else "blocked",
+        "passed": passed,
+        "ip_root": str(ip_root),
+        "largest_rtl_bytes": largest_bytes,
+        "total_ip_bytes": total_ip_bytes,
+        "checks": checks,
+        "policy": "block expensive downstream implementation on pathological generated-artifact growth; thresholds are configurable guardrails",
+    }
+
+
+def write_hls_artifact_guard_report(
+    out_dir: str | Path,
+    hls_dir: str | Path | None,
+    **kwargs: Any,
+) -> tuple[Path, Path, dict[str, Any]]:
+    payload = evaluate_hls_artifact_guards(hls_dir, **kwargs)
+    reports = Path(out_dir) / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    json_path = reports / "compiler_guards.json"
+    md_path = reports / "compiler_guards.md"
+    _write_json(json_path, payload)
+    lines = ["# Compiler guards", "", f"- Status: `{payload['status']}`", f"- Passed: `{str(bool(payload['passed'])).lower()}`"]
+    for check in payload.get("checks", []):
+        lines += ["", f"## {check['id']}", f"- Status: `{check['status']}`", f"- Observed bytes: `{check['observed_bytes']}`", f"- Limit bytes: `{check['limit_bytes']}`", f"- Artifact: `{check.get('artifact')}`", f"- Reason: {check['reason']}"]
+    md_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return json_path, md_path, payload
+
+
+def evaluate_hls_source_guards(
+    hls_dir: str | Path | None,
+    *,
+    max_direct_static_memory_elements: int = 1024,
+) -> dict[str, Any]:
+    """Reject known pathological generated-source constructs before Vitis HLS.
+
+    The primary regression protected here is a large writable static BRAM/URAM
+    array with a C/C++ aggregate initializer. Vitis can legally synthesize this
+    while expanding the initialization into enormous RTL. Compact embedded-image
+    copy initialization and runtime preload remain valid alternatives.
+    """
+    import re
+
+    if hls_dir is None:
+        return {"schema": "fpgai.hls-source-guards/v1", "status": "not_available", "passed": True, "checks": []}
+    src_root = Path(hls_dir) / "src"
+    if not src_root.exists():
+        return {"schema": "fpgai.hls-source-guards/v1", "status": "not_available", "passed": True, "checks": []}
+
+    violations: list[dict[str, Any]] = []
+    declaration = re.compile(
+        r"static\s+[^;\n]+?\s+([A-Za-z_]\w*)\s*\[\s*(\d+)\s*\]\s*=\s*\{",
+        re.MULTILINE,
+    )
+    for source_path in sorted(src_root.rglob("*.cpp")):
+        text = source_path.read_text(encoding="utf-8", errors="replace")
+        bindings: dict[str, str] = {}
+        for match in re.finditer(
+            r"#pragma\s+HLS\s+BIND_STORAGE\s+variable\s*=\s*([A-Za-z_]\w*).*?impl\s*=\s*(bram|uram)",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            bindings[match.group(1)] = match.group(2).lower()
+        for match in declaration.finditer(text):
+            name, count_text = match.groups()
+            count = int(count_text)
+            impl = bindings.get(name)
+            if impl in {"bram", "uram"} and count > int(max_direct_static_memory_elements):
+                violations.append({
+                    "id": "HLS_GUARD_DIRECT_STATIC_MEMORY_INITIALIZER",
+                    "status": "blocked",
+                    "artifact": str(source_path),
+                    "variable": name,
+                    "elements": count,
+                    "limit_elements": int(max_direct_static_memory_elements),
+                    "storage": impl,
+                    "reason": (
+                        "large writable BRAM/URAM aggregate initialization can expand into pathological RTL; "
+                        "use compact embedded-image copy, runtime preload, or backend memory-image initialization"
+                    ),
+                })
+    passed = not violations
+    return {
+        "schema": "fpgai.hls-source-guards/v1",
+        "status": "passed" if passed else "blocked",
+        "passed": passed,
+        "checks": violations or [{
+            "id": "HLS_GUARD_DIRECT_STATIC_MEMORY_INITIALIZER",
+            "status": "passed",
+            "limit_elements": int(max_direct_static_memory_elements),
+        }],
+    }

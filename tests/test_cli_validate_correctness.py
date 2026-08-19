@@ -102,3 +102,35 @@ def test_validate_correctness_help(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "correctness" in out
     assert "--config" in out
+
+
+def test_public_correctness_workflow_dispatches_training_to_training_benchmark(monkeypatch, tmp_path: Path) -> None:
+    import sys
+    import types
+    import fpgai.validation.correctness as correctness
+
+    monkeypatch.setattr(correctness, "_pipeline_mode", lambda _: "training_on_device")
+    marker = tmp_path / "marker.npy"
+    marker.write_bytes(b"")
+    bench = types.SimpleNamespace(
+        build_dir=tmp_path,
+        bench_dir=tmp_path / "bench",
+        passed=True,
+        metrics_json=tmp_path / "metrics.json",
+        summary_txt=tmp_path / "summary.txt",
+        reference_output_npy=marker,
+        hls_output_npy=marker,
+    )
+    calls = {"training": 0}
+    def fake_training(*, config_path):
+        calls["training"] += 1
+        return bench
+    fake_pipeline = types.ModuleType("fpgai.benchmark.pipeline")
+    fake_pipeline.run_compile_training_benchmark = fake_training
+    fake_pipeline.run_compile_correctness_benchmark = lambda **_: bench
+    monkeypatch.setitem(sys.modules, "fpgai.benchmark.pipeline", fake_pipeline)
+    result = correctness.validate_correctness(tmp_path / "training.yml")
+    assert result.pipeline_mode == "training_on_device"
+    assert result.executed is True
+    assert result.passed is True
+    assert calls["training"] == 1

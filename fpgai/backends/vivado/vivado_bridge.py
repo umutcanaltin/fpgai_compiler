@@ -480,7 +480,7 @@ if {{[info exists ::env(FPGAI_VIVADO_RUN_IMPL)]}} {{
 if {{[info exists ::env(FPGAI_VIVADO_RUN_BITSTREAM)]}} {{
   set run_bitstream $::env(FPGAI_VIVADO_RUN_BITSTREAM)
 }}
-set jobs [expr {{[info exists ::env(FPGAI_VIVADO_JOBS)] ? $::env(FPGAI_VIVADO_JOBS) : 4}}]
+set jobs [expr {{[info exists ::env(FPGAI_VIVADO_JOBS)] ? $::env(FPGAI_VIVADO_JOBS) : 1}}]
 
 puts "FPGAI-Vivado project_dir=$project_dir"
 puts "FPGAI-Vivado ip_repo=$ip_repo"

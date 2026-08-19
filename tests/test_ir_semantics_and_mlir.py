@@ -62,6 +62,11 @@ def test_mlir_bridge_round_trips_attention_ir_semantics() -> None:
     g.tensors["scores"].semantics.transport.protocol = "ready_valid"
     g.tensors["scores"].semantics.transport.ready_valid = True
     g.ops[4].semantics.selected_backend = "vhdl"
+    g.semantics.ir_level = "architectural"
+    g.semantics.execution["model"] = {"mode": "pipeline"}
+    g.semantics.provenance["framework"] = "jax"
+    g.ops[4].semantics.execution["layer"] = {"pe": 4, "simd": 2}
+    g.ops[4].semantics.provenance["mlir_op"] = "stablehlo.dot_general"
 
     text = export_fpgai_mlir(g)
     assert 'module attributes {fpgai.schema = "fpgai.mlir-bridge/v1"}' in text
@@ -75,6 +80,11 @@ def test_mlir_bridge_round_trips_attention_ir_semantics() -> None:
     assert restored.get_tensor("scores").shape == (1, 4, 4)
     assert restored.get_tensor("scores").semantics.transport.protocol == "ready_valid"
     assert restored.ops[4].semantics.selected_backend == "vhdl"
+    assert restored.semantics.ir_level == "architectural"
+    assert restored.semantics.execution["model"]["mode"] == "pipeline"
+    assert restored.semantics.provenance["framework"] == "jax"
+    assert restored.ops[4].semantics.execution["layer"]["pe"] == 4
+    assert restored.ops[4].semantics.provenance["mlir_op"] == "stablehlo.dot_general"
     assert [op.op_type for op in restored.ops] == [op.op_type for op in g.ops]
 
 
@@ -163,3 +173,44 @@ def test_resolved_ir_snapshot_is_deterministic_and_covers_scientific_semantics()
     assert matrix["dimensions"]["parallelism"] is True
     assert matrix["dimensions"]["training"] is True
     assert matrix["dimensions"]["runtime"] is True
+
+
+def test_ir_explicitly_records_progressive_level_hierarchy_and_memory_initialization() -> None:
+    from fpgai.engine.models import ArchitecturePlan, CompilePlan, LayerMemoryPlan, LayerPlan, ParallelismPlan, PipelinePlan
+    from fpgai.ir.passes.mechanism_resolution import materialize_compile_plan_semantics
+
+    g = Graph("hierarchical_ir")
+    g.inputs = ["x"]
+    g.outputs = ["y"]
+    g.add_tensor("x", (1, 4))
+    g.add_tensor("w", (4, 4))
+    g.add_tensor("y", (1, 4))
+    g.constants["w"] = np.eye(4, dtype=np.float32)
+    g.add_op("MatMul", ["x", "w"], ["y"], name="mm")
+    annotate_default_hardware_semantics(g, pipeline_mode="training_on_device", target_board="kv260")
+    assert g.semantics.ir_level == "functional"
+    assert g.tensors["w"].semantics.memory.persistence == "model"
+    assert g.tensors["w"].semantics.memory.mutable is True
+
+    arch = ArchitecturePlan(
+        pipeline=PipelinePlan(ii=1, style="dataflow", scope="layer", loops={"k": 1}),
+        parallelism=ParallelismPlan(pe=8, simd=4, unroll={"k": 4}),
+        memory=LayerMemoryPlan(weight_mode="embedded", weight_region="URAM"),
+    )
+    cp = CompilePlan(
+        target_board="kv260",
+        layer_plans=[LayerPlan(node_name="mm", op_type="MatMul", architecture=arch)],
+        notes={"network_execution": {"mode": "pipeline", "pipeline_depth": 2}},
+    )
+    materialize_compile_plan_semantics(g, cp)
+    assert g.semantics.ir_level == "architectural"
+    assert g.semantics.execution["model"]["mode"] == "pipeline"
+    sem = g.ops[0].semantics
+    assert sem.execution["layer"]["pe"] == 8
+    assert sem.execution["layer"]["simd"] == 4
+    assert sem.execution["loops"]["unroll"]["k"] == 4
+    assert sem.execution["loops"]["pipeline_ii"] == 1
+
+    report = analyze_ir_architecture(g)
+    assert report["representations"]["fpgai_ir"]["owned_by_fpgai"] is True
+    assert "FPGA architecture" in report["representations"]["fpgai_ir"]["role"]

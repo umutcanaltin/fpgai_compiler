@@ -208,17 +208,126 @@ def _tied_parameter_bindings(graph: Any) -> tuple[dict[str, dict[str, str]], lis
     return bindings, declarations
 
 
+
+
+def _object_dict(value: Any) -> dict[str, Any]:
+    if hasattr(value, "to_dict"):
+        return value.to_dict()
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _compile_plan_by_name(compile_plan: Any) -> dict[str, dict[str, Any]]:
+    if compile_plan is None:
+        return {}
+    plans = getattr(compile_plan, "layer_plans", None)
+    if plans is None and isinstance(compile_plan, Mapping):
+        plans = compile_plan.get("layer_plans", [])
+    result: dict[str, dict[str, Any]] = {}
+    for plan in plans or []:
+        data = _object_dict(plan)
+        name = data.get("node_name")
+        if name:
+            result[str(name)] = data
+    return result
+
+
+def _arch_section(layer_plan: Mapping[str, Any] | None, section: str) -> dict[str, Any]:
+    if not layer_plan:
+        return {}
+    architecture = layer_plan.get("architecture", {})
+    if not isinstance(architecture, Mapping):
+        return {}
+    value = architecture.get(section, {})
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _pos_int(value: Any, default: int = 1) -> int:
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return max(1, int(default))
+
+
+def _explicit_architecture_request(layer_plan: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not layer_plan:
+        return {}
+    notes = layer_plan.get("notes", {})
+    if not isinstance(notes, Mapping):
+        return {}
+    sources = notes.get("architecture_control_sources", {})
+    if not isinstance(sources, Mapping):
+        return {}
+    requested = sources.get("effective_request", {})
+    return dict(requested) if isinstance(requested, Mapping) else {}
+
+
+def _guard_unsupported_explicit_architecture(op: Any, layer_plan: Mapping[str, Any] | None) -> None:
+    requested = _explicit_architecture_request(layer_plan)
+    compute_sections = {
+        key: requested.get(key)
+        for key in ("pipeline", "parallelism", "partitioning", "tiling")
+        if isinstance(requested.get(key), Mapping) and requested.get(key)
+    }
+    if not compute_sections:
+        return
+    physically_parameterized = {"Dense", "Conv", "MatMul", "Add"}
+    if str(getattr(op, "op_type", "")) not in physically_parameterized:
+        raise RuntimeError(
+            f"HLSDAG105: node {getattr(op, 'name', '<unnamed>')!r} ({getattr(op, 'op_type', '<unknown>')}) "
+            f"has explicit hierarchical architecture controls that the current DAG HLS kernel cannot physically realize: {compute_sections}. "
+            "Use supported/default controls for this operator or add a backend implementation that declares these architecture capabilities."
+        )
+
+
+def _dag_codegen_values(layer_plan: Mapping[str, Any] | None, *, op_type: str) -> dict[str, Any]:
+    pipeline = _arch_section(layer_plan, "pipeline")
+    parallelism = _arch_section(layer_plan, "parallelism")
+    partitioning = _arch_section(layer_plan, "partitioning")
+    tiling = _arch_section(layer_plan, "tiling")
+    unroll = parallelism.get("unroll", {})
+    if not isinstance(unroll, Mapping):
+        unroll = {}
+    targets = partitioning.get("targets", {})
+    if not isinstance(targets, Mapping):
+        targets = {}
+    sizes = tiling.get("sizes", {})
+    if not isinstance(sizes, Mapping):
+        sizes = {}
+    factor = _pos_int(partitioning.get("factor", 1))
+    if op_type == "Dense":
+        input_unroll = _pos_int(unroll.get("in", parallelism.get("simd", 1)))
+        output_unroll = _pos_int(unroll.get("out", parallelism.get("pe", 1)))
+    elif op_type == "MatMul":
+        input_unroll = _pos_int(unroll.get("k", parallelism.get("simd", 1)))
+        output_unroll = _pos_int(unroll.get("n", parallelism.get("pe", 1)))
+    else:
+        input_unroll = _pos_int(unroll.get("ic", parallelism.get("simd", 1)))
+        output_unroll = _pos_int(unroll.get("oc", parallelism.get("pe", 1)))
+    return {
+        "pipeline_ii": _pos_int(pipeline.get("ii", 1)),
+        "input_unroll": input_unroll,
+        "output_unroll": output_unroll,
+        "m_unroll": _pos_int(unroll.get("m", 1)),
+        "input_partition": _pos_int(targets.get("input", factor)),
+        "output_partition": _pos_int(targets.get("output", factor)),
+        "weight_partition": _pos_int(targets.get("weight", factor)),
+        "tile_m": _pos_int(sizes.get("m", sizes.get("tile_m", 1))),
+        "tile_n": _pos_int(sizes.get("n", sizes.get("tile_n", 1))),
+        "tile_k": _pos_int(sizes.get("k", sizes.get("tile_k", 1))),
+    }
 def emit_dag_top_cpp(
     graph: Any,
     *,
     top_name: str,
     weights_mode: str,
     raw_cfg: Mapping[str, Any] | None = None,
+    compile_plan: Any = None,
     external_composition_plan: Any = None,
     tensor_liveness: Mapping[str, Any] | None = None,
     buffer_allocation: Mapping[str, Any] | None = None,
 ) -> str:
     normalized_weights_mode = str(weights_mode).strip().lower()
+    plan_by_name = _compile_plan_by_name(compile_plan)
     supported_weight_modes = {"embedded", "stream", "streamed", "ddr", "dma_ddr", "uram", "ddr_tiled"}
     if normalized_weights_mode not in supported_weight_modes:
         raise ValueError(
@@ -488,6 +597,8 @@ def emit_dag_top_cpp(
         output_words = _tensor_words(graph, output_name)
         lines.append(f"    // DAG node {index}: {op.op_type} ({op.name})")
         lines.append(f"    // FPGAI_BUFFER_PROVENANCE buffer={output_buffer} tensor={output_name}")
+        layer_plan = plan_by_name.get(str(op.name), {})
+        _guard_unsupported_explicit_architecture(op, layer_plan)
 
         if op.op_type in {"Relu", "Sigmoid", "LeakyRelu", "Identity", "Cast", "Squeeze", "Unsqueeze", "Flatten", "Reshape"}:
             if len(runtime_inputs) != 1:
@@ -575,8 +686,12 @@ def emit_dag_top_cpp(
                 raise RuntimeError(f"HLSDAG012: Dense node {op.name!r} requires one runtime activation input")
             source_name = runtime_inputs[0]
             source_words = _tensor_words(graph, source_name)
+            cg = _dag_codegen_values(layer_plan, op_type="Dense")
             lines.append(
-                f"    dense_out_in<{source_words}, {output_words}, {tensor_types[source_name]}, {output_type}, op{index}_wgt_t, op{index}_bias_t, op{index}_acc_t>("
+                f"    // FPGAI_ARCH_EFFECT op=Dense name={op.name} pipeline_ii={cg['pipeline_ii']} input_unroll={cg['input_unroll']} output_unroll={cg['output_unroll']} input_partition={cg['input_partition']} output_partition={cg['output_partition']} weight_partition={cg['weight_partition']}"
+            )
+            lines.append(
+                f"    dense_out_in<{source_words}, {output_words}, {tensor_types[source_name]}, {output_type}, op{index}_wgt_t, op{index}_bias_t, op{index}_acc_t, {cg['pipeline_ii']}, {cg['input_unroll']}, {cg['output_unroll']}, {cg['input_partition']}, {cg['output_partition']}, {cg['weight_partition']}>("
                 f"{tensor_to_buffer[source_name]}, {output_buffer}, W{parameter_index}, B{parameter_index});"
             )
             parameter_index += 1
@@ -607,6 +722,11 @@ def emit_dag_top_cpp(
             qcfg = (getattr(op, "attrs", {}) or {}).get("quantized_conv")
             if groups != 1 and isinstance(qcfg, Mapping):
                 raise RuntimeError(f"HLSDAG017: quantized grouped Conv node {op.name!r} is not yet implemented")
+            cg = _dag_codegen_values(layer_plan, op_type="Conv")
+            if isinstance(qcfg, Mapping) and any(cg[key] != 1 for key in ("pipeline_ii", "input_unroll", "output_unroll", "input_partition", "output_partition", "weight_partition")):
+                raise RuntimeError(
+                    f"HLSDAG103: quantized Conv node {op.name!r} does not yet support non-default hierarchical architecture knobs in DAG lowering; requested={cg}"
+                )
             if isinstance(qcfg, Mapping):
                 weight_zero = [int(v) for v in qcfg.get("weight_zero", [])]
                 multipliers = [int(v) for v in qcfg.get("multipliers", [])]
@@ -631,7 +751,10 @@ def emit_dag_top_cpp(
                 kernel_name = "conv2d" if groups == 1 else "conv2d_grouped"
                 group_arg = "" if groups == 1 else f", {groups}"
                 lines.append(
-                    f"    {kernel_name}<{ih}, {iw}, {ic}, {oh}, {ow}, {oc}, {kernel}, {int(strides[0])}, {int(pads[0])}{group_arg}, {tensor_types[source_name]}, {output_type}, op{index}_wgt_t, op{index}_bias_t, op{index}_acc_t>("
+                    f"    // FPGAI_ARCH_EFFECT op=Conv name={op.name} pipeline_ii={cg['pipeline_ii']} input_unroll={cg['input_unroll']} output_unroll={cg['output_unroll']} input_partition={cg['input_partition']} output_partition={cg['output_partition']} weight_partition={cg['weight_partition']}"
+                )
+                lines.append(
+                    f"    {kernel_name}<{ih}, {iw}, {ic}, {oh}, {ow}, {oc}, {kernel}, {int(strides[0])}, {int(pads[0])}{group_arg}, {tensor_types[source_name]}, {output_type}, op{index}_wgt_t, op{index}_bias_t, op{index}_acc_t, {cg['pipeline_ii']}, {cg['output_unroll']}, {cg['input_unroll']}, {cg['input_partition']}, {cg['output_partition']}, {cg['weight_partition']}>("
                     f"{tensor_to_buffer[source_name]}, {output_buffer}, "
                     f"reinterpret_cast<const op{index}_wgt_t*>(W{parameter_index}), B{parameter_index});"
                 )
@@ -704,9 +827,13 @@ def emit_dag_top_cpp(
                 raise RuntimeError(f"HLSDAG021: MatMul node {op.name!r} currently requires static rank-2 or batch-1 rank-3 compatible matrices")
             m, k = left_shape; _, n = right_shape
             schedule = getattr(getattr(op, "semantics", None), "schedule", {}) or {}
-            tile_m = max(1, min(int(schedule.get("tile_m", 1)), m))
-            tile_n = max(1, min(int(schedule.get("tile_n", 1)), n))
-            tile_k = max(1, min(int(schedule.get("tile_k", 1)), k))
+            cg = _dag_codegen_values(layer_plan, op_type="MatMul")
+            tiling_sizes = _arch_section(layer_plan, "tiling").get("sizes", {}) if layer_plan else {}
+            if not isinstance(tiling_sizes, Mapping):
+                tiling_sizes = {}
+            tile_m = max(1, min(int(tiling_sizes.get("m", tiling_sizes.get("tile_m", schedule.get("tile_m", 1)))), m))
+            tile_n = max(1, min(int(tiling_sizes.get("n", tiling_sizes.get("tile_n", schedule.get("tile_n", 1)))), n))
+            tile_k = max(1, min(int(tiling_sizes.get("k", tiling_sizes.get("tile_k", schedule.get("tile_k", 1)))), k))
             def _matmul_arg(name: str, role: str):
                 if name in (getattr(graph, "constants", {}) or {}):
                     tied = tied_parameter_bindings.get(name)
@@ -729,8 +856,20 @@ def emit_dag_top_cpp(
             if left_view != "native":
                 raise RuntimeError(f"HLSDAG100: transposed tied parameters are currently supported only as the right MatMul operand")
             kernel = "matmul_tiled_right_transposed" if right_view == "transpose" else "matmul_tiled"
+            if right_view == "transpose" and any(cg[key] != 1 for key in ("pipeline_ii", "m_unroll", "output_unroll", "input_unroll", "input_partition", "output_partition", "weight_partition")):
+                raise RuntimeError(
+                    f"HLSDAG104: transposed-right MatMul node {op.name!r} does not yet support non-default hierarchical architecture knobs; requested={cg}"
+                )
+            extra = ""
+            if right_view != "transpose" and layer_plan:
+                extra = (
+                    f", {cg['pipeline_ii']}, {cg['m_unroll']}, {cg['output_unroll']}, {cg['input_unroll']}, {cg['input_partition']}, {cg['output_partition']}, {cg['weight_partition']}"
+                )
             lines.append(
-                f"    {kernel}<{m}, {k}, {n}, {left_type}, {right_type}, {output_type}, {accumulator_type}, {tile_m}, {tile_n}, {tile_k}>("
+                f"    // FPGAI_ARCH_EFFECT op=MatMul name={op.name} tile_m={tile_m} tile_n={tile_n} tile_k={tile_k} pipeline_ii={cg['pipeline_ii']} m_unroll={cg['m_unroll']} n_unroll={cg['output_unroll']} k_unroll={cg['input_unroll']}"
+            )
+            lines.append(
+                f"    {kernel}<{m}, {k}, {n}, {left_type}, {right_type}, {output_type}, {accumulator_type}, {tile_m}, {tile_n}, {tile_k}{extra}>("
                 f"{left_arg}, {right_arg}, {output_buffer});"
             )
         elif op.op_type == "Mul":
@@ -1330,6 +1469,7 @@ def emit_dag_top_cpp(
                 f"{tensor_to_buffer[source_name]}, {output_buffer});"
             )
         elif op.op_type == "Add":
+            cg = _dag_codegen_values(layer_plan, op_type="Add")
             all_inputs = [str(x) for x in (getattr(op, "inputs", []) or [])]
             constants = getattr(graph, "constants", {}) or {}
             if len(runtime_inputs) == 1 and len(all_inputs) == 2:
@@ -1338,6 +1478,10 @@ def emit_dag_top_cpp(
                 constant_name = next(name for name in all_inputs if name != source_name)
                 raw_const = np.asarray(constants.get(constant_name), dtype=float)
                 if raw_const.size == 1:
+                    if layer_plan and any(cg[key] != 1 for key in ("pipeline_ii", "output_unroll", "input_partition", "output_partition")):
+                        raise RuntimeError(
+                            f"HLSDAG106: scalar-broadcast Add node {op.name!r} does not yet support non-default hierarchical architecture knobs; requested={cg}"
+                        )
                     lines.append(
                         f"    add_scalar_typed<{output_words}, {tensor_types[source_name]}, {output_type}, {accumulator_type}>("
                         f"{tensor_to_buffer[source_name]}, ({accumulator_type}){float(raw_const.reshape(-1)[0]):.17g}, {output_buffer});"
@@ -1353,7 +1497,7 @@ def emit_dag_top_cpp(
                     symbol = f"fpgai_add_const_{index}"
                     lines.append(f"    static const {accumulator_type} {symbol}[{output_words}] = {{ {', '.join(f'{float(v):.17g}' for v in expanded)} }};")
                     lines.append(
-                        f"    add_vec_typed<{output_words}, {tensor_types[source_name]}, {accumulator_type}, {output_type}, {accumulator_type}>("
+                        f"    add_vec_typed<{output_words}, {tensor_types[source_name]}, {accumulator_type}, {output_type}, {accumulator_type}, {cg['pipeline_ii']}, {cg['output_unroll']}, {cg['input_partition']}, {cg['output_partition']}>("
                         f"{tensor_to_buffer[source_name]}, {symbol}, {output_buffer});"
                     )
                 lines.append("")
@@ -1367,6 +1511,10 @@ def emit_dag_top_cpp(
                 raise RuntimeError(f"HLSDAG010: Add node {op.name!r} requires equal flattened input/output sizes")
             qcfg = (getattr(op, "attrs", {}) or {}).get("quantized_add")
             if isinstance(qcfg, Mapping):
+                if layer_plan and any(cg[key] != 1 for key in ("pipeline_ii", "output_unroll", "input_partition", "output_partition")):
+                    raise RuntimeError(
+                        f"HLSDAG107: quantized Add node {op.name!r} does not yet support non-default hierarchical architecture knobs; requested={cg}"
+                    )
                 lines.append(
                     f"    add_vec_quantized<{output_words}, {tensor_types[left_name]}, {tensor_types[right_name]}, {output_type}>("
                     f"{tensor_to_buffer[left_name]}, {tensor_to_buffer[right_name]}, {output_buffer}, "
@@ -1377,7 +1525,10 @@ def emit_dag_top_cpp(
                 )
             else:
                 lines.append(
-                    f"    add_vec_typed<{output_words}, {tensor_types[left_name]}, {tensor_types[right_name]}, {output_type}, {accumulator_type}>("
+                    f"    // FPGAI_ARCH_EFFECT op=Add name={op.name} pipeline_ii={cg['pipeline_ii']} element_unroll={cg['output_unroll']} input_partition={cg['input_partition']} output_partition={cg['output_partition']}"
+                )
+                lines.append(
+                    f"    add_vec_typed<{output_words}, {tensor_types[left_name]}, {tensor_types[right_name]}, {output_type}, {accumulator_type}, {cg['pipeline_ii']}, {cg['output_unroll']}, {cg['input_partition']}, {cg['output_partition']}>("
                     f"{tensor_to_buffer[left_name]}, {tensor_to_buffer[right_name]}, {output_buffer});"
                 )
         else:

@@ -5,6 +5,7 @@ from typing import Any, Dict, Iterable, Mapping, Sequence
 
 from fpgai.config.access import get_path
 from fpgai.ir import Graph
+from fpgai.ir.semantics import mark_ir_level
 
 _AUTO = {None, "", "auto", "unspecified", "default"}
 _STORAGE = {"bram", "uram", "ddr", "host", "external", "stream", "recompute"}
@@ -300,11 +301,36 @@ def materialize_compile_plan_semantics(graph: Graph, compile_plan: Any) -> Dict[
         op.semantics.schedule["architecture"] = arch_dict
         op.semantics.schedule["architecture_signature"] = str(getattr(lp, "architecture_signature", ""))
         if arch_dict:
-            op.semantics.schedule["pipeline"] = dict(arch_dict.get("pipeline", {}) or {})
-            op.semantics.schedule["parallelism"] = dict(arch_dict.get("parallelism", {}) or {})
-            op.semantics.schedule["partitioning"] = dict(arch_dict.get("partitioning", {}) or {})
-            op.semantics.schedule["tiling"] = dict(arch_dict.get("tiling", {}) or {})
+            pipeline = dict(arch_dict.get("pipeline", {}) or {})
+            parallelism = dict(arch_dict.get("parallelism", {}) or {})
+            partitioning = dict(arch_dict.get("partitioning", {}) or {})
+            tiling = dict(arch_dict.get("tiling", {}) or {})
+            op.semantics.schedule["pipeline"] = pipeline
+            op.semantics.schedule["parallelism"] = parallelism
+            op.semantics.schedule["partitioning"] = partitioning
+            op.semantics.schedule["tiling"] = tiling
             op.semantics.buffering.update(dict(arch_dict.get("buffering", {}) or {}))
+            # Make hierarchical execution first-class in FPGAI IR.  Layer-level
+            # decisions preserve PE/SIMD and buffering; loop-level decisions
+            # preserve II, unroll, tiling and partitioning independently.
+            op.semantics.execution["layer"] = {
+                "pipeline_style": pipeline.get("style"),
+                "pipeline_scope": pipeline.get("scope"),
+                "pe": parallelism.get("pe", 1),
+                "simd": parallelism.get("simd", 1),
+                "buffering": dict(arch_dict.get("buffering", {}) or {}),
+            }
+            op.semantics.execution["loops"] = {
+                "pipeline_ii": pipeline.get("ii", 1),
+                "pipeline": dict(pipeline.get("loops", {}) or {}),
+                "unroll": dict(parallelism.get("unroll", {}) or {}),
+                "tiling": dict(tiling.get("sizes", {}) or {}),
+                "partitioning": {
+                    "factor": partitioning.get("factor", 1),
+                    "mode": partitioning.get("mode", "none"),
+                    "targets": dict(partitioning.get("targets", {}) or {}),
+                },
+            }
             memory = dict(arch_dict.get("memory", {}) or {})
             if memory:
                 op.semantics.resource_constraints["resolved_memory"] = memory
@@ -314,13 +340,18 @@ def materialize_compile_plan_semantics(graph: Graph, compile_plan: Any) -> Dict[
         }
         materialized.append(str(op.name))
 
+    network_execution = dict((getattr(compile_plan, "notes", {}) or {}).get("network_execution", {}) or {})
     graph.semantics.resource_constraints["resolved_architecture"] = {
         "target_board": str(getattr(compile_plan, "target_board", "unknown")),
         "target_part": str(getattr(compile_plan, "target_part", "unknown")),
         "clock_mhz": float(getattr(compile_plan, "clock_mhz", 0.0) or 0.0),
         "architecture_signature": str(getattr(compile_plan, "architecture_signature", "")),
-        "network_execution": dict((getattr(compile_plan, "notes", {}) or {}).get("network_execution", {}) or {}),
+        "network_execution": network_execution,
     }
+    graph.semantics.execution["model"] = network_execution
+    for op in graph.ops:
+        op.semantics.execution.setdefault("model", network_execution)
+    mark_ir_level(graph, "architectural", reason="resolved compile-plan architecture materialized")
     report = {
         "schema": "fpgai.ir-plan-materialization/v1",
         "materialized_operator_count": len(materialized),

@@ -4,6 +4,7 @@ from .implementation_contract import (
     TrainingImplementationCapabilities,
     implementation_contract_from_manifest,
     validate_implementation_contract,
+    resolve_architecture_parameters,
 )
 from .implementation_registry_adapter import implementation_contract_to_registry_entry
 from .implementation_selector import select_implementation
@@ -27,6 +28,7 @@ __all__ = [
     "implementation_contract_to_registry_entry",
     "select_implementation",
     "validate_implementation_contract",
+    "resolve_architecture_parameters",
 ]
 
 from .hls_composition import (

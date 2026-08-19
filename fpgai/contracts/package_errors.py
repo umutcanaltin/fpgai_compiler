@@ -36,6 +36,7 @@ ERROR_CODES = {
     "PKG013": "missing_required_file",
     "PKG014": "invalid_compatibility_range",
     "PKG015": "invalid_dependency",
+    "PKG016": "invalid_ecosystem_role",
 }
 
 RESOLUTION_ERROR_CODES = {

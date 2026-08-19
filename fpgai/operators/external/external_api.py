@@ -58,3 +58,16 @@ class ReferenceExecutionContext:
 @dataclass(frozen=True)
 class ReferenceExecutionResult:
     outputs: tuple[np.ndarray, ...]
+
+
+@dataclass(frozen=True)
+class BackwardInputReferenceContext:
+    attributes: Mapping[str, Any]
+    inputs: tuple[np.ndarray, ...]
+    grad_outputs: tuple[np.ndarray, ...]
+    def __post_init__(self):
+        object.__setattr__(self, "attributes", MappingProxyType(dict(self.attributes)))
+
+@dataclass(frozen=True)
+class BackwardInputReferenceResult:
+    grad_inputs: tuple[np.ndarray, ...]

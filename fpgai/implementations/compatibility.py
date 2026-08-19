@@ -27,6 +27,7 @@ class CompatibilityRequest:
     require_parameter_gradients: bool = False
     require_optimizer_update: bool = False
     minimum_validation_level: str | None = None
+    operator_semantics_version: int | None = None
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,8 @@ def evaluate_implementation_compatibility(
 ) -> CompatibilityResult:
     reasons: list[str] = []
     mode = request.mode.strip().lower()
+    if request.operator_semantics_version is not None and contract.semantics_version != int(request.operator_semantics_version):
+        reasons.append("operator_semantics_version_mismatch")
     if mode == "inference" and not contract.inference:
         reasons.append("inference_not_supported")
     if mode == "training" and not contract.training.forward:

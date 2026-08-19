@@ -78,8 +78,10 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
     if not isinstance(ecosystem, Mapping) or not bool(ecosystem.get("enabled", False)):
         return ExternalEcosystemCompileResult(False)
 
-    if str(compiler.cfg.pipeline.mode).lower() != "inference":
-        raise RuntimeError("External HLS ecosystem compilation currently supports inference mode only")
+    pipeline_mode = str(compiler.cfg.pipeline.mode).strip().lower()
+    if pipeline_mode not in {"inference", "training_on_device"}:
+        raise RuntimeError(f"External HLS ecosystem compilation does not support pipeline mode {pipeline_mode!r}")
+    training_mode = pipeline_mode == "training_on_device"
 
     started = time.time()
     project_root = Path(str(ecosystem.get("project_root", "."))).expanduser().resolve()
@@ -201,11 +203,13 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
         if not isinstance(selection_cfg, Mapping):
             raise RuntimeError("Implementation selection must be a mapping")
         compatibility = CompatibilityRequest(
-            mode="inference",
+            mode="training" if training_mode else "inference",
             backend=str(selection_cfg.get("backend", "vitis_hls")),
             language="hls_cpp",
             board=target_board or None,
             precision=precision,
+            require_backward_input=training_mode,
+            operator_semantics_version=int(provenance.get("operator_semantics_version", 1) or 1),
         )
         request = ImplementationSelectionRequest(
             operator_id=operator_id,
@@ -220,6 +224,27 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
         node_selection_paths[op.name] = {"json": str(selection_json), "markdown": str(selection_md)}
         if selection.selected is None:
             raise RuntimeError(f"No compatible external HLS implementation for node {op.name!r}")
+        if training_mode:
+            from fpgai.implementations.hls_integration import parse_hls_abi, HLSFlatArrayABI
+            abi = parse_hls_abi(selection.selected)
+            if not isinstance(abi, HLSFlatArrayABI):
+                raise RuntimeError(
+                    f"External training node {op.name!r} currently requires flat_array_v1; "
+                    "tensor_ports training ABI is not yet a supported combination"
+                )
+            caps = selection.selected.training
+            if caps.parameter_gradients or caps.bias_gradients or caps.optimizer_update:
+                raise RuntimeError(
+                    f"External training node {op.name!r} requests trainable parameter/update capabilities; "
+                    "the current external training ABI supports stateless forward+backward_input only"
+                )
+            integration = dict(selection.selected.metadata.get("integration", {}) or {})
+            hls_integration = integration.get("hls", {}) or {}
+            training_integration = hls_integration.get("training", {}) if isinstance(hls_integration, Mapping) else {}
+            if not isinstance(training_integration, Mapping) or not str(training_integration.get("backward_input_top", "")).strip():
+                raise RuntimeError(
+                    f"External training node {op.name!r} requires integration.hls.training.backward_input_top"
+                )
         selected_contracts[op.name] = selection.selected
 
     composition_plan = build_hls_composition_plan(
@@ -238,8 +263,9 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
         out_dir=out_dir,
         top_name=str(get_path(raw, "pipeline.outputs.top_kernel_name", "deeplearn")),
         hls_options={
-            "pipeline_mode": "inference",
+            "pipeline_mode": pipeline_mode,
             "weights_mode": str(get_path(raw, "memory.weights.mode", "embedded") or "embedded"),
+            "training_cfg": (raw.get("training", {}) or {}),
             "part": part,
             "clk_mhz": int(clock_mhz),
             "run_csim": bool(build_stages.get("hls_project", True)),
@@ -250,35 +276,59 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
         external_composition_plan=composition_plan,
     )
 
-    validation_cfg = ecosystem.get("validation", {}) or {}
+    legacy_validation_cfg = ecosystem.get("validation", {}) or {}
+    if not isinstance(legacy_validation_cfg, Mapping):
+        raise RuntimeError("ecosystem.validation must be a mapping")
+    numeric_cfg = get_path(raw, "validation.numeric", {}) or {}
+    if not isinstance(numeric_cfg, Mapping):
+        raise RuntimeError("validation.numeric must be a mapping")
+    numeric_validation_enabled = bool(numeric_cfg.get("enabled", False))
+    validation_cfg = dict(legacy_validation_cfg)
+    validation_cfg["enabled"] = bool(validation_cfg.get("enabled", False) or numeric_validation_enabled)
     validation_artifacts = None
-    if isinstance(validation_cfg, Mapping) and bool(validation_cfg.get("enabled", False)):
-        from fpgai.backends.hls.testbench import emit_tb_cpp
-        from fpgai.validation.mixed_external_hls import prepare_mixed_external_validation
+    host_validation = None
+    training_host_validation = None
+    if bool(validation_cfg.get("enabled", False)):
+        from fpgai.validation.mixed_external_hls import (
+            prepare_mixed_external_validation,
+            run_portable_host_cpp_validation,
+            run_portable_host_cpp_training_validation,
+        )
 
+        # Forward semantic validation is independent of the final training/inference
+        # top ABI, so every ecosystem hardware implementation is checked against
+        # the trusted operator reference before a numeric claim is accepted.
         validation_artifacts = prepare_mixed_external_validation(
             graph=graph, external_context=loaded.context, out_dir=out_dir, config=validation_cfg
         )
-        in_words = _shape_words(graph, graph.inputs[0])
-        out_words = _shape_words(graph, graph.outputs[0])
-        emit_tb_cpp(
-            project.hls_dir / "src",
-            top_name=str(get_path(raw, "pipeline.outputs.top_kernel_name", "deeplearn")),
-            in_words=in_words,
-            out_words=out_words,
-            weights_mode=str(get_path(raw, "memory.weights.mode", "embedded") or "embedded"),
-            raw_cfg=raw,
-        )
-        tcl_text = project.run_tcl.read_text(encoding="utf-8")
-        csim_args = f'csim_design -argv "{validation_artifacts.input_bin.resolve()} {validation_artifacts.output_bin.resolve()}"'
-        tcl_text = tcl_text.replace("csim_design\n", csim_args + "\n")
-        project.run_tcl.write_text(tcl_text, encoding="utf-8")
-        from fpgai.validation.mixed_external_hls import run_portable_host_cpp_validation
         host_validation = run_portable_host_cpp_validation(
             graph=graph, composition_plan=composition_plan, artifacts=validation_artifacts, hls_dir=project.hls_dir
         )
+        if training_mode:
+            training_host_validation = run_portable_host_cpp_training_validation(
+                graph=graph, composition_plan=composition_plan, external_context=loaded.context, out_dir=out_dir
+            )
+        else:
+            from fpgai.backends.hls.testbench import emit_tb_cpp
+            in_words = _shape_words(graph, graph.inputs[0])
+            out_words = _shape_words(graph, graph.outputs[0])
+            emit_tb_cpp(
+                project.hls_dir / "src",
+                top_name=str(get_path(raw, "pipeline.outputs.top_kernel_name", "deeplearn")),
+                in_words=in_words,
+                out_words=out_words,
+                weights_mode=str(get_path(raw, "memory.weights.mode", "embedded") or "embedded"),
+                raw_cfg=raw,
+            )
+            tcl_text = project.run_tcl.read_text(encoding="utf-8")
+            csim_args = f'csim_design -argv "{validation_artifacts.input_bin.resolve()} {validation_artifacts.output_bin.resolve()}"'
+            tcl_text = tcl_text.replace("csim_design\n", csim_args + "\n")
+            project.run_tcl.write_text(tcl_text, encoding="utf-8")
+
         prepared_payload = json.loads(validation_artifacts.report_path.read_text(encoding="utf-8"))
         prepared_payload["host_cpp"] = host_validation
+        if training_host_validation is not None:
+            prepared_payload["training_backward_input"] = training_host_validation
         validation_artifacts.report_path.write_text(
             json.dumps(prepared_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )
@@ -295,7 +345,10 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
     lock_path = write_package_lock(PackageLock(tuple(lock_entries)), out_dir / "package-lock.yml")
 
     hls_run = None
-    run_validation_csim = bool(validation_artifacts is not None and validation_cfg.get("run_vitis_csim", False))
+    run_validation_csim = bool(
+        validation_artifacts is not None
+        and bool(validation_cfg.get("run_vitis_csim", False))
+    )
     if bool(build_stages.get("hls_synthesis", False)) or run_validation_csim:
         hls_run = compiler._maybe_run_vitis_hls(
             project.hls_dir,
@@ -303,13 +356,86 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
         )
     validation_report = None
     if validation_artifacts is not None:
-        from fpgai.validation.mixed_external_hls import finalize_mixed_external_validation
-        validation_report = finalize_mixed_external_validation(
-            validation_artifacts,
-            hls_run=hls_run,
-            atol=float(validation_cfg.get("atol", 1e-5)),
-            rtol=float(validation_cfg.get("rtol", 1e-5)),
+        if training_mode:
+            forward_ok = isinstance(host_validation, Mapping) and host_validation.get("status") == "passed"
+            backward_ok = isinstance(training_host_validation, Mapping) and training_host_validation.get("status") == "passed"
+            validation_report = {
+                "status": "passed" if forward_ok and backward_ok else "failed",
+                "forward": host_validation,
+                "backward_input": training_host_validation,
+                "scope": "ecosystem_operator_semantics_vs_external_training_implementation",
+            }
+            validation_artifacts.report_path.write_text(
+                json.dumps({**json.loads(validation_artifacts.report_path.read_text(encoding="utf-8")), **validation_report}, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+        else:
+            from fpgai.validation.mixed_external_hls import finalize_mixed_external_validation
+            validation_report = finalize_mixed_external_validation(
+                validation_artifacts,
+                hls_run=hls_run,
+                atol=float(validation_cfg.get("atol", 1e-5)),
+                rtol=float(validation_cfg.get("rtol", 1e-5)),
+            )
+
+    numeric_validation_artifacts = None
+    numeric_validation_status = "not_requested"
+    if validation_artifacts is not None and training_mode:
+        numeric_validation_status = str((validation_report or {}).get("status", "not_run"))
+        ecosystem_numeric_payload = {
+            "schema_version": 1,
+            "artifact_kind": "numeric_validation",
+            "pipeline_mode": "training_on_device",
+            "status": numeric_validation_status,
+            "passed": numeric_validation_status == "passed",
+            "reason": "ecosystem operator forward and backward-input implementation compared against trusted operator semantics",
+            "ecosystem": {
+                "forward": host_validation,
+                "backward_input": training_host_validation,
+                "scope": "layerwise_external_operator_training",
+            },
+            "validation_contract": dict(numeric_cfg),
+        }
+        numeric_json = reports_dir / "numeric_validation.json"
+        numeric_json.write_text(json.dumps(ecosystem_numeric_payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        numeric_md = reports_dir / "numeric_validation.md"
+        numeric_md.write_text(
+            "# Numeric validation\n\n"
+            f"- Pipeline mode: `training_on_device`\n- Status: `{numeric_validation_status}`\n"
+            "- Scope: ecosystem operator forward + backward-input semantics\n",
+            encoding="utf-8",
         )
+        numeric_validation_artifacts = {"numeric_validation_json": numeric_json, "numeric_validation_md": numeric_md}
+    elif validation_artifacts is not None:
+        from fpgai.validation.numeric import emit_numeric_validation_report
+
+        generated_output = None
+        if validation_artifacts.output_bin.exists():
+            generated_output = validation_artifacts.output_bin
+        elif isinstance(host_validation, Mapping) and host_validation.get("output_bin"):
+            candidate = Path(str(host_validation.get("output_bin")))
+            if candidate.is_file():
+                generated_output = candidate
+        numeric_validation_artifacts = emit_numeric_validation_report(
+            out_dir,
+            pipeline_mode="inference",
+            source_generated=True,
+            hls_ran=hls_run is not None,
+            hls_ok=(None if hls_run is None else bool(hls_run.ok)),
+            hls_csynth_report=(None if hls_run is None else getattr(hls_run, "csynth_report", None)),
+            inference_reference_artifacts={
+                "status": "available",
+                "reason": "FPGAI Ecosystem reference execution compared with the generated external implementation.",
+                "outputs_ref": validation_artifacts.expected_bin,
+                "outputs_hw": generated_output,
+                "inputs_bin": validation_artifacts.input_bin,
+            },
+            raw_config=raw,
+        )
+        numeric_path = numeric_validation_artifacts.get("numeric_validation_json")
+        if numeric_path and Path(numeric_path).is_file():
+            numeric_payload = json.loads(Path(numeric_path).read_text(encoding="utf-8"))
+            numeric_validation_status = str(numeric_payload.get("status", "not_run"))
 
     synthesis_characterization = None
     synthesis_characterization_paths = None
@@ -387,7 +513,15 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
             "input_bin": str(validation_artifacts.input_bin),
             "reference_output_bin": str(validation_artifacts.expected_bin),
             "hls_output_bin": str(validation_artifacts.output_bin),
+            "host_cpp": host_validation,
+            "training_backward_input": training_host_validation,
             "status": validation_report.get("status") if validation_report else "prepared",
+            "compiler_numeric_validation": {
+                "status": numeric_validation_status,
+                "artifacts": None if numeric_validation_artifacts is None else {
+                    key: str(value) for key, value in numeric_validation_artifacts.items()
+                },
+            },
         },
         "synthesis_characterization": None if synthesis_characterization is None else {
             "status": synthesis_characterization.status,
@@ -409,12 +543,23 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
         not synthesis_required
         or (synthesis_characterization is not None and synthesis_characterization.status == "passed")
     )
+    validation_enabled = bool(validation_cfg.get("enabled", False))
+    legacy_enforce = bool(legacy_validation_cfg.get("enabled", False))
+    numeric_enforce = bool(
+        numeric_validation_enabled
+        and str(numeric_cfg.get("policy", "report_only")).strip().lower() == "enforce"
+    )
+    validation_required = bool(legacy_enforce or numeric_enforce)
+    numeric_validation_ok = (
+        not validation_required
+        or numeric_validation_status == "passed"
+    )
     manifest = {
         "version": compiler.cfg.version,
         "schema": "fpgai.external-ecosystem-compile/v1",
         "status": (
             "passed"
-            if (hls_run is None or hls_run.ok) and synthesis_characterization_ok
+            if (hls_run is None or hls_run.ok) and synthesis_characterization_ok and numeric_validation_ok
             else "failed"
         ),
         "model_path": compiler.cfg.model.path,
@@ -442,11 +587,23 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
             {"name": "analyze_hls_bottlenecks", "status": "skipped" if hls_run is None else "done"},
             {"name": "analyze_tensor_liveness", "status": "done"},
             {"name": "allocate_hls_buffers", "status": "done"},
+            {
+                "name": "numeric_validation",
+                "status": (
+                    "skipped" if not validation_enabled
+                    else ("done" if numeric_validation_status == "passed" else ("failed" if validation_required else "reported"))
+                ),
+            },
         ],
         "seconds": round(time.time() - started, 6),
         "usage": {"platform_scope": "research", "production_path": "morfics"},
     }
     _write_json(out_dir / "manifest.json", manifest)
+
+    if validation_required and not numeric_validation_ok:
+        raise RuntimeError(
+            "External FPGAI Ecosystem numeric validation failed; inspect reports/numeric_validation.json"
+        )
 
     vivado_requested = bool(build_stages.get("vivado_project") or build_stages.get("vivado_implementation") or build_stages.get("bitstream"))
     if vivado_requested:

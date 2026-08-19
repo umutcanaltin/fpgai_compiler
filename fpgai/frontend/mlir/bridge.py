@@ -9,7 +9,7 @@ from typing import Any, Dict
 import numpy as np
 
 from fpgai.ir import Graph
-from fpgai.ir.contracts import OpSemantics, TensorSemantics
+from fpgai.ir.contracts import GraphSemantics, OpSemantics, TensorSemantics
 
 
 class MLIRBridgeError(ValueError):
@@ -193,8 +193,13 @@ def import_fpgai_mlir(source: str | Path) -> Graph:
     graph.inputs = [str(x) for x in data.get("inputs", [])]
     graph.outputs = [str(x) for x in data.get("outputs", [])]
     graph.metadata = dict(data.get("metadata", {}) or {})
-    graph.semantics.source_ir = "mlir"
-    graph.semantics.source_metadata = {"bridge_schema": _SCHEMA}
+    graph.semantics = _graph_semantics_from_dict(data.get("graph_semantics", {}) or {})
+    # The bridge itself is the immediate source representation, while original
+    # framework/StableHLO provenance stays in source_metadata/provenance.
+    graph.semantics.source_metadata.setdefault("bridge_schema", _SCHEMA)
+    graph.semantics.source_metadata.setdefault("imported_via", "mlir_bridge")
+    if not graph.semantics.source_ir or graph.semantics.source_ir == "fpgai":
+        graph.semantics.source_ir = "mlir"
 
     for name, record in (data.get("tensors", {}) or {}).items():
         graph.add_tensor(
@@ -217,6 +222,25 @@ def import_fpgai_mlir(source: str | Path) -> Graph:
         )
         op.semantics = _op_semantics_from_dict(record.get("semantics", {}) or {})
     return graph
+
+
+
+def _graph_semantics_from_dict(data: Dict[str, Any]) -> GraphSemantics:
+    result = GraphSemantics()
+    for key in (
+        "pipeline_mode", "target_board", "ir_level", "runtime_contract",
+        "resource_constraints", "execution", "source_ir", "source_metadata",
+        "provenance", "lowering_history",
+    ):
+        if key not in data or not hasattr(result, key):
+            continue
+        value = data[key]
+        if key == "lowering_history":
+            value = tuple(dict(item) for item in (value or []))
+        elif key in {"runtime_contract", "resource_constraints", "execution", "source_metadata", "provenance"}:
+            value = dict(value or {})
+        setattr(result, key, value)
+    return result
 
 
 def _tensor_semantics_from_dict(data: Dict[str, Any]) -> TensorSemantics:
@@ -243,8 +267,11 @@ def _op_semantics_from_dict(data: Dict[str, Any]) -> OpSemantics:
     result.selected_implementation_id = data.get("selected_implementation_id")
     result.buffering = dict(data.get("buffering", {}) or {})
     result.schedule = dict(data.get("schedule", {}) or {})
+    result.execution = dict(data.get("execution", {}) or {})
     result.training = dict(data.get("training", {}) or {})
     result.resource_constraints = dict(data.get("resource_constraints", {}) or {})
+    result.provenance = dict(data.get("provenance", {}) or {})
+    result.lowering_history = tuple(dict(item) for item in data.get("lowering_history", []) or [])
     result.tags = tuple(str(x) for x in data.get("tags", []) or [])
     candidates = []
     for item in data.get("implementation_candidates", []) or []:

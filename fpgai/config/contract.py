@@ -67,6 +67,8 @@ CANONICAL_KEYS: Tuple[KeySpec, ...] = (
     KeySpec("ecosystem", "External research package discovery and trust configuration", ("package_discovery", "package-lock.yml"), prefix=True),
     KeySpec("implementations", "External hardware implementation selection", ("implementation_selection", "manifest"), prefix=True),
     KeySpec("architecture", "Per-layer hardware mechanism requests and overrides", ("layer_mechanism_resolution", "manifest"), prefix=True),
+    KeySpec("validation.numeric", "Compiler-wide inference/training numeric validation contract", ("numeric_validation", "validation reports"), prefix=True),
+    KeySpec("guards", "Compiler generation and implementation guard policy", ("compiler_guards", "Vivado bridge"), prefix=True),
 )
 
 DEPRECATED_ALIASES: Dict[str, Dict[str, str]] = {

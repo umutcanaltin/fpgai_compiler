@@ -144,6 +144,12 @@ def validate_package_manifest(package_root: str | Path) -> PackageValidationResu
     if asset_type not in {item.value for item in AssetType}:
         errors.append(_issue("PKG005", "package.asset_type", "Unsupported asset type"))
 
+    ecosystem = _mapping(raw.get("ecosystem"))
+    role = str(ecosystem.get("role", ""))
+    expected_role = {"model": "model", "operator": "operator_semantics", "implementation": "operator_implementation"}.get(asset_type)
+    if role and expected_role and role != expected_role:
+        errors.append(_issue("PKG016", "ecosystem.role", f"Asset type {asset_type!r} requires ecosystem role {expected_role!r}"))
+
     license_cfg = _mapping(raw.get("license"))
     license_category = str(license_cfg.get("category", ""))
     if license_category not in {item.value for item in LicenseCategory}:
@@ -183,6 +189,9 @@ def validate_package_manifest(package_root: str | Path) -> PackageValidationResu
     level = str(validation.get("declared_level", ""))
     if level not in {item.value for item in ValidationLevel}:
         errors.append(_issue("PKG010", "validation.declared_level", "Unsupported validation level"))
+    numeric_validation = _mapping(validation.get("numeric"))
+    if role in {"model", "operator_semantics", "operator_implementation"} and numeric_validation and numeric_validation.get("required") is not True:
+        errors.append(_issue("PKG016", "validation.numeric.required", f"Ecosystem role {role!r} must not disable required numeric validation"))
 
     capabilities = _mapping(raw.get("capabilities"))
     training = _mapping(capabilities.get("training"))

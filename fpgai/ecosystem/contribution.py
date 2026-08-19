@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable, Mapping
+import json
+import shutil
 
 import yaml
 
@@ -58,21 +60,46 @@ def _manifest(asset_type: str, package_id: str, name: str, language: str | None)
             },
         },
         "validation": {"declared_level": "unvalidated"},
+        "ecosystem": {"role": ("model" if asset_type == "model" else "operator_semantics" if asset_type == "operator" else "operator_implementation" if asset_type == "implementation" else asset_type)},
     }
 
     if asset_type == "model":
         raw["entrypoints"] = {"model": {"path": "model/model.onnx", "format": "onnx"}}
+        raw["validation"]["numeric"] = {
+            "required": True,
+            "reference": "source_model",
+            "compare": ["fpgai_ir", "generated_backend"],
+            "levels": ["model", "layer", "intermediate"],
+        }
     elif asset_type == "operator":
         raw["entrypoints"] = {"operator": {"python_module": "python/operator.py"}}
+        raw["validation"]["numeric"] = {"required": True, "reference": "operator_numeric_reference"}
     elif asset_type in {"implementation", "system_block", "adapter"}:
         lang = language or "hls_cpp"
         ext = _LANGUAGE_EXTENSIONS.get(lang, "cpp")
+        backend = "vitis_hls" if lang == "hls_cpp" else lang
         raw["entrypoints"] = {
             "implementation": {
                 "language": lang,
+                "backend": backend,
                 "top": "fpgai_top",
                 "sources": [f"src/fpgai_top.{ext}"],
             }
+        }
+        raw["implementation"] = {
+            "implements": {"operator_id": f"{package_id}.operator", "version": 1},
+            "backend": backend,
+        }
+        raw["validation"]["numeric"] = {
+            "required": True,
+            "reference": "operator_semantics",
+            "levels": ["layer"],
+        }
+        raw["export"] = {
+            "standalone_source": True,
+            "requires_hls_synthesis": False,
+            "requires_vivado": False,
+            "requires_bitstream": False,
         }
         raw["interfaces"] = {
             "input": {"protocol": "memory"},
@@ -167,4 +194,93 @@ def scaffold_contribution(
     return root
 
 
-__all__ = ["scaffold_contribution", "supported_contribution_types"]
+def export_implementation_artifact(
+    package_id: str,
+    out_dir: str | Path,
+    *,
+    project_root: str | Path = ".",
+    directories: Iterable[str | Path] = (),
+    force: bool = False,
+) -> Path:
+    """Export one discovered HLS/VHDL/RTL implementation without running tools.
+
+    The export is intentionally source-level: it copies only files declared by
+    the existing implementation contract and writes reusable contract/provenance
+    manifests.  It never invokes Vitis HLS, Vivado, implementation, or bitstream
+    generation.
+    """
+    from fpgai.discovery import DiscoveryRequest, discover_packages
+    from fpgai.implementations.implementation_contract import implementation_contract_from_manifest
+
+    result = discover_packages(DiscoveryRequest(
+        project_root=project_root,
+        configured_directories=tuple(directories),
+        include_builtin=True,
+        strict=False,
+    ))
+    if not result.ok:
+        raise RuntimeError("ECOEXP001: ecosystem package discovery failed")
+    entries = [entry for entry in result.catalogue.find_by_package_id(str(package_id)) if entry.asset_type == "implementation"]
+    if not entries:
+        raise FileNotFoundError(f"ECOEXP002: implementation package {package_id!r} was not discovered")
+    entries.sort(key=lambda entry: (entry.priority, entry.version), reverse=True)
+    entry = entries[0]
+    if entry.source_path is None:
+        raise RuntimeError(f"ECOEXP003: {package_id!r} has no exportable source package")
+
+    contract = implementation_contract_from_manifest(entry.source_path, manifest_hash=entry.manifest_hash)
+    root = Path(out_dir).expanduser().resolve()
+    if root.exists() and any(root.iterdir()) and not force:
+        raise FileExistsError(f"ECOEXP004: output directory is not empty: {root}")
+    root.mkdir(parents=True, exist_ok=True)
+
+    package_root = Path(entry.source_path).resolve()
+    declared = tuple(dict.fromkeys((*contract.sources, *contract.headers)))
+    copied: list[str] = []
+    for rel in declared:
+        src = (package_root / rel).resolve()
+        try:
+            src.relative_to(package_root)
+        except ValueError as exc:
+            raise RuntimeError(f"ECOEXP005: declared source escapes package root: {rel}") from exc
+        if not src.is_file():
+            raise FileNotFoundError(f"ECOEXP006: declared implementation file is missing: {rel}")
+        dst = root / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        copied.append(rel)
+
+    # Keep the package manifest so the export remains independently inspectable.
+    shutil.copy2(package_root / "fpgai.yaml", root / "fpgai.yaml")
+    (root / "implementation_contract.json").write_text(
+        json.dumps(contract.to_dict(), indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8"
+    )
+    artifact_manifest = {
+        "schema": "fpgai.artifact-export/v1",
+        "status": "exported",
+        "package_id": contract.package_id,
+        "version": contract.version,
+        "operator_id": contract.operator_id,
+        "contribution_role": "operator_implementation",
+        "implements": {"operator_id": contract.operator_id, "version": contract.semantics_version},
+        "architecture_mapping": {key: dict(value) for key, value in contract.architecture_mapping.items()},
+        "numeric_validation_required": bool((contract.metadata.get("validation", {}) or {}).get("numeric", {}).get("required", False)) if isinstance(contract.metadata.get("validation", {}), Mapping) else False,
+        "language": contract.language,
+        "backend": contract.backend,
+        "top": contract.top,
+        "files": copied,
+        "granularity": "implementation_block",
+        "build_stage": "source_export",
+        "tool_execution": {"vitis_hls": False, "vivado": False, "bitstream": False},
+        "validation_level": contract.validation_level,
+        "capabilities": contract.to_dict().get("capabilities", {}),
+        "source_package": str(package_root),
+        "manifest_hash": contract.manifest_hash,
+    }
+    (root / "artifact_manifest.json").write_text(
+        json.dumps(artifact_manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return root
+
+
+__all__ = ["scaffold_contribution", "supported_contribution_types", "export_implementation_artifact"]

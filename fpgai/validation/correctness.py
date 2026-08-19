@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from fpgai.benchmark.pipeline import BenchmarkResult, run_compile_correctness_benchmark
+if TYPE_CHECKING:
+    from fpgai.benchmark.pipeline import BenchmarkResult
 from fpgai.config.loader import load_config
 
 
@@ -41,7 +42,7 @@ class CorrectnessValidation:
         cls,
         config_path: str | Path,
         pipeline_mode: str,
-        benchmark: BenchmarkResult,
+        benchmark: "BenchmarkResult",
     ) -> "CorrectnessValidation":
         return cls(
             config_path=Path(config_path),
@@ -80,22 +81,26 @@ def _pipeline_mode(config_path: str | Path) -> str:
 
 
 def validate_correctness(config_path: str | Path) -> CorrectnessValidation:
-    """Run inference correctness validation for supported configs.
+    """Run the compiler's numeric correctness workflow for inference or training.
 
-    Correctness benchmarking currently compares generated HLS inference output
-    against an ONNX Runtime reference. Training and hardware-generation configs
-    are intentionally not executed through this path; they should use training or
-    result-artifact validation instead.
+    Inference compares generated execution outputs with the configured software
+    reference.  On-device training validates the generated training execution
+    against the compiler's reference/capture artifacts, including gradients and
+    parameter-update state when those captures are requested.
     """
     path = Path(config_path)
     mode = _pipeline_mode(path)
 
-    if mode != "inference":
+    if mode == "inference":
+        from fpgai.benchmark.pipeline import run_compile_correctness_benchmark
+        benchmark = run_compile_correctness_benchmark(config_path=path)
+    elif mode == "training_on_device":
+        from fpgai.benchmark.pipeline import run_compile_training_benchmark
+        benchmark = run_compile_training_benchmark(config_path=path)
+    else:
         return CorrectnessValidation.skipped(
             path,
             mode,
-            f"correctness validation currently supports pipeline.mode=inference only; got pipeline.mode={mode}",
+            f"numeric correctness validation does not support pipeline.mode={mode}",
         )
-
-    benchmark = run_compile_correctness_benchmark(config_path=path)
     return CorrectnessValidation.from_benchmark(path, mode, benchmark)

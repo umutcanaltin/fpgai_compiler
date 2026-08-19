@@ -9,7 +9,7 @@ materialize_configs:
     - notes
   compiler_policy_names: true
 
-# Paper-only memory ablation.  Each point changes one concrete weight-memory
+# Experiment-only memory ablation.  Each point changes one concrete weight-memory
 # mechanism while keeping the maintained CNN graph and numerical precision
 # fixed.  This is experiment methodology, not a compiler sweep feature.
 defaults:

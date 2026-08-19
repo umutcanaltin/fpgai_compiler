@@ -2,6 +2,7 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 from fpgai.implementations.hls_integration import parse_hls_abi, HLSFlatArrayABI, HLSTensorPortsABI
+from fpgai.implementations.implementation_contract import resolve_architecture_parameters
 from .composition_errors import HLSCompositionError
 from .composition_types import ExternalNodeBinding, HLSCompositionPlan
 
@@ -64,6 +65,18 @@ def build_hls_composition_plan(graph: Any, *, selected_contracts: Mapping[str, A
                 words = next(iter(input_port_words.values()))
                 out_words = next(iter(output_port_words.values()))
             public_attrs = {k: v for k, v in op.attrs.items() if not str(k).startswith("_fpgai_")}
+            semantics = getattr(op, "semantics", None)
+            schedule = getattr(semantics, "schedule", {}) if semantics is not None else {}
+            architecture = schedule.get("architecture", {}) if isinstance(schedule, Mapping) else {}
+            mapped = resolve_architecture_parameters(contract, architecture).get("hls_attribute", {})
+            if mapped:
+                declared = {item.name for item in abi.attributes}
+                undeclared = sorted(set(mapped) - declared)
+                if undeclared:
+                    raise HLSCompositionError(
+                        f"HLSCOMP024: implementation {contract.package_id!r} maps FPGAI architecture to undeclared HLS attributes {undeclared}"
+                    )
+                public_attrs.update(mapped)
             bindings.append(ExternalNodeBinding(
                 node_name=op.name, op_type=op.op_type,
                 operator_id=str(provenance.get("operator_id", "")),

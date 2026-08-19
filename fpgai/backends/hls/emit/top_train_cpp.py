@@ -864,10 +864,14 @@ def emit_top_train_cpp(
     compile_plan: Any = None,
     memory_plan: Any = None,
     communication_plan: Any = None,
+    external_composition_plan: Any = None,
 ) -> str:
     del memory_plan
     del communication_plan
     plan_by_name = _plan_map(compile_plan)
+    external_binding_names = {
+        str(binding.node_name) for binding in getattr(external_composition_plan, "bindings", ())
+    }
 
     supported_operations = {
         "Dense",
@@ -906,7 +910,7 @@ def emit_top_train_cpp(
     unsupported_operations = [
         op.op_type
         for op in graph.ops
-        if op.op_type not in supported_operations
+        if op.op_type not in supported_operations and str(op.name) not in external_binding_names
     ]
 
     if unsupported_operations:
@@ -1125,7 +1129,17 @@ def emit_top_train_cpp(
             f"static unsigned char FPGAI_RELU_MASK_{relu_tag}[{relu_size}];"
         )
 
+    if external_composition_plan is not None:
+        from fpgai.implementations.hls_composition import package_declarations, package_training_declarations
+        declarations = [
+            *package_declarations(external_composition_plan),
+            *package_training_declarations(external_composition_plan),
+        ]
+        if declarations:
+            lines.extend(["", "// FPGAI Ecosystem external training entrypoints.", *declarations, ""])
+
     parameter_specs = []
+    parameter_initializers = []
 
     for op in graph.ops:
         tag = _sanitize(op.name)
@@ -1151,13 +1165,19 @@ def emit_top_train_cpp(
             )
 
             lines.append(
-                f"static wgt_t W_{tag}[{weights.size}] = "
+                f"static const wgt_t FPGAI_INIT_W_{tag}[{weights.size}] = "
                 f"{{ {weight_values} }};"
             )
+            lines.append(f"static wgt_t W_{tag}[{weights.size}];")
             lines.append(
-                f"static bias_t B_{tag}[{bias.size}] = "
+                f"static const bias_t FPGAI_INIT_B_{tag}[{bias.size}] = "
                 f"{{ {bias_values} }};"
             )
+            lines.append(f"static bias_t B_{tag}[{bias.size}];")
+            parameter_initializers.extend([
+                (f"W_{tag}", f"FPGAI_INIT_W_{tag}", int(weights.size)),
+                (f"B_{tag}", f"FPGAI_INIT_B_{tag}", int(bias.size)),
+            ])
             lines.append(
                 f"static grad_wgt_t dW_{tag}[{weights.size}];"
             )
@@ -1207,7 +1227,9 @@ def emit_top_train_cpp(
         elif op.op_type == "MatMul" and len(op.inputs) == 2 and op.inputs[1] in graph.constants:
             weights = np.asarray(graph.constants[op.inputs[1]], dtype=np.float32)
             weight_values = ", ".join(f"{float(value):.8f}f" for value in weights.reshape(-1))
-            lines.append(f"static wgt_t W_{tag}[{weights.size}] = {{ {weight_values} }};")
+            lines.append(f"static const wgt_t FPGAI_INIT_W_{tag}[{weights.size}] = {{ {weight_values} }};")
+            lines.append(f"static wgt_t W_{tag}[{weights.size}];")
+            parameter_initializers.append((f"W_{tag}", f"FPGAI_INIT_W_{tag}", int(weights.size)))
             lines.append(f"static grad_wgt_t dW_{tag}[{weights.size}];")
             lines.append(f"static float OUT_grad_{tag}[{weights.size}];")
             parameter_specs.append(("matmul", op, tag, weights.size, 0))
@@ -1215,7 +1237,9 @@ def emit_top_train_cpp(
         elif op.op_type == "Gather" and len(op.inputs) >= 2 and op.inputs[0] in graph.constants:
             weights = np.asarray(graph.constants[op.inputs[0]], dtype=np.float32)
             weight_values = ", ".join(f"{float(value):.8f}f" for value in weights.reshape(-1))
-            lines.append(f"static wgt_t W_{tag}[{weights.size}] = {{ {weight_values} }};")
+            lines.append(f"static const wgt_t FPGAI_INIT_W_{tag}[{weights.size}] = {{ {weight_values} }};")
+            lines.append(f"static wgt_t W_{tag}[{weights.size}];")
+            parameter_initializers.append((f"W_{tag}", f"FPGAI_INIT_W_{tag}", int(weights.size)))
             lines.append(f"static grad_wgt_t dW_{tag}[{weights.size}];")
             lines.append(f"static float OUT_grad_{tag}[{weights.size}];")
             parameter_specs.append(("gather", op, tag, weights.size, 0))
@@ -1223,7 +1247,9 @@ def emit_top_train_cpp(
         elif op.op_type == "RMSNorm" and len(op.inputs) > 1 and op.inputs[1] in graph.constants:
             gamma = np.asarray(graph.constants[op.inputs[1]], dtype=np.float32).reshape(-1)
             gamma_values = ", ".join(f"{float(value):.8f}f" for value in gamma)
-            lines.append(f"static wgt_t N_G_{tag}[{gamma.size}] = {{ {gamma_values} }};")
+            lines.append(f"static const wgt_t FPGAI_INIT_N_G_{tag}[{gamma.size}] = {{ {gamma_values} }};")
+            lines.append(f"static wgt_t N_G_{tag}[{gamma.size}];")
+            parameter_initializers.append((f"N_G_{tag}", f"FPGAI_INIT_N_G_{tag}", int(gamma.size)))
             lines.append(f"static grad_wgt_t dN_G_{tag}[{gamma.size}];")
             lines.append(f"static float OUT_grad_{tag}[{gamma.size}];")
             parameter_specs.append(("rmsnorm", op, tag, gamma.size, 0))
@@ -1233,8 +1259,14 @@ def emit_top_train_cpp(
             beta = (np.asarray(graph.constants[op.inputs[2]], dtype=np.float32).reshape(-1) if len(op.inputs) > 2 and op.inputs[2] in graph.constants else np.zeros_like(gamma))
             gamma_values = ", ".join(f"{float(value):.8f}f" for value in gamma)
             beta_values = ", ".join(f"{float(value):.8f}f" for value in beta)
-            lines.append(f"static wgt_t N_G_{tag}[{gamma.size}] = {{ {gamma_values} }};")
-            lines.append(f"static bias_t N_B_{tag}[{beta.size}] = {{ {beta_values} }};")
+            lines.append(f"static const wgt_t FPGAI_INIT_N_G_{tag}[{gamma.size}] = {{ {gamma_values} }};")
+            lines.append(f"static wgt_t N_G_{tag}[{gamma.size}];")
+            lines.append(f"static const bias_t FPGAI_INIT_N_B_{tag}[{beta.size}] = {{ {beta_values} }};")
+            lines.append(f"static bias_t N_B_{tag}[{beta.size}];")
+            parameter_initializers.extend([
+                (f"N_G_{tag}", f"FPGAI_INIT_N_G_{tag}", int(gamma.size)),
+                (f"N_B_{tag}", f"FPGAI_INIT_N_B_{tag}", int(beta.size)),
+            ])
             lines.append(f"static grad_wgt_t dN_G_{tag}[{gamma.size}];")
             lines.append(f"static grad_bias_t dN_B_{tag}[{beta.size}];")
             lines.append(f"static float OUT_grad_{tag}[{gamma.size + beta.size}];")
@@ -1260,13 +1292,19 @@ def emit_top_train_cpp(
             )
 
             lines.append(
-                f"static wgt_t W_{tag}[{weights.size}] = "
+                f"static const wgt_t FPGAI_INIT_W_{tag}[{weights.size}] = "
                 f"{{ {weight_values} }};"
             )
+            lines.append(f"static wgt_t W_{tag}[{weights.size}];")
             lines.append(
-                f"static bias_t B_{tag}[{bias.size}] = "
+                f"static const bias_t FPGAI_INIT_B_{tag}[{bias.size}] = "
                 f"{{ {bias_values} }};"
             )
+            lines.append(f"static bias_t B_{tag}[{bias.size}];")
+            parameter_initializers.extend([
+                (f"W_{tag}", f"FPGAI_INIT_W_{tag}", int(weights.size)),
+                (f"B_{tag}", f"FPGAI_INIT_B_{tag}", int(bias.size)),
+            ])
             lines.append(
                 f"static grad_wgt_t dW_{tag}[{weights.size}];"
             )
@@ -1334,13 +1372,19 @@ def emit_top_train_cpp(
             )
 
             lines.append(
-                f"static wgt_t BN_G_{tag}[{channels}] = "
+                f"static const wgt_t FPGAI_INIT_BN_G_{tag}[{channels}] = "
                 f"{{ {gamma_values} }};"
             )
+            lines.append(f"static wgt_t BN_G_{tag}[{channels}];")
             lines.append(
-                f"static bias_t BN_B_{tag}[{channels}] = "
+                f"static const bias_t FPGAI_INIT_BN_B_{tag}[{channels}] = "
                 f"{{ {beta_values} }};"
             )
+            lines.append(f"static bias_t BN_B_{tag}[{channels}];")
+            parameter_initializers.extend([
+                (f"BN_G_{tag}", f"FPGAI_INIT_BN_G_{tag}", int(channels)),
+                (f"BN_B_{tag}", f"FPGAI_INIT_BN_B_{tag}", int(channels)),
+            ])
             lines.append(
                 f"static acc_t BN_M_{tag}[{channels}] = "
                 f"{{ {mean_values} }};"
@@ -1390,6 +1434,24 @@ def emit_top_train_cpp(
             "",
         ]
     )
+
+    if parameter_initializers:
+        lines.extend([
+            "  // FPGAI compact initialization: keep mutable execution storage separate",
+            "  // from the embedded read-only parameter image to avoid pathological RTL",
+            "  // expansion from large writable BRAM/URAM aggregate initializers.",
+            "  static bool FPGAI_PARAMETERS_INITIALIZED = false;",
+            "  if (!FPGAI_PARAMETERS_INITIALIZED) {",
+        ])
+        for destination, initializer, count in parameter_initializers:
+            lines.append(
+                f"    for (int i = 0; i < {count}; ++i) {destination}[i] = {initializer}[i];"
+            )
+        lines.extend([
+            "    FPGAI_PARAMETERS_INITIALIZED = true;",
+            "  }",
+            "",
+        ])
 
     if weights_mode in {
         "stream",
@@ -1586,6 +1648,26 @@ def emit_top_train_cpp(
         output_tensor_size = tensor_name_to_size[
             output_name_for_op
         ]
+
+        external_binding = (
+            external_composition_plan.binding_for_node(op.name)
+            if external_composition_plan is not None else None
+        )
+        if external_binding is not None:
+            if not external_binding.contract.training.forward:
+                raise RuntimeError(
+                    f"HLSCOMP024: external implementation {external_binding.contract.package_id!r} "
+                    "does not declare training.forward=true"
+                )
+            from fpgai.implementations.hls_composition import emit_external_call
+            lines.extend(emit_external_call(
+                external_binding,
+                current_buffer=input_buffer,
+                current_type="act_t",
+                output_buffer=output_buffer,
+                output_type="act_t",
+            ))
+            continue
 
         if op.op_type == "Dense":
             tag = _sanitize(op.name)
@@ -2231,6 +2313,20 @@ def emit_top_train_cpp(
         output_tensor_size = tensor_name_to_size[
             output_name_for_op
         ]
+
+        external_binding = (
+            external_composition_plan.binding_for_node(op.name)
+            if external_composition_plan is not None else None
+        )
+        if external_binding is not None:
+            from fpgai.implementations.hls_composition import emit_external_backward_input_call
+            lines.extend(emit_external_backward_input_call(
+                external_binding,
+                output_gradient=output_gradient,
+                input_gradient=input_gradient,
+                gradient_type="grad_act_t",
+            ))
+            continue
 
         if op.op_type == "Dense":
             tag = _sanitize(op.name)
@@ -3163,10 +3259,37 @@ def _fpgai_training_weight_storage_impl_from_notes(notes: Dict[str, Any]) -> str
 
 def _fpgai_training_parameter_specs_from_source(source: str) -> List[Tuple[str, str, int, str, int]]:
     specs: List[Tuple[str, str, int, str, int]] = []
-    for match in re.finditer(r"static\s+wgt_t\s+(W_[A-Za-z0-9_]+)\[(\d+)\]\s*=.*?;\s*static\s+bias_t\s+(B_[A-Za-z0-9_]+)\[(\d+)\]", source, flags=re.DOTALL):
-        specs.append((match.group(1), match.group(3), int(match.group(2)), match.group(3), int(match.group(4))))
-    for match in re.finditer(r"static\s+wgt_t\s+(BN_G_[A-Za-z0-9_]+)\[(\d+)\]\s*=.*?;\s*static\s+bias_t\s+(BN_B_[A-Za-z0-9_]+)\[(\d+)\]", source, flags=re.DOTALL):
-        specs.append((match.group(1), match.group(3), int(match.group(2)), match.group(3), int(match.group(4))))
+    # Trainable execution arrays intentionally have no aggregate initializer.
+    # Their embedded values live in FPGAI_INIT_* read-only images and are copied
+    # once at top-level entry.  Keep this parser independent of declaration
+    # adjacency so compact initialization does not break storage binding.
+    weights = {
+        match.group(1): int(match.group(2))
+        for match in re.finditer(r"static\s+wgt_t\s+(W_[A-Za-z0-9_]+)\[(\d+)\]\s*(?:=\s*\{[^;]*\})?\s*;", source)
+    }
+    biases = {
+        match.group(1): int(match.group(2))
+        for match in re.finditer(r"static\s+bias_t\s+(B_[A-Za-z0-9_]+)\[(\d+)\]\s*(?:=\s*\{[^;]*\})?\s*;", source)
+    }
+    for w_name, w_size in weights.items():
+        tag = w_name[2:]
+        b_name = f"B_{tag}"
+        if b_name in biases:
+            specs.append((w_name, b_name, w_size, b_name, biases[b_name]))
+
+    bn_weights = {
+        match.group(1): int(match.group(2))
+        for match in re.finditer(r"static\s+wgt_t\s+(BN_G_[A-Za-z0-9_]+)\[(\d+)\]\s*(?:=\s*\{[^;]*\})?\s*;", source)
+    }
+    bn_biases = {
+        match.group(1): int(match.group(2))
+        for match in re.finditer(r"static\s+bias_t\s+(BN_B_[A-Za-z0-9_]+)\[(\d+)\]\s*(?:=\s*\{[^;]*\})?\s*;", source)
+    }
+    for w_name, w_size in bn_weights.items():
+        tag = w_name[5:]
+        b_name = f"BN_B_{tag}"
+        if b_name in bn_biases:
+            specs.append((w_name, b_name, w_size, b_name, bn_biases[b_name]))
     return specs
 
 

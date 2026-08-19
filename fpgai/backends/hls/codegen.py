@@ -842,6 +842,10 @@ def emit_hls_stub(
             top_name=top_name,
             weights_mode=weights_mode,
             training_cfg=training_cfg,
+            compile_plan=compile_plan,
+            memory_plan=memory_plan,
+            communication_plan=communication_plan,
+            external_composition_plan=external_composition_plan,
         )
         tb_src = _emit_training_tb_cpp(
             graph=graph,
@@ -880,6 +884,7 @@ def emit_hls_stub(
                     top_name=top_name,
                     weights_mode=weights_mode,
                     raw_cfg=hls_options.get("raw_cfg", {}) or {},
+                    compile_plan=compile_plan,
                     external_composition_plan=external_composition_plan,
                     tensor_liveness=tensor_liveness,
                     buffer_allocation=dag_buffer_allocation,

@@ -17,6 +17,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from fpgai.backends.vivado import generate_vivado_bridge_for_experiment
 from fpgai.runtime.package import emit_runtime_package
 from fpgai.toolchain import build_xilinx_tool_command
+from fpgai.reporting.hls_validation import evaluate_hls_artifact_guards
 
 
 def _load_json(path: Path) -> Any:
@@ -705,6 +706,37 @@ def _run_for_artifact(
         return blocked_manifest
 
     if run_vivado_synth or run_vivado_impl:
+        compile_manifest = _load_compile_manifest(bridge.parent)
+        guards_cfg = compile_manifest.get("guards", {}) if isinstance(compile_manifest.get("guards", {}), dict) else {}
+        if not guards_cfg:
+            guards_cfg = _deep_find_dict(compile_manifest, "guards")
+        hls_guard_cfg = guards_cfg.get("hls_artifacts", {}) if isinstance(guards_cfg.get("hls_artifacts", {}), dict) else {}
+        guard_enabled = bool(guards_cfg.get("enabled", True))
+        guard_policy = str(guards_cfg.get("policy", "block") or "block")
+        guard_report = evaluate_hls_artifact_guards(
+            bridge.parent / "hls",
+            max_single_rtl_bytes=int(hls_guard_cfg.get("max_single_rtl_bytes", 32 * 1024 * 1024)),
+            max_total_ip_bytes=int(hls_guard_cfg.get("max_total_ip_bytes", 256 * 1024 * 1024)),
+        ) if guard_enabled else {
+            "schema": "fpgai.hls-artifact-guards/v1", "status": "disabled", "passed": True, "checks": []
+        }
+        guard_report["configured_policy"] = guard_policy
+        row["compiler_guard_report"] = guard_report
+        _write_json(bridge / "reports" / "compiler_guards.json", guard_report)
+        if not guard_report.get("passed", True) and guard_policy == "block":
+            blocked = [check for check in guard_report.get("checks", []) if check.get("status") == "blocked"]
+            reason = "Vivado blocked by FPGAI compiler guard: " + "; ".join(
+                f"{item.get('id')} observed={item.get('observed_bytes')} limit={item.get('limit_bytes')}" for item in blocked
+            )
+            row.update({
+                "vivado_ran": False,
+                "vivado_ok": False,
+                "vivado_returncode": None,
+                "vivado_error": reason,
+                "error": reason,
+            })
+            _refresh_manifest(bridge, {"compiler_guard_report": guard_report, "vivado_guard_blocked": True, "vivado_guard_reason": reason})
+            return row
         if export_hls_ip and not row.get("hls_ip_export_ok", False):
             res = {
                 "requested": True,
@@ -732,7 +764,11 @@ def _run_for_artifact(
                 if run_vivado_impl:
                     env["FPGAI_VIVADO_RUN_IMPL"] = "1"
                 env["FPGAI_VIVADO_RUN_BITSTREAM"] = "1" if run_bitstream else "0"
+                vivado_cfg = _tool_cfg_from_manifest(bridge.parent, "vivado")
+                if "FPGAI_VIVADO_JOBS" not in env:
+                    env["FPGAI_VIVADO_JOBS"] = str(max(1, int(vivado_cfg.get("jobs", 1) or 1)))
                 cmd, tool_info = _resolved_tool_command(bridge.parent, "vivado", ["-mode", "batch", "-source", "scripts/run_vivado.tcl"])
+                tool_info["jobs"] = int(env["FPGAI_VIVADO_JOBS"])
                 res = _run_cmd(cmd, bridge, "vivado_build", timeout_sec, env=env)
                 res["resolved_tool"] = tool_info
 

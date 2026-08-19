@@ -1244,3 +1244,45 @@ def test_external_ddr_weight_residency_uses_tiled_layout() -> None:
     assert all(placement.double_buffer is True for placement in weights)
     assert all(placement.notes["residency"] == "external_ddr" for placement in weights)
     assert all(placement.notes["local_staging"] == "tile_buffer" for placement in weights)
+
+
+def test_hls_source_guard_blocks_large_direct_bram_uram_aggregate_initializer(tmp_path) -> None:
+    from fpgai.reporting.hls_validation import evaluate_hls_source_guards
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "deeplearn.cpp").write_text(
+        """
+        void deeplearn() {
+          static ap_fixed<16,6> W0[2048] = {0};
+        #pragma HLS BIND_STORAGE variable=W0 type=ram_2p impl=uram
+        }
+        """,
+        encoding="utf-8",
+    )
+    report = evaluate_hls_source_guards(tmp_path, max_direct_static_memory_elements=1024)
+    assert report["passed"] is False
+    check = report["checks"][0]
+    assert check["id"] == "HLS_GUARD_DIRECT_STATIC_MEMORY_INITIALIZER"
+    assert check["storage"] == "uram"
+    assert check["elements"] == 2048
+
+
+def test_hls_source_guard_accepts_compact_one_time_copy_into_uram(tmp_path) -> None:
+    from fpgai.reporting.hls_validation import evaluate_hls_source_guards
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "deeplearn.cpp").write_text(
+        """
+        void deeplearn() {
+          static ap_fixed<16,6> W0[2048];
+        #pragma HLS BIND_STORAGE variable=W0 type=ram_2p impl=uram
+          static bool init = false;
+          if (!init) { for (int i=0; i<2048; ++i) W0[i] = fpgai::W0[i]; init = true; }
+        }
+        """,
+        encoding="utf-8",
+    )
+    report = evaluate_hls_source_guards(tmp_path, max_direct_static_memory_elements=1024)
+    assert report["passed"] is True

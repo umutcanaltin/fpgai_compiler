@@ -171,12 +171,23 @@ class HLSProjectGenerationMixin:
         pipeline_mode = str(self.cfg.pipeline.mode).lower()
         training_cfg = (_cfg_get(raw, "training", {}) or {})
 
-        intermediate_dump = bool(_cfg_get(raw, "benchmark.intermediate.enabled", False))
+        validation_levels = _cfg_get(raw, "validation.numeric.levels", []) or []
+        if isinstance(validation_levels, str):
+            validation_levels = [validation_levels]
+        validation_levels = {str(level).strip().lower() for level in validation_levels}
+        validation_requests_intermediates = bool({"layer", "layerwise", "intermediate"} & validation_levels)
+        intermediate_dump = (
+            bool(_cfg_get(raw, "benchmark.intermediate.enabled", False))
+            or validation_requests_intermediates
+        )
         stages = build_stages or _resolve_build_stages(raw)
         emit_hls_project = bool(stages.get("hls_project", True))
         emit_testbench = bool(stages.get("testbench", True))
         if pipeline_mode == "training_on_device":
-            intermediate_dump = bool(_cfg_get(raw, "training.debug.dump_intermediates", False))
+            intermediate_dump = (
+                bool(_cfg_get(raw, "training.debug.dump_intermediates", False))
+                or validation_requests_intermediates
+            )
 
         proj = emit_hls_stub(
             graph=g,
@@ -376,6 +387,7 @@ class HLSProjectGenerationMixin:
                     top_name=top_name,
                     weights_mode=weights_mode,
                     raw_cfg=self.cfg.raw,
+                    compile_plan=compile_plan,
                     tensor_liveness=tensor_liveness,
                     buffer_allocation=build_hls_buffer_allocation(
                         g, raw_cfg=self.cfg.raw, tensor_liveness=tensor_liveness

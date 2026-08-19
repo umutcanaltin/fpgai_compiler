@@ -57,3 +57,13 @@ def test_branch_graph_allows_external_node_to_consume_noncurrent_tensor():
     plan = build_hls_composition_plan(graph, selected_contracts={"scale_bias_0": contract})
     assert plan.graph_mode == "dag_mixed_graph"
     assert plan.bindings[0].input_tensor == "input"
+
+
+def test_hls_architecture_mapping_flows_into_external_call_attributes():
+    from dataclasses import replace
+    contract = implementation_contract_from_manifest(Path("examples/packages/scale_bias_hls"))
+    contract = replace(contract, architecture_mapping={"parallelism.pe": {"target": "hls_attribute", "name": "scale"}})
+    graph = _graph()
+    graph.ops[1].semantics.schedule["architecture"] = {"parallelism": {"pe": 4}}
+    plan = build_hls_composition_plan(graph, selected_contracts={"scale_bias_0": contract})
+    assert plan.bindings[0].attributes["scale"] == 4

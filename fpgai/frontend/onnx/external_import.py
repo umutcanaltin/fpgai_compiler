@@ -36,6 +36,6 @@ def try_import_external_node(*, graph, node, op_name: str, attrs: Mapping[str,An
             continue
         if inferred_shape is not None:
             graph.add_tensor(name,inferred_shape,inferred_dtype or "float32")
-    provenance={"package_id":selected.package_id,"package_version":selected.package_version,"operator_id":definition.contract.operator_id,"manifest_sha256":selected.manifest_hash,"capabilities":definition.contract.capabilities.to_dict(),"category":definition.contract.category}
+    provenance={"package_id":selected.package_id,"package_version":selected.package_version,"operator_id":definition.contract.operator_id,"operator_semantics_version":definition.contract.version,"manifest_sha256":selected.manifest_hash,"capabilities":definition.contract.capabilities.to_dict(),"category":definition.contract.category}
     normalized=dict(imported.attributes); normalized["_fpgai_external_operator"]=provenance
     return Op(name=op_name,op_type=imported.canonical_op_type,inputs=list(imported.inputs),outputs=list(imported.outputs),attrs=normalized)

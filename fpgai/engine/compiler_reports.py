@@ -46,6 +46,7 @@ def _resolved_toolchain_summary(raw: Dict[str, Any]) -> Dict[str, Any]:
             "exe",
             "path",
             "version",
+            "jobs",
         }
         out[name] = {str(k): v for k, v in cfg.items() if str(k) in allowed}
     return out

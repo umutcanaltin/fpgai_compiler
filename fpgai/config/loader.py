@@ -206,6 +206,7 @@ TOP_LEVEL_SECTIONS_V1 = {
     "ecosystem",
     "implementations",
     "architecture",
+    "guards",
 }
 
 DEFAULT_NUMERIC_ROLES = {
@@ -995,6 +996,36 @@ def _validate_analysis_cfg(
     )
 
 
+def _validate_guards_cfg(
+    raw: Dict[str, Any],
+    issues: List[ConfigIssue],
+) -> None:
+    guards = raw.get("guards")
+    if guards is None:
+        return
+    if not isinstance(guards, dict):
+        issues.append(ConfigIssue("guards", "Expected a mapping"))
+        return
+    allowed = {"enabled", "policy", "hls_artifacts"}
+    for key in sorted(set(guards) - allowed):
+        issues.append(ConfigIssue(f"guards.{key}", f"Unknown compiler guard field {key!r}"))
+    if "enabled" in guards and not isinstance(guards.get("enabled"), bool):
+        issues.append(ConfigIssue("guards.enabled", "Expected a boolean"))
+    if "policy" in guards and str(guards.get("policy")) not in {"block", "warn"}:
+        issues.append(ConfigIssue("guards.policy", "Expected 'block' or 'warn'"))
+    hls = guards.get("hls_artifacts")
+    if hls is not None:
+        if not isinstance(hls, dict):
+            issues.append(ConfigIssue("guards.hls_artifacts", "Expected a mapping"))
+        else:
+            allowed_hls = {"max_single_rtl_bytes", "max_total_ip_bytes"}
+            for key in sorted(set(hls) - allowed_hls):
+                issues.append(ConfigIssue(f"guards.hls_artifacts.{key}", f"Unknown HLS artifact guard field {key!r}"))
+            for key in allowed_hls:
+                if key in hls and (not isinstance(hls.get(key), int) or int(hls.get(key)) <= 0):
+                    issues.append(ConfigIssue(f"guards.hls_artifacts.{key}", "Expected a positive integer byte limit"))
+
+
 def _validate_validation_cfg(
     raw: Dict[str, Any],
     issues: List[ConfigIssue],
@@ -1020,8 +1051,19 @@ def _validate_validation_cfg(
         if not isinstance(numeric, dict):
             issues.append(ConfigIssue("validation.numeric", "Expected a mapping"))
         else:
-            for key in sorted(set(numeric) - {"probes"}):
+            allowed_numeric = {"enabled", "policy", "levels", "reference", "compare", "tolerances", "backends", "probes"}
+            for key in sorted(set(numeric) - allowed_numeric):
                 issues.append(ConfigIssue(f"validation.numeric.{key}", f"Unknown numeric validation field {key!r}"))
+            if "enabled" in numeric and not isinstance(numeric.get("enabled"), bool):
+                issues.append(ConfigIssue("validation.numeric.enabled", "Expected a boolean"))
+            if "policy" in numeric and str(numeric.get("policy")) not in {"report_only", "enforce"}:
+                issues.append(ConfigIssue("validation.numeric.policy", "Expected 'report_only' or 'enforce'"))
+            for list_key in ("levels", "backends"):
+                if list_key in numeric and not isinstance(numeric.get(list_key), list):
+                    issues.append(ConfigIssue(f"validation.numeric.{list_key}", "Expected a list"))
+            for map_key in ("reference", "compare", "tolerances"):
+                if map_key in numeric and not isinstance(numeric.get(map_key), dict):
+                    issues.append(ConfigIssue(f"validation.numeric.{map_key}", "Expected a mapping"))
             probes = numeric.get("probes")
             if probes is not None:
                 if not isinstance(probes, dict):
@@ -1572,6 +1614,145 @@ def _validate_compiler_controls(
             issues.append(ConfigIssue(path, "Expected a boolean"))
 
 
+
+def _resolve_ecosystem_model_package(raw: Dict[str, Any], *, config_path: str, issues: List[ConfigIssue]) -> None:
+    """Resolve an FPGAI Ecosystem model package into the normal model.path contract.
+
+    The package registry remains the owner of discovery/version selection while the
+    compiler continues to consume the ordinary model.path/model.format fields.
+    This keeps ecosystem models on the exact same frontend, IR, validation, and
+    backend pipeline as non-package models.
+    """
+    ecosystem = raw.get("ecosystem")
+    if not isinstance(ecosystem, dict):
+        return
+    package_id = ecosystem.get("model_package")
+    if package_id in (None, ""):
+        return
+    if not isinstance(package_id, str) or not package_id.strip():
+        issues.append(ConfigIssue("ecosystem.model_package", "Expected a namespace-qualified package ID string"))
+        return
+    package_id = package_id.strip()
+
+    try:
+        from pathlib import Path as _Path
+        from fpgai.contracts.package_manifest import load_package_manifest
+        from fpgai.discovery import DiscoveryRequest, discover_packages
+
+        cfg_dir = _Path(config_path).expanduser().resolve().parent
+        project_root_raw = ecosystem.get("project_root", cfg_dir)
+        project_root = _Path(str(project_root_raw)).expanduser()
+        if not project_root.is_absolute():
+            project_root = (cfg_dir / project_root).resolve()
+        else:
+            project_root = project_root.resolve()
+
+        directories = []
+        for item in ecosystem.get("package_directories", ()) or ():
+            directory = _Path(str(item)).expanduser()
+            if not directory.is_absolute():
+                directory = (project_root / directory).resolve()
+            else:
+                directory = directory.resolve()
+            directories.append(directory)
+
+        discovered = discover_packages(DiscoveryRequest(
+            project_root=project_root,
+            configured_directories=tuple(directories),
+            include_builtin=bool(ecosystem.get("include_builtin", True)),
+            strict=bool(ecosystem.get("strict_discovery", True)),
+        ))
+        if not discovered.ok:
+            issues.append(ConfigIssue("ecosystem.model_package", "Package discovery failed while resolving the model package"))
+            return
+        entries = [entry for entry in discovered.catalogue.find_by_package_id(package_id) if entry.asset_type == "model"]
+        if not entries:
+            issues.append(ConfigIssue("ecosystem.model_package", f"Model package {package_id!r} was not discovered"))
+            return
+        entries.sort(key=lambda entry: (entry.priority, entry.version), reverse=True)
+        entry = entries[0]
+        if entry.source_path is None:
+            issues.append(ConfigIssue("ecosystem.model_package", f"Model package {package_id!r} has no local package root"))
+            return
+        manifest = load_package_manifest(entry.source_path)
+        model_ep = dict(dict(manifest.raw.get("entrypoints", {})).get("model", {}) or {})
+        relative = model_ep.get("path")
+        if not isinstance(relative, str) or not relative.strip():
+            issues.append(ConfigIssue("ecosystem.model_package", f"Model package {package_id!r} has no entrypoints.model.path"))
+            return
+        package_root = _Path(entry.source_path).resolve()
+        resolved = (package_root / relative).resolve()
+        try:
+            resolved.relative_to(package_root)
+        except ValueError:
+            issues.append(ConfigIssue("ecosystem.model_package", "Resolved model entrypoint escapes the package root"))
+            return
+        if not resolved.is_file():
+            issues.append(ConfigIssue("ecosystem.model_package", f"Model package entrypoint does not exist: {resolved}"))
+            return
+
+        model_cfg = raw.setdefault("model", {})
+        if not isinstance(model_cfg, dict):
+            issues.append(ConfigIssue("model", "Expected a mapping"))
+            return
+        configured_path = model_cfg.get("path")
+        if isinstance(configured_path, str) and configured_path.strip():
+            configured_resolved = _Path(configured_path).expanduser()
+            if not configured_resolved.is_absolute():
+                configured_resolved = (cfg_dir / configured_resolved).resolve()
+            else:
+                configured_resolved = configured_resolved.resolve()
+            if configured_resolved != resolved:
+                issues.append(ConfigIssue(
+                    "model.path",
+                    f"model.path {configured_resolved} conflicts with ecosystem model package {package_id!r} entrypoint {resolved}",
+                ))
+                return
+        model_cfg["path"] = str(resolved)
+        if model_ep.get("format") and not model_cfg.get("format"):
+            model_cfg["format"] = str(model_ep.get("format"))
+
+        require_numeric = bool(ecosystem.get("require_numeric_validation", True))
+        validation_root = raw.setdefault("validation", {})
+        if isinstance(validation_root, dict):
+            numeric = validation_root.setdefault("numeric", {})
+            if isinstance(numeric, dict):
+                if require_numeric and numeric.get("enabled") is False:
+                    issues.append(ConfigIssue(
+                        "validation.numeric.enabled",
+                        "Ecosystem model packages require numeric validation by default; set ecosystem.require_numeric_validation=false to opt out for source-only workflows",
+                    ))
+                elif require_numeric:
+                    numeric.setdefault("enabled", True)
+                    numeric.setdefault("policy", "enforce")
+                    numeric.setdefault("levels", ["model", "layer", "intermediate", "state"])
+                    reference_cfg = numeric.setdefault("reference", {})
+                    if isinstance(reference_cfg, dict):
+                        reference_cfg.setdefault("source", "framework")
+                        reference_cfg.setdefault("compare_ir", True)
+                    compare_cfg = numeric.setdefault("compare", {})
+                    if isinstance(compare_cfg, dict):
+                        compare_cfg.setdefault("outputs", True)
+                        compare_cfg.setdefault("intermediates", True)
+                        compare_cfg.setdefault("loss", True)
+                        compare_cfg.setdefault("gradients", True)
+                        compare_cfg.setdefault("parameters", True)
+                        compare_cfg.setdefault("optimizer_state", True)
+
+        metadata = raw.setdefault("metadata", {})
+        if isinstance(metadata, dict):
+            metadata["ecosystem_model"] = {
+                "package_id": package_id,
+                "version": entry.version,
+                "manifest_hash": entry.manifest_hash,
+                "package_root": str(package_root),
+                "model_path": str(resolved),
+                "format": str(model_ep.get("format", model_cfg.get("format", ""))),
+                "validation_level": entry.validation_level,
+            }
+    except Exception as exc:
+        issues.append(ConfigIssue("ecosystem.model_package", f"Could not resolve model package {package_id!r}: {exc}"))
+
 def load_config(path: str) -> FPGAIConfig:
     if not os.path.exists(path):
         raise ConfigError(
@@ -1588,6 +1769,7 @@ def load_config(path: str) -> FPGAIConfig:
 
     _validate_top_level_sections(raw, issues)
     _validate_architecture_config(raw, issues)
+    _resolve_ecosystem_model_package(raw, config_path=path, issues=issues)
 
     version = raw.get(
         "version",
@@ -1716,6 +1898,10 @@ def load_config(path: str) -> FPGAIConfig:
         issues,
     )
     _validate_validation_cfg(
+        raw,
+        issues,
+    )
+    _validate_guards_cfg(
         raw,
         issues,
     )
