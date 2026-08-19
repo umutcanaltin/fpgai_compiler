@@ -1472,6 +1472,37 @@ def emit_dag_top_cpp(
         ])
     lines.extend(["}", ""])
     source = "\n".join(lines)
+    if normalized_weights_mode == "embedded":
+        # Keep DAG embedded-weight storage on the same physical contract as
+        # the linear emitter.  Global const arrays in fpgai_params.cpp are
+        # only the compile-time initialization image; Vitis cannot apply
+        # file-scope BIND_STORAGE pragmas to them.  Materialize function-scope
+        # static arrays and bind them explicitly to the user-selected BRAM or
+        # URAM implementation.
+        raw = dict(raw_cfg or {})
+        memory = raw.get("memory") if isinstance(raw.get("memory"), Mapping) else {}
+        storage_cfg = memory.get("storage") if isinstance(memory.get("storage"), Mapping) else {}
+        storage = str(
+            storage_cfg.get("weights")
+            or memory.get("weight_storage")
+            or "bram"
+        ).strip().lower().replace("-", "_")
+        storage_aliases = {
+            "embedded": "bram",
+            "on_chip": "bram",
+            "onchip": "bram",
+            "block": "bram",
+            "block_ram": "bram",
+            "bram": "bram",
+            "ultra": "uram",
+            "ultra_ram": "uram",
+            "uram": "uram",
+        }
+        impl = storage_aliases.get(storage)
+        if impl is not None:
+            from fpgai.backends.hls.emit.top_cpp import _fpgai_insert_static_weight_block
+            source = _fpgai_insert_static_weight_block(source, graph, impl=impl)
+
     if normalized_weights_mode == "ddr_tiled":
         # Reuse the existing DDR-tiled weight ABI and Dense/Conv tile helpers.
         # The DAG Conv path stores feature maps internally in HWC-flat order,

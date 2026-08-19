@@ -235,3 +235,61 @@ def test_branch_aware_ddr_tiled_reuses_shared_weight_helpers_with_hwc_conv_layou
     assert "input[(ih * IN_W + iw) * IN_C + ic]" in source
     assert "output[(oh * OUT_W + ow) * OUT_C + oc]" in source
     assert "reinterpret_cast<const op0_wgt_t*>(W0)" not in source
+
+
+def _embedded_dense_graph_for_static_storage():
+    import numpy as np
+
+    graph = Graph("embedded_static_dense")
+    graph.inputs = ["input"]
+    graph.outputs = ["out"]
+    graph.add_tensor("input", (1, 4), "float32")
+    graph.add_tensor("W", (3, 4), "float32")
+    graph.add_tensor("B", (3,), "float32")
+    graph.add_tensor("out", (1, 3), "float32")
+    graph.constants["W"] = np.arange(12, dtype=np.float32).reshape(3, 4)
+    graph.constants["B"] = np.zeros((3,), dtype=np.float32)
+    graph.add_op("Dense", ["input", "W", "B"], ["out"], name="dense0")
+    return graph
+
+
+def test_branch_aware_embedded_bram_materializes_function_scope_weight_storage():
+    graph = _embedded_dense_graph_for_static_storage()
+    source = emit_dag_top_cpp(
+        graph,
+        top_name="deeplearn",
+        weights_mode="embedded",
+        raw_cfg={
+            "memory": {"storage": {"weights": "bram"}},
+            "numerics": {"defaults": {"activation": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6}}},
+        },
+    )
+
+    assert "FPGAI bram_static weight storage" in source
+    assert "static op0_wgt_t W0[12];" in source
+    assert "#pragma HLS BIND_STORAGE variable=W0 type=ram_2p impl=bram" in source
+    assert "W0[i] = fpgai::W0[i];" in source
+    assert "B0[i] = fpgai::B0[i];" in source
+    assert "static bool fpgai_static_weights_initialized = false;" in source
+    assert "static op0_wgt_t W0[12] = {" not in source
+
+
+def test_branch_aware_embedded_uram_materializes_function_scope_weight_storage():
+    graph = _embedded_dense_graph_for_static_storage()
+    source = emit_dag_top_cpp(
+        graph,
+        top_name="deeplearn",
+        weights_mode="embedded",
+        raw_cfg={
+            "memory": {"storage": {"weights": "uram"}},
+            "numerics": {"defaults": {"activation": {"type": "ap_fixed", "total_bits": 16, "int_bits": 6}}},
+        },
+    )
+
+    assert "FPGAI uram_static weight storage" in source
+    assert "static op0_wgt_t W0[12];" in source
+    assert "#pragma HLS BIND_STORAGE variable=W0 type=ram_2p impl=uram" in source
+    assert "W0[i] = fpgai::W0[i];" in source
+    assert "B0[i] = fpgai::B0[i];" in source
+    assert "static bool fpgai_static_weights_initialized = false;" in source
+    assert "static op0_wgt_t W0[12] = {" not in source

@@ -2530,41 +2530,41 @@ def _fpgai_static_weight_init_block(graph, *, impl: str) -> str:
     if not specs:
         return ""
 
+    # Keep compile-time parameters in the compact fpgai_params.cpp ROM and
+    # materialize the user-selected BRAM/URAM execution storage separately.
+    # Do not use a large C++ aggregate initializer on a writable static RAM:
+    # Vitis HLS expands that representation into very large RTL (observed as
+    # tens of megabytes for only a few thousand parameters), which in turn can
+    # make Vivado implementation consume pathological host memory.
     lines = [
         f"    // FPGAI {impl}_static weight storage.",
-        "    // Initial values are compile-time generated constants in fpgai_params.cpp.",
-        f"    // The top function imports them once into local static {impl.upper()} arrays, then reuses them across runs.",
-        "    static bool fpgai_static_weights_initialized = false;",
+        "    // Embedded parameter image is copied once into bound execution storage.",
+        "    // Avoid direct aggregate initialization of writable BRAM/URAM arrays.",
     ]
 
     for parameter_index, precision_tag, weight_count, bias_count, op_type, op_name in specs:
-        lines.append(f"    // {op_type} {op_name}: local static W{parameter_index}[{weight_count}], B{parameter_index}[{bias_count}]")
+        lines.append(
+            f"    // {op_type} {op_name}: local static W{parameter_index}[{weight_count}], "
+            f"B{parameter_index}[{bias_count}]"
+        )
         lines.append(f"    static {precision_tag}_wgt_t W{parameter_index}[{weight_count}];")
         lines.append(f"#pragma HLS BIND_STORAGE variable=W{parameter_index} type=ram_2p impl={impl}")
         lines.append(f"    static {precision_tag}_bias_t B{parameter_index}[{bias_count}];")
         lines.append(f"#pragma HLS BIND_STORAGE variable=B{parameter_index} type=ram_2p impl={impl}")
 
-    lines.extend([
-        "    if (!fpgai_static_weights_initialized) {",
-    ])
-
-    for parameter_index, precision_tag, weight_count, bias_count, op_type, op_name in specs:
-        lines.append(f"        for (int i = 0; i < {weight_count}; ++i) {{")
-        lines.append("#pragma HLS PIPELINE II=1")
-        lines.append(f"            W{parameter_index}[i] = fpgai::W{parameter_index}[i];")
-        lines.append("        }")
-        lines.append(f"        for (int i = 0; i < {bias_count}; ++i) {{")
-        lines.append("#pragma HLS PIPELINE II=1")
-        lines.append(f"            B{parameter_index}[i] = fpgai::B{parameter_index}[i];")
-        lines.append("        }")
-
-    lines.extend([
-        "        fpgai_static_weights_initialized = true;",
-        "    }",
-        "",
-    ])
+    lines.append("    static bool fpgai_static_weights_initialized = false;")
+    lines.append("    if (!fpgai_static_weights_initialized) {")
+    for parameter_index, _precision_tag, weight_count, bias_count, _op_type, _op_name in specs:
+        lines.append(
+            f"        for (int i = 0; i < {weight_count}; ++i) W{parameter_index}[i] = fpgai::W{parameter_index}[i];"
+        )
+        lines.append(
+            f"        for (int i = 0; i < {bias_count}; ++i) B{parameter_index}[i] = fpgai::B{parameter_index}[i];"
+        )
+    lines.append("        fpgai_static_weights_initialized = true;")
+    lines.append("    }")
+    lines.append("")
     return "\n".join(lines)
-
 
 def _fpgai_insert_static_weight_block(source: str, graph, *, impl: str) -> str:
     if f"FPGAI {impl}_static weight storage" in source:

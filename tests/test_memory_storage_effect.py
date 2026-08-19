@@ -380,6 +380,9 @@ def test_top_cpp_emits_function_scope_bram_static_weight_arrays() -> None:
     assert "static op0_wgt_t W0[12];" in source
     assert "#pragma HLS BIND_STORAGE variable=W0 type=ram_2p impl=bram" in source
     assert "W0[i] = fpgai::W0[i];" in source
+    assert "B0[i] = fpgai::B0[i];" in source
+    assert "static bool fpgai_static_weights_initialized = false;" in source
+    assert "static op0_wgt_t W0[12] = {" not in source
     assert "dense_out_in<4, 3" in source
 
 
@@ -445,6 +448,9 @@ def test_top_cpp_emits_function_scope_uram_static_weight_arrays() -> None:
     assert "static op0_wgt_t W0[12];" in source
     assert "#pragma HLS BIND_STORAGE variable=W0 type=ram_2p impl=uram" in source
     assert "W0[i] = fpgai::W0[i];" in source
+    assert "B0[i] = fpgai::B0[i];" in source
+    assert "static bool fpgai_static_weights_initialized = false;" in source
+    assert "static op0_wgt_t W0[12] = {" not in source
     assert "dense_out_in<4, 3" in source
 
 
