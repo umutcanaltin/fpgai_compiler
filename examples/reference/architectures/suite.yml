@@ -1,0 +1,20 @@
+schema: fpgai.reference-architecture-suite/v1
+name: reference_architectures
+architectures:
+  - profile: examples/reference/architectures/llm_like_gqa_decoder.yml
+    builder: fpgai.benchmark.model_graphs:build_llm_like_decoder_graph
+    purpose: autoregressive_gqa
+  - profile: examples/reference/architectures/llm_like_mha_decoder.yml
+    builder: fpgai.benchmark.model_graphs:build_llm_like_decoder_graph
+    purpose: autoregressive_mha
+  - profile: examples/reference/architectures/yolo_like_multiscale_detector.yml
+    builder: fpgai.benchmark.model_graphs:build_yolo_like_multiscale_detector_graph
+    purpose: multiscale_detection
+  - profile: examples/reference/architectures/single_stage_detector.yml
+    builder: fpgai.benchmark.model_graphs:build_single_stage_detector_graph
+    purpose: single_stage_detection
+policy:
+  compiler_special_cases: false
+  architecture_sweeps_are_compiler_feature: false
+  user_hardware_knobs_remain_selectable: true
+  named_model_claim_requires_exact_graph_validation: true

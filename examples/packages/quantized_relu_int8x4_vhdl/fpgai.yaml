@@ -1,0 +1,66 @@
+schema: fpgai.package/v1
+package:
+  id: community.quantized_relu_int8x4_vhdl
+  name: Quantized Int8x4 ReLU VHDL
+  version: 1.0.0
+  asset_type: implementation
+  provider: community
+  description: Quantized ReLU over four packed signed int8 activations with elastic ready/valid transport.
+usage:
+  platform_scope: research
+  permitted_uses: [research, experimentation, validation, benchmarking, education]
+  production_path: morfics
+license:
+  category: open_source
+  identifier: Apache-2.0
+compatibility:
+  fpgai_contract: ">=1.0,<2.0"
+  boards: [kv260, kr260]
+  precisions: [int8]
+  toolchains:
+    - name: vivado
+      versions: ["2023.2"]
+capabilities:
+  inference: true
+  training:
+    forward: true
+    backward_input: false
+    parameter_gradients: false
+    bias_gradients: false
+    optimizer_update: false
+entrypoints:
+  implementation:
+    language: vhdl
+    backend: vhdl
+    top: quantized_relu_int8x4_vhdl
+    sources: [rtl/quantized_relu_int8x4_vhdl.vhd]
+    source_order: [rtl/quantized_relu_int8x4_vhdl.vhd]
+implementation:
+  operator_id: onnx.relu
+  backend: vhdl
+integration:
+  vhdl:
+    abi: tensor_ports_ready_valid_v1
+    data_width: 32
+    signed: false
+    handshake_policy: grouped_transaction
+    inputs:
+      - name: input
+        data: input_data
+    outputs:
+      - name: output
+        data: output_data
+interfaces:
+  input:
+    direction: input
+    protocol: axi_stream
+    data_type: packed_int8x4
+  output:
+    direction: output
+    protocol: axi_stream
+    data_type: packed_int8x4
+validation:
+  declared_level: rtl_simulation_validated
+metrics:
+  latency_cycles: 1
+  initiation_interval: 1

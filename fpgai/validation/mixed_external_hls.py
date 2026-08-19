@@ -111,7 +111,7 @@ def _conv2d_reference_nchw(
                     out[ni, co, oy, ox] = acc
     return out
 
-def execute_mixed_graph_reference(graph: Any, external_context: Any, input_values: np.ndarray) -> np.ndarray:
+def execute_mixed_graph_trace(graph: Any, external_context: Any, input_values: np.ndarray) -> dict[str, np.ndarray]:
     if len(graph.inputs) != 1 or len(graph.outputs) != 1:
         raise ValueError("Mixed external validation currently requires one graph input and one graph output")
     input_array = np.asarray(input_values, dtype=np.float32)
@@ -177,6 +177,11 @@ def execute_mixed_graph_reference(graph: Any, external_context: Any, input_value
                 raise ValueError(f"Reference validation requires one runtime input for node {op.name!r}")
             output = _builtin_reference(op.op_type, tensors[runtime_inputs[0]], op.attrs)
         tensors[op.outputs[0]] = _normalize_declared_tensor_shape(graph, op.outputs[0], output)
+    return {name: np.asarray(value, dtype=np.float32) for name, value in tensors.items()}
+
+
+def execute_mixed_graph_reference(graph: Any, external_context: Any, input_values: np.ndarray) -> np.ndarray:
+    tensors = execute_mixed_graph_trace(graph, external_context, input_values)
     return tensors[graph.outputs[0]].astype(np.float32, copy=False).reshape(-1)
 
 def _write_f32(path: Path, values: np.ndarray) -> None:

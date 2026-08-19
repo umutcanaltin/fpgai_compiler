@@ -47,6 +47,10 @@ datasets = [
   "torchvision>=0.17",
 ]
 
+framework-mlir = [
+  "jax>=0.4.30",
+]
+
 [project.scripts]
 fpgai = "fpgai.cli:main"
 

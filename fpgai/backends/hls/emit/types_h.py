@@ -6,16 +6,72 @@ from fpgai.config.access import get_path
 from fpgai.ir.graph import Graph
 
 
+def _spec_bits(spec: Any, *, default: int = 16) -> int:
+    """Return the physical bit width of an HLS numeric precision spec.
+
+    Integer precision uses ``bits`` while fixed-point precision uses
+    ``total_bits``.  Accept the alternate field as a compatibility fallback so
+    transport packing and C++ type emission resolve the same physical width.
+    """
+    if not isinstance(spec, dict):
+        return int(default)
+    kind = str(spec.get("type", "ap_fixed") or "ap_fixed").strip().lower().replace("-", "_")
+    if kind in {"ap_int", "int", "signed_int", "integer", "ap_uint", "uint", "unsigned_int"}:
+        return int(spec.get("bits", spec.get("total_bits", default)))
+    return int(spec.get("total_bits", spec.get("bits", default)))
+
+
 def _spec_to_ap(spec) -> str:
     if not isinstance(spec, dict):
         return "ap_fixed<16,6>"
-    tb = int(spec.get("total_bits", 16))
-    ib = int(spec.get("int_bits", 6))
+    kind = str(spec.get("type", "ap_fixed") or "ap_fixed").strip().lower().replace("-", "_")
+    bits = _spec_bits(spec)
+    if kind in {"ap_int", "int", "signed_int", "integer"}:
+        return f"ap_int<{bits}>"
+    if kind in {"ap_uint", "uint", "unsigned_int"}:
+        return f"ap_uint<{bits}>"
+    tb = bits
+    ib = int(spec.get("int_bits", min(tb, 6)))
     return f"ap_fixed<{tb},{ib}>"
 
 
 _deep_get = get_path
 
+
+
+
+def _dtype_to_ap(dtype: str | None) -> str | None:
+    """Map canonical integer/bool tensor dtypes to HLS scalar types.
+
+    Floating tensors intentionally return ``None`` so configured FPGAI numeric
+    precision remains authoritative for activations/weights. Integer/index
+    tensors, however, must preserve their discrete semantics instead of being
+    silently represented as fixed-point activations.
+    """
+    text = str(dtype or "").strip().lower().replace("tensor(", "").replace(")", "")
+    aliases = {
+        "bool": "ap_uint<1>",
+        "uint8": "ap_uint<8>", "uchar": "ap_uint<8>",
+        "int8": "ap_int<8>", "char": "ap_int<8>",
+        "uint16": "ap_uint<16>",
+        "int16": "ap_int<16>",
+        "uint32": "ap_uint<32>",
+        "int32": "ap_int<32>", "int": "ap_int<32>",
+        "uint64": "ap_uint<64>",
+        "int64": "ap_int<64>", "long": "ap_int<64>",
+    }
+    return aliases.get(text)
+
+
+def _cpp_type_bits(cpp_type: str, *, default: int = 16) -> int:
+    import re
+    match = re.search(r"ap_(?:u?int|fixed)\s*<\s*(\d+)", str(cpp_type))
+    return int(match.group(1)) if match else int(default)
+
+
+def _tensor_cpp_type(spec: Any, fallback_cpp_type: str) -> str:
+    mapped = _dtype_to_ap(getattr(spec, "dtype", None) if spec is not None else None)
+    return mapped or str(fallback_cpp_type)
 
 def _default_precision(raw_cfg: Dict[str, Any]) -> Dict[str, Any]:
     return {
@@ -219,6 +275,7 @@ def emit_types_h(
     lines = []
     lines.append("#pragma once")
     lines.append("#include <ap_fixed.h>")
+    lines.append("#include <ap_int.h>")
     lines.append("")
     lines.append(f"#define FPGAI_PIPELINE_II {pipe_ii}")
     lines.append(f"#define FPGAI_DENSE_OUT_UNROLL {dense_out_unroll}")

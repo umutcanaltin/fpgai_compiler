@@ -196,21 +196,117 @@ _TEXT_LOOP_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Vitis HLS 2023.2 emits the scheduling decision in stdout/logs as:
+#   Pipelining result : Target II = 1, Final II = 1, Depth = 5, loop 'NAME'
+_VITIS_PIPELINING_RESULT_RE = re.compile(
+    r"Pipelining\s+result\s*:\s*Target\s+II\s*=\s*(?P<req>\d+)\s*,"
+    r"\s*Final\s+II\s*=\s*(?P<ach>\d+)\s*,"
+    r"\s*Depth\s*=\s*(?P<depth>\d+)\s*,\s*loop\s+'(?P<name>[^']+)'",
+    re.IGNORECASE,
+)
+
+
+def _parse_vitis_csynth_table(text: str) -> tuple[HLSLoopSchedule, ...]:
+    """Parse loop rows from the Vitis 2023.2 csynth hierarchy table.
+
+    The table does not preserve the pragma's requested II, but it does expose
+    the achieved loop interval, iteration latency and trip count.  Requested
+    II therefore remains ``None`` here; when a Vitis log is also available the
+    explicit Target/Final II parser provides both values.
+    """
+
+    loops: list[HLSLoopSchedule] = []
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if not stripped.startswith("|") or stripped.count("|") < 10:
+            continue
+        columns = [item.strip() for item in stripped.strip("|").split("|")]
+        if len(columns) < 9:
+            continue
+        marker = columns[0]
+        if not marker.startswith("o "):
+            continue
+        name = marker[2:].strip()
+        # csynth hierarchy columns: name, issue, slack, latency cycles,
+        # latency ns, iteration latency, interval, trip count, pipelined, ...
+        achieved = _parse_int(columns[6]) if len(columns) > 6 else None
+        iteration_latency = _parse_int(columns[5]) if len(columns) > 5 else None
+        trip_count = _parse_int(columns[7]) if len(columns) > 7 else None
+        pipelined = columns[8].strip().lower() if len(columns) > 8 else ""
+        if achieved is None or pipelined not in {"yes", "true"}:
+            continue
+        loops.append(
+            HLSLoopSchedule(
+                name=name,
+                requested_ii=None,
+                achieved_ii=achieved,
+                latency_min=iteration_latency,
+                latency_max=iteration_latency,
+                tripcount_min=trip_count,
+                tripcount_max=trip_count,
+            )
+        )
+    return tuple(loops)
+
 
 def parse_hls_schedule_text(path: str | Path) -> HLSScheduleReport:
-    """Parse requested/achieved II from a plain-text HLS report or log."""
+    """Parse requested/achieved II from a plain-text HLS report or log.
+
+    Supports the historic compact ``requested II / achieved II`` form, the
+    Vitis HLS 2023.2 scheduling log, and the loop hierarchy table in
+    ``csynth.rpt``.
+    """
 
     report_path = Path(path)
     text = report_path.read_text(encoding="utf-8", errors="replace")
-    loops = tuple(
-        HLSLoopSchedule(
-            name=match.group("name"),
-            requested_ii=int(match.group("req")),
-            achieved_ii=int(match.group("ach")),
+    parsed: list[HLSLoopSchedule] = []
+
+    # Parse the historic compact form line-by-line, but leave native Vitis
+    # "Pipelining result" records to the dedicated parser below.  The old
+    # regex is intentionally permissive and would otherwise misidentify the
+    # log prefix (for example ``INFO:``) as a loop name.
+    for line in text.splitlines():
+        if "pipelining result" in line.lower():
+            continue
+        for match in _TEXT_LOOP_RE.finditer(line):
+            parsed.append(
+                HLSLoopSchedule(
+                    name=match.group("name"),
+                    requested_ii=int(match.group("req")),
+                    achieved_ii=int(match.group("ach")),
+                )
+            )
+
+    for match in _VITIS_PIPELINING_RESULT_RE.finditer(text):
+        parsed.append(
+            HLSLoopSchedule(
+                name=match.group("name"),
+                requested_ii=int(match.group("req")),
+                achieved_ii=int(match.group("ach")),
+                latency_min=int(match.group("depth")),
+                latency_max=int(match.group("depth")),
+            )
         )
-        for match in _TEXT_LOOP_RE.finditer(text)
-    )
-    return HLSScheduleReport(source=str(report_path), loops=loops)
+
+    parsed.extend(_parse_vitis_csynth_table(text))
+
+    # Deduplicate identical observations because some reports embed the same
+    # loop row in more than one section.  Preserve distinct requested/achieved
+    # observations when they genuinely differ.
+    unique: dict[tuple[Any, ...], HLSLoopSchedule] = {}
+    for loop in parsed:
+        key = (
+            loop.name,
+            loop.requested_ii,
+            loop.achieved_ii,
+            loop.latency_min,
+            loop.latency_max,
+            loop.tripcount_min,
+            loop.tripcount_max,
+        )
+        unique.setdefault(key, loop)
+
+    return HLSScheduleReport(source=str(report_path), loops=tuple(unique.values()))
 
 
 def parse_hls_schedule_report(path: str | Path) -> HLSScheduleReport:
@@ -288,6 +384,9 @@ def discover_hls_schedule_reports(root: str | Path) -> tuple[Path, ...]:
         "**/*schedule*.xml",
         "**/*schedule*.rpt",
         "**/*schedule*.log",
+        "**/vitis_hls.log",
+        "**/logs/vitis_hls_stdout.log",
+        "**/logs/*vitis*hls*.log",
     )
     found: set[Path] = set()
     for pattern in patterns:

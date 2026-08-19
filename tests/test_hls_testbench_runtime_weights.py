@@ -18,14 +18,15 @@ def test_inference_ddr_tiled_testbench_passes_runtime_weight_buffer(tmp_path: Pa
     tb = (tmp_path / "tb.cpp").read_text(encoding="utf-8")
     assert '#include <ap_int.h>' in tb
     assert '#include "fpgai_params.h"' in tb
-    assert "ap_uint<32>* weights_mem" in tb
-    assert "int mode" in tb
+    assert "const ap_uint<32>* weights_mem" in tb
+    assert "int mode" not in tb
     assert "fpgai::fpgai_runtime_weight_word_count()" in tb
     assert "fpgai::fpgai_fill_runtime_weight_words(weights_mem.data(), actual_weight_words)" in tb
-    assert "deeplearn(in_stream, out_stream, weights_mem.data(), 1);" in tb
-    assert "deeplearn(in_stream, out_stream, weights_mem.data(), 0);" in tb
-    assert tb.index("weights_mem.data(), 1)") < tb.index("weights_mem.data(), 0)")
-    assert "deeplearn(in_stream, out_stream, weights_mem.data());" not in tb
+    assert "deeplearn(in_stream, out_stream, weights_mem.data());" in tb
+    assert "weights_mem.data(), 1)" not in tb
+    assert "weights_mem.data(), 0)" not in tb
+    assert "Importing runtime weights" not in tb
+    assert "weights_mode=ddr_tiled_direct" in tb
 
 
 def test_training_ddr_tiled_testbench_passes_runtime_weight_buffer(tmp_path: Path) -> None:
@@ -259,7 +260,6 @@ def test_inference_runtime_weight_dataset_batch_imports_once_and_runs_each_sampl
     assert tb.count("weights_mem.data(), 2);") == 1
     assert "output_data.reserve(requested_samples * FPGAI_OUTPUT_VALUES);" in tb
     assert 'sample_count_requested' in tb
-    assert 'weight_import_count' in tb
     assert 'weight_export_count' in tb
     assert 'inference_invocation_count' in tb
 

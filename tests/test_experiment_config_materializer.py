@@ -232,7 +232,7 @@ def test_materializer_emits_canonical_weight_and_parallel_paths() -> None:
     }
     out, report = apply_parameter_overrides(
         base,
-        {"weight_storage": "stream", "policy": "resource_first"},
+        {"weight_storage": "ddr", "policy": "resource_first"},
         parameter_mappings={
             "policy": {"path": "optimization.parallel.policy", "create": True},
         },
@@ -240,7 +240,30 @@ def test_materializer_emits_canonical_weight_and_parallel_paths() -> None:
     )
 
     assert report["applied"]["weight_storage"] == "memory.weight_storage,weights.mode"
-    assert out["weights"]["mode"] == "stream"
-    assert out["memory"]["weight_storage"] == "stream"
+    assert out["weights"]["mode"] == "tiled"
+    assert out["memory"]["weight_storage"] == "ddr"
     assert out["optimization"]["parallel"]["policy"] == "ResourceFirst"
     assert "data_movement" not in out
+
+
+def test_memory_strategy_materializer_uses_real_storage_and_weight_modes() -> None:
+    base = {"weights": {"mode": "embedded"}}
+
+    expected = {
+        "on_chip": ("bram", "embedded"),
+        "runtime_preload": ("bram", "import"),
+        "uram_first": ("uram", "embedded"),
+        "external_ddr": ("ddr", "tiled"),
+    }
+    for strategy, (storage, mode) in expected.items():
+        out, report = apply_parameter_overrides(base, {"memory_strategy": strategy})
+        assert "memory_strategy" in report["applied"]
+        assert out["memory"]["weight_storage"] == storage
+        assert out["weights"]["mode"] == mode
+
+
+def test_stream_is_not_accepted_as_a_storage_location() -> None:
+    base = {"weights": {"mode": "embedded"}}
+    out, report = apply_parameter_overrides(base, {"weight_storage": "stream"})
+    assert "weight_storage" in report["skipped"]
+    assert out["weights"]["mode"] == "embedded"

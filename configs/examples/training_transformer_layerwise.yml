@@ -1,0 +1,122 @@
+version: 1
+project:
+  name: tiny_transformer_layerwise_training
+  out_dir: build/examples/training/tiny_transformer_layerwise_training
+  clean: true
+
+pipeline:
+  mode: training_on_device
+  outputs:
+    top_kernel_name: deeplearn
+
+model:
+  format: mlir
+  path: examples/reference/tiny_transformer_training.mlir
+
+operators:
+  supported:
+    - MatMul
+    - Add
+    - Mul
+    - SiLU
+    - RMSNorm
+    - RotaryEmbedding
+    - MultiHeadAttention
+  defaults:
+    activation_insert:
+      kind: none
+
+training:
+  optimizer:
+    type: sgd
+    learning_rate: 0.001
+  loss:
+    type: mse
+  batch:
+    size: 1
+    epochs: 1
+    mode: direct
+    shuffle: false
+  cache:
+    store_forward_activations: true
+    store_pre_activations: true
+    gradient_checkpointing: false
+
+# These are example USER choices, not Transformer/LLM layer requirements.
+# Changing a legal value must change the resolved IR/backend behavior rather
+# than being overwritten by the compiler.
+memory:
+  weight_storage: bram
+  activation_storage: bram
+  gradient_storage: uram
+  optimizer_state_storage: uram
+
+architecture:
+  defaults:
+    implementation:
+      backend: hls
+    execution:
+      mode: auto
+  layers:
+    - match:
+        op_type: MultiHeadAttention
+      execution:
+        mode: serialized
+      buffering:
+        storage: bram
+    - match:
+        op_type: MatMul
+      memory:
+        weight_storage: bram
+        gradient_storage: uram
+    - match:
+        op_type: RMSNorm
+      memory:
+        weight_storage: bram
+        gradient_storage: uram
+
+numerics:
+  defaults:
+    activation: {type: ap_fixed, total_bits: 24, int_bits: 12}
+    weight: {type: ap_fixed, total_bits: 20, int_bits: 8}
+    bias: {type: ap_fixed, total_bits: 32, int_bits: 16}
+    accum: {type: ap_fixed, total_bits: 40, int_bits: 20}
+  training:
+    grad: {type: ap_fixed, total_bits: 32, int_bits: 16}
+    grad_accum: {type: ap_fixed, total_bits: 40, int_bits: 20}
+    master_weight: {type: ap_fixed, total_bits: 24, int_bits: 10}
+    optimizer_state: {type: ap_fixed, total_bits: 32, int_bits: 16}
+
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+      - name: pl_clk0
+        target_mhz: 200
+
+weights:
+  mode: embedded
+
+backends:
+  hls:
+    enabled: true
+    vitis:
+      enabled: true
+      mode: csim
+      exe: vitis_hls
+  host_cpp:
+    enabled: true
+
+toolchain:
+  vitis_hls:
+    enabled: true
+    root: /tools/Xilinx/Vitis_HLS/2023.2
+    settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
+    install_dir: /tools/Xilinx/Vitis_HLS/2023.2
+
+benchmark:
+  enabled: false
+
+debug:
+  verbose: false

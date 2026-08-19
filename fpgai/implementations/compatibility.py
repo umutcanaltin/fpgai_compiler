@@ -21,6 +21,11 @@ class CompatibilityRequest:
     output_protocol: str | None = None
     weight_storage: str | None = None
     activation_storage: str | None = None
+    gradient_storage: str | None = None
+    optimizer_state_storage: str | None = None
+    require_backward_input: bool = False
+    require_parameter_gradients: bool = False
+    require_optimizer_update: bool = False
     minimum_validation_level: str | None = None
 
 
@@ -58,6 +63,12 @@ def evaluate_implementation_compatibility(
         reasons.append("inference_not_supported")
     if mode == "training" and not contract.training.forward:
         reasons.append("training_forward_not_supported")
+    if mode == "training" and request.require_backward_input and not contract.training.backward_input:
+        reasons.append("training_backward_input_not_supported")
+    if mode == "training" and request.require_parameter_gradients and not contract.training.parameter_gradients:
+        reasons.append("training_parameter_gradients_not_supported")
+    if mode == "training" and request.require_optimizer_update and not contract.training.optimizer_update:
+        reasons.append("training_optimizer_update_not_supported")
     if request.backend and contract.backend != request.backend:
         reasons.append("backend_mismatch")
     if request.language and contract.language != request.language:
@@ -77,6 +88,10 @@ def evaluate_implementation_compatibility(
         reasons.append("weight_storage_not_supported")
     if request.activation_storage and contract.activation_storage and request.activation_storage not in contract.activation_storage:
         reasons.append("activation_storage_not_supported")
+    if request.gradient_storage and contract.gradient_storage and request.gradient_storage not in contract.gradient_storage:
+        reasons.append("gradient_storage_not_supported")
+    if request.optimizer_state_storage and contract.optimizer_state_storage and request.optimizer_state_storage not in contract.optimizer_state_storage:
+        reasons.append("optimizer_state_storage_not_supported")
     if request.minimum_validation_level and validation_rank(contract.validation_level) < validation_rank(request.minimum_validation_level):
         reasons.append("validation_level_too_low")
     return CompatibilityResult(not reasons, tuple(reasons))

@@ -245,25 +245,37 @@ def _resolve_model_path(value: Any, repo_root: Optional[Path]) -> Tuple[bool, An
 
 
 
-def _normalise_weight_storage(value: Any) -> Tuple[bool, str, str]:
+def _normalise_weight_storage(value: Any) -> Tuple[bool, str, str, str]:
+    """Resolve an experiment weight-storage request to real compiler semantics.
+
+    Storage and transfer are deliberately separated: BRAM/URAM are local
+    storage, DDR is external tiled storage, and ``stream`` is not a storage
+    location.  The returned tuple is ``(ok, storage, weights_mode, reason)``.
+    """
     raw = str(value).strip().lower().replace("-", "_")
     table = {
-        "embedded": "embedded",
-        "on_chip": "embedded",
-        "onchip": "embedded",
-        "bram": "embedded",
-        "uram": "embedded",
-        "stream": "stream",
-        "streaming": "stream",
-        "streamed": "stream",
-        "ddr": "ddr",
-        "dma_ddr": "ddr",
-        "external": "ddr",
-        "external_ddr": "ddr",
+        "embedded": ("bram", "embedded"),
+        "on_chip": ("bram", "embedded"),
+        "onchip": ("bram", "embedded"),
+        "bram": ("bram", "embedded"),
+        "uram": ("uram", "embedded"),
+        "ddr": ("ddr", "tiled"),
+        "dma_ddr": ("ddr", "tiled"),
+        "external": ("ddr", "tiled"),
+        "external_ddr": ("ddr", "tiled"),
     }
+    if raw in {"stream", "streaming", "streamed"}:
+        return (
+            False,
+            raw,
+            "",
+            "stream is a transport/movement concept, not a weight storage location; "
+            "use memory_strategy=runtime_preload (BRAM preload) or external_ddr (DDR tiled)",
+        )
     if raw not in table:
-        return False, raw, "unknown weight storage mode"
-    return True, table[raw], ""
+        return False, raw, "", "unknown weight storage mode"
+    storage, mode = table[raw]
+    return True, storage, mode, ""
 
 
 def _memory_strategy_payload(value: Any) -> Tuple[bool, Dict[str, Any], str]:
@@ -271,7 +283,7 @@ def _memory_strategy_payload(value: Any) -> Tuple[bool, Dict[str, Any], str]:
     table: Dict[str, Dict[str, Any]] = {
         "on_chip": {
             "memory.strategy": "on_chip",
-            "memory.weight_storage": "embedded",
+            "memory.weight_storage": "bram",
             "weights.mode": "embedded",
             "memory.weight_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
@@ -279,32 +291,43 @@ def _memory_strategy_payload(value: Any) -> Tuple[bool, Dict[str, Any], str]:
         },
         "embedded": {
             "memory.strategy": "on_chip",
-            "memory.weight_storage": "embedded",
+            "memory.weight_storage": "bram",
             "weights.mode": "embedded",
             "memory.weight_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.allow_double_buffer": False,
         },
-        "streaming": {
-            "memory.strategy": "streaming",
-            "memory.weight_storage": "stream",
-            "weights.mode": "stream",
+        # Legacy "streaming" experiment names are retained as aliases, but
+        # the actual supported mechanism is a full runtime preload into local
+        # BRAM.  FPGAI does not claim weights stream directly through compute.
+        "runtime_preload": {
+            "memory.strategy": "runtime_preload",
+            "memory.weight_storage": "bram",
+            "weights.mode": "import",
             "memory.weight_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
-            "memory.allow_double_buffer": True,
+            "memory.allow_double_buffer": False,
+        },
+        "streaming": {
+            "memory.strategy": "runtime_preload",
+            "memory.weight_storage": "bram",
+            "weights.mode": "import",
+            "memory.weight_region_preference": ["BRAM", "URAM", "DDR"],
+            "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
+            "memory.allow_double_buffer": False,
         },
         "stream": {
-            "memory.strategy": "streaming",
-            "memory.weight_storage": "stream",
-            "weights.mode": "stream",
+            "memory.strategy": "runtime_preload",
+            "memory.weight_storage": "bram",
+            "weights.mode": "import",
             "memory.weight_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
-            "memory.allow_double_buffer": True,
+            "memory.allow_double_buffer": False,
         },
         "external_ddr": {
             "memory.strategy": "external_ddr",
             "memory.weight_storage": "ddr",
-            "weights.mode": "ddr",
+            "weights.mode": "tiled",
             "memory.weight_region_preference": ["DDR", "URAM", "BRAM"],
             "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.allow_double_buffer": True,
@@ -312,22 +335,22 @@ def _memory_strategy_payload(value: Any) -> Tuple[bool, Dict[str, Any], str]:
         "ddr": {
             "memory.strategy": "external_ddr",
             "memory.weight_storage": "ddr",
-            "weights.mode": "ddr",
+            "weights.mode": "tiled",
             "memory.weight_region_preference": ["DDR", "URAM", "BRAM"],
             "memory.activation_region_preference": ["BRAM", "URAM", "DDR"],
             "memory.allow_double_buffer": True,
         },
         "bram_saver": {
             "memory.strategy": "bram_saver",
-            "memory.weight_storage": "stream",
-            "weights.mode": "stream",
-            "memory.weight_region_preference": ["DDR", "URAM", "BRAM"],
-            "memory.activation_region_preference": ["DDR", "URAM", "BRAM"],
+            "memory.weight_storage": "uram",
+            "weights.mode": "embedded",
+            "memory.weight_region_preference": ["URAM", "DDR", "BRAM"],
+            "memory.activation_region_preference": ["URAM", "DDR", "BRAM"],
             "memory.allow_double_buffer": False,
         },
         "uram_first": {
             "memory.strategy": "uram_first",
-            "memory.weight_storage": "embedded",
+            "memory.weight_storage": "uram",
             "weights.mode": "embedded",
             "memory.weight_region_preference": ["URAM", "BRAM", "DDR"],
             "memory.activation_region_preference": ["URAM", "BRAM", "DDR"],
@@ -340,10 +363,10 @@ def _memory_strategy_payload(value: Any) -> Tuple[bool, Dict[str, Any], str]:
 
 
 def _apply_weight_storage(cfg: MutableMapping[str, Any], value: Any) -> Tuple[bool, str]:
-    ok, mode, reason = _normalise_weight_storage(value)
+    ok, storage, mode, reason = _normalise_weight_storage(value)
     if not ok:
         return False, reason
-    _set_path(cfg, "memory.weight_storage", mode, create=True)
+    _set_path(cfg, "memory.weight_storage", storage, create=True)
     _set_path(cfg, "weights.mode", mode, create=True)
     return True, "memory.weight_storage,weights.mode"
 

@@ -97,7 +97,14 @@ def _axis_groups(ports: dict[str, tuple[str, int]]) -> dict[str, dict[str, str]]
     groups: dict[str, dict[str, str]] = {}
     for name in ports:
         upper = name.upper()
-        for suffix, field in (("_TDATA", "data"), ("_TVALID", "valid"), ("_TREADY", "ready")):
+        for suffix, field in (
+            ("_TDATA", "data"),
+            ("_TVALID", "valid"),
+            ("_TREADY", "ready"),
+            ("_TKEEP", "keep"),
+            ("_TSTRB", "strb"),
+            ("_TLAST", "last"),
+        ):
             if upper.endswith(suffix):
                 prefix = name[: -len(suffix)]
                 groups.setdefault(prefix, {})[field] = name
@@ -117,7 +124,7 @@ def _axis_group_by_direction(
     expected = ("input", "input", "output") if sink_from_wrapper else ("output", "output", "input")
     matches: list[tuple[str, dict[str, str]]] = []
     for prefix, group in _axis_groups(ports).items():
-        if set(group) != {"data", "valid", "ready"}:
+        if not {"data", "valid", "ready"}.issubset(group):
             continue
         directions = (
             ports[group["data"]][0],
@@ -145,7 +152,7 @@ def _axis_groups_by_direction(
     expected = ("input", "input", "output") if sink_from_wrapper else ("output", "output", "input")
     matches: dict[str, dict[str, str]] = {}
     for prefix, group in _axis_groups(ports).items():
-        if set(group) != {"data", "valid", "ready"}:
+        if not {"data", "valid", "ready"}.issubset(group):
             continue
         directions = (
             ports[group["data"]][0],

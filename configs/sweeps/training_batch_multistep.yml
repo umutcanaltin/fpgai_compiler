@@ -67,7 +67,7 @@ design_points:
   epochs: 2
   batch_size: 1
 - name: training_cnn_stream_2step_b1_balanced
-  weight_mode: stream
+  weight_mode: import_export
   train_steps: 2
   epochs: 2
   batch_size: 1
@@ -77,7 +77,7 @@ design_points:
   epochs: 5
   batch_size: 1
 - name: training_cnn_stream_5step_b1_balanced
-  weight_mode: stream
+  weight_mode: import_export
   train_steps: 5
   epochs: 5
   batch_size: 1
@@ -87,7 +87,7 @@ design_points:
   epochs: 2
   batch_size: 2
 - name: training_cnn_stream_2step_b2_balanced
-  weight_mode: stream
+  weight_mode: import_export
   train_steps: 2
   epochs: 2
   batch_size: 2

@@ -80,3 +80,12 @@ claim cannot silently mix those two experimental budgets.
 - `configs/sweeps/training_batch_equal_exposure_strict3.yml` compares batch sizes 2, 5, and 10 at the same three-epoch / 30-record-visit exposure.
 - `configs/sweeps/training_batch_equal_update_budget.yml` compares the same batch sizes at six optimizer updates with intentionally different record exposure.
 - Generated reports expose control roles, normalized loss reduction, seed/replicate counts, and statistical claim eligibility.
+
+## FPGAI IR scientific trace examples
+
+The following examples are intentionally single configurations, not compiler design-space sweeps. They demonstrate how user-selected architecture and training mechanisms become inspectable FPGAI IR semantics and generated artifacts.
+
+- `ir_architecture_trace_inference.yml` — inference with explicit network/layer pipeline, PE/SIMD, partitioning, tiling, buffering, BRAM/URAM placement, transport, and runtime sequence.
+- `ir_training_trace.yml` — on-device training with optimizer/loss, batch and gradient accumulation, gradient/optimizer-state placement, architecture controls, movement, and runtime sequencing.
+
+Both emit the versioned IR inspection artifacts under `<out_dir>/ir/`, including `resolved_ir.json`, `graph_semantics.json`, `ir_architecture_analysis.json`, and `ir_scientific_capability_matrix.json`. The resolved IR is an inspection/reproducibility artifact; HLS/Vivado/runtime reports remain the authority for physical implementation observations.

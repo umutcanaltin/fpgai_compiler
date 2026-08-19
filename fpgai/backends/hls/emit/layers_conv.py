@@ -5,6 +5,7 @@ def emit_conv_h() -> str:
     return r'''#pragma once
 
 #include "fpgai_types.h"
+#include "quantization.h"
 
 #ifndef FPGAI_PIPELINE_II
 #define FPGAI_PIPELINE_II 1
@@ -234,6 +235,138 @@ void conv2d(
                         (OUT_T)accumulators[output_lane]
                     );
                 }
+            }
+        }
+    }
+}
+
+
+
+template<
+    int IN_H,
+    int IN_W,
+    int IN_C,
+    int OUT_H,
+    int OUT_W,
+    int OUT_C,
+    int K,
+    int STRIDE,
+    int PAD,
+    int GROUPS,
+    typename IN_T = act_t,
+    typename OUT_T = act_t,
+    typename WGT_T = wgt_t,
+    typename BIAS_T = bias_t,
+    typename ACC_T = acc_t,
+    int PIPELINE_II = FPGAI_PIPELINE_II,
+    int OC_UNROLL = FPGAI_CONV_OC_UNROLL,
+    int IC_UNROLL = FPGAI_CONV_IC_UNROLL,
+    int INPUT_PARTITION = 1,
+    int OUTPUT_PARTITION = 1,
+    int WEIGHT_PARTITION = 1
+>
+void conv2d_grouped(
+    const IN_T x[IN_H * IN_W * IN_C],
+    OUT_T y[OUT_H * OUT_W * OUT_C],
+    const WGT_T W[OUT_C * (IN_C / GROUPS) * K * K],
+    const BIAS_T B[OUT_C]
+) {
+#pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=x cyclic factor=INPUT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=y cyclic factor=OUTPUT_PARTITION dim=1
+#pragma HLS ARRAY_PARTITION variable=W cyclic factor=WEIGHT_PARTITION dim=1
+    const int IN_PER_GROUP = IN_C / GROUPS;
+    const int OUT_PER_GROUP = OUT_C / GROUPS;
+    for (int output_channel = 0; output_channel < OUT_C; ++output_channel) {
+        const int group = output_channel / OUT_PER_GROUP;
+        const int input_channel_start = group * IN_PER_GROUP;
+        for (int output_row = 0; output_row < OUT_H; ++output_row) {
+            for (int output_column = 0; output_column < OUT_W; ++output_column) {
+#pragma HLS PIPELINE II=PIPELINE_II
+                ACC_T accumulator = (ACC_T)B[output_channel];
+                for (int local_input_channel = 0; local_input_channel < IN_PER_GROUP; ++local_input_channel) {
+                    const int input_channel = input_channel_start + local_input_channel;
+                    for (int kernel_row = 0; kernel_row < K; ++kernel_row) {
+                        for (int kernel_column = 0; kernel_column < K; ++kernel_column) {
+                            const int input_row = output_row * STRIDE + kernel_row - PAD;
+                            const int input_column = output_column * STRIDE + kernel_column - PAD;
+                            if (input_row < 0 || input_row >= IN_H || input_column < 0 || input_column >= IN_W) continue;
+                            const int input_index = (input_row * IN_W + input_column) * IN_C + input_channel;
+                            const int weight_index = (((output_channel * IN_PER_GROUP + local_input_channel) * K + kernel_row) * K + kernel_column);
+                            accumulator += (ACC_T)x[input_index] * (ACC_T)W[weight_index];
+                        }
+                    }
+                }
+                const int output_index = (output_row * OUT_W + output_column) * OUT_C + output_channel;
+                y[output_index] = (OUT_T)accumulator;
+            }
+        }
+    }
+}
+
+template<
+    int IN_H,
+    int IN_W,
+    int IN_C,
+    int OUT_H,
+    int OUT_W,
+    int OUT_C,
+    int K,
+    int STRIDE,
+    int PAD,
+    typename IN_T,
+    typename OUT_T,
+    typename WGT_T,
+    typename BIAS_T,
+    typename ACC_T
+>
+void conv2d_quantized(
+    const IN_T x[IN_H * IN_W * IN_C],
+    OUT_T y[OUT_H * OUT_W * OUT_C],
+    const WGT_T W[OUT_C * IN_C * K * K],
+    const BIAS_T B[OUT_C],
+    int input_zero,
+    const int weight_zero[OUT_C],
+    int output_zero,
+    const int multiplier[OUT_C],
+    const int shift[OUT_C],
+    int qmin,
+    int qmax,
+    int rounding_mode,
+    int saturation_mode
+) {
+#pragma HLS INLINE off
+    for (int output_channel = 0; output_channel < OUT_C; ++output_channel) {
+        for (int output_row = 0; output_row < OUT_H; ++output_row) {
+            for (int output_column = 0; output_column < OUT_W; ++output_column) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+                ACC_T accumulator = (ACC_T)B[output_channel];
+                for (int input_channel = 0; input_channel < IN_C; ++input_channel) {
+                    for (int kernel_row = 0; kernel_row < K; ++kernel_row) {
+                        for (int kernel_column = 0; kernel_column < K; ++kernel_column) {
+                            const int input_row = output_row * STRIDE + kernel_row - PAD;
+                            const int input_column = output_column * STRIDE + kernel_column - PAD;
+                            if (input_row < 0 || input_row >= IN_H || input_column < 0 || input_column >= IN_W) continue;
+                            const int input_index = ((input_row * IN_W + input_column) * IN_C) + input_channel;
+                            const int weight_index = (((output_channel * IN_C + input_channel) * K + kernel_row) * K) + kernel_column;
+                            const ACC_T input_centered = (ACC_T)x[input_index] - (ACC_T)input_zero;
+                            const ACC_T weight_centered = (ACC_T)W[weight_index] - (ACC_T)weight_zero[output_channel];
+                            accumulator += input_centered * weight_centered;
+                        }
+                    }
+                }
+                ap_int<64> q = quantized_requantize_centered(
+                    (ap_int<64>)accumulator,
+                    multiplier[output_channel],
+                    shift[output_channel],
+                    output_zero,
+                    qmin,
+                    qmax,
+                    rounding_mode,
+                    saturation_mode
+                );
+                const int output_index = ((output_row * OUT_W + output_column) * OUT_C) + output_channel;
+                y[output_index] = (OUT_T)q;
             }
         }
     }

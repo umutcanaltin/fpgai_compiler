@@ -359,6 +359,7 @@ int main(int argc, char** argv) {{
 }}
 """
     elif mode in {"ddr", "dma_ddr", "ddr_tiled", "runtime_ddr", "m_axi", "external_ddr", "uram"}:
+        direct_ddr_tiled = mode == "ddr_tiled"
         input_arg = "const ap_uint<32>* input_mem" if input_m_axi else "hls::stream<axis_t>& in_stream"
         output_arg = "ap_uint<32>* output_mem" if output_m_axi else "hls::stream<axis_t>& out_stream"
         input_decl = f"    std::vector<ap_uint<32> > input_mem({max(1, int(in_words))});\n" if input_m_axi else "    hls::stream<axis_t> in_stream;\n"
@@ -396,9 +397,22 @@ int main(int argc, char** argv) {{
         export_call = (
             f'    printf("[TB] Exporting runtime weights...\\n");\n'
             f'    {top_name}({call_input}, {call_output}, weights_mem.data(), 2);\n'
-            if export_requested
+            if export_requested and not direct_ddr_tiled
             else ""
         )
+        weight_arg = "const ap_uint<32>* weights_mem" if direct_ddr_tiled else "ap_uint<32>* weights_mem"
+        mode_arg = "" if direct_ddr_tiled else ",\n    int mode"
+        weight_mode_label = "ddr_tiled_direct" if direct_ddr_tiled else "runtime_import"
+        import_call = "" if direct_ddr_tiled else (
+            f'    printf("[TB] Importing runtime weights...\\n");\n'
+            f'    {top_name}({call_input}, {call_output}, weights_mem.data(), 1);\n'
+        )
+        inference_call = (
+            f"{top_name}({call_input}, {call_output}, weights_mem.data());"
+            if direct_ddr_tiled
+            else f"{top_name}({call_input}, {call_output}, weights_mem.data(), 0);"
+        )
+        weight_import_count = 0 if direct_ddr_tiled else 1
         tb_text = f"""
 #include <cstdio>
 #include <cstdlib>
@@ -415,8 +429,7 @@ typedef ap_axis<32,0,0,0> axis_t;
 extern "C" void {top_name}(
     {input_arg},
     {output_arg},
-    ap_uint<32>* weights_mem,
-    int mode
+    {weight_arg}{mode_arg}
 );
 
 {helpers}
@@ -457,7 +470,7 @@ int main(int argc, char** argv) {{
     f.close();
 
     printf("[TB] Loaded %d inputs from %s\\n", n_floats, in_path);
-    printf("[TB] Inference I/O ABI: input_m_axi=%d output_m_axi=%d weights_mode=runtime_import\\n", {1 if input_m_axi else 0}, {1 if output_m_axi else 0});
+    printf("[TB] Inference I/O ABI: input_m_axi=%d output_m_axi=%d weights_mode={weight_mode_label}\\n", {1 if input_m_axi else 0}, {1 if output_m_axi else 0});
 
 {input_decl}{output_decl}
     const int sample_words = {max(1, int(in_words))};
@@ -477,9 +490,7 @@ int main(int argc, char** argv) {{
     std::vector<ap_uint<32> > weights_mem(actual_weight_words);
     fpgai::fpgai_fill_runtime_weight_words(weights_mem.data(), actual_weight_words);
 
-    printf("[TB] Importing runtime weights...\\n");
-    {top_name}({call_input}, {call_output}, weights_mem.data(), 1);
-
+{import_call}
     std::vector<float> output_data;
     output_data.reserve(requested_samples * FPGAI_OUTPUT_VALUES);
     for (int sample_index = 0; sample_index < requested_samples; ++sample_index) {{
@@ -489,7 +500,7 @@ int main(int argc, char** argv) {{
         );
 {batch_input_load}
         printf("[TB] Running inference sample %d/%d...\\n", sample_index + 1, requested_samples);
-        {top_name}({call_input}, {call_output}, weights_mem.data(), 0);
+        {inference_call}
 {batch_output_capture}
     }}
 {export_call}
@@ -512,8 +523,8 @@ int main(int argc, char** argv) {{
            << "  \\\"input_values_per_sample\\\": " << sample_words << ",\\n"
            << "  \\\"output_values_per_sample\\\": " << FPGAI_OUTPUT_VALUES << ",\\n"
            << "  \\\"generated_output_words\\\": " << output_data.size() << ",\\n"
-           << "  \\\"weight_import_count\\\": 1,\\n"
-           << "  \\\"weight_export_count\\\": {1 if export_requested else 0},\\n"
+           << "  \\\"weight_import_count\\\": {weight_import_count},\\n"
+           << "  \\\"weight_export_count\\\": {1 if export_requested and not direct_ddr_tiled else 0},\\n"
            << "  \\\"inference_invocation_count\\\": " << requested_samples << "\\n}}\\n";
     record.close();
 

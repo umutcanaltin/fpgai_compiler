@@ -1,0 +1,17 @@
+schema: fpgai.reference-architecture/v1
+name: single_stage_detector
+family: single_stage_detection
+description: Generic single-stage detector reference workload with one-pass box and class prediction and explicit runtime NMS partition.
+compiler_special_case: false
+graph_source: maintained_generic_graph
+benchmark_label: Generic Single-stage Detector
+features:
+  - convolutional_backbone
+  - box_regression_head
+  - classification_head
+  - raw_detection_output
+  - explicit_nms_partition
+parameters:
+  input_shape: [1, 3, 64, 64]
+  class_count: 4
+  output_box_format: xywh

@@ -458,6 +458,8 @@ def inspect_from_config(
             print(f"[OK] Resource prediction JSON: {paths['resource_prediction_json']}")
             print(f"[OK] Timing prediction JSON: {paths['timing_prediction_json']}")
             print(f"[OK] Prediction summary: {paths['prediction_summary_md']}")
+            if paths.get("model_gap_audit_json"):
+                print(f"[OK] Model gap audit JSON: {paths['model_gap_audit_json']}")
             wrote_anything = True
 
         if not wrote_anything:
@@ -619,19 +621,21 @@ def inspect_experiment_config(
         return 2
 
     top_keys = sorted(data.keys())
-    required = ["benchmark", "inputs", "validation_levels", "limitations"]
+    required = ["benchmark", "inputs", "limitations"]
     errors = [f"{key}: missing" for key in required if key not in data]
+    if "validation_levels" not in data and "claim_levels" not in data:
+        errors.append("validation_levels: missing")
 
     benchmark = data.get("benchmark") or {}
     inputs = data.get("inputs") or {}
-    validation_levels = data.get("validation_levels") or {}
+    validation_levels = data.get("validation_levels") or data.get("claim_levels") or {}
     limitations = data.get("limitations") or []
 
     if "benchmark" in data and not isinstance(benchmark, dict):
         errors.append("benchmark: expected mapping")
     if "inputs" in data and not isinstance(inputs, dict):
         errors.append("inputs: expected mapping")
-    if "validation_levels" in data and not isinstance(validation_levels, dict):
+    if ("validation_levels" in data or "claim_levels" in data) and not isinstance(validation_levels, dict):
         errors.append("validation_levels: expected mapping")
     if "limitations" in data and not isinstance(limitations, (list, dict)):
         errors.append("limitations: expected list or mapping")
@@ -1247,6 +1251,48 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
 
+    ecosystem_parser = subparsers.add_parser(
+        "ecosystem",
+        help="Create, validate, discover, and inspect FPGAI Ecosystem contributions",
+    )
+    ecosystem_subparsers = ecosystem_parser.add_subparsers(dest="ecosystem_command")
+    ecosystem_init = ecosystem_subparsers.add_parser("init", help="Create an FPGAI Ecosystem contribution scaffold")
+    ecosystem_init.add_argument("--type", dest="asset_type", required=True, help="model, operator/layer, implementation, hls, vhdl, board, backend, dataset, optimizer, loss, reporter, ...")
+    ecosystem_init.add_argument("--id", dest="package_id", required=True, help="Namespace-qualified ecosystem package ID")
+    ecosystem_init.add_argument("--out", required=True, help="Output contribution directory")
+    ecosystem_init.add_argument("--name", default=None)
+    ecosystem_init.add_argument("--language", choices=["hls_cpp", "vhdl", "verilog", "systemverilog"], default=None)
+    ecosystem_init.add_argument("--force", action="store_true")
+    ecosystem_validate = ecosystem_subparsers.add_parser("validate", help="Validate an ecosystem package manifest without executing contributor code")
+    ecosystem_validate.add_argument("path", help="Contribution root containing fpgai.yaml")
+    ecosystem_validate.add_argument("--json", action="store_true", dest="json_output")
+    ecosystem_inventory = ecosystem_subparsers.add_parser("inventory", help="Show the built-in FPGAI Ecosystem registry inventory")
+    ecosystem_inventory.add_argument("--json", action="store_true", dest="json_output")
+    ecosystem_discover = ecosystem_subparsers.add_parser("discover", help="Discover built-in and project-local FPGAI Ecosystem packages")
+    ecosystem_discover.add_argument("--project-root", default=".", help="Project root containing packages/")
+    ecosystem_discover.add_argument("--directory", action="append", default=[], help="Additional ecosystem package directory; may be repeated")
+    ecosystem_discover.add_argument("--max-depth", type=int, default=2)
+    ecosystem_discover.add_argument("--strict", action="store_true")
+    ecosystem_discover.add_argument("--json", action="store_true", dest="json_output")
+    ecosystem_subparsers.add_parser("types", help="List supported FPGAI Ecosystem contribution asset types")
+
+    frontend_parser = subparsers.add_parser(
+        "frontend",
+        help="Inspect or import registered model-source frontends",
+    )
+    frontend_subparsers = frontend_parser.add_subparsers(dest="frontend_command")
+    frontend_subparsers.add_parser("list", help="List registered source frontends")
+    frontend_subparsers.add_parser("routes", help="Show framework-to-FPGAI ingress routes and legalization status")
+    frontend_import_parser = frontend_subparsers.add_parser(
+        "import", help="Import ONNX/MLIR/StableHLO to FPGAI IR without compiling"
+    )
+    frontend_import_parser.add_argument("--input", required=True, help="Input model/IR path")
+    frontend_import_parser.add_argument("--format", dest="format_hint", default=None, help="onnx, mlir, stablehlo, or external registered frontend")
+    frontend_import_parser.add_argument("--framework", default=None, help="Optional source framework provenance, e.g. jax or pytorch")
+    frontend_import_parser.add_argument("--pipeline-mode", default="inference")
+    frontend_import_parser.add_argument("--target-board", default=None)
+    frontend_import_parser.add_argument("--out", required=True, help="Output directory")
+
     return parser
 
 
@@ -1284,6 +1330,111 @@ def main() -> None:
             return _handle_validate_correctness(args)
         parser.error("validate requires a subcommand")
         return 2
+
+    if args.command == "ecosystem":
+        ecosystem_command = getattr(args, "ecosystem_command", None)
+        if ecosystem_command == "init":
+            from fpgai.ecosystem import scaffold_contribution
+            root = scaffold_contribution(
+                args.out, asset_type=args.asset_type, package_id=args.package_id,
+                name=args.name, language=args.language, force=args.force,
+            )
+            print(str(root))
+            return
+        if ecosystem_command == "validate":
+            from fpgai.contracts.package_validation import validate_package_manifest
+            result = validate_package_manifest(args.path)
+            if args.json_output:
+                print(result.to_json())
+            else:
+                print(f"{result.status}: {result.package_id or args.path}")
+                for issue in (*result.errors, *result.warnings):
+                    print(f"{issue.severity}: {issue.code} {issue.field}: {issue.message}")
+            raise SystemExit(0 if result.ok else 1)
+        if ecosystem_command == "inventory":
+            from fpgai.registries.builtin_catalogue import build_builtin_catalogue
+            from fpgai.registries.registry_inventory import inventory_payload
+            payload = inventory_payload(build_builtin_catalogue())
+            if args.json_output:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                for item in payload.get("entries", []):
+                    print(f"{item.get('asset_type',''):16} {item.get('package_id',''):44} {item.get('version','')}")
+            return
+        if ecosystem_command == "discover":
+            from fpgai.discovery import DiscoveryRequest, discover_packages
+            result = discover_packages(DiscoveryRequest(
+                project_root=args.project_root,
+                configured_directories=tuple(args.directory or ()),
+                include_builtin=True,
+                max_depth=args.max_depth,
+                strict=args.strict,
+            ))
+            payload = result.to_dict()
+            if args.json_output:
+                print(json.dumps(payload, indent=2, sort_keys=True))
+            else:
+                summary = payload["summary"]
+                print(f"accepted={summary['accepted']} quarantined={summary['quarantined']} conflicts={summary['conflicts']}")
+                for item in payload["packages"]:
+                    print(f"{item['status']:12} {item['asset_type']:16} {item['package_id']}@{item['version']}")
+            raise SystemExit(0 if result.ok else 1)
+        if ecosystem_command == "types":
+            from fpgai.ecosystem import supported_contribution_types
+            for asset_type in supported_contribution_types():
+                print(asset_type)
+            return
+        parser.error("ecosystem requires 'init', 'validate', 'inventory', 'discover', or 'types'")
+
+    if args.command == "frontend":
+        from fpgai.frontend import frontend_registry, import_model_source
+        if getattr(args, "frontend_command", None) == "list":
+            for name, spec in sorted(frontend_registry().items()):
+                print(f"{name:16} {spec.provider:16} {spec.description}")
+            return
+        if getattr(args, "frontend_command", None) == "routes":
+            from fpgai.frontend import source_framework_route
+            for framework in ("jax", "tensorflow", "pytorch", "onnx"):
+                route = source_framework_route(framework)
+                accepted = ",".join(route.get("accepted_formats", ())) or "-"
+                print(f"{framework:12} {route.get('maturity','-'):32} {accepted:24} {route.get('preferred_dialect','-')}")
+            return
+        if getattr(args, "frontend_command", None) == "import":
+            from fpgai.frontend.mlir import canonical_ir_equivalence_manifest, mlir_bridge_manifest, write_fpgai_mlir
+            from fpgai.layers.composites import expand_composite_layers
+            out_dir = Path(args.out)
+            out_dir.mkdir(parents=True, exist_ok=True)
+            graph = import_model_source(
+                args.input,
+                format_hint=args.format_hint,
+                source_framework=args.framework,
+                pipeline_mode=args.pipeline_mode,
+                target_board=args.target_board,
+            )
+            graph = expand_composite_layers(graph)
+            manifest = mlir_bridge_manifest(graph)
+            ir_path = out_dir / "fpgai_ir.json"
+            ir_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+            mlir_path = write_fpgai_mlir(graph, out_dir / "fpgai_bridge.mlir")
+            result = {
+                "schema": "fpgai.frontend-import-result/v1",
+                "status": "passed",
+                "source": str(args.input),
+                "format": graph.metadata.get("source", {}).get("format"),
+                "framework": args.framework,
+                "operator_count": len(graph.ops),
+                "tensor_count": len(graph.tensors),
+                "ingress_route": graph.metadata.get("source", {}).get("ingress_route"),
+                "canonical_structure_fingerprint_sha256": canonical_ir_equivalence_manifest(graph)["fingerprint_sha256"],
+                "canonical_parameter_fingerprint_sha256": canonical_ir_equivalence_manifest(graph, include_parameter_values=True)["fingerprint_sha256"],
+                "fpgai_ir": str(ir_path),
+                "fpgai_mlir": str(mlir_path),
+            }
+            result_path = out_dir / "frontend_import_result.json"
+            result_path.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+            print(json.dumps(result, indent=2, sort_keys=True))
+            return
+        parser.error("frontend requires 'list', 'routes', or 'import'")
 
     if args.command == "benchmark":
         raise SystemExit(

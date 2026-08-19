@@ -1,0 +1,51 @@
+version: 1
+project:
+  name: ptq_calibration_example
+  out_dir: build/ptq_calibration_example
+  clean: true
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+model:
+  format: onnx
+  path: models/cnn_mnist.onnx
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+      - name: pl_clk0
+        target_mhz: 200
+operators:
+  supported: [Dense, Conv, MaxPool, Add, Relu, Flatten, Softmax]
+numerics:
+  quantization:
+    mode: ptq
+    weights:
+      bits: 8
+      scheme: symmetric
+      granularity: per_channel
+      axis: 0
+      rounding: nearest
+      saturation: saturate
+    activations:
+      bits: 8
+      scheme: symmetric
+      granularity: per_tensor
+      rounding: nearest
+      saturation: saturate
+    calibration:
+      method: percentile
+      percentile: 99.9
+      samples: 128
+toolchain:
+  vitis_hls:
+    enabled: false
+  vivado:
+    enabled: false
+analysis:
+  quantization_report:
+    enabled: false
+  precision_sweep:
+    enabled: false

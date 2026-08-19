@@ -51,6 +51,10 @@ def load_runtime_execution_plan() -> dict[str, Any]:
         return {'sequence': []}
     return json.loads(RUNTIME_EXECUTION_PLAN_PATH.read_text(encoding='utf-8'))
 
+def load_graph_runtime_contract() -> dict[str, Any]:
+    contract = load_manifest().get('graph_runtime_contract', {})
+    return dict(contract) if isinstance(contract, dict) else {}
+
 def _load_board_runtime_module() -> Any:
     try:
         import board_runtime  # type: ignore
@@ -191,6 +195,84 @@ def export_optimizer_state(*, board_payload: bytes | None = None, capture_path: 
         return _BOUND_BACKEND.export_optimizer_state(capture_path=capture_path)
     _unsupported_board_call('export_optimizer_state')
 
+def _autoregressive_contract() -> dict[str, Any]:
+    contract = load_graph_runtime_contract().get('autoregressive_session', {})
+    return contract if isinstance(contract, dict) else {}
+
+def prepare_prefill(*, reset_state_first: bool | None = None) -> dict[str, Any]:
+    contract = _autoregressive_contract()
+    if not contract:
+        raise RuntimeError('prepare_prefill is unavailable because this package has no autoregressive runtime contract.')
+    do_reset = bool(contract.get('reset_state_on_prefill', True)) if reset_state_first is None else bool(reset_state_first)
+    if do_reset:
+        reset_state()
+    if _BOUND_BACKEND is not None and hasattr(_BOUND_BACKEND, 'set_runtime_mode'):
+        _BOUND_BACKEND.set_runtime_mode('prefill')
+    return {'mode': 'prefill', 'reset_state': do_reset, 'contract': contract}
+
+def prepare_decode() -> dict[str, Any]:
+    contract = _autoregressive_contract()
+    if not contract:
+        raise RuntimeError('prepare_decode is unavailable because this package has no autoregressive runtime contract.')
+    if _BOUND_BACKEND is not None and hasattr(_BOUND_BACKEND, 'set_runtime_mode'):
+        _BOUND_BACKEND.set_runtime_mode('decode')
+    return {'mode': 'decode', 'reset_state': False, 'contract': contract}
+
+def postprocess_detections(outputs: Any, **kwargs: Any) -> Any:
+    contract = load_graph_runtime_contract().get('detection_output', {})
+    if not isinstance(contract, dict) or not contract:
+        raise RuntimeError('postprocess_detections is unavailable because this package has no detection output contract.')
+    partition = str(contract.get('postprocess_partition', 'ps_or_host'))
+    if partition in {'none', 'pl'}:
+        raise RuntimeError(f'postprocess_detections is not a host/PS stage for partition={partition}.')
+    if _BOUND_BACKEND is not None and hasattr(_BOUND_BACKEND, 'postprocess_detections'):
+        return _BOUND_BACKEND.postprocess_detections(outputs, contract=contract, **kwargs)
+    _unsupported_board_call('postprocess_detections')
+
+def _persistent_state_contract() -> dict[str, Any]:
+    state = load_manifest().get('persistent_state', {})
+    return state if isinstance(state, dict) else {}
+
+def reset_state(name: str | None = None) -> Any:
+    state = _persistent_state_contract()
+    if int(state.get('tensor_count', 0)) <= 0:
+        raise RuntimeError('reset_state is unavailable because this package has no persistent state tensors.')
+    if _BOUND_BACKEND is not None and hasattr(_BOUND_BACKEND, 'reset_state'):
+        return _BOUND_BACKEND.reset_state(name=name)
+    _unsupported_board_call('reset_state')
+
+def import_state(payload: Any, *, name: str | None = None) -> Any:
+    state = _persistent_state_contract()
+    if int(state.get('tensor_count', 0)) <= 0:
+        raise RuntimeError('import_state is unavailable because this package has no persistent state tensors.')
+    if _BOUND_BACKEND is not None and hasattr(_BOUND_BACKEND, 'import_state'):
+        return _BOUND_BACKEND.import_state(payload, name=name)
+    _unsupported_board_call('import_state')
+
+def export_state(*, name: str | None = None) -> Any:
+    state = _persistent_state_contract()
+    if int(state.get('tensor_count', 0)) <= 0:
+        raise RuntimeError('export_state is unavailable because this package has no persistent state tensors.')
+    if _BOUND_BACKEND is not None and hasattr(_BOUND_BACKEND, 'export_state'):
+        return _BOUND_BACKEND.export_state(name=name)
+    _unsupported_board_call('export_state')
+
+def read_state(*, name: str | None = None) -> Any:
+    state = _persistent_state_contract()
+    if int(state.get('tensor_count', 0)) <= 0:
+        raise RuntimeError('read_state is unavailable because this package has no persistent state tensors.')
+    if _BOUND_BACKEND is not None and hasattr(_BOUND_BACKEND, 'read_state'):
+        return _BOUND_BACKEND.read_state(name=name)
+    _unsupported_board_call('read_state')
+
+def write_state(payload: Any, *, name: str | None = None) -> Any:
+    state = _persistent_state_contract()
+    if int(state.get('tensor_count', 0)) <= 0:
+        raise RuntimeError('write_state is unavailable because this package has no persistent state tensors.')
+    if _BOUND_BACKEND is not None and hasattr(_BOUND_BACKEND, 'write_state'):
+        return _BOUND_BACKEND.write_state(payload, name=name)
+    _unsupported_board_call('write_state')
+
 def reset_accumulators() -> Any:
     if _BOUND_BACKEND is not None:
         return _BOUND_BACKEND.reset_accumulators()
@@ -234,6 +316,10 @@ def _call_command(command: str, args: dict[str, Any], *, capture_path: str | Pat
         return export_optimizer_state(capture_path=capture_path)
     if command == 'reset_accumulators':
         return reset_accumulators()
+    if command == 'reset_state':
+        return reset_state(name=args.get('name'))
+    if command == 'export_state':
+        return export_state(name=args.get('name'))
     if command == 'accumulate_gradients':
         return accumulate_gradients(steps=int(args.get('steps', 1)))
     if command == 'apply_accumulated_gradients':

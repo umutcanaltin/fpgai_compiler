@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, List
+from dataclasses import dataclass, replace
+from typing import Any, Dict, List, Mapping, Sequence
 
 from fpgai.config.access import get_path
 from fpgai.backends.vivado.boards import get_board
+from fpgai.engine.network_execution import build_network_execution_plan
 from fpgai.engine.models import (
     ArchitecturePlan,
     BufferingPlan,
@@ -1208,6 +1209,131 @@ def _plan_generic(desc: LayerDescriptor, precision: Dict[str, Any], weights_mode
     )
 
 
+
+def _arch_mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _arch_merge(base: Dict[str, Any], override: Mapping[str, Any]) -> Dict[str, Any]:
+    result = dict(base)
+    for key, value in override.items():
+        if key == "match":
+            continue
+        if isinstance(value, Mapping) and isinstance(result.get(key), Mapping):
+            result[key] = _arch_merge(dict(result[key]), value)
+        else:
+            result[key] = value
+    return result
+
+
+def _arch_rule_matches(rule: Mapping[str, Any], desc: LayerDescriptor, index: int) -> bool:
+    match = _arch_mapping(rule.get("match"))
+    if not match:
+        return False
+    if "index" in match and int(match["index"]) != index:
+        return False
+    if "name" in match and str(match["name"]) != str(desc.node_name):
+        return False
+    if "op_type" in match and str(match["op_type"]) != str(desc.op_type):
+        return False
+    return True
+
+
+def _architecture_compute_request(raw: Mapping[str, Any], desc: LayerDescriptor, index: int) -> Dict[str, Any]:
+    """Resolve compute knobs with network -> defaults -> matching-layer precedence."""
+    architecture = _arch_mapping(raw.get("architecture"))
+    requested: Dict[str, Any] = {}
+    requested = _arch_merge(requested, _arch_mapping(architecture.get("network")))
+    requested = _arch_merge(requested, _arch_mapping(architecture.get("defaults")))
+    rules = architecture.get("layers", ())
+    if isinstance(rules, Sequence) and not isinstance(rules, (str, bytes)):
+        for rule in rules:
+            if isinstance(rule, Mapping) and _arch_rule_matches(rule, desc, index):
+                requested = _arch_merge(requested, rule)
+    return requested
+
+
+def _positive_arch_int(value: Any, default: int) -> int:
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return max(1, int(default))
+
+
+def _apply_architecture_compute_controls(raw: Mapping[str, Any], desc: LayerDescriptor, index: int, plan: LayerPlan) -> LayerPlan:
+    requested = _architecture_compute_request(raw, desc, index)
+    architecture = plan.architecture
+    if architecture is None or not requested:
+        return plan
+
+    pipeline_req = _arch_mapping(requested.get("pipeline"))
+    parallel_req = _arch_mapping(requested.get("parallelism"))
+    partition_req = _arch_mapping(requested.get("partitioning"))
+    tiling_req = _arch_mapping(requested.get("tiling"))
+
+    loop_ii = dict(architecture.pipeline.loops)
+    raw_loop_ii = pipeline_req.get("loops", {})
+    if isinstance(raw_loop_ii, Mapping):
+        loop_ii.update({str(k): _positive_arch_int(v, 1) for k, v in raw_loop_ii.items()})
+
+    unroll = dict(architecture.parallelism.unroll)
+    raw_unroll = parallel_req.get("unroll", {})
+    if isinstance(raw_unroll, Mapping):
+        unroll.update({str(k): _positive_arch_int(v, 1) for k, v in raw_unroll.items()})
+
+    pe = _positive_arch_int(parallel_req.get("pe"), architecture.parallelism.pe)
+    simd = _positive_arch_int(parallel_req.get("simd"), architecture.parallelism.simd)
+    # PE/SIMD are also meaningful loop defaults for matrix/conv families.
+    if desc.op_type == "Dense":
+        unroll.setdefault("out", pe)
+        unroll.setdefault("in", simd)
+    elif desc.op_type == "MatMul":
+        unroll.setdefault("n", pe)
+        unroll.setdefault("k", simd)
+    elif desc.op_type == "Conv":
+        unroll.setdefault("oc", pe)
+        unroll.setdefault("ic", simd)
+    else:
+        unroll.setdefault("element", pe)
+
+    factor = _positive_arch_int(partition_req.get("factor"), architecture.partitioning.factor)
+    targets = dict(architecture.partitioning.targets)
+    raw_targets = partition_req.get("targets", {})
+    if isinstance(raw_targets, Mapping):
+        targets.update({str(k): _positive_arch_int(v, factor) for k, v in raw_targets.items()})
+
+    tile_sizes = dict(architecture.tiling.sizes)
+    raw_sizes = tiling_req.get("sizes", {})
+    if isinstance(raw_sizes, Mapping):
+        tile_sizes.update({str(k): _positive_arch_int(v, 1) for k, v in raw_sizes.items()})
+
+    new_arch = replace(
+        architecture,
+        pipeline=PipelinePlan(
+            ii=_positive_arch_int(pipeline_req.get("ii"), architecture.pipeline.ii),
+            style=str(pipeline_req.get("style", architecture.pipeline.style)),
+            scope=pipeline_req.get("scope", architecture.pipeline.scope),
+            loops=loop_ii,
+        ),
+        parallelism=ParallelismPlan(pe=pe, simd=simd, unroll=unroll),
+        partitioning=PartitionPlan(
+            factor=factor,
+            mode=str(partition_req.get("mode", architecture.partitioning.mode)),
+            targets=targets,
+        ),
+        tiling=TilingPlan(sizes=tile_sizes),
+    )
+    plan.architecture = new_arch
+    plan.pipeline_ii = new_arch.pipeline.ii
+    plan.unroll = dict(new_arch.parallelism.unroll)
+    plan.tile = dict(new_arch.tiling.sizes)
+    plan.notes = dict(plan.notes)
+    plan.notes["architecture_control_sources"] = {
+        "precedence": ["architecture.network", "architecture.defaults", "architecture.layers"],
+        "effective_request": requested,
+    }
+    return plan
+
 def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
     raw = cfg.raw
     default_precision = _default_precision_info(cfg)
@@ -1237,11 +1363,17 @@ def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
         else:
             plan = _plan_generic(desc, precision, weights_mode, policy)
 
+        plan = _apply_architecture_compute_controls(raw, desc, len(layer_plans), plan)
         layer_plans.append(plan)
 
     total_param_bytes = sum(d.param_bytes for d in descriptors)
     total_activation_in = sum(d.activation_bytes_in for d in descriptors)
     total_activation_out = sum(d.activation_bytes_out for d in descriptors)
+    network_execution = build_network_execution_plan(
+        raw,
+        descriptors,
+        pipeline_mode=str(_cfg_get(raw, "pipeline.mode", "inference")),
+    )
 
     return CompilePlan(
         target_board=target_board,
@@ -1256,6 +1388,7 @@ def make_compile_plan(cfg, descriptors: List[LayerDescriptor]) -> CompilePlan:
         },
         notes={
             "planner": "policy_driven_v6_precision_aware",
+            "network_execution": network_execution.to_dict(),
             "global_weights_mode_requested": str(
                 _cfg_get(
                     raw,

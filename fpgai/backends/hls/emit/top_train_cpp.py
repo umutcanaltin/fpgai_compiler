@@ -4,6 +4,7 @@ from fpgai.backends.hls.emit.architecture_comments import emit_layer_architectur
 # FPGAI architecture-comment wrapper.
 
 import re
+import numpy as np
 from typing import Any, Dict, List, Optional, Tuple
 
 from fpgai.backends.hls.emit.dense_tiling_codegen import apply_dense_tiling_to_top_source
@@ -23,7 +24,20 @@ from fpgai.engine.training_graph_utils import (
     shape_without_batch as _shape_wo_batch,
 )
 from fpgai.ir.graph import Graph
+from fpgai.ir.tensor_ops import axis_geometry, normalize_axis, resolve_resize_shape, resolve_slice_spec
 
+
+
+def _resize_mode_codes(attrs: Dict[str, Any]) -> Tuple[int, int]:
+    coord = str(attrs.get("coordinate_transformation_mode", "asymmetric")).strip().lower()
+    nearest = str(attrs.get("nearest_mode", "floor")).strip().lower()
+    coord_codes = {"asymmetric": 0, "half_pixel": 1, "align_corners": 2}
+    nearest_codes = {"floor": 0, "round_prefer_floor": 1, "ceil": 2, "round_prefer_ceil": 3}
+    if coord not in coord_codes:
+        raise RuntimeError(f"TRAINHLS220: unsupported nearest Resize coordinate_transformation_mode {coord!r}")
+    if nearest not in nearest_codes:
+        raise RuntimeError(f"TRAINHLS220: unsupported nearest Resize nearest_mode {nearest!r}")
+    return coord_codes[coord], nearest_codes[nearest]
 
 def _object_dict(value: Any) -> Dict[str, Any]:
     if hasattr(value, "to_dict"):
@@ -47,13 +61,19 @@ def _plan_map(
         plans = compile_plan.get("layer_plans", [])
 
     result: Dict[str, Dict[str, Any]] = {}
-    for plan in plans or []:
+    for index, plan in enumerate(plans or []):
         data = _object_dict(plan)
         name = data.get("node_name")
         if name:
             result[str(name)] = data
+        result[f"__index__{index}"] = data
     return result
 
+
+
+def _plan_for_op(plan_map: Dict[str, Dict[str, Any]], op: Any, index: int) -> Dict[str, Any]:
+    """Resolve a layer plan by canonical op name, falling back to stable op index."""
+    return plan_map.get(str(getattr(op, "name", "")), plan_map.get(f"__index__{index}", {}))
 
 def _architecture_section(
     layer_plan: Dict[str, Any],
@@ -93,6 +113,10 @@ def _layer_codegen_values(
         layer_plan,
         "partitioning",
     )
+    tiling = _architecture_section(
+        layer_plan,
+        "tiling",
+    )
     unroll = parallelism.get(
         "unroll",
         layer_plan.get("unroll", {}),
@@ -127,24 +151,54 @@ def _layer_codegen_values(
             unroll.get("ic", 1)
         )
 
+    loop_ii = pipeline.get("loops", {})
+    if not isinstance(loop_ii, dict):
+        loop_ii = {}
+    def loop_value(name: str, fallback: int) -> int:
+        return _positive_codegen_int(loop_ii.get(name, fallback))
+    def unroll_value(name: str, fallback: int = 1) -> int:
+        return _positive_codegen_int(unroll.get(name, fallback))
+
+    base_ii = _positive_codegen_int(
+        pipeline.get("ii", layer_plan.get("pipeline_ii", 1))
+    )
     return {
-        "pipeline_ii": _positive_codegen_int(
-            pipeline.get(
-                "ii",
-                layer_plan.get("pipeline_ii", 1),
-            )
-        ),
+        "pipeline_ii": base_ii,
+        "ii_m": loop_value("m", base_ii),
+        "ii_n": loop_value("n", base_ii),
+        "ii_k": loop_value("k", base_ii),
+        "ii_row": loop_value("row", base_ii),
+        "ii_col": loop_value("col", base_ii),
+        "ii_pair": loop_value("pair", base_ii),
+        "ii_head": loop_value("head", base_ii),
+        "ii_element": loop_value("element", base_ii),
+        "ii_mac": loop_value("mac", loop_value("k", base_ii)),
+        "ii_reduce": loop_value("reduce", base_ii),
+        "ii_normalize": loop_value("normalize", base_ii),
+        "ii_score": loop_value("score", base_ii),
+        "ii_softmax_max": loop_value("softmax_max", base_ii),
+        "ii_softmax_exp": loop_value("softmax_exp", base_ii),
+        "ii_softmax_norm": loop_value("softmax_norm", base_ii),
+        "ii_value": loop_value("value", base_ii),
+        "ii_dq_dv": loop_value("dq_dv", base_ii),
+        "ii_dk": loop_value("dk", base_ii),
         "input_unroll": input_unroll,
         "output_unroll": output_unroll,
-        "input_partition": _positive_codegen_int(
-            targets.get("input", factor)
-        ),
-        "output_partition": _positive_codegen_int(
-            targets.get("output", factor)
-        ),
-        "weight_partition": _positive_codegen_int(
-            targets.get("weight", factor)
-        ),
+        "m_unroll": unroll_value("m", 1),
+        "n_unroll": unroll_value("n", output_unroll),
+        "k_unroll": unroll_value("k", input_unroll),
+        "row_unroll": unroll_value("row", 1),
+        "col_unroll": unroll_value("col", 1),
+        "pair_unroll": unroll_value("pair", 1),
+        "head_unroll": unroll_value("head", 1),
+        "element_unroll": unroll_value("element", max(input_unroll, output_unroll, 1)),
+        "tile_m": _positive_codegen_int((tiling.get("sizes", {}) or {}).get("m", 1)),
+        "tile_n": _positive_codegen_int((tiling.get("sizes", {}) or {}).get("n", 1)),
+        "tile_k": _positive_codegen_int((tiling.get("sizes", {}) or {}).get("k", 1)),
+        "input_partition": _positive_codegen_int(targets.get("input", factor)),
+        "output_partition": _positive_codegen_int(targets.get("output", factor)),
+        "weight_partition": _positive_codegen_int(targets.get("weight", factor)),
+        "gradient_partition": _positive_codegen_int(targets.get("gradient", factor)),
     }
 
 
@@ -250,6 +304,10 @@ def _build_tensor_shapes(
         elif op.op_type in {
             "Flatten",
             "Reshape",
+            "Identity",
+            "Cast",
+            "Squeeze",
+            "Unsqueeze",
         }:
             if input_shape:
                 inferred_shapes[output_name] = (
@@ -581,6 +639,23 @@ def _needs_input_gradient(
         "AvgPool",
         "Flatten",
         "Reshape",
+        "Identity",
+        "Cast",
+        "Squeeze",
+        "Unsqueeze",
+        "Mul",
+        "MatMul",
+        "Transpose",
+        "SiLU",
+        "LayerNormalization",
+        "RMSNorm",
+        "CausalMask",
+        "RotaryEmbedding",
+        "MultiHeadAttention",
+        "Concat",
+        "Slice",
+        "Resize",
+        "Gather",
     }
 
 
@@ -605,33 +680,43 @@ def _inject_native_accumulated_modes_from_cpp(
         return cpp
 
     params = []
-    # Weight/bias gradients already emitted by the training generator.
+    # Discover trainable parameter blocks from the generated source. Keep this
+    # independent of operator names so layerwise and ecosystem extensions can
+    # participate when they emit the standard parameter/gradient contract.
     grad_w = {m.group(1): int(m.group(2)) for m in re.finditer(r"static\s+grad_wgt_t\s+dW_([A-Za-z0-9_]+)\[(\d+)\];", cpp)}
     grad_b = {m.group(1): int(m.group(2)) for m in re.finditer(r"static\s+grad_bias_t\s+dB_([A-Za-z0-9_]+)\[(\d+)\];", cpp)}
+    grad_ng = {m.group(1): int(m.group(2)) for m in re.finditer(r"static\s+grad_wgt_t\s+dN_G_([A-Za-z0-9_]+)\[(\d+)\];", cpp)}
+    grad_nb = {m.group(1): int(m.group(2)) for m in re.finditer(r"static\s+grad_bias_t\s+dN_B_([A-Za-z0-9_]+)\[(\d+)\];", cpp)}
+    grad_bng = {m.group(1): int(m.group(2)) for m in re.finditer(r"static\s+grad_wgt_t\s+dBN_G_([A-Za-z0-9_]+)\[(\d+)\];", cpp)}
+    grad_bnb = {m.group(1): int(m.group(2)) for m in re.finditer(r"static\s+grad_bias_t\s+dBN_B_([A-Za-z0-9_]+)\[(\d+)\];", cpp)}
 
-    for tag in sorted(grad_w.keys()):
-        if tag not in grad_b:
-            continue
-        w_arr = f"W_{tag}"
-        b_arr = f"B_{tag}"
-        if f"static wgt_t {w_arr}[" not in cpp or f"static bias_t {b_arr}[" not in cpp:
-            # BatchNorm or other trainable parameter forms can be added later.
-            continue
+    def add_param(tag, w, b, w_arr, b_arr, dw, db):
         if f"OUT_grad_{tag}" not in cpp:
-            continue
+            return
         params.append({
-            "tag": tag,
-            "w": grad_w[tag],
-            "b": grad_b[tag],
-            "w_arr": w_arr,
-            "b_arr": b_arr,
-            "dw": f"dW_{tag}",
-            "db": f"dB_{tag}",
+            "tag": tag, "w": int(w), "b": int(b),
+            "w_arr": w_arr, "b_arr": b_arr, "dw": dw, "db": db,
             "out": f"OUT_grad_{tag}",
         })
 
+    for tag in sorted(grad_w):
+        if f"static wgt_t W_{tag}[" not in cpp:
+            continue
+        add_param(tag, grad_w[tag], grad_b.get(tag, 0), f"W_{tag}", f"B_{tag}" if tag in grad_b else None, f"dW_{tag}", f"dB_{tag}" if tag in grad_b else None)
+    for tag in sorted(grad_ng):
+        if f"static wgt_t N_G_{tag}[" not in cpp:
+            continue
+        add_param(tag, grad_ng[tag], grad_nb.get(tag, 0), f"N_G_{tag}", f"N_B_{tag}" if tag in grad_nb else None, f"dN_G_{tag}", f"dN_B_{tag}" if tag in grad_nb else None)
+    for tag in sorted(grad_bng):
+        if f"static wgt_t BN_G_{tag}[" not in cpp:
+            continue
+        add_param(tag, grad_bng[tag], grad_bnb.get(tag, 0), f"BN_G_{tag}", f"BN_B_{tag}" if tag in grad_bnb else None, f"dBN_G_{tag}", f"dBN_B_{tag}" if tag in grad_bnb else None)
+
     if not params:
-        raise RuntimeError("Native accumulation injection found no dense/conv trainable parameters in generated C++")
+        # Parameter-free trainable graphs (for example Concat/Slice/Resize)
+        # still have valid backward propagation; accumulated optimizer modes
+        # simply do not apply because there is no mutable parameter block.
+        return cpp
 
     decl = [
         "",
@@ -646,7 +731,8 @@ def _inject_native_accumulated_modes_from_cpp(
     ]
     for p in params:
         decl.append(f"static acc_t ACC_{p['dw']}[{p['w']}];")
-        decl.append(f"static acc_t ACC_{p['db']}[{p['b']}];")
+        if p["b"]:
+            decl.append(f"static acc_t ACC_{p['db']}[{p['b']}];")
     decl.append("static int FPGAI_NATIVE_ACC_BATCH_COUNT = 0;")
     decl_text = "\n".join(decl) + "\n"
 
@@ -659,7 +745,8 @@ def _inject_native_accumulated_modes_from_cpp(
         out = []
         for p in params:
             out.append(f"{indent}for (int i = 0; i < {p['w']}; ++i) ACC_{p['dw']}[i] = (acc_t)0;")
-            out.append(f"{indent}for (int i = 0; i < {p['b']}; ++i) ACC_{p['db']}[i] = (acc_t)0;")
+            if p["b"]:
+                out.append(f"{indent}for (int i = 0; i < {p['b']}; ++i) ACC_{p['db']}[i] = (acc_t)0;")
         out.append(f"{indent}FPGAI_NATIVE_ACC_BATCH_COUNT = 0;")
         return out
 
@@ -671,7 +758,8 @@ def _inject_native_accumulated_modes_from_cpp(
             w_source = f"ACC_{p['dw']}" if accumulated else p['dw']
             b_source = f"ACC_{p['db']}" if accumulated else p['db']
             out.append(f"{indent}for (int i = 0; i < {p['w']}; ++i) {p['out']}[i] = (float){w_source}[i];")
-            out.append(f"{indent}for (int i = 0; i < {p['b']}; ++i) {p['out']}[{p['w']} + i] = (float){b_source}[i];")
+            if p["b"]:
+                out.append(f"{indent}for (int i = 0; i < {p['b']}; ++i) {p['out']}[{p['w']} + i] = (float){b_source}[i];")
             out.append(f"{indent}emit_stream_block<{total}>(out, {p['out']}, {last});")
         return out
 
@@ -689,9 +777,11 @@ def _inject_native_accumulated_modes_from_cpp(
     ]
     for p in params:
         pre_input.append(f"    for (int i = 0; i < {p['w']}; ++i) {p['dw']}[i] = (grad_wgt_t)(((float)ACC_{p['dw']}[i]) / (float)denom);")
-        pre_input.append(f"    for (int i = 0; i < {p['b']}; ++i) {p['db']}[i] = (grad_bias_t)(((float)ACC_{p['db']}[i]) / (float)denom);")
+        if p["b"]:
+            pre_input.append(f"    for (int i = 0; i < {p['b']}; ++i) {p['db']}[i] = (grad_bias_t)(((float)ACC_{p['db']}[i]) / (float)denom);")
         pre_input.append(f"    fpgai::sgd_update_wgt_typed<{p['w']}, wgt_t, grad_wgt_t, upd_t, acc_t, 1, 4>({p['w_arr']}, {p['dw']}, (upd_t){learning_rate:.8f}f);")
-        pre_input.append(f"    fpgai::sgd_update_bias_typed<{p['b']}, bias_t, grad_bias_t, upd_t, acc_t, 1, 2>({p['b_arr']}, {p['db']}, (upd_t){learning_rate:.8f}f);")
+        if p["b"]:
+            pre_input.append(f"    fpgai::sgd_update_bias_typed<{p['b']}, bias_t, grad_bias_t, upd_t, acc_t, 1, 2>({p['b_arr']}, {p['db']}, (upd_t){learning_rate:.8f}f);")
     pre_input.extend(reset_lines("    "))
     pre_input.extend(emit_grad_lines("    "))
     pre_input.extend(["    return;", "  }", ""])
@@ -705,7 +795,8 @@ def _inject_native_accumulated_modes_from_cpp(
     accum = ["", "  if (mode == FPGAI_MODE_ACCUMULATE_GRADIENTS || mode == 3) {", "    // FPGAI accumulate_gradients runtime command: add this micro-batch gradient to native accumulators."]
     for p in params:
         accum.append(f"    for (int i = 0; i < {p['w']}; ++i) ACC_{p['dw']}[i] += (acc_t){p['dw']}[i];")
-        accum.append(f"    for (int i = 0; i < {p['b']}; ++i) ACC_{p['db']}[i] += (acc_t){p['db']}[i];")
+        if p["b"]:
+            accum.append(f"    for (int i = 0; i < {p['b']}; ++i) ACC_{p['db']}[i] += (acc_t){p['db']}[i];")
     accum.append("    FPGAI_NATIVE_ACC_BATCH_COUNT += 1;")
     accum.extend(emit_grad_lines("    ", accumulated=True))
     accum.extend(["    return;", "  }", ""])
@@ -788,10 +879,29 @@ def emit_top_train_cpp(
         "LeakyRelu",
         "Sigmoid",
         "Softmax",
+        "ReduceSum",
         "Flatten",
         "Reshape",
+        "Identity",
+        "Cast",
+        "Squeeze",
+        "Unsqueeze",
         "Add",
+        "Mul",
+        "MatMul",
+        "Transpose",
+        "SiLU",
+        "LayerNormalization",
+        "RMSNorm",
+        "CausalMask",
+        "RotaryEmbedding",
+        "MultiHeadAttention",
+        "Concat",
+         "Slice",
+         "Resize",
+         "Gather",
     }
+
 
     unsupported_operations = [
         op.op_type
@@ -874,6 +984,8 @@ def emit_top_train_cpp(
             '#include "layers/pool.h"',
             '#include "layers/activations.h"',
             '#include "layers/batchnorm.h"',
+            '#include "layers/attention.h"',
+        '#include "layers/tensor.h"',
             "",
             "typedef ap_axis<32,0,0,0> axis_t;",
             "using namespace fpgai;",
@@ -1067,6 +1179,67 @@ def emit_top_train_cpp(
                 )
             )
 
+        elif op.op_type == "RotaryEmbedding":
+            if len(op.inputs) < 3:
+                raise RuntimeError(
+                    f"TRAINHLS201: RotaryEmbedding node {op.name!r} requires input, cosine table, and sine table"
+                )
+            cos_name, sin_name = op.inputs[1], op.inputs[2]
+            if cos_name not in graph.constants or sin_name not in graph.constants:
+                raise RuntimeError(
+                    f"TRAINHLS202: RotaryEmbedding node {op.name!r} requires compiler constant cosine/sine tables"
+                )
+            cos = np.asarray(graph.constants[cos_name], dtype=np.float32).reshape(-1)
+            sin = np.asarray(graph.constants[sin_name], dtype=np.float32).reshape(-1)
+            if cos.size != sin.size:
+                raise RuntimeError(
+                    f"TRAINHLS203: RotaryEmbedding node {op.name!r} cosine/sine table sizes must match"
+                )
+            cos_values = ", ".join(f"{float(value):.8f}f" for value in cos)
+            sin_values = ", ".join(f"{float(value):.8f}f" for value in sin)
+            lines.append(
+                f"static acc_t ROPE_COS_{tag}[{cos.size}] = {{ {cos_values} }};"
+            )
+            lines.append(
+                f"static acc_t ROPE_SIN_{tag}[{sin.size}] = {{ {sin_values} }};"
+            )
+
+        elif op.op_type == "MatMul" and len(op.inputs) == 2 and op.inputs[1] in graph.constants:
+            weights = np.asarray(graph.constants[op.inputs[1]], dtype=np.float32)
+            weight_values = ", ".join(f"{float(value):.8f}f" for value in weights.reshape(-1))
+            lines.append(f"static wgt_t W_{tag}[{weights.size}] = {{ {weight_values} }};")
+            lines.append(f"static grad_wgt_t dW_{tag}[{weights.size}];")
+            lines.append(f"static float OUT_grad_{tag}[{weights.size}];")
+            parameter_specs.append(("matmul", op, tag, weights.size, 0))
+
+        elif op.op_type == "Gather" and len(op.inputs) >= 2 and op.inputs[0] in graph.constants:
+            weights = np.asarray(graph.constants[op.inputs[0]], dtype=np.float32)
+            weight_values = ", ".join(f"{float(value):.8f}f" for value in weights.reshape(-1))
+            lines.append(f"static wgt_t W_{tag}[{weights.size}] = {{ {weight_values} }};")
+            lines.append(f"static grad_wgt_t dW_{tag}[{weights.size}];")
+            lines.append(f"static float OUT_grad_{tag}[{weights.size}];")
+            parameter_specs.append(("gather", op, tag, weights.size, 0))
+
+        elif op.op_type == "RMSNorm" and len(op.inputs) > 1 and op.inputs[1] in graph.constants:
+            gamma = np.asarray(graph.constants[op.inputs[1]], dtype=np.float32).reshape(-1)
+            gamma_values = ", ".join(f"{float(value):.8f}f" for value in gamma)
+            lines.append(f"static wgt_t N_G_{tag}[{gamma.size}] = {{ {gamma_values} }};")
+            lines.append(f"static grad_wgt_t dN_G_{tag}[{gamma.size}];")
+            lines.append(f"static float OUT_grad_{tag}[{gamma.size}];")
+            parameter_specs.append(("rmsnorm", op, tag, gamma.size, 0))
+
+        elif op.op_type == "LayerNormalization" and len(op.inputs) > 1 and op.inputs[1] in graph.constants:
+            gamma = np.asarray(graph.constants[op.inputs[1]], dtype=np.float32).reshape(-1)
+            beta = (np.asarray(graph.constants[op.inputs[2]], dtype=np.float32).reshape(-1) if len(op.inputs) > 2 and op.inputs[2] in graph.constants else np.zeros_like(gamma))
+            gamma_values = ", ".join(f"{float(value):.8f}f" for value in gamma)
+            beta_values = ", ".join(f"{float(value):.8f}f" for value in beta)
+            lines.append(f"static wgt_t N_G_{tag}[{gamma.size}] = {{ {gamma_values} }};")
+            lines.append(f"static bias_t N_B_{tag}[{beta.size}] = {{ {beta_values} }};")
+            lines.append(f"static grad_wgt_t dN_G_{tag}[{gamma.size}];")
+            lines.append(f"static grad_bias_t dN_B_{tag}[{beta.size}];")
+            lines.append(f"static float OUT_grad_{tag}[{gamma.size + beta.size}];")
+            parameter_specs.append(("layernorm", op, tag, gamma.size, beta.size))
+
         elif op.op_type == "Conv":
             (
                 weights,
@@ -1254,6 +1427,28 @@ def emit_top_train_cpp(
                     f"BN_B_{tag}[i] = (bias_t)read_f32(aux);"
                 )
 
+            elif kind in {"matmul", "gather"}:
+                lines.append(
+                    f"    for (int i = 0; i < {weight_size}; ++i) "
+                    f"W_{tag}[i] = (wgt_t)read_f32(aux);"
+                )
+
+            elif kind == "rmsnorm":
+                lines.append(
+                    f"    for (int i = 0; i < {weight_size}; ++i) "
+                    f"N_G_{tag}[i] = (wgt_t)read_f32(aux);"
+                )
+
+            elif kind == "layernorm":
+                lines.append(
+                    f"    for (int i = 0; i < {weight_size}; ++i) "
+                    f"N_G_{tag}[i] = (wgt_t)read_f32(aux);"
+                )
+                lines.append(
+                    f"    for (int i = 0; i < {bias_size}; ++i) "
+                    f"N_B_{tag}[i] = (bias_t)read_f32(aux);"
+                )
+
         lines.extend(
             [
                 "    return;",
@@ -1278,6 +1473,16 @@ def emit_top_train_cpp(
             elif kind == "bn":
                 lines.append(f"    for (int i = 0; i < {weight_size}; ++i) OUT_grad_{tag}[i] = (float)BN_G_{tag}[i];")
                 lines.append(f"    for (int i = 0; i < {bias_size}; ++i) OUT_grad_{tag}[{weight_size} + i] = (float)BN_B_{tag}[i];")
+                lines.append(f"    emit_stream_block<{total_size}>(out, OUT_grad_{tag}, {is_last_block});")
+            elif kind in {"matmul", "gather"}:
+                lines.append(f"    for (int i = 0; i < {weight_size}; ++i) OUT_grad_{tag}[i] = (float)W_{tag}[i];")
+                lines.append(f"    emit_stream_block<{weight_size}>(out, OUT_grad_{tag}, {is_last_block});")
+            elif kind == "rmsnorm":
+                lines.append(f"    for (int i = 0; i < {weight_size}; ++i) OUT_grad_{tag}[i] = (float)N_G_{tag}[i];")
+                lines.append(f"    emit_stream_block<{weight_size}>(out, OUT_grad_{tag}, {is_last_block});")
+            elif kind == "layernorm":
+                lines.append(f"    for (int i = 0; i < {weight_size}; ++i) OUT_grad_{tag}[i] = (float)N_G_{tag}[i];")
+                lines.append(f"    for (int i = 0; i < {bias_size}; ++i) OUT_grad_{tag}[{weight_size} + i] = (float)N_B_{tag}[i];")
                 lines.append(f"    emit_stream_block<{total_size}>(out, OUT_grad_{tag}, {is_last_block});")
         lines.append("    return;")
         lines.append("  }")
@@ -1333,9 +1538,32 @@ def emit_top_train_cpp(
                 f"dBN_B_{tag}[i] = (grad_bias_t)0;"
             )
 
+        elif kind in {"matmul", "gather"}:
+            lines.append(
+                f"  for (int i = 0; i < {weight_size}; ++i) "
+                f"dW_{tag}[i] = (grad_wgt_t)0;"
+            )
+
+        elif kind == "rmsnorm":
+            lines.append(
+                f"  for (int i = 0; i < {weight_size}; ++i) "
+                f"dN_G_{tag}[i] = (grad_wgt_t)0;"
+            )
+
+        elif kind == "layernorm":
+            lines.append(
+                f"  for (int i = 0; i < {weight_size}; ++i) "
+                f"dN_G_{tag}[i] = (grad_wgt_t)0;"
+            )
+            lines.append(
+                f"  for (int i = 0; i < {bias_size}; ++i) "
+                f"dN_B_{tag}[i] = (grad_bias_t)0;"
+            )
+
     lines.append("")
 
-    for op in graph.ops:
+    for op_index, op in enumerate(graph.ops):
+        layer_plan = _plan_for_op(plan_by_name, op, op_index)
         input_name = op.inputs[0]
         output_name_for_op = op.outputs[0]
 
@@ -1362,7 +1590,7 @@ def emit_top_train_cpp(
         if op.op_type == "Dense":
             tag = _sanitize(op.name)
             codegen = _layer_codegen_values(
-                plan_by_name.get(op.name, {}),
+                layer_plan,
                 op_type="Dense",
             )
 
@@ -1393,7 +1621,7 @@ def emit_top_train_cpp(
         elif op.op_type == "Conv":
             tag = _sanitize(op.name)
             codegen = _layer_codegen_values(
-                plan_by_name.get(op.name, {}),
+                layer_plan,
                 op_type="Conv",
             )
 
@@ -1489,15 +1717,250 @@ def emit_top_train_cpp(
                 f"({input_buffer}, {output_buffer});"
             )
 
-        elif op.op_type == "Softmax":
+        elif op.op_type == "MatMul":
+            if len(op.inputs) != 2:
+                raise RuntimeError(f"TRAINHLS204: MatMul node {op.name!r} requires two inputs")
+            left_name, right_name = op.inputs
+            left_shape = tuple(int(x) for x in tensor_name_to_shape.get(left_name, tuple()))
+            right_shape = tuple(int(x) for x in tensor_name_to_shape.get(right_name, tuple()))
+            if len(left_shape) == 3 and left_shape[0] == 1:
+                left_shape = left_shape[1:]
+            if len(right_shape) == 3 and right_shape[0] == 1:
+                right_shape = right_shape[1:]
+            if len(left_shape) != 2 or len(right_shape) != 2 or left_shape[1] != right_shape[0]:
+                raise RuntimeError(f"TRAINHLS205: MatMul node {op.name!r} currently requires rank-2 or batch-1 rank-3 compatible tensors")
+            m, k = left_shape
+            _, n = right_shape
+            right_arg = f"W_{_sanitize(op.name)}" if right_name in graph.constants else tensor_name_to_buffer[right_name]
+            codegen = _layer_codegen_values(layer_plan, op_type="MatMul")
             lines.append(
-                f"  fpgai::softmax<{output_tensor_size}>"
+                f"  fpgai::matmul_tiled<{m}, {k}, {n}, act_t, wgt_t, act_t, acc_t, "
+                f"{codegen['tile_m']}, {codegen['tile_n']}, {codegen['tile_k']}, "
+                f"{codegen['ii_mac']}, {codegen['m_unroll']}, {codegen['n_unroll']}, {codegen['k_unroll']}, "
+                f"{codegen['input_partition']}, {codegen['output_partition']}, {codegen['weight_partition']}>"
+                f"({tensor_name_to_buffer[left_name]}, {right_arg}, {output_buffer});"
+            )
+
+        elif op.op_type == "Mul":
+            if len(op.inputs) != 2:
+                raise RuntimeError(f"TRAINHLS206: Mul node {op.name!r} requires two inputs")
+            left_name, right_name = op.inputs
+            if right_name in graph.constants and np.asarray(graph.constants[right_name]).size == 1:
+                scalar = float(np.asarray(graph.constants[right_name]).reshape(-1)[0])
+                lines.append(f"  for (int i = 0; i < {output_tensor_size}; ++i) {output_buffer}[i] = (act_t)((acc_t){tensor_name_to_buffer[left_name]}[i] * (acc_t){scalar:.17g});")
+            elif left_name in graph.constants and np.asarray(graph.constants[left_name]).size == 1:
+                scalar = float(np.asarray(graph.constants[left_name]).reshape(-1)[0])
+                lines.append(f"  for (int i = 0; i < {output_tensor_size}; ++i) {output_buffer}[i] = (act_t)((acc_t){tensor_name_to_buffer[right_name]}[i] * (acc_t){scalar:.17g});")
+            else:
+                codegen = _layer_codegen_values(layer_plan, op_type="Mul")
+                lines.append(
+                    f"  fpgai::mul_vectors<{output_tensor_size}, act_t, act_t, act_t, acc_t, "
+                    f"{codegen['ii_element']}, {codegen['element_unroll']}, {codegen['input_partition']}, {codegen['output_partition']}>"
+                    f"({tensor_name_to_buffer[left_name]}, {tensor_name_to_buffer[right_name]}, {output_buffer});"
+                )
+
+        elif op.op_type == "SiLU":
+            codegen = _layer_codegen_values(layer_plan, op_type="SiLU")
+            lines.append(
+                f"  fpgai::silu_vector<{output_tensor_size}, act_t, act_t, acc_t, "
+                f"{codegen['ii_element']}, {codegen['element_unroll']}, {codegen['input_partition']}, {codegen['output_partition']}>"
+                f"({input_buffer}, {output_buffer});"
+            )
+
+        elif op.op_type == "Transpose":
+            shape = tuple(int(x) for x in input_shape)
+            if len(shape) == 3 and shape[0] == 1:
+                shape = shape[1:]
+            if len(shape) != 2:
+                raise RuntimeError(f"TRAINHLS207: Transpose node {op.name!r} currently requires rank-2 or batch-1 rank-3 input")
+            rows, cols = shape
+            lines.append(
+                f"  fpgai::transpose_2d<{rows}, {cols}, act_t, act_t>"
+                f"({input_buffer}, {output_buffer});"
+            )
+
+        elif op.op_type == "RMSNorm":
+            shape = tuple(int(x) for x in input_shape)
+            cols = int(shape[-1]); rows = input_tensor_size = tensor_name_to_size[input_name]; rows //= cols
+            tag = _sanitize(op.name)
+            epsilon = float((getattr(op, "attrs", {}) or {}).get("epsilon", 1.0e-5))
+            scale_arg = f"N_G_{tag}" if len(op.inputs) > 1 and op.inputs[1] in graph.constants else tensor_name_to_buffer[op.inputs[1]]
+            codegen = _layer_codegen_values(layer_plan, op_type="RMSNorm")
+            lines.append(
+                f"  fpgai::rms_norm_rows<{rows}, {cols}, act_t, wgt_t, act_t, acc_t, "
+                f"{codegen['ii_reduce']}, {codegen['ii_normalize']}, {codegen['col_unroll']}, {codegen['input_partition']}, {codegen['output_partition']}, {codegen['weight_partition']}>"
+                f"({input_buffer}, {scale_arg}, {output_buffer}, (acc_t){epsilon:.17g});"
+            )
+
+        elif op.op_type == "LayerNormalization":
+            shape = tuple(int(x) for x in input_shape)
+            cols = int(shape[-1]); rows = tensor_name_to_size[input_name] // cols
+            tag = _sanitize(op.name)
+            epsilon = float((getattr(op, "attrs", {}) or {}).get("epsilon", 1.0e-5))
+            scale_arg = f"N_G_{tag}" if len(op.inputs) > 1 and op.inputs[1] in graph.constants else tensor_name_to_buffer[op.inputs[1]]
+            bias_arg = f"N_B_{tag}" if len(op.inputs) > 2 and op.inputs[2] in graph.constants else tensor_name_to_buffer[op.inputs[2]]
+            lines.append(
+                f"  fpgai::layer_norm_rows<{rows}, {cols}, act_t, wgt_t, bias_t, act_t, acc_t>"
+                f"({input_buffer}, {scale_arg}, {bias_arg}, {output_buffer}, (acc_t){epsilon:.17g});"
+            )
+
+        elif op.op_type == "CausalMask":
+            shape = tuple(int(x) for x in input_shape)
+            if len(shape) < 2 or shape[-1] != shape[-2]:
+                raise RuntimeError(f"TRAINHLS208: CausalMask node {op.name!r} requires square last two dimensions")
+            cols = int(shape[-1]); rows = tensor_name_to_size[input_name] // cols
+            attrs = getattr(op, "attrs", {}) or {}
+            diagonal = int(attrs.get("diagonal", 0)); masked_value = float(attrs.get("masked_value", -32.0))
+            lines.append(
+                f"  fpgai::causal_mask_rows<{rows}, {cols}, act_t, act_t, acc_t>"
+                f"({input_buffer}, {output_buffer}, {diagonal}, (acc_t){masked_value:.17g});"
+            )
+
+        elif op.op_type == "RotaryEmbedding":
+            shape = tuple(int(x) for x in input_shape)
+            if len(shape) == 3 and shape[0] == 1:
+                shape = shape[1:]
+            if len(shape) != 2 or shape[1] % 2:
+                raise RuntimeError(f"TRAINHLS209: RotaryEmbedding node {op.name!r} requires [ROWS,COLS] with even COLS")
+            rows, cols = shape; tag = _sanitize(op.name)
+            position_offset = int((getattr(op, "attrs", {}) or {}).get("position_offset", 0))
+            codegen = _layer_codegen_values(layer_plan, op_type="RotaryEmbedding")
+            lines.append(
+                f"  fpgai::rotary_embedding_pairs<{rows}, {cols}, act_t, acc_t, act_t, acc_t, "
+                f"{codegen['ii_pair']}, {codegen['pair_unroll']}, {codegen['input_partition']}, {codegen['output_partition']}>"
+                f"({input_buffer}, ROPE_COS_{tag}, ROPE_SIN_{tag}, {output_buffer}, {position_offset});"
+            )
+
+        elif op.op_type == "MultiHeadAttention":
+            if len(op.inputs) != 3:
+                raise RuntimeError(f"TRAINHLS210: MultiHeadAttention node {op.name!r} requires Q, K, V")
+            q_name, k_name, v_name = op.inputs
+            q_shape = tuple(int(x) for x in tensor_name_to_shape[q_name])
+            if len(q_shape) == 3 and q_shape[0] == 1:
+                q_shape = q_shape[1:]
+            if len(q_shape) != 2:
+                raise RuntimeError(f"TRAINHLS211: MultiHeadAttention node {op.name!r} requires [SEQ,MODEL] or [1,SEQ,MODEL]")
+            seq, model = q_shape; attrs = getattr(op, "attrs", {}) or {}
+            heads = int(attrs.get("num_heads", 1)); mode = str(attrs.get("execution_mode", "auto"))
+            if mode in {"auto", "unspecified", "default", ""}: mode = "serialized"
+            if mode not in {"serialized", "phase_shared"}:
+                raise RuntimeError(f"TRAINHLS212: current training HLS MHA supports serialized/phase_shared execution")
+            scale = float(attrs.get("scale", 1.0 / ((model // heads) ** 0.5))); causal = bool(attrs.get("causal", True)); masked_value = float(attrs.get("masked_value", -32.0))
+            codegen = _layer_codegen_values(layer_plan, op_type="MultiHeadAttention")
+            lines.append(
+                f"  fpgai::multi_head_attention_serialized<{seq}, {model}, {heads}, act_t, act_t, acc_t, "
+                f"{codegen['ii_score']}, {codegen['ii_softmax_max']}, {codegen['ii_softmax_exp']}, {codegen['ii_softmax_norm']}, {codegen['ii_value']}, {codegen['head_unroll']}, {codegen['row_unroll']}, {codegen['col_unroll']}, {codegen['k_unroll']}, "
+                f"{codegen['input_partition']}, {codegen['output_partition']}>"
+                f"({tensor_name_to_buffer[q_name]}, {tensor_name_to_buffer[k_name]}, {tensor_name_to_buffer[v_name]}, {output_buffer}, "
+                f"(acc_t){scale:.17g}, {'true' if causal else 'false'}, (acc_t){masked_value:.17g});"
+            )
+
+        elif op.op_type == "Concat":
+            names = [str(x) for x in op.inputs]
+            if len(names) < 2:
+                raise RuntimeError(f"TRAINHLS218: Concat training HLS requires at least two inputs")
+            first_shape = tuple(int(x) for x in tensor_name_to_shape[names[0]])
+            original_shape = tuple(int(x) for x in graph.get_tensor(names[0]).shape); original_axis = normalize_axis(int((getattr(op, "attrs", {}) or {}).get("axis", 0)), len(original_shape))
+            axis = original_axis - 1 if len(original_shape) == len(first_shape) + 1 and original_shape[0] == 1 else original_axis
+            if axis < 0:
+                raise RuntimeError(f"TRAINHLS219: Concat node {op.name!r} cannot concatenate the stripped batch dimension")
+            geometries = [axis_geometry(tuple(int(x) for x in tensor_name_to_shape[name]), axis) for name in names]
+            outer, _, inner = geometries[0]
+            if any(outer_i != outer or inner_i != inner for outer_i, _, inner_i in geometries[1:]):
+                raise RuntimeError(f"TRAINHLS219: Concat node {op.name!r} non-axis shapes must match")
+            out_axis = sum(axis_i for _, axis_i, _ in geometries)
+            if len(names) == 2:
+                left_name, right_name = names; left_axis = geometries[0][1]; right_axis = geometries[1][1]
+                lines.append(f"  fpgai::concat_axis<{outer}, {left_axis}, {right_axis}, {inner}, act_t, act_t, act_t>({tensor_name_to_buffer[left_name]}, {tensor_name_to_buffer[right_name]}, {output_buffer});")
+            else:
+                offset = 0
+                for name, (_, input_axis, _) in zip(names, geometries):
+                    lines.append(f"  fpgai::concat_axis_segment<{outer}, {out_axis}, {input_axis}, {offset}, {inner}, act_t, act_t>({tensor_name_to_buffer[name]}, {output_buffer});")
+                    offset += input_axis
+
+        elif op.op_type == "Slice":
+            shape = tuple(int(x) for x in input_shape); original_shape = tuple(int(x) for x in graph.get_tensor(input_name).shape); spec_original = resolve_slice_spec(graph, op, original_shape)
+            axis = spec_original["axis"] - 1 if len(original_shape) == len(shape) + 1 and original_shape[0] == 1 else spec_original["axis"]
+            if axis < 0:
+                raise RuntimeError(f"TRAINHLS223: Slice node {op.name!r} cannot slice the stripped batch dimension")
+            spec = dict(spec_original); spec["axis"] = axis; outer, in_axis, inner = axis_geometry(shape, axis)
+            lines.append(f"  fpgai::slice_axis<{outer}, {in_axis}, {spec['start']}, {spec['length']}, {inner}, act_t, act_t>({input_buffer}, {output_buffer});")
+
+        elif op.op_type == "Resize":
+            shape = tuple(int(x) for x in input_shape); original_shape = tuple(int(x) for x in graph.get_tensor(input_name).shape); original_out = resolve_resize_shape(graph, op, original_shape); attrs = getattr(op, "attrs", {}) or {}; mode = str(attrs.get("mode", "nearest")).lower()
+            if len(original_shape) == 4 and original_shape[0] == 1 and len(shape) == 3:
+                b, c, ih, iw = original_shape; _, oc, oh, ow = original_out
+            elif len(shape) == 4:
+                b, c, ih, iw = shape; _, oc, oh, ow = original_out
+            else:
+                raise RuntimeError(f"TRAINHLS220: current Resize training HLS requires static NCHW nearest resize")
+            if c != oc or mode != "nearest":
+                raise RuntimeError(f"TRAINHLS220: current Resize training HLS requires nearest resize with unchanged channel count")
+            coord_code, nearest_code = _resize_mode_codes(attrs)
+            lines.append(f"  fpgai::resize_nearest_nchw<{b}, {c}, {ih}, {iw}, {oh}, {ow}, {coord_code}, {nearest_code}, act_t, act_t>({input_buffer}, {output_buffer});")
+
+        elif op.op_type == "Gather":
+            if len(op.inputs) < 2:
+                raise RuntimeError(f"TRAINHLS221: Gather node {op.name!r} requires data and indices")
+            data_name, indices_name = op.inputs[:2]; data_shape = tuple(int(x) for x in tensor_name_to_shape[data_name]); axis = normalize_axis(int((getattr(op, "attrs", {}) or {}).get("axis", 0)), len(data_shape))
+            if axis != 0 or len(data_shape) != 2:
+                raise RuntimeError(f"TRAINHLS222: current Gather training HLS requires rank-2 data and axis=0")
+            rows, width = data_shape; index_count = tensor_name_to_size[indices_name]; tag = _sanitize(op.name)
+            data_arg = f"W_{tag}" if data_name in graph.constants else tensor_name_to_buffer[data_name]
+            lines.append(f"  fpgai::gather_rows<{rows}, {width}, {index_count}, wgt_t, act_t, act_t>({data_arg}, {tensor_name_to_buffer[indices_name]}, {output_buffer});")
+
+        elif op.op_type == "Softmax":
+            shape = tuple(int(x) for x in graph.get_tensor(op.inputs[0]).shape)
+            axis = normalize_axis(int((getattr(op, "attrs", {}) or {}).get("axis", -1)), len(shape))
+            outer = 1
+            for dim in shape[:axis]:
+                outer *= dim
+            axis_size = shape[axis]
+            inner = 1
+            for dim in shape[axis + 1:]:
+                inner *= dim
+            if outer == 1 and inner == 1:
+                lines.append(f"  fpgai::softmax<{axis_size}>({input_buffer}, {output_buffer});")
+            else:
+                lines.append(
+                    f"  fpgai::softmax_axis_typed<{outer}, {axis_size}, {inner}, act_t, act_t, acc_t>"
+                    f"({input_buffer}, {output_buffer});"
+                )
+
+        elif op.op_type == "ReduceSum":
+            source_name = str(op.inputs[0])
+            shape = tuple(int(x) for x in graph.get_tensor(source_name).shape)
+            attrs = getattr(op, "attrs", {}) or {}
+            axes = attrs.get("axes", attrs.get("dimensions", None))
+            if axes is None:
+                raise RuntimeError(f"TRAINHLS224: ReduceSum node {op.name!r} requires a static reduction axis")
+            if isinstance(axes, int):
+                axes = [axes]
+            normalized = [normalize_axis(int(x), len(shape)) for x in axes]
+            if len(normalized) != 1:
+                raise RuntimeError(f"TRAINHLS225: current ReduceSum training HLS requires exactly one static axis")
+            axis = normalized[0]
+            outer = 1
+            for dim in shape[:axis]:
+                outer *= dim
+            axis_size = shape[axis]
+            inner = 1
+            for dim in shape[axis + 1:]:
+                inner *= dim
+            if output_tensor_size != outer * inner:
+                raise RuntimeError(f"TRAINHLS226: ReduceSum output shape does not match selected axis")
+            lines.append(
+                f"  fpgai::reduce_sum_axis_typed<{outer}, {axis_size}, {inner}, act_t, act_t, acc_t>"
                 f"({input_buffer}, {output_buffer});"
             )
 
         elif op.op_type in {
             "Flatten",
             "Reshape",
+            "Identity",
+            "Cast",
+            "Squeeze",
+            "Unsqueeze",
         }:
             lines.append(
                 f"  fpgai::reshape_copy<{output_tensor_size}>"
@@ -1509,10 +1972,11 @@ def emit_top_train_cpp(
                 op.inputs[1]
             ]
 
+            codegen = _layer_codegen_values(layer_plan, op_type="Add")
             lines.append(
-                f"  fpgai::add_vec<{output_tensor_size}>"
-                f"({input_buffer}, {right_buffer}, "
-                f"{output_buffer});"
+                f"  fpgai::add_vec_typed<{output_tensor_size}, act_t, act_t, act_t, acc_t, "
+                f"{codegen['ii_element']}, {codegen['element_unroll']}, {codegen['input_partition']}, {codegen['output_partition']}>"
+                f"({input_buffer}, {right_buffer}, {output_buffer});"
             )
 
         elif op.op_type == "MaxPool":
@@ -1734,6 +2198,7 @@ def emit_top_train_cpp(
         -1,
     ):
         op = graph.ops[op_index]
+        layer_plan = _plan_for_op(plan_by_name, op, op_index)
 
         input_name = op.inputs[0]
         output_name_for_op = op.outputs[0]
@@ -1770,7 +2235,7 @@ def emit_top_train_cpp(
         if op.op_type == "Dense":
             tag = _sanitize(op.name)
             codegen = _layer_codegen_values(
-                plan_by_name.get(op.name, {}),
+                layer_plan,
                 op_type="Dense",
             )
 
@@ -1821,7 +2286,7 @@ def emit_top_train_cpp(
         elif op.op_type == "Conv":
             tag = _sanitize(op.name)
             codegen = _layer_codegen_values(
-                plan_by_name.get(op.name, {}),
+                layer_plan,
                 op_type="Conv",
             )
 
@@ -1955,6 +2420,165 @@ def emit_top_train_cpp(
                 f"{input_gradient});"
             )
 
+        elif op.op_type == "MatMul":
+            if len(op.inputs) != 2:
+                raise RuntimeError(f"TRAINHLS213: MatMul node {op.name!r} requires two inputs")
+            left_name, right_name = op.inputs
+            left_shape = tuple(int(x) for x in tensor_name_to_shape.get(left_name, tuple()))
+            right_shape = tuple(int(x) for x in tensor_name_to_shape.get(right_name, tuple()))
+            if len(left_shape) == 3 and left_shape[0] == 1: left_shape = left_shape[1:]
+            if len(right_shape) == 3 and right_shape[0] == 1: right_shape = right_shape[1:]
+            if len(left_shape) != 2 or len(right_shape) != 2 or left_shape[1] != right_shape[0]:
+                raise RuntimeError(f"TRAINHLS214: MatMul backward requires compatible rank-2 or batch-1 rank-3 tensors")
+            m, k = left_shape; _, n = right_shape
+            right_arg = f"W_{_sanitize(op.name)}" if right_name in graph.constants else tensor_name_to_buffer[right_name]
+            codegen = _layer_codegen_values(layer_plan, op_type="MatMul")
+            lines.append(
+                f"  fpgai::matmul_backward_left_accumulate<{m}, {k}, {n}, grad_act_t, wgt_t, grad_act_t, acc_t, "
+                f"{codegen['pipeline_ii']}, {codegen['m_unroll']}, {codegen['k_unroll']}, {codegen['n_unroll']}, "
+                f"{codegen['gradient_partition']}, {codegen['weight_partition']}>"
+                f"({output_gradient}, {right_arg}, {gradient_name_to_buffer[left_name]});"
+            )
+            if right_name in graph.constants:
+                tag = _sanitize(op.name)
+                lines.append(
+                    f"  fpgai::matmul_weight_grad<{m}, {k}, {n}, act_t, grad_act_t, grad_wgt_t, acc_t, "
+                    f"{codegen['pipeline_ii']}, {codegen['m_unroll']}, {codegen['k_unroll']}, {codegen['n_unroll']}, {codegen['input_partition']}, {codegen['gradient_partition']}>"
+                    f"({tensor_name_to_buffer[left_name]}, {output_gradient}, dW_{tag});"
+                )
+            else:
+                lines.append(
+                    f"  fpgai::matmul_backward_right_accumulate<{m}, {k}, {n}, act_t, grad_act_t, grad_act_t, acc_t, "
+                    f"{codegen['pipeline_ii']}, {codegen['m_unroll']}, {codegen['k_unroll']}, {codegen['n_unroll']}, "
+                    f"{codegen['input_partition']}, {codegen['gradient_partition']}>"
+                    f"({tensor_name_to_buffer[left_name]}, {output_gradient}, {gradient_name_to_buffer[right_name]});"
+                )
+
+        elif op.op_type == "Mul":
+            left_name, right_name = op.inputs
+            left_is_scalar = left_name in graph.constants and np.asarray(graph.constants[left_name]).size == 1
+            right_is_scalar = right_name in graph.constants and np.asarray(graph.constants[right_name]).size == 1
+            if right_is_scalar:
+                scalar = float(np.asarray(graph.constants[right_name]).reshape(-1)[0])
+                lines.append(f"  for (int i = 0; i < {output_tensor_size}; ++i) {gradient_name_to_buffer[left_name]}[i] += (grad_act_t)((acc_t){output_gradient}[i] * (acc_t){scalar:.17g});")
+            elif left_is_scalar:
+                scalar = float(np.asarray(graph.constants[left_name]).reshape(-1)[0])
+                lines.append(f"  for (int i = 0; i < {output_tensor_size}; ++i) {gradient_name_to_buffer[right_name]}[i] += (grad_act_t)((acc_t){output_gradient}[i] * (acc_t){scalar:.17g});")
+            else:
+                codegen = _layer_codegen_values(layer_plan, op_type="Mul")
+                lines.append(
+                    f"  fpgai::mul_backward_accumulate<{output_tensor_size}, act_t, act_t, grad_act_t, grad_act_t, acc_t, "
+                    f"{codegen['ii_element']}, {codegen['element_unroll']}>"
+                    f"({tensor_name_to_buffer[left_name]}, {tensor_name_to_buffer[right_name]}, {output_gradient}, "
+                    f"{gradient_name_to_buffer[left_name]}, {gradient_name_to_buffer[right_name]});"
+                )
+
+        elif op.op_type == "SiLU":
+            codegen = _layer_codegen_values(layer_plan, op_type="SiLU")
+            lines.append(
+                f"  fpgai::silu_backward_accumulate<{output_tensor_size}, act_t, grad_act_t, grad_act_t, acc_t, "
+                f"{codegen['ii_element']}, {codegen['element_unroll']}>"
+                f"({input_buffer}, {output_gradient}, {input_gradient});"
+            )
+
+        elif op.op_type == "Transpose":
+            shape = tuple(int(x) for x in input_shape)
+            if len(shape) == 3 and shape[0] == 1: shape = shape[1:]
+            if len(shape) != 2:
+                raise RuntimeError(f"TRAINHLS215: Transpose backward currently requires rank-2 or batch-1 rank-3 input")
+            rows, cols = shape
+            lines.append(
+                f"  fpgai::transpose_backward_accumulate<{rows}, {cols}, grad_act_t, grad_act_t>"
+                f"({output_gradient}, {input_gradient});"
+            )
+
+        elif op.op_type == "RMSNorm":
+            shape = tuple(int(x) for x in input_shape); cols = int(shape[-1]); rows = input_tensor_size // cols
+            tag = _sanitize(op.name); epsilon = float((getattr(op, "attrs", {}) or {}).get("epsilon", 1.0e-5))
+            scale_arg = f"N_G_{tag}" if len(op.inputs) > 1 and op.inputs[1] in graph.constants else tensor_name_to_buffer[op.inputs[1]]
+            if len(op.inputs) <= 1 or op.inputs[1] not in graph.constants:
+                raise RuntimeError(f"TRAINHLS216: current RMSNorm training HLS requires trainable compiler-constant scale")
+            codegen = _layer_codegen_values(layer_plan, op_type="RMSNorm")
+            lines.append(
+                f"  fpgai::rms_norm_backward_rows<{rows}, {cols}, act_t, wgt_t, grad_act_t, grad_act_t, grad_wgt_t, acc_t, "
+                f"{codegen['ii_reduce']}, {codegen['ii_normalize']}, {codegen['col_unroll']}>"
+                f"({input_buffer}, {scale_arg}, {output_gradient}, {input_gradient}, dN_G_{tag}, (acc_t){epsilon:.17g});"
+            )
+
+        elif op.op_type == "LayerNormalization":
+            shape = tuple(int(x) for x in input_shape); cols = int(shape[-1]); rows = input_tensor_size // cols
+            tag = _sanitize(op.name); epsilon = float((getattr(op, "attrs", {}) or {}).get("epsilon", 1.0e-5))
+            if len(op.inputs) <= 1 or op.inputs[1] not in graph.constants:
+                raise RuntimeError(f"TRAINHLS217: current LayerNorm training HLS requires trainable compiler-constant scale/bias")
+            lines.append(
+                f"  fpgai::layer_norm_backward_rows<{rows}, {cols}, act_t, wgt_t, grad_act_t, grad_act_t, grad_wgt_t, grad_bias_t, acc_t>"
+                f"({input_buffer}, N_G_{tag}, {output_gradient}, {input_gradient}, dN_G_{tag}, dN_B_{tag}, (acc_t){epsilon:.17g});"
+            )
+
+        elif op.op_type == "CausalMask":
+            shape = tuple(int(x) for x in input_shape); cols = int(shape[-1]); rows = input_tensor_size // cols
+            diagonal = int((getattr(op, "attrs", {}) or {}).get("diagonal", 0))
+            lines.append(
+                f"  fpgai::causal_mask_backward_rows<{rows}, {cols}, grad_act_t, grad_act_t>"
+                f"({output_gradient}, {input_gradient}, {diagonal});"
+            )
+
+        elif op.op_type == "RotaryEmbedding":
+            shape = tuple(int(x) for x in input_shape)
+            if len(shape) == 3 and shape[0] == 1: shape = shape[1:]
+            rows, cols = shape; tag = _sanitize(op.name); position_offset = int((getattr(op, "attrs", {}) or {}).get("position_offset", 0))
+            codegen = _layer_codegen_values(layer_plan, op_type="RotaryEmbedding")
+            lines.append(
+                f"  fpgai::rotary_embedding_backward_pairs<{rows}, {cols}, grad_act_t, acc_t, grad_act_t, acc_t, "
+                f"{codegen['ii_pair']}, {codegen['pair_unroll']}>"
+                f"({output_gradient}, ROPE_COS_{tag}, ROPE_SIN_{tag}, {input_gradient}, {position_offset});"
+            )
+
+        elif op.op_type == "MultiHeadAttention":
+            q_name, k_name, v_name = op.inputs
+            shape = tuple(int(x) for x in tensor_name_to_shape[q_name])
+            if len(shape) == 3 and shape[0] == 1: shape = shape[1:]
+            seq, model = shape; attrs = getattr(op, "attrs", {}) or {}; heads = int(attrs.get("num_heads", 1))
+            scale = float(attrs.get("scale", 1.0 / ((model // heads) ** 0.5))); causal = bool(attrs.get("causal", True)); masked_value = float(attrs.get("masked_value", -32.0))
+            codegen = _layer_codegen_values(layer_plan, op_type="MultiHeadAttention")
+            lines.append(
+                f"  fpgai::multi_head_attention_backward_serialized<{seq}, {model}, {heads}, act_t, grad_act_t, grad_act_t, acc_t, "
+                f"{codegen['ii_score']}, {codegen['ii_softmax_exp']}, {codegen['ii_softmax_norm']}, {codegen['ii_dq_dv']}, {codegen['ii_dk']}, {codegen['head_unroll']}, {codegen['row_unroll']}, {codegen['col_unroll']}, {codegen['k_unroll']}>"
+                f"({tensor_name_to_buffer[q_name]}, {tensor_name_to_buffer[k_name]}, {tensor_name_to_buffer[v_name]}, {output_gradient}, "
+                f"{gradient_name_to_buffer[q_name]}, {gradient_name_to_buffer[k_name]}, {gradient_name_to_buffer[v_name]}, "
+                f"(acc_t){scale:.17g}, {'true' if causal else 'false'}, (acc_t){masked_value:.17g});"
+            )
+
+        elif op.op_type == "Concat":
+            names = [str(x) for x in op.inputs]
+            first_shape = tuple(int(x) for x in tensor_name_to_shape[names[0]])
+            original_shape = tuple(int(x) for x in graph.get_tensor(names[0]).shape); original_axis = normalize_axis(int((getattr(op, "attrs", {}) or {}).get("axis", 0)), len(original_shape)); axis = original_axis - 1 if len(original_shape) == len(first_shape) + 1 and original_shape[0] == 1 else original_axis
+            geometries = [axis_geometry(tuple(int(x) for x in tensor_name_to_shape[name]), axis) for name in names]
+            outer, _, inner = geometries[0]; out_axis = sum(axis_i for _, axis_i, _ in geometries)
+            if len(names) == 2:
+                left_name, right_name = names; left_axis = geometries[0][1]; right_axis = geometries[1][1]
+                lines.append(f"  fpgai::concat_axis_backward<{outer}, {left_axis}, {right_axis}, {inner}, grad_act_t>({output_gradient}, {gradient_name_to_buffer[left_name]}, {gradient_name_to_buffer[right_name]});")
+            else:
+                offset = 0
+                for name, (_, input_axis, _) in zip(names, geometries):
+                    lines.append(f"  fpgai::concat_axis_backward_segment<{outer}, {out_axis}, {input_axis}, {offset}, {inner}, grad_act_t>({output_gradient}, {gradient_name_to_buffer[name]});")
+                    offset += input_axis
+
+        elif op.op_type == "Slice":
+            shape = tuple(int(x) for x in input_shape); original_shape = tuple(int(x) for x in graph.get_tensor(input_name).shape); spec_original = resolve_slice_spec(graph, op, original_shape); axis = spec_original["axis"] - 1 if len(original_shape) == len(shape) + 1 and original_shape[0] == 1 else spec_original["axis"]; spec = dict(spec_original); spec["axis"] = axis; outer, in_axis, inner = axis_geometry(shape, axis)
+            lines.append(f"  fpgai::slice_axis_backward<{outer}, {in_axis}, {spec['start']}, {spec['length']}, {inner}, grad_act_t>({output_gradient}, {input_gradient});")
+
+        elif op.op_type == "Resize":
+            shape = tuple(int(x) for x in input_shape); original_shape = tuple(int(x) for x in graph.get_tensor(input_name).shape); out_shape = resolve_resize_shape(graph, op, original_shape); b, c, ih, iw = original_shape; _, _, oh, ow = out_shape; attrs = getattr(op, "attrs", {}) or {}; coord_code, nearest_code = _resize_mode_codes(attrs)
+            lines.append(f"  fpgai::resize_nearest_nchw_backward<{b}, {c}, {ih}, {iw}, {oh}, {ow}, {coord_code}, {nearest_code}, grad_act_t>({output_gradient}, {input_gradient});")
+
+        elif op.op_type == "Gather":
+            data_name, indices_name = op.inputs[:2]; data_shape = tuple(int(x) for x in tensor_name_to_shape[data_name]); rows, width = data_shape; index_count = tensor_name_to_size[indices_name]; tag = _sanitize(op.name)
+            if data_name in graph.constants:
+                lines.append(f"  fpgai::gather_rows_backward<{rows}, {width}, {index_count}, act_t, grad_wgt_t>({tensor_name_to_buffer[indices_name]}, {output_gradient}, dW_{tag});")
+            else:
+                lines.append(f"  fpgai::gather_rows_backward<{rows}, {width}, {index_count}, act_t, grad_act_t>({tensor_name_to_buffer[indices_name]}, {output_gradient}, {gradient_name_to_buffer[data_name]});")
+
         elif op.op_type == "Softmax":
             is_final_op = bool(
                 op_index == len(graph.ops) - 1
@@ -1974,16 +2598,58 @@ def emit_top_train_cpp(
                     f"{output_gradient}[i];"
                 )
             else:
-                lines.append(
-                    f"  fpgai::softmax_backward"
-                    f"<{output_tensor_size}>"
-                    f"({output_buffer}, {output_gradient}, "
-                    f"{input_gradient});"
-                )
+                shape = tuple(int(x) for x in graph.get_tensor(op.inputs[0]).shape)
+                axis = normalize_axis(int((getattr(op, "attrs", {}) or {}).get("axis", -1)), len(shape))
+                outer = 1
+                for dim in shape[:axis]:
+                    outer *= dim
+                axis_size = shape[axis]
+                inner = 1
+                for dim in shape[axis + 1:]:
+                    inner *= dim
+                if outer == 1 and inner == 1:
+                    lines.append(
+                        f"  fpgai::softmax_backward<{axis_size}>"
+                        f"({output_buffer}, {output_gradient}, {input_gradient});"
+                    )
+                else:
+                    lines.append(
+                        f"  fpgai::softmax_axis_backward_typed<{outer}, {axis_size}, {inner}, act_t, grad_act_t, grad_act_t, acc_t>"
+                        f"({output_buffer}, {output_gradient}, {input_gradient});"
+                    )
+
+        elif op.op_type == "ReduceSum":
+            source_name = str(op.inputs[0])
+            shape = tuple(int(x) for x in graph.get_tensor(source_name).shape)
+            attrs = getattr(op, "attrs", {}) or {}
+            axes = attrs.get("axes", attrs.get("dimensions", None))
+            if axes is None:
+                raise RuntimeError(f"TRAINHLS227: ReduceSum node {op.name!r} requires a static reduction axis")
+            if isinstance(axes, int):
+                axes = [axes]
+            normalized = [normalize_axis(int(x), len(shape)) for x in axes]
+            if len(normalized) != 1:
+                raise RuntimeError(f"TRAINHLS228: current ReduceSum backward HLS requires exactly one static axis")
+            axis = normalized[0]
+            outer = 1
+            for dim in shape[:axis]:
+                outer *= dim
+            axis_size = shape[axis]
+            inner = 1
+            for dim in shape[axis + 1:]:
+                inner *= dim
+            lines.append(
+                f"  fpgai::reduce_sum_axis_backward_typed<{outer}, {axis_size}, {inner}, grad_act_t, grad_act_t>"
+                f"({output_gradient}, {input_gradient});"
+            )
 
         elif op.op_type in {
             "Flatten",
             "Reshape",
+            "Identity",
+            "Cast",
+            "Squeeze",
+            "Unsqueeze",
         }:
             lines.append(
                 f"  for (int i = 0; i < {output_tensor_size}; ++i) "
@@ -1996,11 +2662,11 @@ def emit_top_train_cpp(
                 op.inputs[1]
             ]
 
+            codegen = _layer_codegen_values(layer_plan, op_type="Add")
             lines.append(
-                f"  fpgai::add_backward"
-                f"<{output_tensor_size}>"
-                f"({output_gradient}, {input_gradient}, "
-                f"{right_gradient});"
+                f"  fpgai::add_backward_typed<{output_tensor_size}, grad_act_t, grad_act_t, grad_act_t, acc_t, "
+                f"{codegen['ii_element']}, {codegen['element_unroll']}, {codegen['gradient_partition']}>"
+                f"({output_gradient}, {input_gradient}, {right_gradient});"
             )
 
         elif op.op_type == "MaxPool":
@@ -2127,7 +2793,7 @@ def emit_top_train_cpp(
             "conv",
         }:
             codegen = _layer_codegen_values(
-                plan_by_name.get(op.name, {}),
+                _plan_for_op(plan_by_name, op, graph.ops.index(op)),
                 op_type="Dense" if kind == "dense" else "Conv",
             )
             lines.append(
@@ -2159,6 +2825,28 @@ def emit_top_train_cpp(
                 f"(upd_t){learning_rate:.8f}f);"
             )
 
+        elif kind in {"matmul", "gather"}:
+            lines.append(
+                f"  fpgai::sgd_update_wgt<{weight_size}>"
+                f"(W_{tag}, dW_{tag}, (upd_t){learning_rate:.8f}f);"
+            )
+
+        elif kind == "rmsnorm":
+            lines.append(
+                f"  fpgai::sgd_update_wgt<{weight_size}>"
+                f"(N_G_{tag}, dN_G_{tag}, (upd_t){learning_rate:.8f}f);"
+            )
+
+        elif kind == "layernorm":
+            lines.append(
+                f"  fpgai::sgd_update_wgt<{weight_size}>"
+                f"(N_G_{tag}, dN_G_{tag}, (upd_t){learning_rate:.8f}f);"
+            )
+            lines.append(
+                f"  fpgai::sgd_update_bias<{bias_size}>"
+                f"(N_B_{tag}, dN_B_{tag}, (upd_t){learning_rate:.8f}f);"
+            )
+
     for index, (
         kind,
         _op,
@@ -2171,27 +2859,37 @@ def emit_top_train_cpp(
         if kind in {
             "dense",
             "conv",
+            "matmul",
         }:
             lines.append(
                 f"  for (int i = 0; i < {weight_size}; ++i) "
                 f"OUT_grad_{tag}[i] = (float)dW_{tag}[i];"
             )
-            lines.append(
-                f"  for (int i = 0; i < {bias_size}; ++i) "
-                f"OUT_grad_{tag}[{weight_size} + i] = "
-                f"(float)dB_{tag}[i];"
-            )
-        else:
+            if bias_size:
+                lines.append(
+                    f"  for (int i = 0; i < {bias_size}; ++i) "
+                    f"OUT_grad_{tag}[{weight_size} + i] = "
+                    f"(float)dB_{tag}[i];"
+                )
+        elif kind == "bn":
             lines.append(
                 f"  for (int i = 0; i < {weight_size}; ++i) "
-                f"OUT_grad_{tag}[i] = "
-                f"(float)dBN_G_{tag}[i];"
+                f"OUT_grad_{tag}[i] = (float)dBN_G_{tag}[i];"
             )
             lines.append(
                 f"  for (int i = 0; i < {bias_size}; ++i) "
-                f"OUT_grad_{tag}[{weight_size} + i] = "
-                f"(float)dBN_B_{tag}[i];"
+                f"OUT_grad_{tag}[{weight_size} + i] = (float)dBN_B_{tag}[i];"
             )
+        elif kind in {"rmsnorm", "layernorm"}:
+            lines.append(
+                f"  for (int i = 0; i < {weight_size}; ++i) "
+                f"OUT_grad_{tag}[i] = (float)dN_G_{tag}[i];"
+            )
+            if bias_size:
+                lines.append(
+                    f"  for (int i = 0; i < {bias_size}; ++i) "
+                    f"OUT_grad_{tag}[{weight_size} + i] = (float)dN_B_{tag}[i];"
+                )
 
         is_last = (
             "true"
@@ -2626,6 +3324,10 @@ def _fpgai_reject_unsupported_ddr_training(graph: Graph) -> None:
         "Softmax",
         "Flatten",
         "Reshape",
+        "Identity",
+        "Cast",
+        "Squeeze",
+        "Unsqueeze",
         "MaxPool",
         "AveragePool",
         "GlobalAveragePool",
@@ -3166,7 +3868,7 @@ def emit_top_train_cpp(*args, **kwargs):
 
 # FPGAI training optimizer-state/loss readability and interface wrapper.
 def _fpgai_training_optimizer_state_storage(raw: Any) -> str:
-    value = _fpgai_training_raw_get(raw, "training.storage.optimizer_state", "none")
+    value = _fpgai_training_raw_get(raw, "memory.optimizer_state_storage", _fpgai_training_raw_get(raw, "training.storage.optimizer_state", "none"))
     return str(value or "none").strip().lower().replace('-', '_')
 
 
@@ -4000,7 +4702,7 @@ def _fpgai_ensure_adam_final_contract(source: str, *, raw_cfg: Any) -> str:
         if "FPGAI persistent Adam optimizer first/second moment state" not in updated:
             decl_lines.append("")
             decl_lines.append("// FPGAI persistent Adam optimizer first/second moment state.")
-        state_storage = str(_fpgai_training_raw_get(raw, "training.storage.optimizer_state", _fpgai_training_raw_get(raw, "memory.optimizer_state_storage", "bram")) or "bram").strip().lower().replace("-", "_")
+        state_storage = str(_fpgai_training_raw_get(raw, "memory.optimizer_state_storage", _fpgai_training_raw_get(raw, "training.storage.optimizer_state", "bram")) or "bram").strip().lower().replace("-", "_")
         state_impl = "uram" if state_storage == "uram" else "bram"
         state_binding_names = []
         for name, size in missing:
@@ -5190,6 +5892,155 @@ def emit_top_train_cpp(*args, **kwargs):
 
     source = _fpgai_f5d2_probe_previous_emit_top_train_cpp(*args, **kwargs)
     return instrument_fused_dense_adam_probe(
+        source,
+        raw_cfg=kwargs.get("raw_cfg") or {},
+    )
+
+# FPGAI N1 network-level phase-shared MatMul materialization.
+_fpgai_n1_network_previous_emit_top_train_cpp = emit_top_train_cpp
+
+
+def _fpgai_n1_network_mode(raw_cfg: Any) -> str:
+    from fpgai.engine.network_execution import requested_network_execution_mode
+    return requested_network_execution_mode(raw_cfg or {})
+
+
+def _fpgai_n1_split_template_args(text: str) -> list[str]:
+    # Current generated MatMul type arguments are simple identifiers/integers.
+    # Keep this parser deliberately strict so unsupported C++ expressions fail
+    # loudly instead of being grouped incorrectly.
+    args = [item.strip() for item in text.split(",")]
+    if any((not item) or "<" in item or ">" in item for item in args):
+        raise RuntimeError(f"TRAINHLSN103: unsupported nested MatMul template arguments: {text!r}")
+    return args
+
+
+def _fpgai_n1_rewrite_cross_shape_group(
+    source: str,
+    *,
+    call_re: re.Pattern[str],
+    expected_arg_count: int,
+    replacement_name: str,
+    dimless_signature_start: int,
+    runtime_args: tuple[str, ...],
+) -> tuple[str, int]:
+    matches = list(call_re.finditer(source))
+    parsed: list[tuple[re.Match[str], list[str]]] = []
+    for match in matches:
+        args = _fpgai_n1_split_template_args(match.group("template"))
+        if len(args) != expected_arg_count:
+            continue
+        try:
+            int(args[0]); int(args[1]); int(args[2])
+        except ValueError:
+            continue
+        parsed.append((match, args))
+
+    groups: dict[tuple[str, ...], list[tuple[re.Match[str], list[str]]]] = {}
+    for item in parsed:
+        signature = tuple(item[1][dimless_signature_start:])
+        groups.setdefault(signature, []).append(item)
+
+    replacements: dict[int, tuple[int, str]] = {}
+    materialized = 0
+    for signature, members in groups.items():
+        # Cross-specialization sharing is useful only when at least two call
+        # sites exist and their compile-time dimensions are not all identical.
+        dims = {(int(args[0]), int(args[1]), int(args[2])) for _, args in members}
+        if len(members) < 2 or len(dims) < 2:
+            continue
+        max_m = max(d[0] for d in dims)
+        max_k = max(d[1] for d in dims)
+        max_n = max(d[2] for d in dims)
+        materialized += 1
+        shared_template = ", ".join([str(max_m), str(max_k), str(max_n), *signature])
+        for match, args in members:
+            call_values = [match.group(name) for name in runtime_args]
+            call_values.extend([args[0], args[1], args[2]])
+            replacement = (
+                f"{match.group('indent')}fpgai::{replacement_name}<{shared_template}>"
+                f"({', '.join(call_values)});"
+            )
+            replacements[match.start()] = (match.end(), replacement)
+
+    if not replacements:
+        return source, 0
+    chunks: list[str] = []
+    cursor = 0
+    for start_pos in sorted(replacements):
+        end_pos, replacement = replacements[start_pos]
+        chunks.append(source[cursor:start_pos])
+        chunks.append(replacement)
+        cursor = end_pos
+    chunks.append(source[cursor:])
+    return "".join(chunks), materialized
+
+
+def _fpgai_n1_materialize_phase_shared_matmul(source: str, *, raw_cfg: Any) -> str:
+    """Materialize true cross-specialization MatMul sharing for training.
+
+    Unlike the original wrapper-only N1 implementation, this pass groups calls
+    that have identical precision/II/unroll/partition/tile policies even when
+    their M/K/N dimensions differ.  Each group is rewritten to one bounded
+    runtime-dimension GEMM specialization, allowing Vitis to synthesize one RTL
+    module for multiple layer shapes.
+    """
+    if _fpgai_n1_network_mode(raw_cfg) != "phase_shared":
+        return source
+
+    forward_re = re.compile(
+        r"(?P<indent>\s*)fpgai::matmul_tiled<(?P<template>[^>]*)>"
+        r"\((?P<left>[A-Za-z_][A-Za-z0-9_]*),\s*(?P<right>W_[A-Za-z_][A-Za-z0-9_]*),\s*"
+        r"(?P<out>[A-Za-z_][A-Za-z0-9_]*)\);"
+    )
+    backward_left_re = re.compile(
+        r"(?P<indent>\s*)fpgai::matmul_backward_left_accumulate<(?P<template>[^>]*)>"
+        r"\((?P<dy>[A-Za-z_][A-Za-z0-9_]*),\s*(?P<right>W_[A-Za-z_][A-Za-z0-9_]*),\s*"
+        r"(?P<dx>[A-Za-z_][A-Za-z0-9_]*)\);"
+    )
+    weight_grad_re = re.compile(
+        r"(?P<indent>\s*)fpgai::matmul_weight_grad<(?P<template>[^>]*)>"
+        r"\((?P<left>[A-Za-z_][A-Za-z0-9_]*),\s*(?P<dy>[A-Za-z_][A-Za-z0-9_]*),\s*"
+        r"(?P<dw>dW_[A-Za-z_][A-Za-z0-9_]*)\);"
+    )
+
+    updated, forward_groups = _fpgai_n1_rewrite_cross_shape_group(
+        source,
+        call_re=forward_re,
+        expected_arg_count=17,
+        replacement_name="phase_shared_matmul_forward",
+        dimless_signature_start=3,
+        runtime_args=("left", "right", "out"),
+    )
+    updated, backward_groups = _fpgai_n1_rewrite_cross_shape_group(
+        updated,
+        call_re=backward_left_re,
+        expected_arg_count=13,
+        replacement_name="phase_shared_matmul_backward_left",
+        dimless_signature_start=3,
+        runtime_args=("dy", "right", "dx"),
+    )
+    updated, weight_grad_groups = _fpgai_n1_rewrite_cross_shape_group(
+        updated,
+        call_re=weight_grad_re,
+        expected_arg_count=13,
+        replacement_name="phase_shared_matmul_weight_grad",
+        dimless_signature_start=3,
+        runtime_args=("left", "dy", "dw"),
+    )
+
+    total = forward_groups + backward_groups + weight_grad_groups
+    return (
+        f"// FPGAI_NETWORK_EXECUTION mode=phase_shared physical=cross_specialization_gemm "
+        f"forward_groups={forward_groups} backward_groups={backward_groups} "
+        f"weight_grad_groups={weight_grad_groups}\n"
+        + updated
+    )
+
+
+def emit_top_train_cpp(*args, **kwargs):
+    source = _fpgai_n1_network_previous_emit_top_train_cpp(*args, **kwargs)
+    return _fpgai_n1_materialize_phase_shared_matmul(
         source,
         raw_cfg=kwargs.get("raw_cfg") or {},
     )

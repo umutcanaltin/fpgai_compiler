@@ -5,6 +5,7 @@ def emit_activations_h() -> str:
     return r'''#pragma once
 
 #include "fpgai_types.h"
+#include "quantization.h"
 #include <hls_math.h>
 
 #ifndef FPGAI_PIPELINE_II
@@ -355,6 +356,51 @@ void softmax_typed(
 }
 
 
+template<
+    int OUTER,
+    int AXIS,
+    int INNER,
+    typename IN_T = act_t,
+    typename OUT_T = act_t,
+    typename ACC_T = acc_t
+>
+void softmax_axis_typed(
+    const IN_T x[OUTER * AXIS * INNER],
+    OUT_T y[OUTER * AXIS * INNER]
+) {
+#pragma HLS INLINE off
+    for (int outer = 0; outer < OUTER; ++outer) {
+        for (int inner = 0; inner < INNER; ++inner) {
+            const int first = (outer * AXIS) * INNER + inner;
+            ACC_T maximum = (ACC_T)x[first];
+            for (int axis = 1; axis < AXIS; ++axis) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+                const int index = (outer * AXIS + axis) * INNER + inner;
+                const ACC_T value = (ACC_T)x[index];
+                if (value > maximum) maximum = value;
+            }
+            ACC_T temporary[AXIS];
+#pragma HLS ARRAY_PARTITION variable=temporary cyclic factor=FPGAI_ACT_UNROLL
+            ACC_T sum = (ACC_T)0;
+            for (int axis = 0; axis < AXIS; ++axis) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+                const int index = (outer * AXIS + axis) * INNER + inner;
+                const ACC_T shifted = (ACC_T)x[index] - maximum;
+                const ACC_T e = (ACC_T)exp_approx_neg_scalar_typed<ACC_T, ACC_T, ACC_T>(shifted);
+                temporary[axis] = e;
+                sum += e;
+            }
+            if (sum <= (ACC_T)0) sum = (ACC_T)1;
+            for (int axis = 0; axis < AXIS; ++axis) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+                const int index = (outer * AXIS + axis) * INNER + inner;
+                y[index] = (OUT_T)(temporary[axis] / sum);
+            }
+        }
+    }
+}
+
+
 template<int N>
 void softmax(
     const act_t* x,
@@ -405,12 +451,93 @@ void reshape_copy(
 }
 
 
+
+template<int N, typename IN_T, typename OUT_T>
+void relu_quantized(
+    const IN_T x[N],
+    OUT_T y[N],
+    int input_zero,
+    int multiplier,
+    int shift,
+    int output_zero,
+    int qmin,
+    int qmax,
+    int rounding_mode,
+    int saturation_mode
+) {
+#pragma HLS INLINE off
+    for (int index = 0; index < N; ++index) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+        ap_int<64> value = (ap_int<64>)x[index];
+        if (value < input_zero) value = input_zero;
+        y[index] = (OUT_T)quantized_requantize_centered(
+            value - input_zero,
+            multiplier,
+            shift,
+            output_zero,
+            qmin,
+            qmax,
+            rounding_mode,
+            saturation_mode
+        );
+    }
+}
+
+template<int N, typename LEFT_T, typename RIGHT_T, typename OUT_T>
+void add_vec_quantized(
+    const LEFT_T left[N],
+    const RIGHT_T right[N],
+    OUT_T output[N],
+    int left_zero,
+    int left_multiplier,
+    int left_shift,
+    int right_zero,
+    int right_multiplier,
+    int right_shift,
+    int output_zero,
+    int qmin,
+    int qmax,
+    int rounding_mode,
+    int saturation_mode
+) {
+#pragma HLS INLINE off
+    for (int index = 0; index < N; ++index) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+        ap_int<64> left_q = quantized_requantize_centered(
+            (ap_int<64>)left[index] - left_zero,
+            left_multiplier,
+            left_shift,
+            output_zero,
+            qmin,
+            qmax,
+            rounding_mode,
+            saturation_mode
+        );
+        ap_int<64> right_q = quantized_requantize_centered(
+            (ap_int<64>)right[index] - right_zero,
+            right_multiplier,
+            right_shift,
+            output_zero,
+            qmin,
+            qmax,
+            rounding_mode,
+            saturation_mode
+        );
+        ap_int<64> sum = left_q + right_q - output_zero;
+        output[index] = (OUT_T)quantized_apply_overflow(sum, qmin, qmax, saturation_mode);
+    }
+}
+
 template<
     int N,
     typename LEFT_T = act_t,
     typename RIGHT_T = act_t,
     typename OUT_T = act_t,
-    typename ACC_T = acc_t
+    typename ACC_T = acc_t,
+    int PIPELINE_II = FPGAI_PIPELINE_II,
+    int ELEMENT_UNROLL = FPGAI_ACT_UNROLL,
+    int INPUT_PARTITION = 1,
+    int OUTPUT_PARTITION = 1
 >
 void add_vec_typed(
     const LEFT_T left[N],
@@ -418,20 +545,19 @@ void add_vec_typed(
     OUT_T output[N]
 ) {
 #pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=left cyclic factor=INPUT_PARTITION
+#pragma HLS ARRAY_PARTITION variable=right cyclic factor=INPUT_PARTITION
+#pragma HLS ARRAY_PARTITION variable=output cyclic factor=OUTPUT_PARTITION
 
-    for (
-        int index = 0;
-        index < N;
-        ++index
-    ) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
-
-        output[index] = (
-            (OUT_T)(
-                (ACC_T)left[index]
-                + (ACC_T)right[index]
-            )
-        );
+    for (int base = 0; base < N; base += ELEMENT_UNROLL) {
+#pragma HLS PIPELINE II=PIPELINE_II
+        for (int lane = 0; lane < ELEMENT_UNROLL; ++lane) {
+#pragma HLS UNROLL
+            const int index = base + lane;
+            if (index < N) {
+                output[index] = (OUT_T)((ACC_T)left[index] + (ACC_T)right[index]);
+            }
+        }
     }
 }
 
@@ -826,6 +952,39 @@ void softmax_backward_typed(
 }
 
 
+template<
+    int OUTER,
+    int AXIS,
+    int INNER,
+    typename ACT_T = act_t,
+    typename GRAD_OUT_T = grad_act_t,
+    typename GRAD_IN_T = grad_act_t,
+    typename ACC_T = acc_t
+>
+void softmax_axis_backward_typed(
+    const ACT_T y[OUTER * AXIS * INNER],
+    const GRAD_OUT_T dY[OUTER * AXIS * INNER],
+    GRAD_IN_T dX[OUTER * AXIS * INNER]
+) {
+#pragma HLS INLINE off
+    for (int outer = 0; outer < OUTER; ++outer) {
+        for (int inner = 0; inner < INNER; ++inner) {
+            ACC_T dot = (ACC_T)0;
+            for (int axis = 0; axis < AXIS; ++axis) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+                const int index = (outer * AXIS + axis) * INNER + inner;
+                dot += (ACC_T)y[index] * (ACC_T)dY[index];
+            }
+            for (int axis = 0; axis < AXIS; ++axis) {
+#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+                const int index = (outer * AXIS + axis) * INNER + inner;
+                dX[index] = (GRAD_IN_T)((ACC_T)y[index] * ((ACC_T)dY[index] - dot));
+            }
+        }
+    }
+}
+
+
 template<int N>
 void softmax_backward(
     const act_t* y,
@@ -851,7 +1010,10 @@ template<
     typename GRAD_OUT_T = grad_act_t,
     typename GRAD_LEFT_T = grad_act_t,
     typename GRAD_RIGHT_T = grad_act_t,
-    typename ACC_T = acc_t
+    typename ACC_T = acc_t,
+    int PIPELINE_II = FPGAI_PIPELINE_II,
+    int ELEMENT_UNROLL = FPGAI_ACT_UNROLL,
+    int GRADIENT_PARTITION = 1
 >
 void add_backward_typed(
     const GRAD_OUT_T dY[N],
@@ -859,13 +1021,16 @@ void add_backward_typed(
     GRAD_RIGHT_T dRight[N]
 ) {
 #pragma HLS INLINE off
+#pragma HLS ARRAY_PARTITION variable=dY cyclic factor=GRADIENT_PARTITION
+#pragma HLS ARRAY_PARTITION variable=dLeft cyclic factor=GRADIENT_PARTITION
+#pragma HLS ARRAY_PARTITION variable=dRight cyclic factor=GRADIENT_PARTITION
 
-    for (
-        int index = 0;
-        index < N;
-        ++index
-    ) {
-#pragma HLS PIPELINE II=FPGAI_PIPELINE_II
+    for (int base = 0; base < N; base += ELEMENT_UNROLL) {
+#pragma HLS PIPELINE II=PIPELINE_II
+        for (int lane = 0; lane < ELEMENT_UNROLL; ++lane) {
+#pragma HLS UNROLL
+            const int index = base + lane;
+            if (index < N) {
 
         dLeft[index] = (
             (GRAD_LEFT_T)(
@@ -880,6 +1045,8 @@ void add_backward_typed(
                 + (ACC_T)dY[index]
             )
         );
+            }
+        }
     }
 }
 

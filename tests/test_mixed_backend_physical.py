@@ -4,6 +4,7 @@ from fpgai.implementations import implementation_contract_from_manifest
 from fpgai.implementations.mixed_backend.physical import (
     MixedBackendPhysicalRequest,
     _verilog_ports,
+    _axis_groups,
     emit_mixed_backend_physical_project,
 )
 
@@ -52,3 +53,23 @@ def test_emit_physical_hls_to_vhdl_project(tmp_path):
     assert "read_vhdl" in tcl
     assert "read_verilog -sv" in tcl
     assert "synth_design" in tcl
+
+
+def test_axis_group_discovers_optional_sidebands() -> None:
+    ports = {
+        "in_TDATA": ("input", 32),
+        "in_TVALID": ("input", 1),
+        "in_TREADY": ("output", 1),
+        "in_TKEEP": ("input", 4),
+        "in_TSTRB": ("input", 4),
+        "in_TLAST": ("input", 1),
+    }
+    group = _axis_groups(ports)["in"]
+    assert group == {
+        "data": "in_TDATA",
+        "valid": "in_TVALID",
+        "ready": "in_TREADY",
+        "keep": "in_TKEEP",
+        "strb": "in_TSTRB",
+        "last": "in_TLAST",
+    }

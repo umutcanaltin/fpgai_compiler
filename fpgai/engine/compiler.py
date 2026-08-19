@@ -68,6 +68,7 @@ from fpgai.analysis.hls_artifact_metadata import emit_hls_artifact_metadata
 from fpgai.analysis.hls_calibration_runner import run_hls_calibration
 from fpgai.util.binio import write_f32_bin
 from fpgai.runtime.package import emit_runtime_package
+from fpgai.runtime.runtime_plans import build_persistent_state_plan
 from fpgai.validation.numeric import emit_numeric_validation_report
 from fpgai.validation.dataset import (
     emit_dataset_artifacts,
@@ -142,6 +143,14 @@ from fpgai.engine.vivado_pipeline import (
     _yaml_requested_vivado_bridge,
 )
 
+
+from fpgai.analysis.ir_architecture import (
+    ir_scientific_capability_matrix,
+    write_ir_architecture_analysis,
+    write_resolved_ir_snapshot,
+)
+from fpgai.ir.semantics import write_graph_semantics_report
+from fpgai.ir.passes.mechanism_resolution import materialize_compile_plan_semantics
 
 from fpgai.engine.memory_semantics import MemorySemanticsMixin
 from fpgai.engine.hls_project_generation import HLSProjectGenerationMixin
@@ -314,7 +323,7 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             memory_plan,
         )
 
-        self._emit_ir_artifacts(out_dir, g, descriptors, compile_plan, memory_plan, communication_plan)
+        self._emit_ir_artifacts(out_dir, g, descriptors, compile_plan, memory_plan, communication_plan, runtime_sequence=runtime_sequence)
         prediction_artifacts = self._emit_prediction_artifacts(
             out_dir,
             descriptors,
@@ -428,6 +437,8 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             memory_plan=memory_plan,
             build_stages=build_stages,
             runtime_sequence=runtime_sequence,
+            persistent_state_plan=build_persistent_state_plan(g),
+            graph_runtime_contract=dict(getattr(getattr(g, "semantics", None), "runtime_contract", {}) or {}),
             hls_artifacts=self._hls_artifacts_manifest_payload(
                 out_dir=out_dir,
                 hls_run=hls_run,
@@ -748,7 +759,7 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             memory_plan,
         )
 
-        self._emit_ir_artifacts(out_dir, g, descriptors, compile_plan, memory_plan, communication_plan)
+        self._emit_ir_artifacts(out_dir, g, descriptors, compile_plan, memory_plan, communication_plan, runtime_sequence=runtime_sequence)
         prediction_artifacts = self._emit_prediction_artifacts(
             out_dir,
             descriptors,
@@ -816,6 +827,12 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
         # payload generation, but do not classify it as unsupported external DDR.
 
         emit_training_artifacts(out_dir, training_plan)
+        # Refresh the resolved IR after the canonical training plan exists so the
+        # authoritative artifact captures optimizer/loss/batch/update semantics.
+        self._emit_ir_artifacts(
+            out_dir, g, descriptors, compile_plan, memory_plan, communication_plan,
+            runtime_sequence=runtime_sequence, training_plan=training_plan,
+        )
 
         training_estimate_result = None
         if bool(training_plan.estimator.get("enabled", True)):
@@ -1197,6 +1214,8 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             memory_plan=memory_plan,
             build_stages=build_stages,
             runtime_sequence=runtime_sequence,
+            persistent_state_plan=build_persistent_state_plan(g),
+            graph_runtime_contract=dict(getattr(getattr(g, "semantics", None), "runtime_contract", {}) or {}),
             hls_artifacts=self._hls_artifacts_manifest_payload(
                 out_dir=out_dir,
                 hls_run=hls_run,
@@ -1673,13 +1692,70 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
         )
 
     def _import_and_prepare_graph(self, *, act_kind: str, act_alpha: float, act_except_last: bool):
-        from fpgai.frontend.onnx import import_onnx
+        from fpgai.frontend import import_model_source
         from fpgai.ir.passes import validate_allowlist, assign_stable_names, insert_activations
+        from fpgai.layers.composites import expand_composite_layers
 
-        g = import_onnx(self.cfg.model.path, canonicalize=True, infer_shapes=True)
+        target_board = _cfg_get(self.cfg.raw, "targets.platform.board", _cfg_get(self.cfg.raw, "targets.board", None))
+        g = import_model_source(
+            self.cfg.model.path,
+            format_hint=getattr(self.cfg.model, "format", None),
+            source_framework=getattr(self.cfg.model, "framework", None),
+            pipeline_mode=self.cfg.pipeline.mode,
+            target_board=target_board,
+            shape_overrides=_cfg_get(self.cfg.raw, "model.static_shapes", None),
+        )
+
+        # Optimized ONNX decoders may expose contrib GroupQueryAttention with
+        # explicit past/present cache ports.  Internalize that transport-level
+        # representation into FPGAI's generic persistent-state contract before
+        # composite expansion/codegen.  The decision is operator-driven and the
+        # capacity/storage remain user-selectable configuration.
+        if any(op.op_type == "GroupQueryAttention" for op in g.ops):
+            from fpgai.ir.passes.transformer_lowering import internalize_explicit_group_query_attention_state
+
+            capacity = _cfg_get(self.cfg.raw, "runtime.autoregressive.max_sequence_length", None)
+            if capacity is None:
+                capacity = _cfg_get(self.cfg.raw, "runtime.max_sequence_length", None)
+            if capacity is None:
+                capacity = _cfg_get(self.cfg.raw, "model.max_sequence_length", None)
+            if capacity is None:
+                inferred_caps = []
+                for op in g.ops:
+                    if op.op_type != "GroupQueryAttention" or len(op.inputs) < 4:
+                        continue
+                    spec = g.get_tensor(op.inputs[3])
+                    if spec is not None and len(spec.shape) >= 2:
+                        try:
+                            candidate = int(spec.shape[-2])
+                        except Exception:
+                            candidate = 0
+                        if candidate > 1:
+                            inferred_caps.append(candidate)
+                capacity = max(inferred_caps) if inferred_caps else None
+            if capacity is None:
+                raise ValueError(
+                    "ONNXGQA001: explicit-cache GroupQueryAttention requires a bounded cache capacity; "
+                    "set runtime.autoregressive.max_sequence_length or provide static cache shape overrides"
+                )
+            cache_storage = _cfg_get(
+                self.cfg.raw, "runtime.autoregressive.cache_storage",
+                _cfg_get(self.cfg.raw, "memory.storage.kv_cache", "auto"),
+            )
+            overflow = _cfg_get(self.cfg.raw, "runtime.autoregressive.overflow_policy", "saturate")
+            internalize_explicit_group_query_attention_state(
+                g, max_sequence_length=int(capacity), cache_storage=str(cache_storage),
+                overflow_policy=str(overflow),
+            )
+
+        g = expand_composite_layers(g)
         if act_kind != "none":
             g = insert_activations(g, kind=act_kind, alpha=act_alpha, except_last=act_except_last)
         g = assign_stable_names(g)
+        from fpgai.ir.passes.mechanism_resolution import resolve_layer_mechanisms
+        resolve_layer_mechanisms(g, self.cfg.raw)
+        from fpgai.analysis.training_capability import audit_training_capabilities
+        audit_training_capabilities(g)
         validate_allowlist(g, self.cfg.operators.supported)
         return g
 
@@ -1869,7 +1945,15 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
         result["board_fit_hls_synthesis_markdown"] = str(hls_md)
         return result
 
-    def _emit_ir_artifacts(self, out_dir: Path, g, descriptors, compile_plan, memory_plan, communication_plan) -> None:
+    def _emit_ir_artifacts(
+        self, out_dir: Path, g, descriptors, compile_plan, memory_plan, communication_plan,
+        *, runtime_sequence=None, training_plan=None,
+    ) -> None:
+        materialize_compile_plan_semantics(g, compile_plan)
+        if runtime_sequence is not None:
+            g.semantics.runtime_contract["sequence"] = runtime_sequence
+        if training_plan is not None:
+            g.semantics.runtime_contract["training_plan"] = training_plan.to_dict() if hasattr(training_plan, "to_dict") else training_plan
         write_text(out_dir / "ir_summary.txt", g.summary())
         part_plan = single_device_plan(g, device_id="fpga0")
         write_text(out_dir / "partition_plan.json", json.dumps(part_plan.to_dict(), indent=2))
@@ -1893,6 +1977,28 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
                 }
             )
         write_text(ir_dir / "layerwise_precision.json", json.dumps(prec_dump, indent=2))
+        mechanism_report = getattr(g, "metadata", {}).get("layer_mechanism_resolution")
+        if mechanism_report is not None:
+            write_text(ir_dir / "layer_mechanism_resolution.json", json.dumps(mechanism_report, indent=2))
+        training_audit = getattr(g, "metadata", {}).get("training_capability_audit")
+        if training_audit is not None:
+            write_text(ir_dir / "training_capability_audit.json", json.dumps(training_audit, indent=2))
+
+        write_graph_semantics_report(g, ir_dir / "graph_semantics.json")
+        write_ir_architecture_analysis(g, ir_dir / "ir_architecture_analysis.json")
+        write_text(
+            ir_dir / "ir_scientific_capability_matrix.json",
+            json.dumps(ir_scientific_capability_matrix(g), indent=2, sort_keys=True),
+        )
+        write_resolved_ir_snapshot(
+            g,
+            ir_dir / "resolved_ir.json",
+            compile_plan=compile_plan,
+            memory_plan=memory_plan,
+            communication_plan=communication_plan,
+            runtime_sequence=runtime_sequence,
+            training_plan=training_plan,
+        )
 
     def _emit_dummy_input(self, out_dir: Path, g) -> Path:
         p = out_dir / "input.bin"
@@ -3567,6 +3673,24 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
         out_dir = kwargs["out_dir"]
         precision_layout_artifacts = self._emit_precision_layout_reports(**kwargs)
         hardware_knob_contract = self._emit_hardware_knob_contract_reports(**kwargs)
+        # The existing knob report remains the owner of requested/effective YAML
+        # traceability.  Fold its payload into the final resolved IR snapshot so
+        # FPGAI IR exposes the complete compiler decision chain without creating
+        # a second knob-resolution implementation.
+        graph = kwargs.get("graph")
+        if graph is not None:
+            knob_json = Path(kwargs["out_dir"]) / "reports" / "hardware_knob_contract.json"
+            if knob_json.is_file():
+                try:
+                    graph.metadata["hardware_knob_contract"] = json.loads(knob_json.read_text(encoding="utf-8"))
+                except Exception:
+                    graph.metadata["hardware_knob_contract"] = {"status": "unreadable"}
+            self._emit_ir_artifacts(
+                Path(kwargs["out_dir"]), graph, kwargs.get("descriptors") or [],
+                kwargs["compile_plan"], kwargs["memory_plan"], kwargs["communication_plan"],
+                runtime_sequence=kwargs.get("runtime_sequence"),
+                training_plan=kwargs.get("training_plan"),
+            )
         fit_policy_gate = self._fit_policy_gate(kwargs.get("prediction_artifacts"))
         manifest = {
             "version": self.cfg.version,
@@ -3624,7 +3748,7 @@ class Compiler(HLSProjectGenerationMixin, MemorySemanticsMixin):
             },
             "out_dir": str(out_dir),
             "num_ops": len(kwargs["graph"].ops),
-            "num_params": len(kwargs["graph"].params),
+            "num_params": len(getattr(kwargs["graph"], "params", getattr(kwargs["graph"], "constants", {}))),
             "num_descriptors": len(kwargs["descriptors"]),
             "num_layer_plans": len(kwargs["compile_plan"].layer_plans),
             "architecture_signature": (

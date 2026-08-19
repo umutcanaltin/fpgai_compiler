@@ -1,0 +1,134 @@
+version: 1
+project:
+  name: mlp_dataflow_inference
+  out_dir: build/examples/inference/mlp_dataflow_inference
+  clean: true
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+training:
+  optimizer:
+    type: sgd
+    learning_rate: 0.01
+  loss:
+    type: mse
+  cache:
+    store_forward_activations: true
+    store_pre_activations: true
+    store_pool_indices: true
+    gradient_checkpointing: false
+    store_step_snapshots: true
+  estimator:
+    enabled: true
+    include_forward: true
+    include_backward_input: true
+    include_backward_params: true
+    include_update: true
+    include_buffers: true
+  phase_overrides: {}
+  batch:
+    size: 1
+    epochs: 1
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+operators:
+  supported:
+  - Dense
+  - Conv
+  - MaxPool
+  - AvgPool
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - BatchNormalization
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true
+model:
+  format: onnx
+  path: models/mlp.onnx
+numerics:
+  training:
+    grad:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+    grad_accum:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+    master_weight:
+      type: ap_fixed
+      total_bits: 16
+      int_bits: 6
+    optimizer_state:
+      type: ap_fixed
+      total_bits: 24
+      int_bits: 10
+analysis:
+  quantization_report:
+    enabled: false
+  design_space:
+    enabled: false
+  precision_sweep:
+    enabled: false
+data_movement:
+  ps_pl:
+    compression:
+      enabled: true
+backends:
+  hls:
+    enabled: true
+    vitis:
+      enabled: true
+      mode: csim
+      exe: vitis_hls
+  host_cpp:
+    enabled: true
+debug:
+  verbose: false
+toolchain:
+  vitis_hls:
+    enabled: true
+    root: /tools/Xilinx/Vitis_HLS/2023.2
+    settings64: /tools/Xilinx/Vitis_HLS/2023.2/settings64.sh
+    install_dir: /tools/Xilinx/Vitis_HLS/2023.2
+benchmark:
+  enabled: false
+  fail_on_mismatch: true
+  seed: 0
+  compare:
+    atol: 0.08
+    rtol: 0.08
+    max_abs_error: 0.08
+    mean_abs_error: 0.03
+    rmse: 0.04
+    require_argmax_match: false
+    min_cosine_similarity: 0.95
+  intermediate:
+    enabled: true
+    fail_on_layer_mismatch: false
+    stop_on_first_bad_layer: false
+memory:
+  weight_storage: bram
+  activation_storage: bram
+  gradient_storage: bram
+  optimizer_state_storage: bram
+weights:
+  mode: embedded
+architecture:
+  network:
+    execution:
+      mode: dataflow

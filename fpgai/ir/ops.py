@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from .contracts import OpSemantics
+
 
 @dataclass
 class Op:
@@ -11,6 +13,7 @@ class Op:
     inputs: List[str]
     outputs: List[str]
     attrs: Dict[str, Any] = field(default_factory=dict)
+    semantics: OpSemantics = field(default_factory=OpSemantics)
 
 
 def make_name(op_type: str, idx: int, node_name: Optional[str] = None) -> str:

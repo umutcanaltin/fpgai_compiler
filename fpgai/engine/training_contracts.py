@@ -127,9 +127,13 @@ def _resolve_training_batch_accumulation_contract(raw: Dict[str, Any]) -> Dict[s
     # Do not use nested _cfg_get(...) calls as default arguments here: Python
     # evaluates defaults eagerly and training.execution.batch_size=1 would mask
     # a user-specified training.batch_size=2.
-    batch_raw = _cfg_get(raw, "training.batch.size", None)
+    # The public shorthand is an explicit user override and must win over
+    # legacy/default training.batch.size values already present in example
+    # configs.  Otherwise setting training.batch_size=2 can be silently masked
+    # by an inherited training.batch.size=1.
+    batch_raw = _cfg_get(raw, "training.batch_size", None)
     if batch_raw is None:
-        batch_raw = _cfg_get(raw, "training.batch_size", None)
+        batch_raw = _cfg_get(raw, "training.batch.size", None)
     if batch_raw is None:
         batch_raw = _cfg_get(raw, "training.execution.batch_size", 1)
     batch_size = _as_positive_int(batch_raw, 1)
@@ -531,7 +535,7 @@ def _resolve_training_optimizer_loss_contract(raw: Dict[str, Any]) -> Dict[str, 
         explicit_storage = True
     if storage not in _OPTIMIZER_STATE_STORAGE:
         raise ValueError(
-            "training.storage.optimizer_state must be one of none, bram, uram, ddr; "
+            "memory.optimizer_state_storage must be one of none, bram, uram, ddr; "
             f"got {storage!r}."
         )
 
@@ -542,7 +546,7 @@ def _resolve_training_optimizer_loss_contract(raw: Dict[str, Any]) -> Dict[str, 
     if state_required and storage == "none":
         raise ValueError(
             f"training.optimizer.type={optimizer_type!r} requires persistent optimizer state; "
-            "training.storage.optimizer_state must be bram, uram, or ddr."
+            "memory.optimizer_state_storage must be bram, uram, or ddr."
         )
 
     momentum_value = float(_cfg_get(raw, "training.optimizer.momentum", 0.9) or 0.9)

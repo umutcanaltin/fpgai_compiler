@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
-from fpgai.backends.hls.emit.types_h import _default_precision, _op_precision_from_attrs, _spec_to_ap
+from fpgai.backends.hls.emit.types_h import _default_precision, _op_precision_from_attrs, _spec_to_ap, _tensor_cpp_type
 from fpgai.ir.liveness import analyze_tensor_liveness
 
 
@@ -48,13 +48,19 @@ def _tensor_cpp_types(graph: Any, raw_cfg: Mapping[str, Any] | None) -> dict[str
     defaults = _default_precision(raw)
     result: dict[str, str] = {}
     default_act = _spec_to_ap(defaults["activation"])
+    # Seed all declared tensors so persistent state and non-port tensors retain
+    # their explicit integer/floating dtype even when they are not graph inputs.
+    for name, spec in (getattr(graph, "tensors", {}) or {}).items():
+        result[str(name)] = _tensor_cpp_type(spec, default_act)
     for name in getattr(graph, "inputs", []) or []:
-        result[str(name)] = default_act
+        spec = graph.get_tensor(str(name)) if hasattr(graph, "get_tensor") else None
+        result[str(name)] = _tensor_cpp_type(spec, default_act)
     for index, op in enumerate(getattr(graph, "ops", []) or []):
         precision = _op_precision_from_attrs(op, defaults)
         out_type = _spec_to_ap(precision["activation"])
         for name in getattr(op, "outputs", []) or []:
-            result[str(name)] = out_type
+            spec = graph.get_tensor(str(name)) if hasattr(graph, "get_tensor") else None
+            result[str(name)] = _tensor_cpp_type(spec, out_type)
     return result
 
 
@@ -79,12 +85,22 @@ def build_hls_buffer_allocation(
     for name, entry in tensors.items():
         if not isinstance(entry, Mapping) or bool(entry.get("constant", False)):
             continue
+        spec = graph.get_tensor(str(name)) if hasattr(graph, "get_tensor") else None
+        semantics = getattr(spec, "semantics", None) if spec is not None else None
+        state_obj = getattr(semantics, "state", None) if semantics is not None else None
+        memory_obj = getattr(semantics, "memory", None) if semantics is not None else None
+        persistent = bool(getattr(state_obj, "persistent_across_invocations", False))
+        state_kind = str(getattr(state_obj, "kind", "stateless") or "stateless")
+        storage = str(getattr(memory_obj, "storage", "unspecified") or "unspecified")
         rows.append({
             "tensor": str(name),
             "first": int(entry.get("first_live_step", 0)),
             "last": int(entry.get("last_live_step", 0)),
             "cpp_type": cpp_types.get(str(name), _spec_to_ap(_default_precision(dict(raw_cfg or {}))["activation"])),
             "words": _words(graph, str(name)),
+            "persistent": persistent,
+            "state_kind": state_kind,
+            "storage": storage,
         })
     rows.sort(key=lambda row: (row["first"], row["last"], row["tensor"]))
 
@@ -93,19 +109,28 @@ def build_hls_buffer_allocation(
     tensor_to_slot: dict[str, int] = {}
     for row in rows:
         chosen: int | None = None
-        for slot_index, slot in enumerate(slots):
-            if slot["cpp_type"] == row["cpp_type"] and int(slot["last"]) < int(row["first"]):
-                chosen = slot_index
-                break
+        # Persistent runtime-session tensors are physical state: never reuse
+        # their storage with ephemeral activation live ranges.
+        if not bool(row.get("persistent")):
+            for slot_index, slot in enumerate(slots):
+                if bool(slot.get("persistent")):
+                    continue
+                if slot["cpp_type"] == row["cpp_type"] and int(slot["last"]) < int(row["first"]):
+                    chosen = slot_index
+                    break
         if chosen is None:
             chosen = len(slots)
+            slot_name = f"fpgai_state_{row['tensor']}" if bool(row.get("persistent")) else f"fpgai_buffer_{chosen}"
             slots.append({
                 "slot": chosen,
-                "name": f"fpgai_buffer_{chosen}",
+                "name": slot_name.replace("/", "_").replace(".", "_"),
                 "cpp_type": row["cpp_type"],
                 "words": int(row["words"]),
                 "last": int(row["last"]),
                 "tensors": [row["tensor"]],
+                "persistent": bool(row.get("persistent")),
+                "state_kind": row.get("state_kind", "stateless"),
+                "storage": row.get("storage", "unspecified"),
             })
         else:
             slot = slots[chosen]
@@ -115,16 +140,21 @@ def build_hls_buffer_allocation(
         tensor_to_buffer[row["tensor"]] = slots[chosen]["name"]
         tensor_to_slot[row["tensor"]] = chosen
 
-    public_slots = [
-        HLSBufferSlot(
+    public_slots = []
+    for slot in slots:
+        row = HLSBufferSlot(
             slot=int(slot["slot"]),
             name=str(slot["name"]),
             cpp_type=str(slot["cpp_type"]),
             words=int(slot["words"]),
             tensors=tuple(str(x) for x in slot["tensors"]),
         ).to_dict()
-        for slot in slots
-    ]
+        row.update({
+            "persistent": bool(slot.get("persistent", False)),
+            "state_kind": str(slot.get("state_kind", "stateless")),
+            "storage": str(slot.get("storage", "unspecified")),
+        })
+        public_slots.append(row)
 
     resource_provenance: dict[str, Any] = {}
     for slot in public_slots:

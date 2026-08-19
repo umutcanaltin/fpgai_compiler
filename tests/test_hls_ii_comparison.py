@@ -115,3 +115,26 @@ def test_compiler_records_ii_comparison_in_manifest_source() -> None:
     assert "write_requested_achieved_ii_summary" in source
     assert "hls_ii_comparison=hls_ii_comparison" in source
     assert 'manifest["hls_ii_comparison"] = hls_ii_comparison' in source
+
+
+def test_unmatched_layers_are_reported_as_unverified_not_passed(tmp_path: Path) -> None:
+    report_path = tmp_path / "proj" / "solution1" / "syn" / "report" / "csynth.rpt"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text(
+        """
+    |                                        Modules                                        |  Issue |       | Latency |  Latency  | Iteration|         | Trip |          |          |           |              |               |     |
+    |                                        & Loops                                        |  Type  | Slack | (cycles)|    (ns)   |  Latency | Interval| Count| Pipelined|   BRAM   |    DSP    |      FF      |      LUT      | URAM|
+    |  o VITIS_LOOP_328_1                                                                  |       -|   3.65|       10|    50.000|        4|        1|     8|       yes|         -|          -|              -|              -|    -|
+        """,
+        encoding="utf-8",
+    )
+    plan = {"layer_plans": [{"name": "layer_0", "pipeline_ii": 2}]}
+
+    result = write_requested_achieved_ii_summary(tmp_path, plan)
+
+    assert result is not None
+    summary = result["summary"]
+    assert summary["matched_layer_count"] == 0
+    assert summary["all_requested_layers_matched"] is False
+    assert summary["all_matched_layers_met_ii"] is None
+    assert summary["verification_status"] == "unmatched"

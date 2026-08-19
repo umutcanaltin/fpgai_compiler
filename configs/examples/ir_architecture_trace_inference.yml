@@ -1,0 +1,120 @@
+version: 1
+project:
+  name: ir_architecture_trace_inference
+  out_dir: build/examples/ir_architecture_trace_inference
+  clean: true
+  reproducibility:
+    emit_manifest: true
+pipeline:
+  mode: inference
+  outputs:
+    top_kernel_name: deeplearn
+model:
+  format: onnx
+  path: models/mlp.onnx
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks:
+    - name: pl_clk0
+      target_mhz: 200
+operators:
+  supported:
+  - Dense
+  - MatMul
+  - Add
+  - Relu
+  - LeakyRelu
+  - Sigmoid
+  - Softmax
+  - Flatten
+  - Reshape
+  defaults:
+    activation_insert:
+      kind: none
+      alpha: 0.1
+      except_last: true
+weights:
+  mode: embedded
+memory:
+  weight_storage: bram
+  activation_storage: uram
+  gradient_storage: bram
+  optimizer_state_storage: bram
+architecture:
+  network:
+    execution:
+      mode: dataflow
+    pipeline:
+      ii: 2
+    parallelism:
+      pe: 2
+      simd: 2
+    partitioning:
+      factor: 2
+      mode: cyclic
+    buffering:
+      storage: bram
+  defaults:
+    tiling:
+      sizes:
+        m: 1
+        n: 2
+        k: 2
+  layers:
+  - match:
+      index: 0
+    pipeline:
+      ii: 1
+      loops:
+        k: 2
+    parallelism:
+      pe: 4
+      simd: 2
+      unroll:
+        n: 4
+        k: 2
+    partitioning:
+      factor: 2
+      mode: cyclic
+    tiling:
+      sizes:
+        m: 1
+        n: 4
+        k: 2
+data_movement:
+  inputs:
+    interface: m_axi
+    transport: ps_runtime
+    policy: full
+  outputs:
+    interface: m_axi
+    transport: ps_runtime
+    policy: full
+runtime:
+  sequence:
+  - run_inference
+analysis:
+  quantization_report:
+    enabled: false
+  design_space:
+    enabled: false
+  precision_sweep:
+    enabled: false
+build:
+  stages:
+    cpp: true
+    testbench: true
+    hls_project: false
+    hls_synthesis: false
+    vivado_project: false
+    vivado_implementation: false
+    bitstream: false
+    runtime_package: true
+    reports: true
+toolchain:
+  vitis_hls:
+    enabled: false
+  vivado:
+    enabled: false

@@ -59,7 +59,7 @@ def test_adam_support_contract_is_end_to_end_multi_epoch_hls_validated() -> None
 
 def test_stateful_optimizer_rejects_none_storage() -> None:
     raw = _raw("momentum")
-    raw["training"]["storage"]["optimizer_state"] = "none"
+    raw.setdefault("memory", {})["optimizer_state_storage"] = "none"
     with pytest.raises(ValueError, match="requires persistent optimizer state"):
         _resolve_training_optimizer_loss_contract(raw)
 
@@ -817,7 +817,7 @@ def test_update_behavior_trace_reports_final_boundary_path() -> None:
 def test_adam_persistent_state_arrays_materialize_requested_uram_bindings() -> None:
     from fpgai.backends.hls.emit.top_train_cpp import _fpgai_ensure_adam_final_contract
     raw = _raw("adam")
-    raw.setdefault("training", {}).setdefault("storage", {})["optimizer_state"] = "uram"
+    raw.setdefault("memory", {})["optimizer_state_storage"] = "uram"
     source = """
 #include <hls_math.h>
 using namespace fpgai;
@@ -966,7 +966,7 @@ static opt_t FPGAI_ADAM_M_W_dense0[1024];
     by_name = {row["name"]: row for row in ownership["owners"]}
     assert by_name["W_dense0"]["owning_yaml_knob"] == "memory.weight_storage"
     assert by_name["dW_dense0"]["owning_yaml_knob"] == "training.storage.parameter_gradient"
-    assert by_name["FPGAI_ADAM_M_W_dense0"]["owning_yaml_knob"] == "training.storage.optimizer_state"
+    assert by_name["FPGAI_ADAM_M_W_dense0"]["owning_yaml_knob"] == "memory.optimizer_state_storage"
     assert by_name["FPGAI_ADAM_M_W_dense0"]["source_binding"] == "uram"
     assert any(row["path"] == "optimization.parallel.partition_factor" for row in ownership["hardware_knob_trace"])
     assert any(row["knob"] == "optimization.parallel.pe" for row in ownership["recommended_knob_actions"])

@@ -1,0 +1,69 @@
+schema: fpgai.package/v1
+package:
+  id: community.quantized_int8_packet_bridge_vhdl
+  name: Quantized Int8 Packet Elastic Bridge VHDL
+  version: 1.0.0
+  asset_type: implementation
+  provider: community
+  description: Research VHDL elastic ready/valid bridge for 32-bit transport words containing four packed int8 activation values.
+usage:
+  platform_scope: research
+  permitted_uses: [research, experimentation, validation, benchmarking, education]
+  production_path: morfics
+license:
+  category: open_source
+  identifier: Apache-2.0
+compatibility:
+  fpgai_contract: ">=1.0,<2.0"
+  boards: [kv260, kr260]
+  precisions: [int8]
+  toolchains:
+    - name: vivado
+      versions: ["2023.2"]
+capabilities:
+  inference: true
+  training:
+    forward: false
+    backward_input: false
+    parameter_gradients: false
+    bias_gradients: false
+    optimizer_update: false
+entrypoints:
+  implementation:
+    language: vhdl
+    backend: vhdl
+    top: quantized_int8_packet_bridge_vhdl
+    sources: [rtl/quantized_int8_packet_bridge_vhdl.vhd]
+    source_order: [rtl/quantized_int8_packet_bridge_vhdl.vhd]
+implementation:
+  operator_id: community.operator.quantized_packet_bridge
+  backend: vhdl
+integration:
+  vhdl:
+    abi: tensor_ports_ready_valid_v1
+    data_width: 32
+    signed: false
+    handshake_policy: grouped_transaction
+    inputs:
+      - name: input
+        data: input_data
+    outputs:
+      - name: output
+        data: output_data
+interfaces:
+  input:
+    direction: input
+    protocol: axi_stream
+    data_type: packed_int8x4
+  output:
+    direction: output
+    protocol: axi_stream
+    data_type: packed_int8x4
+memory:
+  supported_weight_storage: [embedded]
+  supported_activation_storage: [bram, uram]
+validation:
+  declared_level: rtl_simulation_validated
+metrics:
+  latency_cycles: 1
+  initiation_interval: 1

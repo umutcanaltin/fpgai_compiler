@@ -34,6 +34,8 @@ def emit_runtime_package(
     memory_plan: Any | None = None,
     build_stages: Mapping[str, Any] | None = None,
     runtime_sequence: Mapping[str, Any] | None = None,
+    persistent_state_plan: Mapping[str, Any] | None = None,
+    graph_runtime_contract: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Create a self-describing runtime package from existing compile artifacts.
 
@@ -82,6 +84,14 @@ def emit_runtime_package(
         prior_sequence = previous_payload.get("runtime_sequence", {})
         if isinstance(prior_sequence, Mapping):
             runtime_sequence = dict(prior_sequence)
+    if persistent_state_plan is None:
+        prior_state = previous_payload.get("persistent_state", {})
+        if isinstance(prior_state, Mapping):
+            persistent_state_plan = dict(prior_state)
+    if graph_runtime_contract is None:
+        prior_contract = previous_payload.get("graph_runtime_contract", {})
+        if isinstance(prior_contract, Mapping):
+            graph_runtime_contract = dict(prior_contract)
 
     if package_dir.exists():
         shutil.rmtree(package_dir)
@@ -190,6 +200,7 @@ def emit_runtime_package(
         runtime_sequence=runtime_sequence_payload,
         runtime_weights=weight_payload["summary"],
         pipeline_mode=pipeline_mode,
+        persistent_state_plan=persistent_state_plan,
     )
     files.update(runtime_buffer_plans["files"])
 
@@ -205,6 +216,8 @@ def emit_runtime_package(
         "hls_artifacts": dict(hls_artifacts or {}),
         "build_stages": {str(k): bool(v) for k, v in dict(build_stages or {}).items()},
         "runtime_sequence": runtime_sequence_payload,
+        "persistent_state": dict(persistent_state_plan or {}),
+        "graph_runtime_contract": dict(graph_runtime_contract or {}),
         "runtime_buffer_plan": runtime_buffer_plans["buffer_plan"],
         "runtime_execution_plan": runtime_buffer_plans["runtime_execution_plan"],
         "hardware": hardware,
@@ -268,6 +281,15 @@ def emit_runtime_package(
             "bind_allocated_buffers",
             "bind_backend",
             "get_backend",
+            "load_graph_runtime_contract",
+            "reset_state",
+            "import_state",
+            "export_state",
+            "read_state",
+            "write_state",
+            "prepare_prefill",
+            "prepare_decode",
+            "postprocess_detections",
             "reset_accumulators",
             "accumulate_gradients",
             "apply_accumulated_gradients",
@@ -303,6 +325,8 @@ def emit_runtime_package(
                 f"- selected build stages: `{json.dumps(payload['build_stages'], sort_keys=True)}`",
                 f"- runtime sequence: `{json.dumps(runtime_sequence_payload.get('sequence', []), sort_keys=True)}`",
                 f"- runtime buffers: `{len(runtime_buffer_plans['buffer_plan'].get('buffers', []))}`",
+                f"- persistent state tensors: `{int((persistent_state_plan or {}).get('tensor_count', 0))}`",
+                f"- graph runtime contract keys: `{sorted((graph_runtime_contract or {}).keys())}`",
                 "",
                 "The package is accurate: missing hardware handoff files are recorded as missing.",
                 "Use the Vivado bridge flow to generate bitstream/XSA artifacts before board deployment.",
@@ -341,5 +365,7 @@ def emit_runtime_package(
         "runtime_package_validation_status": validation_summary["status"],
         "runtime_package_deployability_ready": validation_summary["deployability_ready"],
         "runtime_package_validation_json": validation_summary["validation_json"],
+        "persistent_state": dict(persistent_state_plan or {}),
+        "graph_runtime_contract": dict(graph_runtime_contract or {}),
         "file_count": len(files),
     }

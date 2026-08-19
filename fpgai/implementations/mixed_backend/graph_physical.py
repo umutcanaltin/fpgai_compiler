@@ -40,6 +40,8 @@ class HLSPhysicalBinding:
     backend: str = "vitis_hls"
     input_streams: tuple[str, ...] = ()
     output_streams: tuple[str, ...] = ()
+    input_packet_words: tuple[int, ...] = ()
+    output_packet_words: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -47,6 +49,12 @@ class VHDLPhysicalBinding:
     node_name: str
     contract: ImplementationContract
     backend: str = "vhdl"
+
+
+@dataclass(frozen=True)
+class RequantizationPhysicalBinding:
+    node_name: str
+    backend: str = "requantization"
 
 
 @dataclass(frozen=True)

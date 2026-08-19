@@ -1,0 +1,23 @@
+schema: fpgai.reference-architecture/v1
+name: yolo_like_multiscale_detector
+family: yolo_like
+description: Representative one-stage multi-scale detector with feature fusion and distribution-style box regression; not a claim of exact YOLO model compatibility.
+compiler_special_case: false
+graph_source: maintained_generic_graph
+benchmark_label: YOLO-like Multi-scale Detector
+features:
+  - convolutional_backbone
+  - grouped_or_depthwise_convolution
+  - multi_scale_features
+  - nearest_resize
+  - feature_concatenation
+  - distribution_box_regression
+  - softmax_expectation
+  - grid_stride_decode
+  - raw_detection_output
+  - explicit_nms_partition
+parameters:
+  input_shape: [1, 3, 64, 64]
+  pyramid_strides: [8, 16, 32]
+  class_count: 4
+  dfl_bins: 8

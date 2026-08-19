@@ -312,7 +312,7 @@ class CompileResult:
             "=============== FPGAI Compile Result ===============",
             f"Out dir              : {self.out_dir}",
             f"Ops                  : {len(self.graph.ops)}",
-            f"Params               : {len(self.graph.params)}",
+            f"Params               : {len(getattr(self.graph, 'constants', {}) or {})}",
             f"Inputs               : {self.graph.inputs}",
             f"Outputs              : {self.graph.outputs}",
             "---------------------------------------------------",

@@ -112,6 +112,18 @@ def _file_word_count(path: Path | None, *, word_bytes: int = 4) -> int | None:
     return max(1, (size + word_bytes - 1) // word_bytes)
 
 
+def _dtype_nbytes(dtype: str) -> int:
+    key = str(dtype or "float32").strip().lower().replace("-", "")
+    sizes = {
+        "bool": 1,
+        "int8": 1, "uint8": 1,
+        "int16": 2, "uint16": 2, "float16": 2, "bfloat16": 2,
+        "int32": 4, "uint32": 4, "float32": 4, "float": 4,
+        "int64": 8, "uint64": 8, "float64": 8, "double": 8,
+    }
+    return int(sizes.get(key, 4))
+
+
 def _runtime_buffer_entry(
     name: str,
     *,
@@ -145,6 +157,7 @@ def _emit_runtime_buffer_plans(
     runtime_sequence: Mapping[str, Any],
     runtime_weights: Mapping[str, Any],
     pipeline_mode: str | None,
+    persistent_state_plan: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Emit runtime buffer metadata consumed by generated board_runtime/runtime_api.
 
@@ -252,6 +265,62 @@ def _emit_runtime_buffer_plans(
                 source=str(runtime_weights.get("weights_bin") or "weights/weights.bin"),
             )
         )
+
+    state_plan = dict(persistent_state_plan or {})
+    external_state_storages = {"ddr", "external", "host"}
+    for state in state_plan.get("tensors", []) if isinstance(state_plan.get("tensors", []), list) else []:
+        if not isinstance(state, Mapping):
+            continue
+        storage = str(state.get("storage") or "unspecified").strip().lower().replace("-", "_")
+        residency = str(state.get("residency") or "unspecified").strip().lower().replace("-", "_")
+        if storage not in external_state_storages and residency != "external":
+            continue
+        tensor_name = str(state.get("name") or "").strip()
+        if not tensor_name:
+            continue
+        shape = [int(v) for v in (state.get("shape") or []) if int(v) > 0]
+        elements = 1
+        for extent in shape or [1]:
+            elements *= extent
+        state_dtype = str(state.get("dtype") or "float32")
+        state_bytes = elements * _dtype_nbytes(state_dtype)
+        physical_words = max(1, (state_bytes + 3) // 4)
+        entry = _runtime_buffer_entry(
+            f"state__{tensor_name}",
+            role="persistent_state",
+            direction="bidirectional",
+            words=physical_words,
+            dtype=state_dtype,
+            logical_shape=shape or [elements],
+        )
+        entry["bytes"] = state_bytes
+        entry.update({
+            "state_name": tensor_name,
+            "state_group": state.get("state_group"),
+            "owner": state.get("owner"),
+            "storage": storage,
+            "residency": residency,
+            "persistent": True,
+        })
+        buffers.append(entry)
+        cursor_entry = _runtime_buffer_entry(
+            f"state_cursor__{tensor_name}",
+            role="persistent_state_cursor",
+            direction="bidirectional",
+            words=1,
+            dtype="int32",
+            logical_shape=[1],
+        )
+        cursor_entry.update({
+            "state_name": tensor_name,
+            "state_group": state.get("state_group"),
+            "owner": state.get("owner"),
+            "storage": storage,
+            "residency": residency,
+            "persistent": True,
+            "cursor_for": f"state__{tensor_name}",
+        })
+        buffers.append(cursor_entry)
 
     if is_training:
         buffers.append(
@@ -381,4 +450,60 @@ def _emit_runtime_buffer_plans(
                 "bytes": execution_plan_path.stat().st_size,
             },
         },
+    }
+
+
+def build_persistent_state_plan(graph: Any | None) -> dict[str, Any]:
+    """Build a generic runtime-session state manifest from IR tensor semantics.
+
+    This is deliberately model-agnostic. KV caches, recurrent state, calibration
+    state and future mutable tensors all use the same contract. The plan records
+    ownership/storage/update semantics; it does not claim a backend can mutate the
+    state unless the backend advertises that separately.
+    """
+    tensors: list[dict[str, Any]] = []
+    if graph is None:
+        return {
+            "schema": "fpgai.persistent-state-plan/v1",
+            "tensor_count": 0,
+            "tensors": [],
+            "backend_required": False,
+        }
+    for name, spec in sorted((getattr(graph, "tensors", {}) or {}).items()):
+        semantics = getattr(spec, "semantics", None)
+        state_obj = getattr(semantics, "state", None) if semantics is not None else None
+        memory_obj = getattr(semantics, "memory", None) if semantics is not None else None
+        state = state_obj.to_dict() if hasattr(state_obj, "to_dict") else {}
+        if not (
+            state.get("kind") not in {None, "", "stateless"}
+            or bool(state.get("mutable"))
+            or bool(state.get("persistent_across_invocations"))
+        ):
+            continue
+        memory = memory_obj.to_dict() if hasattr(memory_obj, "to_dict") else {}
+        shape = [int(x) for x in (getattr(spec, "shape", ()) or ())]
+        tensors.append({
+            "name": str(name),
+            "dtype": str(getattr(spec, "dtype", "unknown")),
+            "shape": shape,
+            "kind": str(state.get("kind") or "state"),
+            "mutable": bool(state.get("mutable")),
+            "persistent_across_invocations": bool(state.get("persistent_across_invocations")),
+            "update_policy": str(state.get("update_policy") or "none"),
+            "sequence_axis": state.get("sequence_axis"),
+            "capacity": state.get("capacity"),
+            "overflow_policy": str(state.get("overflow_policy") or "saturate"),
+            "owner": state.get("owner"),
+            "state_group": state.get("state_group"),
+            "storage": str(memory.get("storage") or "unspecified"),
+            "residency": str(memory.get("residency") or "unspecified"),
+            "lifetime": str(memory.get("lifetime") or "graph"),
+        })
+    return {
+        "schema": "fpgai.persistent-state-plan/v1",
+        "tensor_count": len(tensors),
+        "tensors": tensors,
+        "backend_required": bool(tensors),
+        "required_operations": ["reset", "import", "export", "read", "write"] if tensors else [],
+        "policy": "Persistent state is derived from generic IR tensor semantics; no model-specific runtime path is selected.",
     }

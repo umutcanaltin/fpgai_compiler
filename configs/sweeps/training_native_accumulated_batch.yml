@@ -66,19 +66,19 @@ defaults:
   dump_intermediates: true
 design_points:
 - name: training_cnn_stream_native_accum_1step_b2_balanced
-  weight_mode: stream
+  weight_mode: import_export
   train_steps: 1
   epochs: 1
   batch_size: 2
   batch_mode: accumulate
 - name: training_cnn_stream_native_accum_2step_b2_balanced
-  weight_mode: stream
+  weight_mode: import_export
   train_steps: 2
   epochs: 2
   batch_size: 2
   batch_mode: accumulate
 - name: training_cnn_stream_native_accum_2step_b4_balanced
-  weight_mode: stream
+  weight_mode: import_export
   train_steps: 2
   epochs: 2
   batch_size: 4

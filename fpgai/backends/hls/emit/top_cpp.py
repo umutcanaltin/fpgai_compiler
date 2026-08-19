@@ -1824,7 +1824,7 @@ void dense_out_in_ddr_tiled(
 def _fpgai_rewrite_dense_calls_for_ddr_tiled(source: str, graph) -> str:
     import re
     call_re = re.compile(
-        r"dense_out_in(?P<tiled>_tiled)?\s*<(?P<template>[^>]*)>\s*\((?P<args>[^;]*)\)\s*;",
+        r"dense_out_in(?P<tiled>_tiled)?\s*<(?P<template>.*?)>\s*\((?P<args>.*?)\)\s*;",
         re.MULTILINE | re.DOTALL,
     )
     offsets = _fpgai_ddr_weight_offsets_by_type(graph, "Dense")
@@ -1869,8 +1869,10 @@ def _fpgai_rewrite_dense_calls_for_ddr_tiled(source: str, graph) -> str:
 
 
 
-def _fpgai_conv_ddr_tiled_helper_cpp() -> str:
-    return r'''
+def _fpgai_conv_ddr_tiled_helper_cpp(*, layout: str = "nchw") -> str:
+    if layout not in {"nchw", "hwc"}:
+        raise ValueError(f"Unsupported DDR-tiled Conv layout {layout!r}")
+    source = r'''
 
 // FPGAI real DDR-tiled Conv helper.
 // Full Conv weights live in weights_mem. Only input_tile, conv_weight_tile,
@@ -2052,6 +2054,16 @@ void conv2d_ddr_tiled(
     }
 }
 '''
+    if layout == "hwc":
+        source = source.replace(
+            "input[(ic * IN_H + ih) * IN_W + iw]",
+            "input[(ih * IN_W + iw) * IN_C + ic]",
+        )
+        source = source.replace(
+            "output[(oc * OUT_H + oh) * OUT_W + ow]",
+            "output[(oh * OUT_W + ow) * OUT_C + oc]",
+        )
+    return source
 
 
 def _fpgai_conv_ddr_tile_template(template: str) -> str:
@@ -2065,10 +2077,10 @@ def _fpgai_conv_ddr_tile_template(template: str) -> str:
     return ", ".join([*parts[:9], out_c, out_h, out_w, in_c, *parts[9:]])
 
 
-def _fpgai_rewrite_conv_calls_for_ddr_tiled(source: str, graph) -> str:
+def _fpgai_rewrite_conv_calls_for_ddr_tiled(source: str, graph, *, layout: str = "nchw") -> str:
     import re
     call_re = re.compile(
-        r"conv2d(?P<tiled>_tiled)?\s*<(?P<template>[^>]*)>\s*\((?P<args>[^;]*)\)\s*;",
+        r"conv2d(?P<tiled>_tiled)?\s*<(?P<template>.*?)>\s*\((?P<args>.*?)\)\s*;",
         re.MULTILINE | re.DOTALL,
     )
     offsets = _fpgai_ddr_weight_offsets_by_type(graph, "Conv")
@@ -2096,9 +2108,9 @@ def _fpgai_rewrite_conv_calls_for_ddr_tiled(source: str, graph) -> str:
         signature = 'extern "C" void '
         pos = rewritten.find(signature)
         if pos >= 0:
-            rewritten = rewritten[:pos] + _fpgai_conv_ddr_tiled_helper_cpp() + "\n" + rewritten[pos:]
+            rewritten = rewritten[:pos] + _fpgai_conv_ddr_tiled_helper_cpp(layout=layout) + "\n" + rewritten[pos:]
         else:
-            rewritten = _fpgai_conv_ddr_tiled_helper_cpp() + "\n" + rewritten
+            rewritten = _fpgai_conv_ddr_tiled_helper_cpp(layout=layout) + "\n" + rewritten
     return rewritten
 
 def _fpgai_insert_ddr_tiled_pragmas(source: str) -> str:
@@ -2229,9 +2241,19 @@ def _fpgai_rewrite_runtime_signature(source: str, *, top_name: str, mode: str) -
             ") {"
         )
 
-    if original_signature not in source:
-        raise ValueError("Could not rewrite top signature for runtime weight mode")
-    return source.replace(original_signature, runtime_signature, 1)
+    if original_signature in source:
+        return source.replace(original_signature, runtime_signature, 1)
+
+    # The DAG-aware emitter uses a compact one-line signature. Keep the
+    # runtime-weight interface transformation shared between the linear and
+    # DAG emitters rather than duplicating two independent ABI implementations.
+    compact_signature = (
+        f'extern "C" void {top_name}(hls::stream<axis_t>& in_stream, hls::stream<axis_t>& out_stream) {{'
+    )
+    if compact_signature in source:
+        return source.replace(compact_signature, runtime_signature, 1)
+
+    raise ValueError("Could not rewrite top signature for runtime weight mode")
 
 
 def _fpgai_runtime_load_block(graph, *, mode: str, resolved_semantics: str | None = None) -> str:

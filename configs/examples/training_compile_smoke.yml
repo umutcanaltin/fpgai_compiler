@@ -151,6 +151,6 @@ memory:
   weight_storage: bram
   activation_storage: bram
   gradient_storage: bram
-  optimizer_state_storage: bram
+  optimizer_state_storage: none
 weights:
   mode: embedded

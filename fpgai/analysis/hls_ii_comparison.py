@@ -122,16 +122,36 @@ def compare_requested_achieved_ii_for_directory(
         if isinstance(layer, dict)
     ]
 
+    all_requested_layers_matched = bool(requested) and matched_layer_count == len(requested)
+    all_matched_layers_met_ii = (
+        None if matched_layer_count == 0 else failed_layer_count == 0
+    )
+    verification_status = (
+        "verified"
+        if all_requested_layers_matched and all_matched_layers_met_ii is True
+        else "failed"
+        if failed_layer_count > 0
+        else "partially_verified"
+        if matched_layer_count > 0
+        else "unmatched"
+    )
+
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "requested_by_layer": requested,
         "summary": {
             "report_count": len(reports),
             "layer_count": len(requested),
             "matched_layer_count": matched_layer_count,
             "failed_layer_count": failed_layer_count,
-            "all_requested_layers_matched": matched_layer_count == len(requested),
-            "all_matched_layers_met_ii": failed_layer_count == 0,
+            "all_requested_layers_matched": all_requested_layers_matched,
+            "all_matched_layers_met_ii": all_matched_layers_met_ii,
+            "verification_status": verification_status,
+            "note": (
+                "Per-layer II cannot be verified until generated HLS preserves a stable layer-to-loop identity."
+                if matched_layer_count == 0
+                else None
+            ),
         },
         "reports": reports,
         "layers": all_layers,

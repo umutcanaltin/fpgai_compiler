@@ -1,0 +1,58 @@
+schema: fpgai.reference-model-profile/v1
+name: yolo11n
+role: evaluation_reference_only
+compiler_special_case: false
+source:
+  framework: pytorch
+  preferred_fpga_ingress: onnx
+  official_architecture: https://github.com/ultralytics/ultralytics/blob/main/ultralytics/cfg/models/11/yolo11.yaml
+  official_docs: https://docs.ultralytics.com/models/yolo11
+reference_facts:
+  task: object_detection
+  scale: n
+  parameter_count: 2624080
+  gradient_parameter_count: 2624064
+  gflops: 6.6
+  input_reference: [1, 3, 640, 640]
+  output_pyramid_strides: [8, 16, 32]
+official_modules:
+  - Conv
+  - C3k2
+  - SPPF
+  - C2PSA
+  - Upsample
+  - Concat
+  - Detect
+expected_generic_operator_families_after_export:
+  - Conv
+  - Add
+  - Mul
+  - SiLU
+  - MaxPool
+  - Resize
+  - Concat
+  - Split
+  - Slice
+  - Reshape
+  - Transpose
+  - Softmax
+  - Sigmoid
+evaluation_metrics:
+  - task_metric_map
+  - single_image_latency
+  - throughput_images_per_second
+  - power
+  - energy_per_image
+  - external_memory_traffic
+  - lut
+  - ff
+  - dsp
+  - bram
+  - uram
+  - timing_at_requested_clock
+policy:
+  compile_from_actual_exported_graph: true
+  custom_shapes_and_layers_allowed: true
+  layerwise_gap_audit_required: true
+  model_name_must_not_affect_lowering: true
+  training_support_required_per_operator: true

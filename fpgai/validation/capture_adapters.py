@@ -395,45 +395,29 @@ def materialize_canonical_capture_files(
 def derive_canonical_parameter_layout_from_graph(graph: Any) -> list[dict[str, Any]]:
     """Derive the flattened trainable-parameter order used by FPGAI references/HLS.
 
-    This is intentionally based on semantic IR operators rather than generated
-    source declarations. It therefore remains stable across HLS, RTL, and future
-    community backends.
+    This delegates to the canonical semantic training-parameter inventory so
+    capture comparison, HLS CSim preload/export, and source-driven layerwise
+    training all use exactly the same parameter order and word count.
     """
-    from fpgai.engine.training_graph_utils import (
-        as_chw, get_tensor_shape, resolve_batchnorm_arrays,
-        resolve_conv_arrays, resolve_dense_arrays,
-    )
+    from fpgai.engine.training_graph_utils import derive_training_parameter_inventory
 
     entries: list[dict[str, Any]] = []
     offset = 0
-
-    def add(name: str, layer: str, role: str, array: Any) -> None:
-        nonlocal offset
-        values = np.asarray(array)
-        count = int(values.size)
+    for item in derive_training_parameter_inventory(graph):
+        count = int(item["count"])
+        layer = str(item["layer"])
+        semantic_role = str(item["role"])
+        role = "weight" if semantic_role == "scale" else semantic_role
+        tensor = item.get("tensor")
         entries.append({
-            "name": name, "layer": layer, "role": role,
-            "offset": offset, "count": count, "shape": list(values.shape),
+            "name": str(tensor) if tensor else f"{layer}.{role}",
+            "layer": layer,
+            "role": role,
+            "offset": int(offset),
+            "count": count,
+            "shape": [int(v) for v in item.get("shape", [])],
         })
         offset += count
-
-    for op in graph.ops:
-        if op.op_type == "Dense":
-            weights, bias, _, _ = resolve_dense_arrays(graph, op)
-            add(f"{op.name}.weight", op.name, "weight", weights)
-            add(f"{op.name}.bias", op.name, "bias", bias)
-        elif op.op_type == "Conv":
-            weights, bias, _ = resolve_conv_arrays(graph, op)
-            add(f"{op.name}.weight", op.name, "weight", weights)
-            add(f"{op.name}.bias", op.name, "bias", np.asarray(bias).reshape(-1))
-        elif op.op_type == "BatchNormalization":
-            shape = get_tensor_shape(graph, op.outputs[0]) or get_tensor_shape(graph, op.inputs[0])
-            if not shape:
-                raise RuntimeError(f"BatchNormalization shape unavailable for op {op.name!r}")
-            channels, _, _ = as_chw(shape)
-            gamma, beta, _, _ = resolve_batchnorm_arrays(graph, op, channels)
-            add(f"{op.name}.gamma", op.name, "weight", gamma)
-            add(f"{op.name}.beta", op.name, "bias", beta)
     return canonical_parameter_layout(entries)
 
 

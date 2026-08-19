@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
@@ -67,6 +67,7 @@ class ModelInspection:
     disallowed_operators: List[str]
     unsupported_operators: List[str]
     limited_operators: List[str]
+    gap_audit: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def compilation_ready(self) -> bool:
@@ -91,6 +92,7 @@ class ModelInspection:
             "unsupported_operators": self.unsupported_operators,
             "limited_operators": self.limited_operators,
             "compilation_ready": self.compilation_ready,
+            "gap_audit": self.gap_audit,
         }
 
     def to_json(self) -> str:
@@ -199,6 +201,9 @@ def inspect_graph(
         )
     )
 
+    from fpgai.analysis.model_gap import audit_model_gaps
+    gap_audit = audit_model_gaps(graph, pipeline_mode=pipeline_mode)
+
     return ModelInspection(
         model_path=str(model_path),
         pipeline_mode=str(pipeline_mode),
@@ -225,13 +230,15 @@ def inspect_graph(
         disallowed_operators=sorted(disallowed),
         unsupported_operators=sorted(unsupported),
         limited_operators=sorted(limited),
+        gap_audit=gap_audit,
     )
 
 
 def inspect_config(
     cfg: Any,
 ) -> ModelInspection:
-    from fpgai.frontend.onnx import import_onnx
+    from fpgai.frontend import import_model_source
+    from fpgai.layers.composites import expand_composite_layers
     from fpgai.ir.passes import (
         assign_stable_names,
         insert_activations,
@@ -258,11 +265,14 @@ def inspect_config(
         {},
     ) or {}
 
-    graph = import_onnx(
+    graph = import_model_source(
         cfg.model.path,
-        canonicalize=True,
-        infer_shapes=True,
+        format_hint=getattr(cfg.model, "format", None),
+        source_framework=getattr(cfg.model, "framework", None),
+        pipeline_mode=getattr(cfg.pipeline, "mode", "inference"),
+        target_board=((raw.get("targets", {}).get("platform", {}) or {}).get("board") or (raw.get("targets", {}) or {}).get("board")),
     )
+    graph = expand_composite_layers(graph)
 
     activation_kind = str(
         activation.get(
@@ -316,8 +326,51 @@ def write_model_inspection_report(
     resource_json = output / "resource_prediction.json"
     timing_json = output / "timing_prediction.json"
     summary_md = output / "prediction_summary.md"
+    gap_json = output / "model_gap_audit.json"
+    gap_md = output / "model_gap_audit.md"
 
     inspection.write_json(profile_json)
+    gap_json.write_text(json.dumps(inspection.gap_audit, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    gap = dict(inspection.gap_audit or {})
+    gap_lines = [
+        "# FPGAI Real-Model Compilation Gap Audit",
+        "",
+        f"- Graph: `{gap.get('graph')}`",
+        f"- Pipeline mode: `{gap.get('pipeline_mode')}`",
+        f"- Operators: `{gap.get('operator_count', 0)}`",
+        f"- Operator-contract ready: `{gap.get('compilation_ready_at_operator_contract_level', False)}`",
+        "",
+        "## Blockers",
+        "",
+        f"- Unsupported operator types: `{gap.get('unsupported_operator_types', [])}`",
+        f"- Limited operator types: `{gap.get('limited_operator_types', [])}`",
+        f"- Dynamic-shape operator types: `{gap.get('dynamic_shape_operator_types', [])}`",
+        f"- Typed tensor blockers: `{gap.get('typed_tensor_blockers', [])}`",
+        f"- Persistent runtime-state blockers: `{[item.get('name') if isinstance(item, dict) else item for item in gap.get('runtime_state_blockers', [])]}`",
+        f"- Explicit post-processing partition candidates: `{[item.get('name') for item in gap.get('postprocess_partition_candidates', [])]}`",
+        "",
+        "## Typed tensors",
+        "",
+        f"- Integer/boolean tensors: `{[item.get('name') for item in gap.get('integer_tensors', [])]}`",
+        f"- Index tensors: `{[item.get('name') for item in gap.get('index_tensors', [])]}`",
+        "",
+        "## Persistent state",
+        "",
+        f"- State tensors: `{[item.get('name') for item in gap.get('state_tensors', [])]}`",
+        f"- State requirements: `{gap.get('runtime_state_requirements', [])}`",
+        "",
+        "## Detection output contract",
+        "",
+        f"- Contract: `{gap.get('detection_output_contract')}`",
+        "",
+        "## Explicit post-processing boundaries",
+        "",
+        *([f"- `{item.get('name')}` ({item.get('op_type')}): `{item.get('recommended_partition')}` — {item.get('reason')}" for item in gap.get('postprocess_partition_candidates', [])] or ["- None"]),
+        "",
+        "The audit is model-agnostic: it reports graph/operator/runtime requirements and does not select a model-specific compiler path.",
+        "",
+    ]
+    gap_md.write_text("\n".join(gap_lines), encoding="utf-8")
 
     if resource_prediction is not None:
         resource_json.write_text(
@@ -362,6 +415,9 @@ def write_model_inspection_report(
         f"- Disallowed operators: `{inspection.disallowed_operators}`",
         f"- Unsupported operators: `{inspection.unsupported_operators}`",
         f"- Limited operators: `{inspection.limited_operators}`",
+        f"- Dynamic-shape operator types: `{inspection.gap_audit.get('dynamic_shape_operator_types', [])}`",
+        f"- Typed tensor blockers: `{inspection.gap_audit.get('typed_tensor_blockers', [])}`",
+        f"- Persistent-state blockers: `{inspection.gap_audit.get('runtime_state_blockers', [])}`",
         "",
         "## Prediction status",
         "",
@@ -387,6 +443,8 @@ def write_model_inspection_report(
     paths = {
         "model_profile_json": str(profile_json),
         "prediction_summary_md": str(summary_md),
+        "model_gap_audit_json": str(gap_json),
+        "model_gap_audit_md": str(gap_md),
     }
 
     if resource_prediction is not None:

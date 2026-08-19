@@ -1661,9 +1661,6 @@ def test_q0_batch2_expected_example_suite_exists_and_is_canonical() -> None:
     }
     expected_templates = {
         "examples/reference/full_options_reference.yml",
-        "examples/benchmark/precision_sweep.yml",
-        "examples/benchmark/memory_strategy_sweep.yml",
-        "examples/benchmark/pipeline_parallel_sweep.yml",
     }
 
     for rel in sorted(expected_compile_configs):

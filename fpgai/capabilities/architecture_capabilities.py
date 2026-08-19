@@ -196,28 +196,35 @@ def _validate_layer_features(
             "Dense",
             "Conv",
         }
+        training_generic_controlled = (
+            pipeline_mode == "training_on_device"
+            and layer.op_type in {
+                "MatMul", "Add", "Mul", "SiLU", "RMSNorm",
+                "RotaryEmbedding", "MultiHeadAttention",
+            }
+        )
+        compute_controlled = forward_specialized or training_generic_controlled
         _add(
             issues,
             layer_name=layer.node_name,
             feature="pipeline",
             status=(
                 IMPLEMENTED
-                if forward_specialized
+                if compute_controlled
                 else PLANNING_ONLY
             ),
             requested=architecture.pipeline.to_dict(),
-            effective={
-                "ii": architecture.pipeline.ii
-                if forward_specialized
-                else "global_macro"
-            },
+            effective=(
+                architecture.pipeline.to_dict()
+                if compute_controlled
+                else {"ii": "global_macro"}
+            ),
             detail=(
-                "Dense/Conv forward, backward, gradient, and update "
-                "kernels receive the layer-specific pipeline II."
-                if forward_specialized
-                and pipeline_mode == "training_on_device"
-                else "The generated forward kernel receives the "
-                "layer-specific pipeline II."
+                "Forward/backward kernels consume layer- and loop-specific pipeline II controls."
+                if training_generic_controlled
+                else "Dense/Conv forward, backward, gradient, and update kernels receive the layer-specific pipeline II."
+                if forward_specialized and pipeline_mode == "training_on_device"
+                else "The generated forward kernel receives the layer-specific pipeline II."
                 if forward_specialized
                 else "This operator still uses a shared pipeline macro."
             ),
@@ -229,20 +236,20 @@ def _validate_layer_features(
             feature="parallelism",
             status=(
                 IMPLEMENTED
-                if forward_specialized
+                if compute_controlled
                 else PLANNING_ONLY
             ),
             requested=architecture.parallelism.to_dict(),
             effective=(
                 architecture.parallelism.to_dict()
-                if forward_specialized
+                if compute_controlled
                 else {"scope": "operator_global"}
             ),
             detail=(
-                "Dense/Conv forward, backward-input, and weight-gradient "
-                "kernels receive layer-specific PE/SIMD unroll values."
-                if forward_specialized
-                and pipeline_mode == "training_on_device"
+                "Forward/backward kernels consume loop-specific unroll values derived from PE/SIMD and explicit loop controls."
+                if training_generic_controlled
+                else "Dense/Conv forward, backward-input, and weight-gradient kernels receive layer-specific PE/SIMD unroll values."
+                if forward_specialized and pipeline_mode == "training_on_device"
                 else "The generated forward kernel receives "
                 "layer-specific PE/SIMD unroll values."
                 if forward_specialized
@@ -265,7 +272,7 @@ def _validate_layer_features(
             status=(
                 IMPLEMENTED
                 if partition_requested
-                and forward_specialized
+                and compute_controlled
                 else PLANNING_ONLY
                 if partition_requested
                 else IMPLEMENTED
@@ -278,11 +285,11 @@ def _validate_layer_features(
                 "Forward, backward, gradient, and update arrays receive "
                 "layer-specific partition pragmas."
                 if partition_requested
-                and forward_specialized
+                and compute_controlled
                 and pipeline_mode == "training_on_device"
                 else "Forward input, output, and weight arrays receive "
                 "layer-specific partition pragmas."
-                if partition_requested and forward_specialized
+                if partition_requested and compute_controlled
                 else "No non-trivial partitioning was requested."
             ),
         )

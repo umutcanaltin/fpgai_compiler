@@ -60,7 +60,7 @@ design_points:
 - name: training_cnn_embedded_balanced
   weight_mode: embedded
 - name: training_cnn_stream_balanced
-  weight_mode: stream
+  weight_mode: import_export
 - name: training_cnn_embedded_latency_first
   policy: latency_first
   pe: 4
@@ -74,4 +74,4 @@ design_points:
   simd: 4
   unroll_factor: 4
   partition_factor: 4
-  weight_mode: stream
+  weight_mode: import_export

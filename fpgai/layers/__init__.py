@@ -15,3 +15,10 @@ __all__ = [
     "layer_registry",
     "supported_layer_types",
 ]
+from .composites import (
+    CompositeLayerSpec,
+    composite_layer_registry,
+    expand_composite_layers,
+    register_composite_layer,
+)
+

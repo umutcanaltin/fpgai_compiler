@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any, Mapping, Optional, Sequence
 
 from fpgai.config.access import get_path
+from fpgai.engine.network_execution import requested_network_execution_mode
 from fpgai.numerics.precision_policy import (
     canonical_op_type,
     resolve_precision_for_op,
@@ -958,13 +959,7 @@ def build_hls_architecture(
                 ),
             )
         ),
-        execution_mode=str(
-            _get(
-                config,
-                "hls.execution_mode",
-                "sequential",
-            )
-        ),
+        execution_mode=requested_network_execution_mode(config),
         clock_mhz=(
             planned_clock
             if planned_clock is not None

@@ -265,7 +265,7 @@ def test_training_numeric_validation_records_adam_optimizer_state_debt(tmp_path:
     opt_cfg['beta1'] = 0.9
     opt_cfg['beta2'] = 0.999
     opt_cfg['epsilon'] = 1.0e-8
-    raw['training'].setdefault('storage', {})['optimizer_state'] = 'bram'
+    raw.setdefault('memory', {})['optimizer_state_storage'] = 'bram'
     _cpp_only(raw)
 
     result = _compile_raw(raw, tmp_path)
@@ -298,7 +298,7 @@ def test_compile_numeric_validation_compares_captured_optimizer_state_files(tmp_
     opt_cfg['beta1'] = 0.9
     opt_cfg['beta2'] = 0.999
     opt_cfg['epsilon'] = 1.0e-8
-    raw['training'].setdefault('storage', {})['optimizer_state'] = 'bram'
+    raw.setdefault('memory', {})['optimizer_state_storage'] = 'bram'
     dm = raw.setdefault('data_movement', {}).setdefault('optimizer_state', {})
     dm['export'] = {'interface': 'm_axi', 'transport': 'ps_runtime', 'policy': 'full'}
     _cpp_only(raw)

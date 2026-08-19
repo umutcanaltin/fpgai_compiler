@@ -587,7 +587,7 @@ def _training_resource_owner_payload(
             upper = name.upper()
             if upper.startswith("FPGAI_ADAM_") or upper.startswith("FPGAI_MOMENTUM_"):
                 role = "optimizer_state"
-                knob = "training.storage.optimizer_state"
+                knob = "memory.optimizer_state_storage"
             elif "GRADIENT_EXPORT_TILE" in upper:
                 role = "gradient_export_scratch"
                 knob = "training.gradients.tile_size"
@@ -624,7 +624,7 @@ def _training_resource_owner_payload(
         {"path": "memory.weight_storage", "effective": _cfg_lookup(raw, "memory.weight_storage", None), "effect": "parameter memory implementation"},
         {"path": "training.gradients.computation", "effective": _cfg_lookup(raw, "training.gradients.computation", "full_buffer"), "effect": "parameter-gradient compute lifetime: full buffer, tiled accumulation, or fused update"},
         {"path": "training.storage.parameter_gradient", "effective": _cfg_lookup(raw, "training.storage.parameter_gradient", _cfg_lookup(raw, "training.storage.gradient", _cfg_lookup(raw, "memory.gradient_storage", None))), "effect": "parameter-gradient memory implementation"},
-        {"path": "training.storage.optimizer_state", "effective": _cfg_lookup(raw, "training.storage.optimizer_state", _cfg_lookup(raw, "memory.optimizer_state_storage", None)), "effect": "optimizer-state memory implementation"},
+        {"path": "memory.optimizer_state_storage", "effective": _cfg_lookup(raw, "memory.optimizer_state_storage", _cfg_lookup(raw, "training.storage.optimizer_state", None)), "effect": "optimizer-state memory implementation"},
         {"path": "training.gradients.materialization", "effective": _cfg_lookup(raw, "training.gradients.materialization", "full"), "effect": "full, tiled, or streamed gradient export scratch structure"},
         {"path": "training.gradients.tile_size", "effective": _cfg_lookup(raw, "training.gradients.tile_size", 256), "effect": "bounded gradient export tile size"},
         {"path": "training.memory_lifetime.policy", "effective": _cfg_lookup(raw, "training.memory_lifetime.policy", "separate"), "effect": "per-layer or phase-shared physical export tile ownership"},
@@ -639,7 +639,7 @@ def _training_resource_owner_payload(
     if isinstance(actual_bram, (int, float)) and actual_bram > 0:
         recommendations.extend([
             {"priority": 1, "resource": "bram_18k", "knob": "optimization.parallel.partition_factor", "action": "keep at 1 or reduce banking", "reason": "partitioning can replicate memory banks"},
-            {"priority": 2, "resource": "bram_18k", "knob": "training.storage.optimizer_state", "action": "prefer uram when supported", "reason": "persistent optimizer state is a dominant owner"},
+            {"priority": 2, "resource": "bram_18k", "knob": "memory.optimizer_state_storage", "action": "prefer uram when supported", "reason": "persistent optimizer state is a dominant owner"},
             {"priority": 3, "resource": "bram_18k", "knob": "training.storage.parameter_gradient", "action": "select uram when capacity permits", "reason": "moves complete dW/dB owners from BRAM to URAM"},
             {"priority": 4, "resource": "bram_18k", "knob": "training.gradients.materialization", "action": "select tiled or streamed", "reason": "removes full OUT_grad export scratch arrays"},
             {"priority": 5, "resource": "bram_18k", "knob": "training.memory_lifetime.policy", "action": "select phase_shared with tiled materialization", "reason": "reuses one physical export tile across layers"},

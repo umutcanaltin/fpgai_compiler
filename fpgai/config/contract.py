@@ -28,8 +28,10 @@ CANONICAL_KEYS: Tuple[KeySpec, ...] = (
     KeySpec("pipeline.mode", "Select inference or on-device training", ("resolved_config.pipeline_mode", "manifest.pipeline_mode")),
     KeySpec("pipeline.outputs.top_kernel_name", "Generated top kernel name", ("resolved_config.top_kernel_name", "manifest.top_kernel_name")),
     KeySpec("pipeline.outputs", "Pipeline output naming and artifact controls", ("resolved_config", "manifest"), prefix=True),
+    KeySpec("numerics.quantization", "PTQ/QAT quantization configuration and numeric semantics", ("quantization calibration", "quantized IR", "numeric validation"), prefix=True),
     KeySpec("model.path", "Input model path", ("manifest.model_path",)),
     KeySpec("model.format", "Input model format hint", ("model loader", "model_compatibility")),
+    KeySpec("model.framework", "Optional source framework provenance for MLIR/StableHLO imports", ("model loader", "model_compatibility")),
     KeySpec("targets.board", "Target board shortcut", ("board_fit", "vivado_bd_validation")),
     KeySpec("targets.platform.board", "Target board", ("board_fit", "vivado_bd_validation")),
     KeySpec("targets.platform.part", "Target FPGA part", ("board_fit", "hls/vivado scripts")),
@@ -64,6 +66,7 @@ CANONICAL_KEYS: Tuple[KeySpec, ...] = (
     KeySpec("reports", "Report switches", ("manifest",), prefix=True),
     KeySpec("ecosystem", "External research package discovery and trust configuration", ("package_discovery", "package-lock.yml"), prefix=True),
     KeySpec("implementations", "External hardware implementation selection", ("implementation_selection", "manifest"), prefix=True),
+    KeySpec("architecture", "Per-layer hardware mechanism requests and overrides", ("layer_mechanism_resolution", "manifest"), prefix=True),
 )
 
 DEPRECATED_ALIASES: Dict[str, Dict[str, str]] = {

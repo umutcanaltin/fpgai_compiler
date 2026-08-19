@@ -98,7 +98,7 @@ defaults:
   config_path: configs/examples/training_compile_smoke.yml
   board: kv260
   model_path: models/cnn_mnist.onnx
-  weight_mode: stream
+  weight_mode: import_export
   learning_rate: 0.005
   epochs: 2
   train_steps: 2

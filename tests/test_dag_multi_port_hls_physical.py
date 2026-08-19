@@ -189,13 +189,15 @@ assign output_r_TVALID=input_r_TVALID; endmodule
     )
     assert result.ok, [issue.to_dict() for issue in result.issues]
     wrapper = result.wrapper.read_text(encoding="utf-8")
-    assert "node_4_fanout_active" in wrapper
-    assert "node_4_fanout_pending" in wrapper
-    assert "node_4_fanout_data_0" in wrapper
-    assert "node_4_fanout_data_1" in wrapper
-    assert "assign node_4_output_ready = ~node_4_fanout_active;" in wrapper
-    assert "assign tensor_vhdl_left_valid = node_4_fanout_active & node_4_fanout_pending[0];" in wrapper
-    assert "assign tensor_vhdl_right_valid = node_4_fanout_active & node_4_fanout_pending[1];" in wrapper
+    assert "node_4_fanout_fifo_data_0" in wrapper
+    assert "node_4_fanout_fifo_data_1" in wrapper
+    assert "node_4_fanout_fifo_count_0" in wrapper
+    assert "node_4_fanout_fifo_count_1" in wrapper
+    assert "node_4_fanout_fifo_can_accept_0" in wrapper
+    assert "node_4_fanout_fifo_can_accept_1" in wrapper
+    assert "assign node_4_output_ready = (node_4_fanout_fifo_can_accept_0) & (node_4_fanout_fifo_can_accept_1);" in wrapper
+    assert "assign tensor_vhdl_left_valid = (node_4_fanout_fifo_count_0 != 0);" in wrapper
+    assert "assign tensor_vhdl_right_valid = (node_4_fanout_fifo_count_1 != 0);" in wrapper
     # The previous combinational peer-ready gating could form a zero-valid loop
     # when this split fed the grouped VHDL join directly.
     assert "tensor_vhdl_left_valid = node_4_output_valid &" not in wrapper

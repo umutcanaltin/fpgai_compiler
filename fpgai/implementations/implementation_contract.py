@@ -49,6 +49,8 @@ class ImplementationContract:
     interfaces: tuple[InterfaceRequirement, ...] = ()
     weight_storage: tuple[str, ...] = ()
     activation_storage: tuple[str, ...] = ()
+    gradient_storage: tuple[str, ...] = ()
+    optimizer_state_storage: tuple[str, ...] = ()
     validation_level: str = "unvalidated"
     metrics: ImplementationMetrics = field(default_factory=ImplementationMetrics)
     license_category: str = "research_only"
@@ -85,6 +87,8 @@ class ImplementationContract:
             "memory": {
                 "weight_storage": list(self.weight_storage),
                 "activation_storage": list(self.activation_storage),
+                "gradient_storage": list(self.gradient_storage),
+                "optimizer_state_storage": list(self.optimizer_state_storage),
             },
             "validation_level": self.validation_level,
             "metrics": self.metrics.to_dict(),
@@ -193,6 +197,8 @@ def implementation_contract_from_manifest(package_root: str | Path, *, manifest_
         interfaces=_interface_contracts(raw.get("interfaces", {})),
         weight_storage=_tuple(memory.get("supported_weight_storage", memory.get("weight_storage", []))),
         activation_storage=_tuple(memory.get("supported_activation_storage", memory.get("activation_storage", []))),
+        gradient_storage=_tuple(memory.get("supported_gradient_storage", memory.get("gradient_storage", []))),
+        optimizer_state_storage=_tuple(memory.get("supported_optimizer_state_storage", memory.get("optimizer_state_storage", []))),
         validation_level=str(validation.get("declared_level", "unvalidated")),
         metrics=ImplementationMetrics(**{key: value for key, value in metrics_raw.items() if key in ImplementationMetrics.__dataclass_fields__}),
         license_category=str(license_cfg.get("category", "research_only")),

@@ -1,0 +1,25 @@
+schema: fpgai.reference-architecture/v1
+name: llm_like_mha_decoder
+family: llm_like
+description: Compact decoder-only transformer workload using conventional multi-head attention for comparison with GQA.
+compiler_special_case: false
+graph_source: maintained_generic_graph
+benchmark_label: LLM-like MHA Decoder
+features:
+  - token_embedding
+  - layernorm_or_rmsnorm
+  - multi_head_attention
+  - rotary_embedding
+  - causal_attention
+  - gated_mlp
+  - residual_connections
+  - prefill_decode
+  - persistent_kv_cache
+parameters:
+  layers: 2
+  model_dimension: 12
+  attention_heads: 3
+  kv_heads: 3
+  hidden_dimension: 24
+  vocabulary_size: 32
+  max_sequence_length: 16

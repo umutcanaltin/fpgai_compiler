@@ -10,11 +10,13 @@ from fpgai.implementations import implementation_contract_from_manifest
 from fpgai.implementations.mixed_backend import (
     DAGMixedBackendPhysicalRequest,
     HLSPhysicalBinding,
+    RequantizationPhysicalBinding,
     VHDLPhysicalBinding,
     emit_dag_mixed_backend_physical_project,
     run_dag_mixed_backend_physical_project,
 )
 from fpgai.ir.graph import Graph
+from fpgai.quantization import QuantizationParameters, QuantizationSpec
 
 
 def _run_hls_stage(
@@ -97,6 +99,30 @@ def _multi_port_hls_graph() -> Graph:
     return graph
 
 
+def _quantized_bridge_graph() -> Graph:
+    graph = Graph("quantized_requantization_bridge")
+    graph.inputs = ["input"]
+    graph.outputs = ["output"]
+    graph.add_tensor("input", (1,), "int8")
+    graph.add_tensor("wide_in", (1,), "int16")
+    graph.add_tensor("wide_out", (1,), "int16")
+    graph.add_tensor("output", (1,), "int8")
+
+    int8_spec = QuantizationSpec(bits=8, scheme="symmetric", granularity="per_tensor")
+    int16_spec = QuantizationSpec(bits=16, scheme="symmetric", granularity="per_tensor")
+    q_input = QuantizationParameters(int8_spec, 0.5, 0, -64.0, 63.5)
+    q_wide = QuantizationParameters(int16_spec, 0.25, 0, -8192.0, 8191.75)
+    graph.set_tensor_quantization("input", q_input.to_dict())
+    graph.set_tensor_quantization("wide_in", q_wide.to_dict())
+    graph.set_tensor_quantization("wide_out", q_wide.to_dict())
+    graph.set_tensor_quantization("output", q_input.to_dict())
+
+    graph.add_op("Requantize", ["input"], ["wide_in"], name="requantize_up")
+    graph.add_op("Add1", ["wide_in"], ["wide_out"], name="hls_add")
+    graph.add_op("Requantize", ["wide_out"], ["output"], name="requantize_down")
+    return graph
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Validate DAG mixed HLS/VHDL composition with grouped ready/valid multi-port VHDL boundaries"
@@ -104,7 +130,7 @@ def main() -> int:
     parser.add_argument("--out", default="build/dag_mixed_backend_validation")
     parser.add_argument(
         "--profile",
-        choices=("vhdl_fork_join", "multi_port_hls"),
+        choices=("vhdl_fork_join", "multi_port_hls", "quantized_bridge"),
         default="vhdl_fork_join",
         help="Physical DAG validation profile to run",
     )
@@ -140,7 +166,15 @@ def main() -> int:
         Path("examples/packages/add_grouped_ready_valid_vhdl")
     )
 
-    if args.profile == "multi_port_hls":
+    if args.profile == "quantized_bridge":
+        graph = _quantized_bridge_graph()
+        bindings = {
+            "requantize_up": RequantizationPhysicalBinding("requantize_up"),
+            "hls_add": HLSPhysicalBinding("hls_add", add1_rtl, "add1_axis"),
+            "requantize_down": RequantizationPhysicalBinding("requantize_down"),
+        }
+        expected_output = 8
+    elif args.profile == "multi_port_hls":
         split2_rtl = _run_hls_stage(
             root,
             name="split2_axis",

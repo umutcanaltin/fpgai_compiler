@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Tuple
 
 import numpy as np
+
+from fpgai.ir.tensor_ops import normalize_axis, resolve_resize_shape, resolve_slice_spec
 
 from fpgai.engine.training_graph_utils import (
     as_chw as _as_chw,
@@ -199,6 +201,7 @@ def _conv_forward_hwc(
     pad: int,
     output_shape: Tuple[int, int, int],
 ) -> np.ndarray:
+    x = np.asarray(x, dtype=np.float32).reshape(-1)
     channels_in, height_in, width_in = input_shape
     channels_out, height_out, width_out = output_shape
     kernel_size = weights.shape[2]
@@ -274,6 +277,7 @@ def _conv_backward_input_hwc(
     stride: int,
     pad: int,
 ) -> np.ndarray:
+    output_gradient = np.asarray(output_gradient, dtype=np.float32).reshape(-1)
     channels_in, height_in, width_in = input_shape
     channels_out, height_out, width_out = output_shape
     kernel_size = weights.shape[2]
@@ -350,6 +354,8 @@ def _conv_weight_grad_hwc(
     stride: int,
     pad: int,
 ) -> np.ndarray:
+    x = np.asarray(x, dtype=np.float32).reshape(-1)
+    output_gradient = np.asarray(output_gradient, dtype=np.float32).reshape(-1)
     channels_in, height_in, width_in = input_shape
     channels_out, height_out, width_out = output_shape
     _, _, kernel_size, _ = weight_shape
@@ -423,6 +429,7 @@ def _conv_bias_grad_hwc(
     output_gradient: np.ndarray,
     output_shape: Tuple[int, int, int],
 ) -> np.ndarray:
+    output_gradient = np.asarray(output_gradient, dtype=np.float32).reshape(-1)
     channels_out, height_out, width_out = output_shape
 
     bias_gradient = np.zeros(
@@ -869,13 +876,23 @@ def _forward_pass(
     parameter_state: Dict[str, Dict[str, np.ndarray]],
     input_array: np.ndarray,
     layerwise_dir: Path,
+    activation_transform: Callable[[str, np.ndarray], np.ndarray] | None = None,
 ):
     values: Dict[str, np.ndarray] = {}
     caches: Dict[str, Dict[str, Any]] = {}
     inferred_shapes: Dict[str, Tuple[int, ...]] = {}
 
     input_name = graph.inputs[0]
-    values[input_name] = input_array.astype(np.float32)
+    input_value = input_array.astype(np.float32)
+    if activation_transform is not None:
+        input_value = np.asarray(activation_transform(input_name, input_value), dtype=np.float32)
+    values[input_name] = input_value
+
+    # Constants are ordinary IR tensors. Parameterized MatMul/norm operators may
+    # override them from parameter_state below, but keeping constants in the
+    # value map lets generic layerwise training execute framework-originated IR.
+    for constant_name, constant_value in getattr(graph, "constants", {}).items():
+        values[str(constant_name)] = np.asarray(constant_value, dtype=np.float32)
 
     input_shape = _get_tensor_shape(graph, input_name)
     if input_shape:
@@ -1011,6 +1028,196 @@ def _forward_pass(
             if input_shape:
                 inferred_shapes[output_name] = input_shape
 
+        elif op.op_type == "MatMul":
+            if len(op.inputs) != 2:
+                raise RuntimeError(f"MatMul training reference expects two inputs for op '{op.name}'")
+            right_name = op.inputs[1]
+            right_value = (
+                parameter_state[op.name]["W"]
+                if op.name in parameter_state and "W" in parameter_state[op.name]
+                else values[right_name]
+            )
+            left_shape = get_shape(input_name)
+            right_shape = get_shape(right_name)
+            left = np.asarray(input_value, dtype=np.float32)
+            right = np.asarray(right_value, dtype=np.float32)
+            if left_shape and left.size == int(np.prod(left_shape)):
+                left = left.reshape(left_shape)
+            if right_shape and right.size == int(np.prod(right_shape)):
+                right = right.reshape(right_shape)
+            output_value = np.matmul(left, right).astype(np.float32)
+            cache.update({"left": left, "right": right, "left_shape": left.shape, "right_shape": right.shape})
+            inferred_shapes[output_name] = tuple(int(x) for x in output_value.shape)
+
+        elif op.op_type == "Mul":
+            if len(op.inputs) != 2:
+                raise RuntimeError(f"Mul training reference expects two inputs for op '{op.name}'")
+            right_value = np.asarray(values[op.inputs[1]], dtype=np.float32)
+            left = np.asarray(input_value, dtype=np.float32)
+            output_value = (left * right_value).astype(np.float32)
+            cache.update({"left": left, "right": right_value})
+            inferred_shapes[output_name] = tuple(int(x) for x in output_value.shape)
+
+        elif op.op_type == "SiLU":
+            x = np.asarray(input_value, dtype=np.float32)
+            sig = (1.0 / (1.0 + np.exp(-x))).astype(np.float32)
+            output_value = (x * sig).astype(np.float32)
+            cache.update({"x": x, "sigmoid": sig})
+            inferred_shapes[output_name] = tuple(int(x) for x in x.shape)
+
+        elif op.op_type == "Transpose":
+            x = np.asarray(input_value, dtype=np.float32)
+            perm = tuple(int(v) for v in (op.attrs.get("perm") or tuple(reversed(range(x.ndim)))))
+            output_value = np.transpose(x, axes=perm).astype(np.float32)
+            cache["perm"] = perm
+            inferred_shapes[output_name] = tuple(int(x) for x in output_value.shape)
+
+        elif op.op_type in {"RMSNorm", "LayerNormalization"}:
+            x = np.asarray(input_value, dtype=np.float32)
+            input_shape = get_shape(input_name)
+            if input_shape and x.size == int(np.prod(input_shape)):
+                x = x.reshape(input_shape)
+            axis = int(op.attrs.get("axis", -1))
+            if axis < 0:
+                axis += x.ndim
+            if axis != x.ndim - 1:
+                raise RuntimeError(f"{op.op_type} training reference currently requires last-axis normalization")
+            eps = float(op.attrs.get("epsilon", 1.0e-5))
+            gamma = (parameter_state.get(op.name, {}).get("gamma") if op.name in parameter_state else None)
+            if gamma is None and len(op.inputs) > 1:
+                gamma = values[op.inputs[1]]
+            gamma = np.asarray(gamma if gamma is not None else np.ones((x.shape[-1],), dtype=np.float32), dtype=np.float32).reshape((1,) * (x.ndim - 1) + (-1,))
+            if op.op_type == "RMSNorm":
+                inv = (1.0 / np.sqrt(np.mean(x * x, axis=-1, keepdims=True) + eps)).astype(np.float32)
+                normalized = (x * inv).astype(np.float32)
+                output_value = (normalized * gamma).astype(np.float32)
+                cache.update({"x": x, "gamma": gamma, "inv": inv, "normalized": normalized})
+            else:
+                mean = np.mean(x, axis=-1, keepdims=True).astype(np.float32)
+                centered = (x - mean).astype(np.float32)
+                inv = (1.0 / np.sqrt(np.mean(centered * centered, axis=-1, keepdims=True) + eps)).astype(np.float32)
+                normalized = (centered * inv).astype(np.float32)
+                beta = parameter_state.get(op.name, {}).get("beta") if op.name in parameter_state else None
+                if beta is None and len(op.inputs) > 2:
+                    beta = values[op.inputs[2]]
+                beta = np.asarray(beta if beta is not None else np.zeros((x.shape[-1],), dtype=np.float32), dtype=np.float32).reshape((1,) * (x.ndim - 1) + (-1,))
+                output_value = (normalized * gamma + beta).astype(np.float32)
+                cache.update({"x": x, "gamma": gamma, "beta": beta, "inv": inv, "normalized": normalized})
+            inferred_shapes[output_name] = tuple(int(v) for v in x.shape)
+
+        elif op.op_type == "RotaryEmbedding":
+            if len(op.inputs) < 3:
+                raise RuntimeError(f"RotaryEmbedding training reference requires x/cos/sin for op '{op.name}'")
+            x = np.asarray(input_value, dtype=np.float32)
+            cos = np.asarray(values[op.inputs[1]], dtype=np.float32)
+            sin = np.asarray(values[op.inputs[2]], dtype=np.float32)
+            offset = int(op.attrs.get("position_offset", 0))
+            rows = int(np.prod(x.shape[:-1])) if x.ndim > 1 else 1
+            cols = int(x.shape[-1])
+            flat = x.reshape(rows, cols)
+            half = cols // 2
+            cos2 = cos.reshape(-1, half)[offset:offset + rows]
+            sin2 = sin.reshape(-1, half)[offset:offset + rows]
+            out2 = np.empty_like(flat)
+            out2[:, 0::2] = flat[:, 0::2] * cos2 - flat[:, 1::2] * sin2
+            out2[:, 1::2] = flat[:, 0::2] * sin2 + flat[:, 1::2] * cos2
+            output_value = out2.reshape(x.shape).astype(np.float32)
+            cache.update({"cos": cos2, "sin": sin2, "shape": x.shape})
+            inferred_shapes[output_name] = tuple(int(v) for v in x.shape)
+
+        elif op.op_type == "CausalMask":
+            x = np.asarray(input_value, dtype=np.float32)
+            diagonal = int(op.attrs.get("diagonal", 0))
+            masked_value = float(op.attrs.get("masked_value", -32.0))
+            rows, cols = x.shape[-2], x.shape[-1]
+            allowed = np.tri(rows, cols, k=diagonal, dtype=bool)
+            allowed = np.broadcast_to(allowed, x.shape)
+            output_value = np.where(allowed, x, np.float32(masked_value)).astype(np.float32)
+            cache["allowed"] = allowed
+            inferred_shapes[output_name] = tuple(int(v) for v in x.shape)
+
+        elif op.op_type == "MultiHeadAttention":
+            if len(op.inputs) != 3:
+                raise RuntimeError(f"MultiHeadAttention training reference requires Q/K/V for op '{op.name}'")
+            q = np.asarray(values[op.inputs[0]], dtype=np.float32)
+            k = np.asarray(values[op.inputs[1]], dtype=np.float32)
+            v = np.asarray(values[op.inputs[2]], dtype=np.float32)
+            squeeze_batch = q.ndim == 3 and q.shape[0] == 1
+            q2 = q[0] if squeeze_batch else q
+            k2 = k[0] if squeeze_batch else k
+            v2 = v[0] if squeeze_batch else v
+            heads = int(op.attrs.get("num_heads", op.attrs.get("heads", 1)))
+            seq, model = q2.shape
+            hd = model // heads
+            scale = float(op.attrs.get("scale", 1.0 / np.sqrt(float(hd))))
+            causal = bool(op.attrs.get("causal", True))
+            out = np.zeros_like(q2, dtype=np.float32)
+            head_cache = []
+            for h in range(heads):
+                sl = slice(h * hd, (h + 1) * hd)
+                qh, kh, vh = q2[:, sl], k2[:, sl], v2[:, sl]
+                scores = (qh @ kh.T * scale).astype(np.float32)
+                allowed = np.tri(seq, seq, dtype=bool) if causal else np.ones((seq, seq), dtype=bool)
+                scores = np.where(allowed, scores, np.float32(op.attrs.get("masked_value", -32.0)))
+                shifted = scores - np.max(scores, axis=-1, keepdims=True)
+                exp = np.exp(shifted).astype(np.float32)
+                probs = (exp / np.sum(exp, axis=-1, keepdims=True)).astype(np.float32)
+                out[:, sl] = probs @ vh
+                head_cache.append((qh, kh, vh, probs, allowed, sl))
+            output_value = out[None, ...] if squeeze_batch else out
+            cache.update({"heads": head_cache, "scale": scale, "shape_q": q.shape, "shape_k": k.shape, "shape_v": v.shape, "squeeze_batch": squeeze_batch})
+            inferred_shapes[output_name] = tuple(int(vv) for vv in output_value.shape)
+
+        elif op.op_type == "Concat":
+            axis = normalize_axis(int(op.attrs.get("axis", 0)), np.asarray(values[op.inputs[0]]).ndim)
+            arrays = [np.asarray(values[name], dtype=np.float32) for name in op.inputs]
+            output_value = np.concatenate(arrays, axis=axis).astype(np.float32)
+            cache.update({"axis": axis, "input_shapes": [arr.shape for arr in arrays]})
+            inferred_shapes[output_name] = tuple(int(x) for x in output_value.shape)
+
+        elif op.op_type == "Slice":
+            x = np.asarray(input_value, dtype=np.float32)
+            input_shape = get_shape(input_name) or tuple(int(v) for v in x.shape)
+            if x.size == int(np.prod(input_shape)):
+                x = x.reshape(input_shape)
+            spec = resolve_slice_spec(graph, op, input_shape)
+            slices = [slice(None)] * len(input_shape)
+            slices[spec["axis"]] = slice(spec["start"], spec["end"], 1)
+            output_value = x[tuple(slices)].copy().astype(np.float32)
+            cache.update({"input_shape": tuple(input_shape), "slice_spec": spec})
+            inferred_shapes[output_name] = tuple(int(v) for v in output_value.shape)
+
+        elif op.op_type == "Resize":
+            x = np.asarray(input_value, dtype=np.float32)
+            input_shape = get_shape(input_name) or tuple(int(v) for v in x.shape)
+            if x.size == int(np.prod(input_shape)):
+                x = x.reshape(input_shape)
+            out_shape = resolve_resize_shape(graph, op, input_shape)
+            mode = str(op.attrs.get("mode", "nearest")).lower()
+            if mode != "nearest" or len(input_shape) != 4 or len(out_shape) != 4 or input_shape[:2] != out_shape[:2]:
+                raise RuntimeError(f"Resize training reference currently requires static NCHW nearest resize with unchanged N/C for op '{op.name}'")
+            b, c, ih, iw = input_shape; _, _, oh, ow = out_shape
+            output_value = np.empty(out_shape, dtype=np.float32)
+            for yy in range(oh):
+                sy = min(ih - 1, (yy * ih) // oh)
+                for xx in range(ow):
+                    sx = min(iw - 1, (xx * iw) // ow)
+                    output_value[:, :, yy, xx] = x[:, :, sy, sx]
+            cache.update({"input_shape": tuple(input_shape), "output_shape": tuple(out_shape)})
+            inferred_shapes[output_name] = tuple(int(v) for v in out_shape)
+
+        elif op.op_type == "Gather":
+            if len(op.inputs) < 2:
+                raise RuntimeError(f"Gather training reference requires data and indices for op '{op.name}'")
+            data_name, indices_name = op.inputs[:2]
+            data = parameter_state.get(op.name, {}).get("W") if op.name in parameter_state else values[data_name]
+            data = np.asarray(data, dtype=np.float32)
+            indices = np.asarray(values[indices_name]).astype(np.int64)
+            axis = normalize_axis(int(op.attrs.get("axis", 0)), data.ndim)
+            output_value = np.take(data, indices, axis=axis).astype(np.float32)
+            cache.update({"axis": axis, "data_shape": data.shape, "indices": indices, "data_name": data_name, "indices_name": indices_name})
+            inferred_shapes[output_name] = tuple(int(v) for v in output_value.shape)
+
         elif op.op_type == "Softmax":
             output_value = _softmax(input_value)
 
@@ -1026,20 +1233,26 @@ def _forward_pass(
 
         elif op.op_type == "Add":
             right_value = values[op.inputs[1]]
-
-            output_value = _add_vectors(
-                input_value,
-                right_value,
-            )
-
             input_shape = get_shape(input_name)
+            left = np.asarray(input_value, dtype=np.float32)
+            right = np.asarray(right_value, dtype=np.float32)
+            if input_shape:
+                words = int(np.prod(input_shape))
+                if left.size == words:
+                    left = left.reshape(input_shape)
+                if right.size == words:
+                    right = right.reshape(input_shape)
+            if left.shape != right.shape:
+                raise RuntimeError(
+                    f"Add training reference shape mismatch for op '{op.name}': "
+                    f"left={left.shape}, right={right.shape}"
+                )
+            output_value = (left + right).astype(np.float32)
 
             if input_shape:
                 inferred_shapes[output_name] = input_shape
             else:
-                inferred_shapes[output_name] = (
-                    int(output_value.size),
-                )
+                inferred_shapes[output_name] = tuple(int(x) for x in output_value.shape) or (int(output_value.size),)
 
         elif op.op_type == "MaxPool":
             input_shape = get_shape(input_name)
@@ -1181,9 +1394,13 @@ def _forward_pass(
                 f"{op.op_type}"
             )
 
-        values[output_name] = output_value.astype(
-            np.float32
-        )
+        raw_output_value = np.asarray(output_value, dtype=np.float32)
+        if activation_transform is not None:
+            cache["pre_activation_transform_output"] = raw_output_value.copy()
+            output_value = np.asarray(activation_transform(output_name, raw_output_value), dtype=np.float32)
+        else:
+            output_value = raw_output_value
+        values[output_name] = output_value
         caches[op.name] = cache
 
         _write_f32(layerwise_dir / f"{op.name}__fwd_input.bin", input_value)
@@ -1200,10 +1417,16 @@ def _mse_loss_and_grad(
     prediction: np.ndarray,
     target: np.ndarray,
 ):
-    difference = (
-        prediction.astype(np.float32)
-        - target.astype(np.float32)
-    )
+    prediction = np.asarray(prediction, dtype=np.float32)
+    target = np.asarray(target, dtype=np.float32)
+    if prediction.shape != target.shape:
+        if prediction.size != target.size:
+            raise RuntimeError(
+                "mse target size must match prediction size: "
+                f"target={target.size}, prediction={prediction.size}"
+            )
+        target = target.reshape(prediction.shape)
+    difference = prediction - target
 
     loss = float(
         np.mean(difference * difference)
@@ -1301,6 +1524,8 @@ def run_training_reference_step(
     out_dir: Path,
     x_input: np.ndarray,
     target: np.ndarray,
+    activation_transform: Callable[[str, np.ndarray], np.ndarray] | None = None,
+    gradient_transform: Callable[[str, np.ndarray], np.ndarray] | None = None,
 ) -> TrainingReferenceResult:
     reference_dir = (
         Path(out_dir)
@@ -1403,6 +1628,24 @@ def run_training_reference_step(
                 ("dense", op.name)
             )
 
+        elif op.op_type == "MatMul" and len(op.inputs) == 2 and op.inputs[1] in graph.constants:
+            parameter_state[op.name] = {"W": np.asarray(graph.constants[op.inputs[1]], dtype=np.float32).copy()}
+            trainable_order.append(("matmul", op.name))
+
+        elif op.op_type == "Gather" and len(op.inputs) >= 2 and op.inputs[0] in graph.constants:
+            parameter_state[op.name] = {"W": np.asarray(graph.constants[op.inputs[0]], dtype=np.float32).copy()}
+            trainable_order.append(("gather", op.name))
+
+        elif op.op_type == "RMSNorm" and len(op.inputs) > 1 and op.inputs[1] in graph.constants:
+            parameter_state[op.name] = {"gamma": np.asarray(graph.constants[op.inputs[1]], dtype=np.float32).copy()}
+            trainable_order.append(("rmsnorm", op.name))
+
+        elif op.op_type == "LayerNormalization" and len(op.inputs) > 1 and op.inputs[1] in graph.constants:
+            gamma = np.asarray(graph.constants[op.inputs[1]], dtype=np.float32).copy()
+            beta = np.asarray(graph.constants[op.inputs[2]], dtype=np.float32).copy() if len(op.inputs) > 2 and op.inputs[2] in graph.constants else np.zeros_like(gamma)
+            parameter_state[op.name] = {"gamma": gamma, "beta": beta}
+            trainable_order.append(("layernorm", op.name))
+
         elif op.op_type == "Conv":
             (
                 weights,
@@ -1467,6 +1710,12 @@ def run_training_reference_step(
         if kind in ("dense", "conv"):
             first = parameters["W"].reshape(-1)
             second = parameters["B"].reshape(-1)
+        elif kind in {"matmul", "gather"}:
+            first = parameters["W"].reshape(-1)
+            second = np.zeros((0,), dtype=np.float32)
+        elif kind == "rmsnorm":
+            first = parameters["gamma"].reshape(-1)
+            second = np.zeros((0,), dtype=np.float32)
         else:
             first = parameters["gamma"].reshape(-1)
             second = parameters["beta"].reshape(-1)
@@ -1488,6 +1737,7 @@ def run_training_reference_step(
         parameter_state,
         x_input.astype(np.float32),
         layerwise_dir,
+        activation_transform=activation_transform,
     )
 
     prediction = values[graph.outputs[0]]
@@ -1559,9 +1809,12 @@ def run_training_reference_step(
         output_name = op.outputs[0]
 
         output_value = values[output_name]
+        derivative_output_value = caches[op.name].get("pre_activation_transform_output", output_value)
         output_gradient = gradients_by_tensor[
             output_name
         ]
+        if gradient_transform is not None:
+            output_gradient = np.asarray(gradient_transform(output_name, output_gradient), dtype=np.float32)
         _write_f32(layerwise_dir / f"{op.name}__bwd_output_grad.bin", output_gradient)
 
         if op.op_type == "Dense":
@@ -1652,7 +1905,7 @@ def run_training_reference_step(
         elif op.op_type == "Relu":
             gradients_by_tensor[input_name] = (
                 _relu_backward_from_output(
-                    output_value,
+                    derivative_output_value,
                     output_gradient,
                 )
             )
@@ -1669,10 +1922,163 @@ def run_training_reference_step(
         elif op.op_type == "Sigmoid":
             gradients_by_tensor[input_name] = (
                 _sigmoid_backward_from_output(
-                    output_value,
+                    derivative_output_value,
                     output_gradient,
                 )
             )
+
+        elif op.op_type == "MatMul":
+            cache = caches[op.name]
+            left = cache["left"]
+            right = cache["right"]
+            grad = np.asarray(output_gradient, dtype=np.float32).reshape(np.asarray(output_value).shape)
+            left_grad = np.matmul(grad, np.swapaxes(right, -1, -2)).astype(np.float32)
+            right_grad = np.matmul(np.swapaxes(left, -1, -2), grad).astype(np.float32)
+            while right_grad.ndim > right.ndim:
+                right_grad = right_grad.sum(axis=0)
+            for axis, size in enumerate(right.shape):
+                if size == 1 and right_grad.shape[axis] != 1:
+                    right_grad = right_grad.sum(axis=axis, keepdims=True)
+            gradients_by_tensor[input_name] = left_grad.reshape(np.asarray(values[input_name]).shape).astype(np.float32)
+            if op.name in parameter_state:
+                parameter_gradients[op.name] = (right_grad.reshape(-1), np.zeros((0,), dtype=np.float32))
+            else:
+                right_name = op.inputs[1]
+                gradients_by_tensor[right_name] = gradients_by_tensor.get(right_name, np.zeros_like(right, dtype=np.float32)) + right_grad
+
+        elif op.op_type == "Mul":
+            cache = caches[op.name]
+            left = cache["left"]
+            right = cache["right"]
+            grad = np.asarray(output_gradient, dtype=np.float32).reshape(np.asarray(output_value).shape)
+            gradients_by_tensor[input_name] = (grad * right).astype(np.float32)
+            right_name = op.inputs[1]
+            right_grad = (grad * left).astype(np.float32)
+            gradients_by_tensor[right_name] = gradients_by_tensor.get(right_name, np.zeros_like(right_grad)) + right_grad
+
+        elif op.op_type == "SiLU":
+            x = caches[op.name]["x"]
+            sig = caches[op.name]["sigmoid"]
+            grad = np.asarray(output_gradient, dtype=np.float32).reshape(x.shape)
+            gradients_by_tensor[input_name] = (grad * (sig + x * sig * (1.0 - sig))).astype(np.float32)
+
+        elif op.op_type == "Transpose":
+            perm = caches[op.name]["perm"]
+            inverse = np.argsort(np.asarray(perm))
+            gradients_by_tensor[input_name] = np.transpose(np.asarray(output_gradient).reshape(np.asarray(output_value).shape), axes=tuple(int(x) for x in inverse)).astype(np.float32)
+
+        elif op.op_type in {"RMSNorm", "LayerNormalization"}:
+            cache = caches[op.name]
+            x = cache["x"]
+            gamma = cache["gamma"]
+            inv = cache["inv"]
+            normalized = cache["normalized"]
+            grad = np.asarray(output_gradient, dtype=np.float32).reshape(x.shape)
+            g = grad * gamma
+            n = float(x.shape[-1])
+            if op.op_type == "RMSNorm":
+                mean_gx = np.mean(g * x, axis=-1, keepdims=True)
+                dx = g * inv - x * (inv ** 3) * mean_gx
+                dgamma = np.sum(grad * normalized, axis=tuple(range(grad.ndim - 1)))
+                parameter_gradients[op.name] = (dgamma.reshape(-1), np.zeros((0,), dtype=np.float32))
+            else:
+                sum_g = np.sum(g, axis=-1, keepdims=True)
+                sum_gn = np.sum(g * normalized, axis=-1, keepdims=True)
+                dx = (inv / n) * (n * g - sum_g - normalized * sum_gn)
+                axes = tuple(range(grad.ndim - 1))
+                dgamma = np.sum(grad * normalized, axis=axes)
+                dbeta = np.sum(grad, axis=axes)
+                parameter_gradients[op.name] = (dgamma.reshape(-1), dbeta.reshape(-1))
+            gradients_by_tensor[input_name] = dx.astype(np.float32)
+
+        elif op.op_type == "RotaryEmbedding":
+            cache = caches[op.name]
+            shape = cache["shape"]
+            grad = np.asarray(output_gradient, dtype=np.float32).reshape(shape)
+            rows, cols = int(np.prod(shape[:-1])), int(shape[-1])
+            flat = grad.reshape(rows, cols)
+            cos2, sin2 = cache["cos"], cache["sin"]
+            dx = np.empty_like(flat)
+            dx[:, 0::2] = flat[:, 0::2] * cos2 + flat[:, 1::2] * sin2
+            dx[:, 1::2] = -flat[:, 0::2] * sin2 + flat[:, 1::2] * cos2
+            gradients_by_tensor[input_name] = dx.reshape(shape).astype(np.float32)
+
+        elif op.op_type == "CausalMask":
+            allowed = caches[op.name]["allowed"]
+            grad = np.asarray(output_gradient, dtype=np.float32).reshape(allowed.shape)
+            gradients_by_tensor[input_name] = np.where(allowed, grad, 0.0).astype(np.float32)
+
+        elif op.op_type == "MultiHeadAttention":
+            cache = caches[op.name]
+            grad = np.asarray(output_gradient, dtype=np.float32)
+            if cache["squeeze_batch"]:
+                grad2 = grad.reshape(cache["shape_q"])[0]
+            else:
+                grad2 = grad.reshape(cache["shape_q"])
+            dq = np.zeros(cache["shape_q"][1:] if cache["squeeze_batch"] else cache["shape_q"], dtype=np.float32)
+            dk = np.zeros_like(dq)
+            dv = np.zeros_like(dq)
+            for qh, kh, vh, probs, allowed, sl in cache["heads"]:
+                gh = grad2[:, sl]
+                dv[:, sl] += probs.T @ gh
+                dp = gh @ vh.T
+                ds = probs * (dp - np.sum(dp * probs, axis=-1, keepdims=True))
+                ds = np.where(allowed, ds, 0.0).astype(np.float32)
+                dq[:, sl] += (ds @ kh) * cache["scale"]
+                dk[:, sl] += (ds.T @ qh) * cache["scale"]
+            if cache["squeeze_batch"]:
+                dq, dk, dv = dq[None, ...], dk[None, ...], dv[None, ...]
+            for name, value in zip(op.inputs, (dq, dk, dv)):
+                gradients_by_tensor[name] = gradients_by_tensor.get(name, np.zeros_like(value, dtype=np.float32)) + value.astype(np.float32)
+
+        elif op.op_type == "Concat":
+            cache = caches[op.name]
+            axis = int(cache["axis"])
+            grad = np.asarray(output_gradient, dtype=np.float32).reshape(np.asarray(output_value).shape)
+            offset = 0
+            for name, shape in zip(op.inputs, cache["input_shapes"]):
+                width = int(shape[axis])
+                slices = [slice(None)] * grad.ndim
+                slices[axis] = slice(offset, offset + width)
+                piece = grad[tuple(slices)].reshape(shape).astype(np.float32)
+                gradients_by_tensor[name] = gradients_by_tensor.get(name, np.zeros(shape, dtype=np.float32)) + piece
+                offset += width
+
+        elif op.op_type == "Slice":
+            cache = caches[op.name]; shape = tuple(cache["input_shape"]); spec = cache["slice_spec"]
+            dx = np.zeros(shape, dtype=np.float32)
+            slices = [slice(None)] * len(shape); slices[spec["axis"]] = slice(spec["start"], spec["end"], 1)
+            dx[tuple(slices)] += np.asarray(output_gradient, dtype=np.float32).reshape(np.asarray(output_value).shape)
+            gradients_by_tensor[input_name] = gradients_by_tensor.get(input_name, np.zeros(shape, dtype=np.float32)) + dx
+
+        elif op.op_type == "Resize":
+            cache = caches[op.name]; b, c, ih, iw = cache["input_shape"]; _, _, oh, ow = cache["output_shape"]
+            grad = np.asarray(output_gradient, dtype=np.float32).reshape((b, c, oh, ow)); dx = np.zeros((b, c, ih, iw), dtype=np.float32)
+            for yy in range(oh):
+                sy = min(ih - 1, (yy * ih) // oh)
+                for xx in range(ow):
+                    sx = min(iw - 1, (xx * iw) // ow)
+                    dx[:, :, sy, sx] += grad[:, :, yy, xx]
+            gradients_by_tensor[input_name] = gradients_by_tensor.get(input_name, np.zeros_like(dx)) + dx
+
+        elif op.op_type == "Gather":
+            data_name = op.inputs[0]
+            cache = caches[op.name]; axis = int(cache["axis"]); indices = cache["indices"]; data_shape = tuple(cache["data_shape"]); grad = np.asarray(output_gradient, dtype=np.float32).reshape(np.asarray(output_value).shape)
+            data_grad = np.zeros(data_shape, dtype=np.float32)
+            if axis != 0:
+                raise RuntimeError(f"Gather training backward currently supports axis=0 for op '{op.name}'")
+            flat_indices = indices.reshape(-1); grad_rows = grad.reshape((flat_indices.size,) + data_shape[1:])
+            for i, raw_index in enumerate(flat_indices):
+                row = int(raw_index); row = row + data_shape[0] if row < 0 else row
+                if row < 0 or row >= data_shape[0]:
+                    raise RuntimeError(f"Gather index {raw_index} out of range for op '{op.name}'")
+                data_grad[row] += grad_rows[i]
+            if op.name in parameter_state:
+                parameter_gradients[op.name] = (data_grad.reshape(-1), np.zeros((0,), dtype=np.float32))
+                gradients_by_tensor[data_name] = data_grad
+            else:
+                data_name = cache["data_name"]
+                gradients_by_tensor[data_name] = gradients_by_tensor.get(data_name, np.zeros_like(data_grad)) + data_grad
 
         elif op.op_type == "Softmax":
             is_final_op = bool(
@@ -1692,7 +2098,7 @@ def run_training_reference_step(
             else:
                 gradients_by_tensor[input_name] = (
                     _softmax_backward(
-                        output_value,
+                        derivative_output_value,
                         output_gradient,
                     )
                 )
@@ -1893,7 +2299,10 @@ def run_training_reference_step(
         if kind in ("dense", "conv"):
             parameters["W"] = _apply_optimizer_update(parameters["W"], first_gradient)
             parameters["B"] = _apply_optimizer_update(parameters["B"], second_gradient)
-
+        elif kind in {"matmul", "gather"}:
+            parameters["W"] = _apply_optimizer_update(parameters["W"], first_gradient)
+        elif kind == "rmsnorm":
+            parameters["gamma"] = _apply_optimizer_update(parameters["gamma"], first_gradient)
         else:
             parameters["gamma"] = _apply_optimizer_update(parameters["gamma"], first_gradient)
             parameters["beta"] = _apply_optimizer_update(parameters["beta"], second_gradient)
@@ -1920,6 +2329,12 @@ def run_training_reference_step(
         if kind in ("dense", "conv"):
             first = parameters["W"].reshape(-1)
             second = parameters["B"].reshape(-1)
+        elif kind in {"matmul", "gather"}:
+            first = parameters["W"].reshape(-1)
+            second = np.zeros((0,), dtype=np.float32)
+        elif kind == "rmsnorm":
+            first = parameters["gamma"].reshape(-1)
+            second = np.zeros((0,), dtype=np.float32)
         else:
             first = parameters["gamma"].reshape(-1)
             second = parameters["beta"].reshape(-1)
@@ -1951,6 +2366,7 @@ def run_training_reference_step(
         parameter_state,
         x_input.astype(np.float32),
         layerwise_dir / "after_step",
+        activation_transform=activation_transform,
     )
 
     prediction_after = values_after[

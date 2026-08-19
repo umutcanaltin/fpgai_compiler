@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 
 SweepRunner = Callable[..., int]
@@ -27,6 +27,76 @@ def default_sweep_for_experiment_name(name: str) -> str | None:
     }
     return mapping.get(str(name))
 
+
+
+def _write_single_compile_sweep(
+    *,
+    item_out: Path,
+    name: str,
+    config_path: str,
+    required_artifacts: list[str] | None = None,
+) -> Path:
+    """Materialize one explicit compile config through the existing sweep runner.
+
+    This is experiment orchestration only: it does not add a compiler design-space
+    feature.  The generated sweep contains exactly one concrete design point and
+    therefore preserves the user's explicit YAML architecture selection.
+    """
+    try:
+        import yaml
+    except Exception as exc:  # pragma: no cover - environment error
+        raise RuntimeError(f"PyYAML is required to materialize compile experiment items: {exc}") from exc
+
+    item_out.mkdir(parents=True, exist_ok=True)
+    sweep_path = item_out / "single_compile.yml"
+    payload = {
+        "name": f"{name}_compile",
+        "command_template": "PYTHONPATH=. python -B main.py compile --config {config_path}",
+        "defaults": {"config_path": str(config_path)},
+        "design_points": [{"name": str(name)}],
+        "required_artifacts": list(required_artifacts or []),
+        "metadata": {
+            "generated_by": "fpgai experiment run",
+            "experiment_kind": "explicit_compile",
+            "design_space_sweep": False,
+        },
+    }
+    sweep_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+    return sweep_path
+
+
+def _collect_child_compile_outputs(items: list[dict[str, Any]]) -> list[Path]:
+    """Collect unique compile output directories recorded by child result stores."""
+    outputs: list[Path] = []
+    seen: set[str] = set()
+    for item in items:
+        child = item.get("child_summary") or {}
+        results_path = child.get("results_path")
+        if not results_path:
+            continue
+        path = Path(str(results_path))
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        records = payload.get("results") if isinstance(payload, dict) else None
+        if not isinstance(records, list):
+            continue
+        for record in records:
+            if not isinstance(record, dict) or str(record.get("status")) != "passed":
+                continue
+            raw = record.get("out_dir") or record.get("project_out_dir")
+            if not raw:
+                continue
+            out = Path(str(raw))
+            key = str(out.resolve()) if out.exists() else str(out)
+            if key in seen:
+                continue
+            seen.add(key)
+            outputs.append(out)
+    return outputs
 
 def _load_yaml(path: Path) -> dict[str, Any]:
     try:
@@ -172,29 +242,61 @@ def run_experiment_from_config(
     failed = 0
 
     for name, source in experiments.items():
-        source_str = str(source)
-
-        if source_str.endswith((".yml", ".yaml")) and Path(source_str).exists():
-            sweep_config = source_str
-        else:
-            sweep_config = default_sweep_for_experiment_name(str(name))
-
         item_out = out_path / str(name)
+        item_kind = "sweep"
+        required_artifacts: list[str] = []
+
+        if isinstance(source, Mapping):
+            item_kind = str(source.get("kind") or "compile").strip().lower()
+            if item_kind != "compile":
+                source_str = str(source.get("config") or source.get("sweep") or "")
+                sweep_config = source_str if source_str else default_sweep_for_experiment_name(str(name))
+            else:
+                source_str = str(source.get("config") or "")
+                required_artifacts = [str(x) for x in (source.get("required_artifacts") or [])]
+                if source_str and Path(source_str).exists():
+                    sweep_config = str(
+                        _write_single_compile_sweep(
+                            item_out=item_out,
+                            name=str(name),
+                            config_path=source_str,
+                            required_artifacts=required_artifacts,
+                        )
+                    )
+                else:
+                    sweep_config = None
+        else:
+            source_str = str(source)
+            if source_str.endswith((".yml", ".yaml")) and Path(source_str).exists():
+                sweep_config = source_str
+            else:
+                sweep_config = default_sweep_for_experiment_name(str(name))
 
         item: dict[str, Any] = {
             "name": str(name),
+            "kind": item_kind,
             "source": source_str,
             "sweep_config": sweep_config,
             "out_dir": str(item_out),
             "status": "pending",
             "returncode": None,
         }
+        if required_artifacts:
+            item["required_artifacts"] = required_artifacts
 
         if not sweep_config or not Path(sweep_config).exists():
-            item["status"] = "skipped"
-            item["reason"] = "no runnable public sweep config was found"
+            item["status"] = "failed" if item_kind == "compile" else "skipped"
+            item["reason"] = (
+                "explicit compile config was not found"
+                if item_kind == "compile"
+                else "no runnable public sweep config was found"
+            )
             manifest["items"].append(item)
-            print(f"[SKIP] {name}: no runnable public sweep config found")
+            if item_kind == "compile":
+                failed += 1
+                print(f"[FAIL] {name}: explicit compile config not found: {source_str}")
+            else:
+                print(f"[SKIP] {name}: no runnable public sweep config found")
             continue
 
         print(f"[RUN] {name}: {sweep_config} -> {item_out}")
@@ -228,6 +330,34 @@ def run_experiment_from_config(
             failed += 1
 
         manifest["items"].append(item)
+
+    compile_outputs = _collect_child_compile_outputs(manifest["items"])
+    if compile_outputs and not dry_run:
+        try:
+            from fpgai.reporting.benchmark_results import write_master_results
+
+            master_json = out_path / "master_results.json"
+            master_csv = out_path / "master_results.csv"
+            master_md = out_path / "master_results.md"
+            schema_dir = out_path / "schema"
+            master = write_master_results(
+                compile_outputs,
+                output_json=master_json,
+                output_csv=master_csv,
+                output_md=master_md,
+                schema_json=schema_dir / "master_result_schema.json",
+                schema_md=schema_dir / "master_result_schema.md",
+            )
+            manifest["master_results"] = {
+                "status": master.get("status"),
+                "summary": master.get("summary"),
+                "json": str(master_json),
+                "csv": str(master_csv),
+                "markdown": str(master_md),
+            }
+        except Exception as exc:
+            manifest["master_results"] = {"status": "failed", "error": str(exc)}
+            failed += 1
 
     manifest["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     manifest["failed_count"] = failed

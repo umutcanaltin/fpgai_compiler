@@ -8,20 +8,25 @@ materialize_configs:
   strip_top_level_sections:
     - notes
   compiler_policy_names: true
+
+# Paper-only memory ablation.  Each point changes one concrete weight-memory
+# mechanism while keeping the maintained CNN graph and numerical precision
+# fixed.  This is experiment methodology, not a compiler sweep feature.
 defaults:
-  base_config_path: configs/examples/default_compile.yml
-  config_path: configs/examples/default_compile.yml
-  model_path: models/cnn_mnist.onnx
+  base_config_path: configs/suite/cnn_mnist.yml
+  config_path: configs/suite/cnn_mnist.yml
+  model_path: models/suite/cnn_mnist.onnx
   board: kv260
-  policy: balanced
-  precision_mode: fx8_3
-design_name_template: memory_{memory_strategy}_{policy}
-parameters:
-  memory_strategy:
-    - on_chip
-    - streaming
-    - external_ddr
-    - bram_saver
-  policy:
-    - balanced
-    - latency_first
+
+design_points:
+  - name: memory_bram_static
+    memory_strategy: on_chip
+
+  - name: memory_bram_runtime_preload
+    memory_strategy: runtime_preload
+
+  - name: memory_uram_static
+    memory_strategy: uram_first
+
+  - name: memory_external_ddr_tiled
+    memory_strategy: external_ddr

@@ -1,0 +1,27 @@
+schema: fpgai.reference-architecture/v1
+name: llm_like_gqa_decoder
+family: llm_like
+description: Compact decoder-only transformer workload representing modern autoregressive LLM mechanisms without targeting a named model.
+compiler_special_case: false
+graph_source: maintained_generic_graph
+benchmark_label: LLM-like GQA Decoder
+features:
+  - token_embedding
+  - rmsnorm
+  - grouped_query_attention
+  - rotary_embedding
+  - causal_attention
+  - swiglu
+  - residual_connections
+  - tied_embedding_lm_head
+  - prefill_decode
+  - persistent_kv_cache
+  - selectable_bram_uram_ddr_state
+parameters:
+  layers: 2
+  model_dimension: 12
+  attention_heads: 3
+  kv_heads: 1
+  hidden_dimension: 24
+  vocabulary_size: 32
+  max_sequence_length: 16

@@ -1001,3 +1001,90 @@ def resolve_batchnorm_arrays(
         mean,
         variance,
     )
+
+def derive_training_parameter_inventory(graph: Any) -> list[dict[str, Any]]:
+    """Return the canonical trainable-parameter inventory for a layerwise graph.
+
+    The inventory is semantic IR state, not a backend-specific guess.  It is used
+    by training HLS/testbench generation so parameter export/preload counts stay
+    aligned for built-in and source-driven graphs.
+
+    Each entry has ``layer``, ``role``, ``tensor``, ``count`` and ``shape``.
+    Ordering follows graph operator order and, within an operator, weight-like
+    parameters precede bias-like parameters to match the generated HLS mode-1
+    parameter stream.
+    """
+    entries: list[dict[str, Any]] = []
+
+    def add(layer: str, role: str, tensor: str | None, array: Any) -> None:
+        values = np.asarray(array, dtype=np.float32)
+        entries.append(
+            {
+                "layer": str(layer),
+                "role": str(role),
+                "tensor": str(tensor) if tensor is not None else None,
+                "count": int(values.size),
+                "shape": [int(v) for v in values.shape],
+            }
+        )
+
+    for op in getattr(graph, "ops", []):
+        op_type = str(getattr(op, "op_type", ""))
+        inputs = list(getattr(op, "inputs", []) or [])
+        name = str(getattr(op, "name", op_type))
+
+        if op_type == "Dense":
+            weights, bias, _, _ = resolve_dense_arrays(graph, op)
+            add(name, "weight", inputs[1] if len(inputs) > 1 else None, weights)
+            add(name, "bias", inputs[2] if len(inputs) > 2 else None, bias)
+
+        elif op_type == "Conv":
+            weights, bias, _ = resolve_conv_arrays(graph, op)
+            add(name, "weight", inputs[1] if len(inputs) > 1 else None, weights)
+            add(name, "bias", inputs[2] if len(inputs) > 2 else None, np.asarray(bias).reshape(-1))
+
+        elif op_type == "BatchNormalization":
+            shape = get_tensor_shape(graph, op.outputs[0]) or get_tensor_shape(graph, inputs[0])
+            if not shape:
+                raise RuntimeError(f"BatchNormalization shape unavailable for op {name!r}")
+            channels, _, _ = as_chw(shape)
+            gamma, beta, _, _ = resolve_batchnorm_arrays(graph, op, channels)
+            add(name, "scale", inputs[1] if len(inputs) > 1 else None, gamma)
+            add(name, "bias", inputs[2] if len(inputs) > 2 else None, beta)
+
+        elif op_type == "MatMul" and len(inputs) == 2:
+            weights = read_named_array(graph, inputs[1])
+            if weights is not None:
+                add(name, "weight", inputs[1], weights)
+
+        elif op_type == "Gather" and len(inputs) >= 2:
+            table = read_named_array(graph, inputs[0])
+            if table is not None:
+                add(name, "weight", inputs[0], table)
+
+        elif op_type == "RMSNorm" and len(inputs) > 1:
+            gamma = read_named_array(graph, inputs[1])
+            if gamma is not None:
+                add(name, "scale", inputs[1], np.asarray(gamma).reshape(-1))
+
+        elif op_type == "LayerNormalization" and len(inputs) > 1:
+            gamma = read_named_array(graph, inputs[1])
+            if gamma is not None:
+                gamma = np.asarray(gamma, dtype=np.float32).reshape(-1)
+                add(name, "scale", inputs[1], gamma)
+                if len(inputs) > 2:
+                    beta = read_named_array(graph, inputs[2])
+                else:
+                    beta = None
+                # The current training HLS contract materializes a trainable beta
+                # vector even when the source omits one, initialized to zero.
+                if beta is None:
+                    beta = np.zeros_like(gamma)
+                add(name, "bias", inputs[2] if len(inputs) > 2 else None, np.asarray(beta).reshape(-1))
+
+    return entries
+
+
+def training_parameter_word_count(graph: Any) -> int:
+    """Number of words exported by training mode-1 for the graph parameters."""
+    return int(sum(int(entry["count"]) for entry in derive_training_parameter_inventory(graph)))

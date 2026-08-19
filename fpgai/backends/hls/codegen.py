@@ -17,6 +17,9 @@ from fpgai.backends.hls.emit.layers_conv import emit_conv_h, emit_conv_cpp
 from fpgai.backends.hls.emit.layers_pool import emit_pool_h, emit_pool_cpp
 from fpgai.backends.hls.emit.layers_activations import emit_activations_h, emit_activations_cpp
 from fpgai.backends.hls.emit.layers_batchnorm import emit_batchnorm_h, emit_batchnorm_cpp
+from fpgai.backends.hls.emit.layers_attention import emit_attention_h
+from fpgai.backends.hls.emit.layers_tensor import emit_tensor_h
+from fpgai.backends.hls.emit.layers_quantization import emit_quantization_h
 from fpgai.analysis.hls_validation import run_and_write_hls_validation
 from fpgai.util.fs import ensure_clean_dir, write_text
 
@@ -37,6 +40,32 @@ _cfg_get = get_path
 def _tcl_bool(v: bool) -> str:
     return "1" if bool(v) else "0"
 
+
+
+
+def _requires_dag_inference_codegen(graph: Any, tensor_liveness: Dict[str, Any]) -> bool:
+    """Return True when inference lowering needs the DAG-aware HLS emitter.
+
+    Branching graphs already require the DAG emitter. Quantized PTQ/QAT lowering also
+    attaches operator-level integer hardware contracts (``quantized_*`` attrs) that are
+    implemented by the DAG emitter even when a later backend partition makes the
+    remaining HLS graph structurally linear. Falling back to the legacy linear emitter
+    in that case would route integer ``ap_int`` configs through the older fixed-point
+    precision policy and, more importantly, bypass the quantized Conv/ReLU lowering.
+    """
+    if bool(tensor_liveness.get("has_branching", False)):
+        return True
+
+    if any(getattr(op, "op_type", "") in {"MatMul", "Transpose", "Mul", "Softmax", "LayerNormalization", "RMSNorm", "CausalMask", "RotaryEmbedding", "MultiHeadAttention", "Concat", "Slice", "Resize", "Gather"} for op in getattr(graph, "ops", ()) or ()):
+        return True
+
+    quantized_attr_names = {"quantized_conv", "quantized_add", "quantized_relu"}
+    for op in getattr(graph, "ops", ()) or ():
+        attrs = getattr(op, "attrs", {}) or {}
+        if any(name in attrs for name in quantized_attr_names):
+            return True
+
+    return False
 
 def _cpp_float_literal(value: Any) -> str:
     try:
@@ -796,12 +825,15 @@ def emit_hls_stub(
     write_text(layers_inc_dir / "dense.h", emit_dense_h())
     write_text(layers_src_dir / "dense.cpp", emit_dense_cpp())
     write_text(layers_inc_dir / "conv.h", emit_conv_h())
+    write_text(layers_inc_dir / "quantization.h", emit_quantization_h())
     write_text(layers_src_dir / "conv.cpp", emit_conv_cpp())
     write_text(layers_inc_dir / "pool.h", emit_pool_h())
     write_text(layers_src_dir / "pool.cpp", emit_pool_cpp())
     write_text(layers_inc_dir / "activations.h", emit_activations_h())
     write_text(layers_src_dir / "activations.cpp", emit_activations_cpp())
     write_text(layers_inc_dir / "batchnorm.h", emit_batchnorm_h())
+    write_text(layers_inc_dir / "attention.h", emit_attention_h())
+    write_text(layers_inc_dir / "tensor.h", emit_tensor_h())
     write_text(layers_src_dir / "batchnorm.cpp", emit_batchnorm_cpp())
 
     if pipeline_mode == "training_on_device":
@@ -835,7 +867,7 @@ def emit_hls_stub(
         if graph_has_inference_body:
             from fpgai.ir.liveness import analyze_tensor_liveness
             tensor_liveness = analyze_tensor_liveness(graph)
-            if bool(tensor_liveness.get("has_branching", False)) and hasattr(graph, "get_tensor"):
+            if _requires_dag_inference_codegen(graph, tensor_liveness) and hasattr(graph, "get_tensor"):
                 from fpgai.backends.hls.buffer_allocation import build_hls_buffer_allocation
                 from fpgai.backends.hls.emit.dag_top_cpp import emit_dag_top_cpp
                 dag_buffer_allocation = build_hls_buffer_allocation(

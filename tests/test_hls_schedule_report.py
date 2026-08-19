@@ -88,3 +88,45 @@ def test_compare_requested_achieved_ii_by_layer(tmp_path):
     assert comparison["layers"][0]["ii_met"] is True
     assert comparison["layers"][1]["ii_met"] is False
     assert comparison["layers"][2]["ii_met"] is None
+
+
+def test_parse_vitis_2023_2_csynth_hierarchy_loop_rows(tmp_path):
+    report = tmp_path / "csynth.rpt"
+    report.write_text(
+        """
+    |                                        Modules                                        |  Issue |       | Latency |  Latency  | Iteration|         | Trip |          |          |           |              |               |     |
+    |                                        & Loops                                        |  Type  | Slack | (cycles)|    (ns)   |  Latency | Interval| Count| Pipelined|   BRAM   |    DSP    |      FF      |      LUT      | URAM|
+    |+ deeplearn                                                                            |  Timing|  -1.99|     8263|  4.662e+04|-|     8264|     -|        no|  53 (18%)|  536 (42%)|  106925 (45%)|  180936 (154%)|    -|
+    | + deeplearn_Pipeline_VITIS_LOOP_328_1                                                |       -|   0.16|       12|    60.000|        -|       12|     -|        no|         -|          -|       303 (~0%)|       1220 (1%)|    -|
+    |  o VITIS_LOOP_328_1                                                                  |       -|   3.65|       10|    50.000|        4|        1|     8|       yes|         -|          -|              -|              -|    -|
+        """,
+        encoding="utf-8",
+    )
+
+    parsed = parse_hls_schedule_report(report)
+
+    assert parsed.summary["loop_count"] == 1
+    loop = parsed.loops[0]
+    assert loop.name == "VITIS_LOOP_328_1"
+    assert loop.requested_ii is None
+    assert loop.achieved_ii == 1
+    assert loop.latency_min == 4
+    assert loop.tripcount_min == 8
+
+
+def test_parse_vitis_2023_2_pipelining_result_log(tmp_path):
+    report = tmp_path / "vitis_hls.log"
+    report.write_text(
+        "INFO: [HLS 200-1470] Pipelining result : Target II = 2, "
+        "Final II = 3, Depth = 5, loop 'VITIS_LOOP_26_1'\n",
+        encoding="utf-8",
+    )
+
+    parsed = parse_hls_schedule_report(report)
+
+    assert parsed.summary["loop_count"] == 1
+    loop = parsed.loops[0]
+    assert loop.name == "VITIS_LOOP_26_1"
+    assert loop.requested_ii == 2
+    assert loop.achieved_ii == 3
+    assert loop.ii_met is False

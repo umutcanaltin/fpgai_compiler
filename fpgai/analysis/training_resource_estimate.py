@@ -7,6 +7,8 @@ import json
 import math
 import numpy as np
 
+from fpgai.engine.training_graph_utils import derive_training_parameter_inventory
+
 from fpgai.util.fs import write_text
 
 
@@ -213,6 +215,11 @@ def run_training_resource_estimate(
 
     layer_rows: List[Dict[str, Any]] = []
 
+    parameter_elems_by_layer: Dict[str, int] = {}
+    for item in derive_training_parameter_inventory(graph):
+        layer = str(item["layer"])
+        parameter_elems_by_layer[layer] = parameter_elems_by_layer.get(layer, 0) + int(item["count"])
+
     for idx, op in enumerate(getattr(graph, "ops", [])):
         name = str(getattr(op, "name", f"op_{idx}"))
         op_type = str(getattr(op, "op_type", ""))
@@ -227,14 +234,7 @@ def run_training_resource_estimate(
         caps = caps_info.get("caps", {})
         cls = caps_info.get("classification", "unsupported")
 
-        if op_type == "Dense":
-            param_elems = _resolve_dense_param_elems(graph, op)
-        elif op_type == "Conv":
-            param_elems = _resolve_conv_param_elems(graph, op)
-        elif op_type == "BatchNormalization":
-            param_elems = _resolve_bn_param_elems(graph, op)
-        else:
-            param_elems = 0
+        param_elems = int(parameter_elems_by_layer.get(name, 0))
 
         cache_elems = out_elems
         if op_type in ("Relu", "LeakyRelu", "Sigmoid"):

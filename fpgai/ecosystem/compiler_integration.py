@@ -120,14 +120,18 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
     if not loaded.ok:
         raise RuntimeError("External operator loading failed; inspect external_operator_loading.json")
 
-    from fpgai.frontend.onnx import import_onnx
+    from fpgai.frontend import import_model_source
+    from fpgai.layers.composites import expand_composite_layers
 
-    graph = import_onnx(
+    graph = import_model_source(
         compiler.cfg.model.path,
-        canonicalize=True,
-        infer_shapes=True,
+        format_hint=getattr(compiler.cfg.model, "format", None),
+        source_framework=getattr(compiler.cfg.model, "framework", None),
+        pipeline_mode=getattr(compiler.cfg.pipeline, "mode", "inference"),
+        target_board=((raw.get("targets", {}).get("platform", {}) or {}).get("board") or (raw.get("targets", {}) or {}).get("board")),
         external_operator_context=loaded.context,
     )
+    graph = expand_composite_layers(graph)
     external_ops = [op for op in graph.ops if isinstance(op.attrs.get("_fpgai_external_operator"), Mapping)]
     if not external_ops:
         raise RuntimeError("Ecosystem compilation was enabled but the model contains no activated external operator")

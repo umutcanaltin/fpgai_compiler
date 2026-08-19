@@ -141,6 +141,8 @@ _deep_get = get_path
 @dataclass(frozen=True)
 class ModelCfg:
     path: str
+    format: str | None = None
+    framework: str | None = None
 
 
 @dataclass(frozen=True)
@@ -203,6 +205,7 @@ TOP_LEVEL_SECTIONS_V1 = {
     "validation",
     "ecosystem",
     "implementations",
+    "architecture",
 }
 
 DEFAULT_NUMERIC_ROLES = {
@@ -565,6 +568,104 @@ def _validate_and_normalize_training_numerics(
 
     numerics["training"] = normalized
 
+
+
+def _validate_quantization_cfg(
+    raw: Dict[str, Any],
+    issues: List[ConfigIssue],
+) -> None:
+    quant = _deep_get(raw, "numerics.quantization", None)
+    if quant is None:
+        return
+    if not isinstance(quant, dict):
+        issues.append(ConfigIssue("numerics.quantization", "Expected a mapping"))
+        return
+
+    allowed = {"mode", "weights", "activations", "calibration", "qat"}
+    for key in sorted(set(quant) - allowed):
+        issues.append(ConfigIssue(f"numerics.quantization.{key}", f"Unknown quantization field {key!r}"))
+
+    mode = quant.get("mode", "none")
+    if mode not in {"none", "ptq", "qat"}:
+        issues.append(ConfigIssue("numerics.quantization.mode", "Must be one of ['none', 'ptq', 'qat']"))
+
+    def validate_tensor_spec(name: str) -> None:
+        spec = quant.get(name)
+        if spec is None:
+            return
+        path = f"numerics.quantization.{name}"
+        if not isinstance(spec, dict):
+            issues.append(ConfigIssue(path, "Expected a mapping"))
+            return
+        allowed_spec = {"bits", "scheme", "granularity", "signed", "axis", "rounding", "saturation"}
+        for key in sorted(set(spec) - allowed_spec):
+            issues.append(ConfigIssue(f"{path}.{key}", f"Unknown quantization field {key!r}"))
+        bits = spec.get("bits", 8)
+        if type(bits) is not int or not 2 <= bits <= 32:
+            issues.append(ConfigIssue(f"{path}.bits", "Expected an integer in [2, 32]"))
+        if spec.get("scheme", "symmetric") not in {"symmetric", "asymmetric"}:
+            issues.append(ConfigIssue(f"{path}.scheme", "Must be one of ['symmetric', 'asymmetric']"))
+        granularity = spec.get("granularity", "per_tensor")
+        if granularity not in {"per_tensor", "per_channel"}:
+            issues.append(ConfigIssue(f"{path}.granularity", "Must be one of ['per_tensor', 'per_channel']"))
+        axis = spec.get("axis")
+        if granularity == "per_channel" and type(axis) is not int:
+            issues.append(ConfigIssue(f"{path}.axis", "Per-channel quantization requires an integer axis"))
+        if granularity == "per_tensor" and axis is not None:
+            issues.append(ConfigIssue(f"{path}.axis", "Per-tensor quantization must not set axis"))
+        if "signed" in spec and not isinstance(spec["signed"], bool):
+            issues.append(ConfigIssue(f"{path}.signed", "Expected a boolean"))
+        if spec.get("rounding", "nearest") not in {"nearest", "floor", "ceil"}:
+            issues.append(ConfigIssue(f"{path}.rounding", "Must be one of ['nearest', 'floor', 'ceil']"))
+        if spec.get("saturation", "saturate") not in {"saturate", "wrap"}:
+            issues.append(ConfigIssue(f"{path}.saturation", "Must be one of ['saturate', 'wrap']"))
+
+    validate_tensor_spec("weights")
+    validate_tensor_spec("activations")
+
+    calibration = quant.get("calibration")
+    if calibration is not None:
+        if not isinstance(calibration, dict):
+            issues.append(ConfigIssue("numerics.quantization.calibration", "Expected a mapping"))
+        else:
+            allowed_cal = {"method", "percentile", "samples", "dataset", "array_key"}
+            for key in sorted(set(calibration) - allowed_cal):
+                issues.append(ConfigIssue(f"numerics.quantization.calibration.{key}", f"Unknown calibration field {key!r}"))
+            method = calibration.get("method", "min_max")
+            if method not in {"min_max", "percentile"}:
+                issues.append(ConfigIssue("numerics.quantization.calibration.method", "Must be one of ['min_max', 'percentile']"))
+            percentile = calibration.get("percentile", 99.99)
+            if method == "percentile" and (type(percentile) not in {int, float} or isinstance(percentile, bool) or not 0.0 < float(percentile) <= 100.0):
+                issues.append(ConfigIssue("numerics.quantization.calibration.percentile", "Expected a number in (0, 100]"))
+            samples = calibration.get("samples")
+            if samples is not None and (type(samples) is not int or samples <= 0):
+                issues.append(ConfigIssue("numerics.quantization.calibration.samples", "Expected a positive integer"))
+            dataset = calibration.get("dataset")
+            if dataset is not None and (not isinstance(dataset, str) or not dataset.strip()):
+                issues.append(ConfigIssue("numerics.quantization.calibration.dataset", "Expected a non-empty .npy/.npz path string"))
+            array_key = calibration.get("array_key")
+            if array_key is not None and (not isinstance(array_key, str) or not array_key.strip()):
+                issues.append(ConfigIssue("numerics.quantization.calibration.array_key", "Expected a non-empty string"))
+
+    qat = quant.get("qat")
+    if qat is not None:
+        if not isinstance(qat, dict):
+            issues.append(ConfigIssue("numerics.quantization.qat", "Expected a mapping"))
+        else:
+            allowed_qat = {"fake_quant", "straight_through_estimator", "freeze_after_updates"}
+            for key in sorted(set(qat) - allowed_qat):
+                issues.append(ConfigIssue(f"numerics.quantization.qat.{key}", f"Unknown QAT field {key!r}"))
+            for key in ("fake_quant", "straight_through_estimator"):
+                if key in qat and not isinstance(qat[key], bool):
+                    issues.append(ConfigIssue(f"numerics.quantization.qat.{key}", "Expected a boolean"))
+            freeze = qat.get("freeze_after_updates")
+            if freeze is not None and (type(freeze) is not int or freeze < 0):
+                issues.append(ConfigIssue("numerics.quantization.qat.freeze_after_updates", "Expected a non-negative integer"))
+
+    if mode == "ptq" and calibration is None:
+        issues.append(ConfigIssue("numerics.quantization.calibration", "PTQ mode requires a calibration mapping"))
+    if mode == "qat" and qat is None:
+        issues.append(ConfigIssue("numerics.quantization.qat", "QAT mode requires a qat mapping"))
 
 def _validate_quantization_report(
     raw: Dict[str, Any],
@@ -1300,6 +1401,133 @@ def _validate_parallel_policy(
         )
 
 
+
+
+def _validate_architecture_config(raw: Dict[str, Any], issues: List[ConfigIssue]) -> None:
+    architecture = raw.get("architecture")
+    if architecture is None:
+        return
+    if not isinstance(architecture, dict):
+        issues.append(ConfigIssue("architecture", "Expected a mapping"))
+        return
+    for key in sorted(set(architecture) - {"network", "defaults", "layers"}):
+        issues.append(ConfigIssue(f"architecture.{key}", f"Unknown architecture field {key!r}"))
+
+    allowed_sections = {"memory", "implementation", "execution", "transport", "buffering", "pipeline", "parallelism", "partitioning", "tiling"}
+    allowed_memory = {"weight_storage", "activation_storage", "gradient_storage", "optimizer_state_storage"}
+    allowed_impl = {"backend", "preferred", "allow_fallback", "policy"}
+    allowed_execution = {"mode"}
+    allowed_transport = {"protocol"}
+    allowed_buffering = {"storage"}
+    allowed_pipeline = {"ii", "style", "scope", "loops"}
+    allowed_parallelism = {"pe", "simd", "unroll"}
+    allowed_partitioning = {"factor", "mode", "targets"}
+    allowed_tiling = {"sizes"}
+    allowed_loop_controls = {
+        "element", "in", "out", "ic", "oc", "m", "n", "k", "mac",
+        "row", "col", "pair", "head", "d", "reduce", "normalize",
+        "score", "softmax_max", "softmax_exp", "softmax_norm", "value",
+        "dq_dv", "dk",
+    }
+    storage_values = {"auto", "unspecified", "bram", "uram", "ddr", "host", "external", "stream", "recompute"}
+    backend_values = {"auto", "unspecified", "hls", "vitis_hls", "vhdl", "rtl", "external"}
+    execution_values = {"auto", "unspecified", "sequential", "dataflow", "serialized", "phase_shared", "parallel", "streamed"}
+
+    def validate_body(body: Any, path: str, *, allow_match: bool) -> None:
+        if not isinstance(body, dict):
+            issues.append(ConfigIssue(path, "Expected a mapping"))
+            return
+        allowed = set(allowed_sections) | ({"match"} if allow_match else set())
+        for key in sorted(set(body) - allowed):
+            issues.append(ConfigIssue(f"{path}.{key}", f"Unknown layer architecture field {key!r}"))
+        if allow_match:
+            match = body.get("match")
+            if not isinstance(match, dict) or not match:
+                issues.append(ConfigIssue(f"{path}.match", "Expected a non-empty mapping"))
+            else:
+                for key in sorted(set(match) - {"name", "op_type", "index", "provider"}):
+                    issues.append(ConfigIssue(f"{path}.match.{key}", f"Unknown match field {key!r}"))
+                if "index" in match and (type(match["index"]) is not int or match["index"] < 0):
+                    issues.append(ConfigIssue(f"{path}.match.index", "Expected a non-negative integer"))
+        section_fields = {
+            "memory": allowed_memory, "implementation": allowed_impl, "execution": allowed_execution,
+            "transport": allowed_transport, "buffering": allowed_buffering,
+            "pipeline": allowed_pipeline, "parallelism": allowed_parallelism,
+            "partitioning": allowed_partitioning, "tiling": allowed_tiling,
+        }
+        for section, fields in section_fields.items():
+            value = body.get(section)
+            if value is None:
+                continue
+            if not isinstance(value, dict):
+                issues.append(ConfigIssue(f"{path}.{section}", "Expected a mapping"))
+                continue
+            for key in sorted(set(value) - fields):
+                issues.append(ConfigIssue(f"{path}.{section}.{key}", f"Unknown {section} field {key!r}"))
+        pipeline = body.get("pipeline") if isinstance(body.get("pipeline"), dict) else {}
+        if "ii" in pipeline and (type(pipeline["ii"]) is not int or pipeline["ii"] < 1):
+            issues.append(ConfigIssue(f"{path}.pipeline.ii", "Expected a positive integer"))
+        if "loops" in pipeline:
+            loops = pipeline["loops"]
+            if not isinstance(loops, dict):
+                issues.append(ConfigIssue(f"{path}.pipeline.loops", "Expected a mapping of loop-name to positive II"))
+            else:
+                for loop_name, value in loops.items():
+                    if not isinstance(loop_name, str) or not loop_name.strip() or type(value) is not int or value < 1:
+                        issues.append(ConfigIssue(f"{path}.pipeline.loops", "Loop II entries require non-empty names and positive integer values"))
+                        break
+                    if loop_name not in allowed_loop_controls:
+                        issues.append(ConfigIssue(f"{path}.pipeline.loops.{loop_name}", f"Unknown loop control {loop_name!r}"))
+        parallelism = body.get("parallelism") if isinstance(body.get("parallelism"), dict) else {}
+        for key in ("pe", "simd"):
+            if key in parallelism and (type(parallelism[key]) is not int or parallelism[key] < 1):
+                issues.append(ConfigIssue(f"{path}.parallelism.{key}", "Expected a positive integer"))
+        if "unroll" in parallelism:
+            unroll = parallelism["unroll"]
+            if not isinstance(unroll, dict) or any(not isinstance(k, str) or not k.strip() or type(v) is not int or v < 1 for k, v in (unroll.items() if isinstance(unroll, dict) else [])):
+                issues.append(ConfigIssue(f"{path}.parallelism.unroll", "Expected a mapping of loop-name to positive unroll factor"))
+            elif isinstance(unroll, dict):
+                for loop_name in unroll:
+                    if loop_name not in allowed_loop_controls:
+                        issues.append(ConfigIssue(f"{path}.parallelism.unroll.{loop_name}", f"Unknown loop control {loop_name!r}"))
+        partitioning = body.get("partitioning") if isinstance(body.get("partitioning"), dict) else {}
+        if "factor" in partitioning and (type(partitioning["factor"]) is not int or partitioning["factor"] < 1):
+            issues.append(ConfigIssue(f"{path}.partitioning.factor", "Expected a positive integer"))
+        if "mode" in partitioning and str(partitioning["mode"]).lower() not in {"none", "cyclic", "block", "complete"}:
+            issues.append(ConfigIssue(f"{path}.partitioning.mode", "Expected one of ['none', 'cyclic', 'block', 'complete']"))
+        if "targets" in partitioning:
+            targets = partitioning["targets"]
+            if not isinstance(targets, dict) or any(type(v) is not int or v < 1 for v in (targets.values() if isinstance(targets, dict) else [])):
+                issues.append(ConfigIssue(f"{path}.partitioning.targets", "Expected a mapping of target-name to positive partition factor"))
+        tiling = body.get("tiling") if isinstance(body.get("tiling"), dict) else {}
+        if "sizes" in tiling:
+            sizes = tiling["sizes"]
+            if not isinstance(sizes, dict) or any(type(v) is not int or v < 1 for v in (sizes.values() if isinstance(sizes, dict) else [])):
+                issues.append(ConfigIssue(f"{path}.tiling.sizes", "Expected a mapping of tile-dimension to positive size"))
+
+        memory = body.get("memory") if isinstance(body.get("memory"), dict) else {}
+        for key in allowed_memory:
+            if key in memory and str(memory[key]).strip().lower().replace("-", "_") not in storage_values:
+                issues.append(ConfigIssue(f"{path}.memory.{key}", f"Unsupported storage value {memory[key]!r}"))
+        impl = body.get("implementation") if isinstance(body.get("implementation"), dict) else {}
+        if "backend" in impl and str(impl["backend"]).strip().lower().replace("-", "_") not in backend_values:
+            issues.append(ConfigIssue(f"{path}.implementation.backend", f"Unsupported backend {impl['backend']!r}"))
+        execution = body.get("execution") if isinstance(body.get("execution"), dict) else {}
+        if "mode" in execution and str(execution["mode"]).strip().lower().replace("-", "_") not in execution_values:
+            issues.append(ConfigIssue(f"{path}.execution.mode", f"Unsupported execution mode {execution['mode']!r}"))
+
+    if "network" in architecture:
+        validate_body(architecture.get("network"), "architecture.network", allow_match=False)
+    if "defaults" in architecture:
+        validate_body(architecture.get("defaults"), "architecture.defaults", allow_match=False)
+    layers = architecture.get("layers", [])
+    if not isinstance(layers, list):
+        issues.append(ConfigIssue("architecture.layers", "Expected a list"))
+    else:
+        for index, rule in enumerate(layers):
+            validate_body(rule, f"architecture.layers[{index}]", allow_match=True)
+
+
 def _validate_compiler_controls(
     raw: Dict[str, Any],
     issues: List[ConfigIssue],
@@ -1359,6 +1587,7 @@ def load_config(path: str) -> FPGAIConfig:
     issues: List[ConfigIssue] = []
 
     _validate_top_level_sections(raw, issues)
+    _validate_architecture_config(raw, issues)
 
     version = raw.get(
         "version",
@@ -1478,6 +1707,10 @@ def load_config(path: str) -> FPGAIConfig:
         raw,
         issues,
     )
+    _validate_quantization_cfg(
+        raw,
+        issues,
+    )
     _validate_analysis_cfg(
         raw,
         issues,
@@ -1510,6 +1743,8 @@ def load_config(path: str) -> FPGAIConfig:
         version=version,
         model=ModelCfg(
             path=model_path,
+            format=(str(_deep_get(raw, "model.format", "")).strip().lower() or None),
+            framework=(str(_deep_get(raw, "model.framework", "")).strip().lower() or None),
         ),
         pipeline=PipelineCfg(
             mode=mode,
@@ -1598,6 +1833,7 @@ def print_summary(cfg: FPGAIConfig) -> None:
             False,
         )
     )
+    quant_mode = str(get("numerics.quantization.mode", "none"))
     quant_enabled = bool(
         get(
             "analysis.quantization_report.enabled",
@@ -1638,6 +1874,7 @@ def print_summary(cfg: FPGAIConfig) -> None:
     print(f" bias                 : {_ap_str(bias)}")
     print(f" accum                : {_ap_str(accum)}")
     print(f"Layerwise overrides   : {len(layer_rules)}")
+    print(f"Quantization mode     : {quant_mode}")
     print(
         f"Training numerics     : "
         f"{sorted(training_rules.keys())}"

@@ -70,6 +70,7 @@ def test_training_batch_accumulation_contract_resolves_batch_and_native_mode() -
     contract = _resolve_training_batch_accumulation_contract(
         {
             "training": {
+                "batch": {"size": 1},
                 "batch_size": 4,
                 "gradient_accumulation": {"steps": 3, "mode": "native"},
             }

@@ -1,0 +1,66 @@
+schema: fpgai.reference-model-profile/v1
+name: smollm2-135m
+role: evaluation_reference_only
+compiler_special_case: false
+source:
+  framework: pytorch
+  preferred_fpga_ingress:
+    - stablehlo
+    - onnx
+  official_model: https://huggingface.co/HuggingFaceTB/SmolLM2-135M
+  official_config: https://huggingface.co/HuggingFaceTB/SmolLM2-135M/blob/main/config.json
+reference_facts:
+  architecture: LlamaForCausalLM
+  hidden_size: 576
+  intermediate_size: 1536
+  num_hidden_layers: 30
+  num_attention_heads: 9
+  num_key_value_heads: 3
+  max_position_embeddings: 8192
+  vocab_size: 49152
+  rms_norm_eps: 1.0e-5
+  rope_theta: 100000
+  hidden_act: silu
+  use_cache: true
+  tie_word_embeddings: true
+  source_dtype: bfloat16
+expected_generic_operator_families:
+  - Gather
+  - MatMul
+  - Add
+  - Mul
+  - SiLU
+  - RMSNorm
+  - RotaryEmbedding
+  - Transpose
+  - Reshape
+  - Softmax
+  - CausalMask
+  - Concat
+  - Slice
+state_requirements:
+  - key_value_cache
+  - position_offset
+  - persistent_state_across_decode_calls
+evaluation_metrics:
+  - next_token_agreement
+  - perplexity_or_reference_loss
+  - time_to_first_token
+  - tokens_per_second
+  - power
+  - energy_per_token
+  - weight_bandwidth
+  - kv_cache_bytes
+  - external_memory_traffic
+  - lut
+  - ff
+  - dsp
+  - bram
+  - uram
+  - timing_at_requested_clock
+policy:
+  compile_from_actual_exported_graph: true
+  layerwise_gap_audit_required: true
+  model_name_must_not_affect_lowering: true
+  training_support_required_per_operator: true
+  weight_and_state_storage_are_user_choices: true

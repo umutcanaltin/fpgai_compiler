@@ -1,0 +1,67 @@
+project:
+  name: quantized_residual_cnn_qat
+  out_dir: build/quantized_residual_cnn_qat
+
+model:
+  format: onnx
+  path: models/quantized_residual_cnn.onnx
+
+targets:
+  hls:
+    control_protocol: ap_ctrl_none
+  mixed_backend:
+    residual_add_backend: vhdl
+    final_relu_backend: vhdl
+  platform:
+    part: xck26-sfvc784-2LV-c
+    clocks:
+      - target_mhz: 200
+
+numerics:
+  defaults:
+    activation: {type: ap_int, bits: 8}
+    weight: {type: ap_int, bits: 8}
+    bias: {type: ap_int, bits: 32}
+    accum: {type: ap_int, bits: 32}
+  quantization:
+    mode: qat
+    weights:
+      bits: 8
+      scheme: symmetric
+      granularity: per_channel
+      signed: true
+      axis: 0
+      rounding: nearest
+      saturation: saturate
+    activations:
+      bits: 8
+      scheme: symmetric
+      granularity: per_tensor
+      signed: true
+      rounding: nearest
+      saturation: saturate
+    accumulators:
+      bits: 32
+    calibration:
+      method: min_max
+      percentile: 99.9
+    qat:
+      fake_quant: true
+      straight_through_estimator: true
+      freeze_after_updates: 4
+
+training:
+  batch:
+    size: 1
+    epochs: 2
+    mode: accumulate
+    shuffle: false
+  optimizer:
+    type: adam
+    learning_rate: 0.005
+    beta1: 0.9
+    beta2: 0.999
+    epsilon: 1.0e-8
+    bias_correction: true
+  loss:
+    type: mse

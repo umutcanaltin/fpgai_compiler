@@ -102,9 +102,15 @@ class PipelinePlan:
     ii: int = 1
     style: str = "balanced"
     scope: Optional[str] = None
+    loops: Dict[str, int] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "ii", _positive_int(self.ii))
+        object.__setattr__(
+            self,
+            "loops",
+            {str(key): _positive_int(value) for key, value in self.loops.items()},
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -387,6 +393,7 @@ class CompilePlan:
             "target_board": self.target_board,
             "target_part": self.target_part,
             "clock_mhz": float(self.clock_mhz),
+            "network_execution": dict(self.notes.get("network_execution", {})),
             "layers": [
                 {
                     "op_type": layer.op_type,

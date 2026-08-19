@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Dict, List, Optional, Set, TYPE_CHECKING
+import numpy as np
 import onnx
 
 from fpgai.ir import Graph
@@ -30,6 +31,7 @@ def import_onnx(
     canonicalize: bool = True,
     infer_shapes: bool = True,
     insert_missing_activations: bool = False,
+    shape_overrides: Optional[Dict[str, object]] = None,
     external_operator_context: "ExternalOperatorContext | None" = None,
 ) -> Graph:
     model = onnx.load(path)
@@ -50,8 +52,16 @@ def import_onnx(
     # Initializers (Weights/Biases)
     # Store them in g.constants so the backend can access the numpy arrays
     raw_inits = collect_initializers(model)
-    g.constants = raw_inits  # <--- CRITICAL FIX
+    g.constants = raw_inits
     g.params = raw_inits     # Keep params alias for backward compatibility
+
+    # Initializers are tensors semantically, even though they are not runtime
+    # graph inputs. Register them in the canonical tensor table so downstream
+    # passes (quantization, type propagation, reporting) can attach metadata to
+    # weights and biases without maintaining a second tensor namespace.
+    for init_name, init_value in raw_inits.items():
+        init_array = np.asarray(init_value)
+        g.add_tensor(init_name, tuple(int(dim) for dim in init_array.shape), str(init_array.dtype))
 
     init_names: Set[str] = set(g.constants.keys())
 
@@ -87,10 +97,30 @@ def import_onnx(
         attrs: Dict[str, object] = {}
         for a in node.attribute:
             attrs[a.name] = attr_to_py(a)
+        domain = node.domain or "ai.onnx"
+        attrs["_onnx_domain"] = domain
+        attrs["_onnx_opset"] = int(opsets.get(domain, 1))
+
+        # ONNX Constant nodes are compile-time tensors, not executable hardware
+        # operators. Materialize their numeric payload into the canonical constant
+        # table so allowlist validation and backend lowering see ordinary static
+        # tensor inputs, just like graph initializers.
+        if op_type == "Constant" and outputs:
+            numeric_keys = ("value", "value_float", "value_int", "value_floats", "value_ints")
+            payload = next((attrs[key] for key in numeric_keys if key in attrs), None)
+            if payload is not None:
+                array = np.asarray(payload)
+                if array.dtype.kind in {"b", "i", "u", "f", "c"}:
+                    output = str(outputs[0])
+                    g.constants[output] = array
+                    g.params = g.constants
+                    existing = g.get_tensor(output)
+                    dtype = str(array.dtype) if array.dtype is not None else str(getattr(existing, "dtype", "float32"))
+                    g.add_tensor(output, tuple(int(dim) for dim in array.shape), dtype)
+                    continue
 
         external_op = None
         if external_operator_context is not None:
-            domain = node.domain or "ai.onnx"
             external_op = try_import_external_node(
                 graph=g,
                 node=node,
@@ -109,9 +139,70 @@ def import_onnx(
     # Canonicalize per-op
     ops = [canonicalize_op(op) for op in raw_ops]
     
+    # Lower static ONNX Split into ordinary Slice operators so the backend
+    # remains layerwise and does not need a model- or multi-output-specific kernel.
+    lowered_ops: List[Op] = []
+    for op in ops:
+        if op.op_type != "Split":
+            lowered_ops.append(op)
+            continue
+        attrs = dict(op.attrs or {})
+        axis = int(attrs.get("axis", 0))
+        split_sizes = attrs.get("split")
+        if split_sizes is None and len(op.inputs) > 1 and op.inputs[1] in g.constants:
+            split_sizes = [int(x) for x in np.asarray(g.constants[op.inputs[1]]).reshape(-1).tolist()]
+        if split_sizes is None:
+            sizes = []
+            for output in op.outputs:
+                spec = g.get_tensor(output)
+                if spec is None or not getattr(spec, "shape", None):
+                    sizes = []
+                    break
+                rank = len(spec.shape); resolved_axis = axis + rank if axis < 0 else axis
+                if resolved_axis < 0 or resolved_axis >= rank:
+                    sizes = []
+                    break
+                sizes.append(int(spec.shape[resolved_axis]))
+            split_sizes = sizes or None
+        if split_sizes is None or len(split_sizes) != len(op.outputs):
+            lowered_ops.append(op)
+            continue
+        cursor = 0
+        for output_index, (output, size) in enumerate(zip(op.outputs, split_sizes)):
+            size = int(size)
+            lowered_ops.append(Op(
+                name=f"{op.name}__slice_{output_index}",
+                op_type="Slice",
+                inputs=[op.inputs[0]],
+                outputs=[output],
+                attrs={"starts": [cursor], "ends": [cursor + size], "axes": [axis], "steps": [1], "canonicalized_from": "Split"},
+            ))
+            cursor += size
+    ops = lowered_ops
+
     # Fuse patterns (using the constants keys)
     ops = fuse_matmul_add_to_dense(ops, params=set(g.constants.keys()))
     g.ops = ops
+
+    # Real exported graphs commonly retain symbolic sequence/cache dimensions.
+    # FPGA hardware needs bounded static extents, so allow the user/config to
+    # resolve those tensor shapes explicitly without changing the source model.
+    # This is tensor-name driven and works for arbitrary models/frontends.
+    if shape_overrides:
+        applied: Dict[str, list[int]] = {}
+        for tensor_name, raw_shape in dict(shape_overrides).items():
+            if not isinstance(raw_shape, (list, tuple)) or not raw_shape:
+                raise ValueError(f"ONNXSHAPE001: shape override for {tensor_name!r} must be a non-empty list/tuple")
+            shape = tuple(int(x) for x in raw_shape)
+            if any(dim <= 0 for dim in shape):
+                raise ValueError(f"ONNXSHAPE002: shape override for {tensor_name!r} must contain positive static dimensions")
+            existing = g.get_tensor(str(tensor_name))
+            dtype = str(getattr(existing, "dtype", "float32")) if existing is not None else "float32"
+            semantics = getattr(existing, "semantics", None) if existing is not None else None
+            quantization = getattr(existing, "quantization", None) if existing is not None else None
+            g.add_tensor(str(tensor_name), shape, dtype, semantics=semantics, quantization=quantization)
+            applied[str(tensor_name)] = list(shape)
+        g.metadata["shape_overrides"] = applied
 
     # Annotate Dense features from weight shapes
     annotate_dense_features(g)

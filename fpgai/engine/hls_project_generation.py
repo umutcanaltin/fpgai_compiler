@@ -24,6 +24,7 @@ from fpgai.backends.hls.emit.layers_conv import emit_conv_h, emit_conv_cpp
 from fpgai.backends.hls.emit.layers_pool import emit_pool_h, emit_pool_cpp
 from fpgai.backends.hls.emit.layers_activations import emit_activations_h, emit_activations_cpp
 from fpgai.backends.hls.emit.layers_batchnorm import emit_batchnorm_h, emit_batchnorm_cpp
+from fpgai.backends.hls.emit.layers_quantization import emit_quantization_h
 from fpgai.backends.hls.emit.params_h import emit_params_h
 from fpgai.backends.hls.emit.params_cpp import emit_params_cpp
 from fpgai.backends.hls.emit.weights_runtime_h import emit_weights_runtime_h
@@ -32,6 +33,7 @@ from fpgai.backends.hls.emit.csim_tcl import emit_csim_tcl
 from fpgai.backends.hls.emit.csim_train_tcl import emit_csim_train_tcl
 from fpgai.backends.hls.testbench import emit_tb_cpp
 from fpgai.backends.hls.testbench_train import emit_tb_train_cpp
+from fpgai.engine.training_graph_utils import training_parameter_word_count
 
 
 _cfg_get = get_path
@@ -219,6 +221,7 @@ class HLSProjectGenerationMixin:
             ),
         )
         write_text(layers_inc_dir / "conv.h", emit_conv_h())
+        write_text(layers_inc_dir / "quantization.h", emit_quantization_h())
         write_text(
             layers_src_dir / "conv.cpp",
             self._apply_hls_array_partition_mode(
@@ -311,118 +314,11 @@ class HLSProjectGenerationMixin:
                 else (out_dir / "target.bin").resolve()
             )
 
-            def _try_numel_tensor(name: str) -> int:
-                if not name:
-                    return 0
-
-                try:
-                    t = g.get_tensor(name)
-                except Exception:
-                    t = None
-
-                if t is not None and getattr(t, "shape", None):
-                    return int(np.prod(tuple(int(v) for v in t.shape)))
-
-                if hasattr(g, "constants") and name in getattr(g, "constants", {}):
-                    return int(np.asarray(g.constants[name]).size)
-
-                if hasattr(g, "params") and name in getattr(g, "params", {}):
-                    return int(np.asarray(g.params[name]).size)
-
-                if t is not None:
-                    data = getattr(t, "data", None)
-                    if data is not None:
-                        return int(np.asarray(data).size)
-                    for attr_name in ("initializer", "value", "values"):
-                        if hasattr(t, attr_name):
-                            arr = getattr(t, attr_name)
-                            if arr is not None:
-                                return int(np.asarray(arr).size)
-
-                return 0
-
-            def _attr_numel(op, *keys: str) -> int:
-                attrs = getattr(op, "attrs", {}) or {}
-                for k in keys:
-                    if k not in attrs:
-                        continue
-                    v = attrs[k]
-                    if isinstance(v, str):
-                        n = _try_numel_tensor(v)
-                        if n > 0:
-                            return n
-                    else:
-                        try:
-                            arr = np.asarray(v)
-                            if arr.dtype.kind not in ("U", "S", "O"):
-                                return int(arr.size)
-                        except Exception:
-                            pass
-                return 0
-
-            total_param_words = 0
-            for op in g.ops:
-                if op.op_type == "Dense":
-                    in_f = int(op.attrs.get("in_features") or 0)
-                    out_f = int(op.attrs.get("out_features") or 0)
-
-                    if in_f > 0 and out_f > 0:
-                        total_param_words += out_f * in_f
-                        total_param_words += out_f
-                    else:
-                        w_n = 0
-                        b_n = 0
-                        if len(op.inputs) > 1:
-                            w_n = _try_numel_tensor(op.inputs[1])
-                        if len(op.inputs) > 2:
-                            b_n = _try_numel_tensor(op.inputs[2])
-                        if w_n == 0:
-                            w_n = _attr_numel(op, "weights", "weight", "W", "kernel", "weights_name", "weight_name")
-                        if b_n == 0:
-                            b_n = _attr_numel(op, "bias", "biases", "B", "bias_name")
-                        total_param_words += w_n + b_n
-
-                elif op.op_type == "Conv":
-                    w_n = 0
-                    b_n = 0
-
-                    if len(op.inputs) > 1:
-                        w_n = _try_numel_tensor(op.inputs[1])
-                    if len(op.inputs) > 2:
-                        b_n = _try_numel_tensor(op.inputs[2])
-
-                    if w_n == 0:
-                        w_n = _attr_numel(op, "weights", "weight", "W", "kernel", "weights_name", "weight_name")
-                    if b_n == 0:
-                        b_n = _attr_numel(op, "bias", "biases", "B", "bias_name")
-
-                    total_param_words += w_n + b_n
-
-                elif op.op_type == "BatchNormalization":
-                    xshape = None
-                    try:
-                        xshape = g.get_tensor(op.inputs[0])
-                    except Exception:
-                        xshape = None
-
-                    c = None
-                    if xshape is not None and getattr(xshape, "shape", None):
-                        shp = tuple(int(v) for v in xshape.shape)
-                        if len(shp) > 1 and shp[0] == 1:
-                            shp = shp[1:]
-                        if len(shp) == 3:
-                            c = int(shp[0])
-
-                    if c is None:
-                        gamma_n = 0
-                        if len(op.inputs) > 1:
-                            gamma_n = _try_numel_tensor(op.inputs[1])
-                        if gamma_n == 0:
-                            gamma_n = _attr_numel(op, "scale", "gamma", "scale_name", "gamma_name")
-                        c = gamma_n if gamma_n > 0 else None
-
-                    if c is not None:
-                        total_param_words += 2 * c
+            # Keep the CSim parameter stream contract aligned with the same
+            # semantic layerwise inventory used by training code generation.
+            # This includes MatMul/Gather/norm parameters as well as the legacy
+            # Dense/Conv/BatchNorm families and avoids model-specific counting.
+            total_param_words = training_parameter_word_count(g)
 
             if emit_testbench:
                 emit_tb_train_cpp(
@@ -463,18 +359,40 @@ class HLSProjectGenerationMixin:
                     ),
                 )
         else:
-            write_text(
-                src_dir / f"{top_name}.cpp",
-                emit_top_cpp(
+            # Preserve branch-aware/operator-aware lowering in the final compiler
+            # artifact. emit_hls_stub may choose the DAG emitter, so this later
+            # compiler pass must make the same decision rather than overwriting
+            # the generated top with the legacy linear emitter.
+            from fpgai.ir.liveness import analyze_tensor_liveness
+            from fpgai.backends.hls.codegen import _requires_dag_inference_codegen
+
+            tensor_liveness = analyze_tensor_liveness(g)
+            if _requires_dag_inference_codegen(g, tensor_liveness) and hasattr(g, "get_tensor"):
+                from fpgai.backends.hls.buffer_allocation import build_hls_buffer_allocation
+                from fpgai.backends.hls.emit.dag_top_cpp import emit_dag_top_cpp
+
+                final_top_source = emit_dag_top_cpp(
+                    graph=g,
+                    top_name=top_name,
+                    weights_mode=weights_mode,
+                    raw_cfg=self.cfg.raw,
+                    tensor_liveness=tensor_liveness,
+                    buffer_allocation=build_hls_buffer_allocation(
+                        g, raw_cfg=self.cfg.raw, tensor_liveness=tensor_liveness
+                    ),
+                )
+            else:
+                final_top_source = emit_top_cpp(
                     g,
                     top_name=top_name,
                     weights_mode=weights_mode,
                     compile_plan=compile_plan,
                     memory_plan=memory_plan,
                     communication_plan=communication_plan,
-                raw_cfg=self.cfg.raw,
-                ),
-            )
+                    raw_cfg=self.cfg.raw,
+                )
+
+            write_text(src_dir / f"{top_name}.cpp", final_top_source)
 
             x_name = g.inputs[0]
             y_name = g.outputs[0]

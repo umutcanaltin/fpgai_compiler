@@ -1,0 +1,102 @@
+version: 1
+benchmark:
+  title: FPGAI Final Hardware Validation Campaign
+  stage: hardware_validation
+  result_policy: artifact_first
+  compiler_feature_freeze: true
+  architecture_sweeps_are_compiler_feature: false
+inputs:
+  experiments:
+    ir_inference_trace:
+      kind: compile
+      config: configs/examples/ir_architecture_trace_inference.yml
+      required_artifacts:
+      - manifest.json
+      - ir/resolved_ir.json
+      - reports/hardware_knob_contract.json
+      - reports/generated_cpp_validation.json
+    ir_training_trace:
+      kind: compile
+      config: configs/examples/ir_training_trace.yml
+      required_artifacts:
+      - manifest.json
+      - ir/resolved_ir.json
+      - training/training_plan.json
+      - reports/hardware_knob_contract.json
+    mlp_mnist:
+      kind: compile
+      config: configs/suite/mlp_mnist.yml
+      required_artifacts:
+      - manifest.json
+      - ir/resolved_ir.json
+      - reports/hls_synthesis_report.json
+      - reports/estimate_vs_hls.json
+    cnn_mnist:
+      kind: compile
+      config: configs/suite/cnn_mnist.yml
+      required_artifacts:
+      - manifest.json
+      - ir/resolved_ir.json
+      - reports/hls_synthesis_report.json
+      - reports/estimate_vs_hls.json
+    yolo_like_detector:
+      kind: compile
+      config: configs/suite/tiny_yolo_like.yml
+      required_artifacts:
+      - manifest.json
+      - ir/resolved_ir.json
+      - reports/hls_synthesis_report.json
+      - reports/estimate_vs_hls.json
+    transformer_training_layerwise:
+      kind: compile
+      config: configs/examples/training_transformer_layerwise.yml
+      required_artifacts:
+      - manifest.json
+      - ir/resolved_ir.json
+      - training/training_plan.json
+      - reports/hls_synthesis_report.json
+    transformer_training_phase_shared:
+      kind: compile
+      config: configs/examples/training_transformer_phase_shared.yml
+      required_artifacts:
+      - manifest.json
+      - ir/resolved_ir.json
+      - training/training_plan.json
+      - reports/hls_synthesis_report.json
+    hardware_knob_ablation: configs/sweeps/hardware_knob_validation.yml
+    memory_ablation: configs/sweeps/memory_strategy.yml
+    pipeline_ablation: configs/sweeps/pipeline_policy_strength.yml
+    parallelism_ablation: configs/sweeps/parallelism_feasible_envelope.yml
+    training_learning_ablation: configs/sweeps/training_multi_epoch_convergence.yml
+  artifacts:
+    master_json: master_results.json
+    master_csv: master_results.csv
+    master_markdown: master_results.md
+    schema_json: schema/master_result_schema.json
+    schema_markdown: schema/master_result_schema.md
+  frontends:
+    jax_python: examples/frontends/jax_linear.py
+    tensorflow_python: examples/frontends/tensorflow_linear.py
+    pytorch_python: examples/frontends/pytorch_linear.py
+    onnx_python: examples/frontends/onnx_linear.py
+  reference_architectures:
+    llm_like_gqa: examples/reference/architectures/llm_like_gqa_decoder.yml
+    llm_like_mha: examples/reference/architectures/llm_like_mha_decoder.yml
+    yolo_like_multiscale: examples/reference/architectures/yolo_like_multiscale_detector.yml
+    single_stage_detector: examples/reference/architectures/single_stage_detector.yml
+validation_levels:
+  static_validation: generated C++/HLS, resolved IR, movement, and runtime-package
+    artifacts are present and internally validated
+  hls_synthesis: Vitis HLS synthesis produced and FPGAI parsed a tool report
+  vivado_implementation: Vivado implementation produced utilization and timing reports
+  board_runtime: FPGA runtime execution produced measured runtime/numerical artifacts
+limitations:
+- Named-model claims are not implied by YOLO-like or transformer-like reference workloads.
+- Explicit compile entries are fixed user-selected architectures, not compiler design-space
+  sweeps.
+- Ablation sweep YAMLs under configs/sweeps are experiment methodology only and are
+  not a normal FPGAI compiler feature.
+- HLS synthesis, Vivado implementation, and board runtime status must come from their
+  corresponding tool/runtime artifacts; static artifacts do not imply physical validation.
+- Vivado bridge/implementation should be run on selected HLS-valid campaign outputs
+  after HLS results are reviewed, rather than blindly implementing every design point.

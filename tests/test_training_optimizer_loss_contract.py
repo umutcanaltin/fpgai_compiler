@@ -59,7 +59,7 @@ def test_training_sgd_optimizer_loss_contract_reports_default_no_state(tmp_path:
     raw.setdefault("pipeline", {})["mode"] = "training_on_device"
     raw.setdefault("training", {}).setdefault("optimizer", {})["type"] = "sgd"
     raw["training"].setdefault("loss", {})["type"] = "mse"
-    raw["training"].setdefault("storage", {}).pop("optimizer_state", None)
+    raw.setdefault("memory", {}).pop("optimizer_state_storage", None)
     _cpp_only(raw)
 
     result = _compile_raw(raw, tmp_path)
@@ -80,7 +80,7 @@ def test_training_optimizer_state_bram_import_export_generates_port_storage_and_
     raw.setdefault("project", {})["out_dir"] = str(tmp_path / "training_optimizer_state_bram")
     raw.setdefault("pipeline", {})["mode"] = "training_on_device"
     raw.setdefault("training", {}).setdefault("optimizer", {})["type"] = "sgd"
-    raw["training"].setdefault("storage", {})["optimizer_state"] = "bram"
+    raw.setdefault("memory", {})["optimizer_state_storage"] = "bram"
     dm = raw.setdefault("data_movement", {}).setdefault("optimizer_state", {})
     dm["import"] = {"interface": "m_axi", "transport": "ps_runtime", "policy": "full"}
     dm["export"] = {"interface": "m_axi", "transport": "ps_runtime", "policy": "full"}
@@ -106,7 +106,7 @@ def test_training_optimizer_state_uram_storage_generates_uram_binding(tmp_path: 
     raw.setdefault("project", {})["out_dir"] = str(tmp_path / "training_optimizer_state_uram")
     raw.setdefault("pipeline", {})["mode"] = "training_on_device"
     raw.setdefault("training", {}).setdefault("optimizer", {})["type"] = "sgd"
-    raw["training"].setdefault("storage", {})["optimizer_state"] = "uram"
+    raw.setdefault("memory", {})["optimizer_state_storage"] = "uram"
     _cpp_only(raw)
 
     result = _compile_raw(raw, tmp_path)
@@ -121,7 +121,7 @@ def test_training_optimizer_state_ddr_tiled_generates_m_axi_tile_and_reports(tmp
     raw.setdefault("project", {})["out_dir"] = str(tmp_path / "training_optimizer_state_ddr_tiled")
     raw.setdefault("pipeline", {})["mode"] = "training_on_device"
     raw.setdefault("training", {}).setdefault("optimizer", {})["type"] = "sgd"
-    raw["training"].setdefault("storage", {})["optimizer_state"] = "ddr"
+    raw.setdefault("memory", {})["optimizer_state_storage"] = "ddr"
     dm = raw.setdefault("data_movement", {}).setdefault("optimizer_state", {})
     dm["import"] = {"interface": "m_axi", "transport": "ps_runtime", "policy": "tiled"}
     dm["export"] = {"interface": "m_axi", "transport": "ps_runtime", "policy": "tiled"}
@@ -150,7 +150,7 @@ def test_training_momentum_optimizer_generates_real_update_kernel_and_reports(tm
     opt_cfg["type"] = "momentum"
     opt_cfg["learning_rate"] = 0.001
     opt_cfg["momentum"] = 0.9
-    raw["training"].setdefault("storage", {})["optimizer_state"] = "bram"
+    raw.setdefault("memory", {})["optimizer_state_storage"] = "bram"
     _cpp_only(raw)
 
     result = _compile_raw(raw, tmp_path)
@@ -193,7 +193,7 @@ def test_training_adam_optimizer_generates_real_update_kernel_and_reports(tmp_pa
     opt_cfg["beta1"] = 0.9
     opt_cfg["beta2"] = 0.999
     opt_cfg["epsilon"] = 1.0e-8
-    raw["training"].setdefault("storage", {})["optimizer_state"] = "bram"
+    raw.setdefault("memory", {})["optimizer_state_storage"] = "bram"
     _cpp_only(raw)
 
     result = _compile_raw(raw, tmp_path)
@@ -230,7 +230,7 @@ def test_training_adam_optimizer_state_export_generates_capture_mode_and_reports
     opt_cfg["beta1"] = 0.9
     opt_cfg["beta2"] = 0.999
     opt_cfg["epsilon"] = 1.0e-8
-    raw["training"].setdefault("storage", {})["optimizer_state"] = "bram"
+    raw.setdefault("memory", {})["optimizer_state_storage"] = "bram"
     dm = raw.setdefault("data_movement", {}).setdefault("optimizer_state", {})
     dm["export"] = {"interface": "m_axi", "transport": "ps_runtime", "policy": "full"}
     _cpp_only(raw)
@@ -385,7 +385,7 @@ def test_stateful_optimizer_rejects_none_storage(tmp_path: Path) -> None:
     raw.setdefault("project", {})["out_dir"] = str(tmp_path / "momentum_without_state")
     raw.setdefault("pipeline", {})["mode"] = "training_on_device"
     raw.setdefault("training", {}).setdefault("optimizer", {})["type"] = "momentum"
-    raw["training"].setdefault("storage", {})["optimizer_state"] = "none"
+    raw.setdefault("memory", {})["optimizer_state_storage"] = "none"
     _cpp_only(raw)
 
     with pytest.raises(ValueError, match="requires persistent optimizer state"):
@@ -414,7 +414,7 @@ def test_optimizer_parameter_ranges_are_validated(
     optimizer = raw.setdefault("training", {}).setdefault("optimizer", {})
     optimizer["type"] = optimizer_type
     optimizer[field] = value
-    raw["training"].setdefault("storage", {})["optimizer_state"] = "bram"
+    raw.setdefault("memory", {})["optimizer_state_storage"] = "bram"
     _cpp_only(raw)
 
     with pytest.raises(ValueError, match=message):
