@@ -40,6 +40,25 @@ def execute_graph_reference_trace(graph: Graph, inputs: Mapping[str, np.ndarray]
         if op.op_type == "Transpose":
             perm = tuple(int(x) for x in attrs.get("perm", ()))
             out = np.transpose(ins[0], axes=perm or None)
+        elif op.op_type == "Broadcast":
+            target_spec = graph.get_tensor(op.outputs[0])
+            if target_spec is None or not getattr(target_spec, "shape", None):
+                raise ValueError(f"REF005: Broadcast output tensor metadata is missing for {op.outputs[0]!r}")
+            target = tuple(int(v) for v in target_spec.shape)
+            source = np.asarray(ins[0], dtype=np.float32)
+            dims = attrs.get("broadcast_dimensions", attrs.get("dimensions", None))
+            if dims is None:
+                out = np.broadcast_to(source, target)
+            else:
+                dims = tuple(int(v) for v in dims)
+                if len(dims) != source.ndim or len(set(dims)) != len(dims) or any(v < 0 or v >= len(target) for v in dims):
+                    raise ValueError(
+                        f"REF006: Broadcast dimensions {dims!r} are incompatible with source rank {source.ndim} and target {target!r}"
+                    )
+                reshape = [1] * len(target)
+                for source_axis, target_axis in enumerate(dims):
+                    reshape[target_axis] = int(source.shape[source_axis])
+                out = np.broadcast_to(source.reshape(tuple(reshape)), target)
         elif op.op_type == "MatMul":
             out = np.matmul(ins[0], ins[1])
         elif op.op_type == "Mul":

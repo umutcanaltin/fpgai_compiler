@@ -1064,6 +1064,14 @@ def _validate_validation_cfg(
             for map_key in ("reference", "compare", "tolerances"):
                 if map_key in numeric and not isinstance(numeric.get(map_key), dict):
                     issues.append(ConfigIssue(f"validation.numeric.{map_key}", "Expected a mapping"))
+            reference_cfg = numeric.get("reference")
+            if isinstance(reference_cfg, dict):
+                for key in sorted(set(reference_cfg) - {"source", "compare_ir", "bundle"}):
+                    issues.append(ConfigIssue(f"validation.numeric.reference.{key}", f"Unknown reference field {key!r}"))
+                if "compare_ir" in reference_cfg and not isinstance(reference_cfg.get("compare_ir"), bool):
+                    issues.append(ConfigIssue("validation.numeric.reference.compare_ir", "Expected a boolean"))
+                if "bundle" in reference_cfg and not isinstance(reference_cfg.get("bundle"), str):
+                    issues.append(ConfigIssue("validation.numeric.reference.bundle", "Expected a path string"))
             probes = numeric.get("probes")
             if probes is not None:
                 if not isinstance(probes, dict):

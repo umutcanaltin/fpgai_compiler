@@ -84,3 +84,26 @@ def test_tensor_ports_v1_external_project_generation(tmp_path: Path) -> None:
     assert "const float rhs[4]" in text
     assert "float output[4]" in text
     assert "add_tensor_ports_hls(lhs, rhs, output, 4);" in text
+
+
+def test_external_hls_standalone_export_maps_architecture_into_real_call(tmp_path: Path):
+    from dataclasses import replace
+    from fpgai.implementations import implementation_contract_from_manifest
+    from fpgai.implementations.hls_integration import ExternalHLSProjectRequest, emit_external_hls_operator_project
+
+    contract = implementation_contract_from_manifest(Path("examples/packages/scale_bias_hls"))
+    contract = replace(contract, architecture_mapping={"parallelism.pe": {"target": "hls_attribute", "name": "scale"}})
+    result = emit_external_hls_operator_project(ExternalHLSProjectRequest(
+        out_dir=tmp_path / "architecture_hls",
+        contract=contract,
+        operator_name="ScaleBias",
+        operator_attributes={"scale": 2.0, "bias": 1.0},
+        input_words=4,
+        output_words=4,
+        architecture={"parallelism": {"pe": 8}},
+    ))
+    assert result.ok
+    source = result.top_cpp.read_text(encoding="utf-8")
+    assert "scale_bias_hls(input, output, 4, 8.0f, 1.0f);" in source
+    report = __import__("json").loads(result.report_path.read_text(encoding="utf-8"))
+    assert report["operator"]["resolved_architecture_attributes"]["scale"] == 8

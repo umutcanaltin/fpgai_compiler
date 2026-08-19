@@ -17,7 +17,23 @@ python -m fpgai.cli frontend import \
   --out build/examples/frontends/jax_import
 ```
 
-The JAX model uses JAX's StableHLO export path, which FPGAI imports through its existing StableHLO/MLIR frontend.
+The JAX model uses JAX's StableHLO export path, which FPGAI imports through its existing StableHLO/MLIR frontend. The exporter also writes a deterministic `fpgai.frontend-reference/v1` bundle beside the MLIR file (`jax_linear.fpgai-reference/reference_manifest.json`). FPGAI auto-discovers that bundle, so numeric validation compares the original JAX output with the functional FPGAI IR while MLIR/StableHLO remains the compiler ingress path.
+
+The same reference-bundle contract can be produced by TensorFlow, PyTorch, custom Python/MLIR exporters, or other frontends without adding framework-specific branches to FPGAI. An explicit bundle may also be selected in YAML:
+
+```yaml
+validation:
+  numeric:
+    enabled: true
+    policy: enforce
+    levels: [model, layer, intermediate, state]
+    reference:
+      source: framework
+      compare_ir: true
+      bundle: build/examples/frontends/jax_linear.fpgai-reference/reference_manifest.json
+```
+
+A model-only bundle validates the model boundary. If `layer`/`intermediate` is requested, the producer must also provide the corresponding captured intermediate tensors; FPGAI reports insufficient reference coverage instead of silently claiming layerwise validation.
 
 ## PyTorch -> ONNX -> FPGAI IR
 

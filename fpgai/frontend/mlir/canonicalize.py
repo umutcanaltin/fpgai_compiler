@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Dict
 
+import numpy as np
+
 from fpgai.ir import Graph
 from fpgai.ir.ops import Op
 
@@ -297,6 +299,55 @@ def canonicalize_stablehlo_layernorm(graph: Graph) -> int:
 
 
 
+def canonicalize_constant_broadcasts(graph: Graph) -> int:
+    """Fold StableHLO Broadcast of compile-time constants into FPGAI constants.
+
+    This preserves functional semantics while avoiding a runtime hardware block for
+    compile-time broadcast_in_dim values such as framework-exported bias tensors.
+    Non-constant Broadcast operations remain explicit FPGAI operators.
+    """
+    count = 0
+    for op in list(graph.ops):
+        if op.op_type != "Broadcast" or len(op.inputs) != 1 or len(op.outputs) != 1:
+            continue
+        source_name = str(op.inputs[0])
+        output_name = str(op.outputs[0])
+        if source_name not in graph.constants:
+            continue
+        target_spec = graph.get_tensor(output_name)
+        if target_spec is None or not getattr(target_spec, "shape", None):
+            continue
+        source = np.asarray(graph.constants[source_name])
+        target = tuple(int(v) for v in target_spec.shape)
+        dims = (op.attrs or {}).get("broadcast_dimensions", (op.attrs or {}).get("dimensions", None))
+        try:
+            if dims is None:
+                expanded = np.broadcast_to(source, target)
+            else:
+                dims = tuple(int(v) for v in dims)
+                if len(dims) != source.ndim or len(set(dims)) != len(dims):
+                    continue
+                if any(v < 0 or v >= len(target) for v in dims):
+                    continue
+                reshape = [1] * len(target)
+                for source_axis, target_axis in enumerate(dims):
+                    reshape[target_axis] = int(source.shape[source_axis])
+                expanded = np.broadcast_to(source.reshape(tuple(reshape)), target)
+        except (TypeError, ValueError):
+            continue
+        graph.constants[output_name] = np.asarray(expanded, dtype=source.dtype).copy()
+        count += 1
+    if count:
+        removed = eliminate_dead_ops(graph)
+        graph.metadata.setdefault("canonicalizations", []).append({
+            "pass": "stablehlo_constant_broadcast",
+            "count": count,
+            "dead_ops_removed": removed,
+            "schema": "fpgai.mlir-canonicalization/v1",
+        })
+    return count
+
+
 def canonicalize_scalar_constants(graph: Graph) -> int:
     """Fold scalar arithmetic emitted around framework attention scaling."""
     import math
@@ -527,6 +578,7 @@ def canonicalize_batch1_dot_layout(graph: Graph) -> int:
 
 
 def canonicalize_stablehlo(graph: Graph) -> Graph:
+    broadcast_folded = canonicalize_constant_broadcasts(graph)
     folded = canonicalize_scalar_constants(graph)
     rewired = canonicalize_scalar_broadcast_elementwise(graph)
     canonicalize_batch1_dot_layout(graph)

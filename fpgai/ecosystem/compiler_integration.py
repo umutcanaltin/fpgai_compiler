@@ -202,9 +202,18 @@ def compile_external_hls_if_configured(compiler: Any, *, out_dir: Path, build_st
             selection_cfg = {**dict(selection_cfg), **dict(node_preferences[op.name])}
         if not isinstance(selection_cfg, Mapping):
             raise RuntimeError("Implementation selection must be a mapping")
+        requested_backend = str(selection_cfg.get("backend", "vitis_hls")).strip().lower()
+        if requested_backend not in {"vitis_hls", "hls", "hls_cpp"}:
+            raise RuntimeError(
+                f"ECOCOMP001: normal full-graph Ecosystem composition currently supports external Vitis-HLS nodes; "
+                f"node {op.name!r} requested backend {requested_backend!r}. "
+                "VHDL/RTL implementation packages are supported by standalone FPGAI block export and the maintained "
+                "mixed-backend physical project layer, but are not silently substituted into this HLS composition path."
+            )
+        normalized_backend = "vitis_hls" if requested_backend in {"hls", "hls_cpp", "vitis_hls"} else requested_backend
         compatibility = CompatibilityRequest(
             mode="training" if training_mode else "inference",
-            backend=str(selection_cfg.get("backend", "vitis_hls")),
+            backend=normalized_backend,
             language="hls_cpp",
             board=target_board or None,
             precision=precision,

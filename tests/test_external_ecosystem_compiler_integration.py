@@ -233,3 +233,47 @@ implementations:
     assert numeric["ecosystem"]["forward"]["status"] == "passed"
     assert numeric["ecosystem"]["backward_input"]["status"] == "passed"
     assert manifest["status"] == "passed"
+
+
+def test_full_graph_external_vhdl_selection_is_explicitly_not_silently_hls(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[1]
+    model_path = tmp_path / "scale_bias_vhdl.onnx"
+    out_dir = tmp_path / "out_vhdl"
+    _write_model(model_path)
+    config_path = tmp_path / "compile_vhdl.yml"
+    config_path.write_text(
+        f"""
+version: 1
+project: {{out_dir: {out_dir}, clean: true}}
+model: {{path: {model_path}}}
+pipeline: {{mode: inference}}
+operators: {{supported: [ScaleBias]}}
+numerics: {{kind: float}}
+targets:
+  platform:
+    board: kv260
+    part: xck26-sfvc784-2LV-c
+    clocks: [{{name: pl_clk0, target_mhz: 200}}]
+build:
+  stages: {{cpp: true, hls_project: true, hls_synthesis: false, reports: true}}
+ecosystem:
+  enabled: true
+  project_root: {repo}
+  package_directories: [{repo / 'examples/packages'}]
+  strict_discovery: true
+  operator_packages:
+    enable: [community.scale_bias_operator]
+  trust:
+    community.scale_bias_operator: approved_for_reference
+implementations:
+  enable: [community.scale_bias_vhdl]
+  operators:
+    community.operator.scale_bias:
+      backend: vhdl
+      preferred: [community.scale_bias_vhdl]
+      allow_fallback: false
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="ECOCOMP001"):
+        Compiler.from_yaml(str(config_path)).compile()

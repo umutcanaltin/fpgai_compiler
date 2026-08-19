@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from fpgai.implementations.implementation_contract import ImplementationContract
+from fpgai.implementations.implementation_contract import ImplementationContract, resolve_architecture_parameters
 from .abi import HLSFlatArrayABI, HLSTensorPortsABI, parse_hls_abi, validate_hls_integration_contract
 from .errors import HLSIntegrationIssue
 from .types import ExternalHLSProjectRequest, ExternalHLSProjectResult
@@ -86,6 +86,13 @@ def _ports(request: ExternalHLSProjectRequest, abi: HLSFlatArrayABI | HLSTensorP
     )
 
 
+def _resolved_operator_attributes(request: ExternalHLSProjectRequest) -> dict[str, Any]:
+    values = dict(request.operator_attributes)
+    mapped = resolve_architecture_parameters(request.contract, request.architecture).get("hls_attribute", {})
+    values.update(mapped)
+    return values
+
+
 def _wrapper_header(request: ExternalHLSProjectRequest, abi: HLSFlatArrayABI | HLSTensorPortsABI) -> str:
     params = []
     for name, direction, words, scalar_type in _ports(request, abi):
@@ -108,7 +115,8 @@ def _package_declaration(contract: ImplementationContract, abi: HLSFlatArrayABI 
 
 
 def _wrapper_source(request: ExternalHLSProjectRequest, abi: HLSFlatArrayABI | HLSTensorPortsABI) -> str:
-    values = [_cpp_literal(request.operator_attributes.get(a.name, a.default), a.cpp_type) for a in abi.attributes]
+    resolved_attributes = _resolved_operator_attributes(request)
+    values = [_cpp_literal(resolved_attributes.get(a.name, a.default), a.cpp_type) for a in abi.attributes]
     ports = _ports(request, abi)
     if isinstance(abi, HLSFlatArrayABI):
         args = ['input', 'output', str(request.output_words), *values]
@@ -135,7 +143,8 @@ def _wrapper_source(request: ExternalHLSProjectRequest, abi: HLSFlatArrayABI | H
 
 
 def _flat_testbench(request: ExternalHLSProjectRequest, abi: HLSFlatArrayABI) -> str:
-    attrs = {a.name: request.operator_attributes.get(a.name, a.default) for a in abi.attributes}
+    resolved_attributes = _resolved_operator_attributes(request)
+    attrs = {a.name: resolved_attributes.get(a.name, a.default) for a in abi.attributes}
     scale = float(attrs.get('scale', 1.0))
     bias = float(attrs.get('bias', 0.0))
     return '\n'.join([
@@ -223,7 +232,7 @@ def emit_external_hls_operator_project(request: ExternalHLSProjectRequest) -> Ex
         report_path = out_dir / 'reports' / 'external_hls_integration.json'
         report = {
             'schema':'fpgai.external-hls-integration/v1','status':'generated','usage':{'platform_scope':'research','production_path':'morfics'},
-            'operator':{'name':request.operator_name,'attributes':dict(request.operator_attributes)},'implementation':request.contract.to_dict(),
+            'operator':{'name':request.operator_name,'attributes':dict(request.operator_attributes),'resolved_architecture_attributes':_resolved_operator_attributes(request)},'implementation':request.contract.to_dict(),
             'abi':{'name':abi.abi,'scalar_type':abi.scalar_type,'input_words':request.input_words,'output_words':request.output_words,'inputs':[p.name for p in getattr(abi,'inputs',())],'outputs':[p.name for p in getattr(abi,'outputs',())]},
             'ownership':{'package_sources':'user_owned_source_copied_read_only','generated_wrapper':'compiler_owned','package_root_modified':False},
             'artifacts':[{'path':str(p),'sha256':_sha256(p),'kind':'copied_source'} for p in copied_sources]+[{'path':str(p),'sha256':_sha256(p),'kind':'copied_header'} for p in copied_headers]+[{'path':str(p),'sha256':_sha256(p),'kind':'generated'} for p in (header,top_cpp,tb_cpp,run_tcl)],

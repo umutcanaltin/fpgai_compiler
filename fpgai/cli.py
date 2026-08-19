@@ -970,7 +970,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     export_block.add_argument("--config", required=True, help="Compile configuration used to resolve the source model and architecture")
     export_block.add_argument("--op", action="append", required=True, help="Operator name to include; may be repeated")
-    export_block.add_argument("--format", default="hls", choices=["hls", "hls_cpp"], help="Generated backend source format")
+    export_block.add_argument("--format", default="hls", choices=["hls", "hls_cpp", "vhdl"], help="Generated backend source format; VHDL resolves a compatible implementation package without running Vivado")
     export_block.add_argument("--out", required=True, help="Standalone export directory")
 
     benchmark_parser = subparsers.add_parser(
@@ -1256,7 +1256,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     validate_correctness_parser = validate_subparsers.add_parser(
         "correctness",
-        help="Run inference correctness validation for a compile config",
+        help="Run inference or on-device training numeric correctness validation for a compile config",
     )
     validate_correctness_parser.add_argument(
         "--config",

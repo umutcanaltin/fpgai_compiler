@@ -22,6 +22,7 @@ class ExternalHLSProjectRequest:
     top_name: str = "deeplearn"
     part: str = "xck26-sfvc784-2LV-c"
     clock_period_ns: float = 5.0
+    architecture: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)

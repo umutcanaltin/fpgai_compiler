@@ -72,3 +72,15 @@ def test_numeric_validation_report_records_compiler_validation_contract(tmp_path
     assert contract["levels"] == ["model", "layer", "intermediate", "state"]
     assert contract["reference"]["compare_ir"] is True
     assert contract["backends"] == ["hls_csim", "rtl_sim"]
+
+
+def test_numeric_reference_bundle_contract_is_public_config(tmp_path):
+    from fpgai.config.loader import load_config
+    model = tmp_path / "model.mlir"
+    model.write_text("module {}\n")
+    bundle = tmp_path / "reference_manifest.json"
+    bundle.write_text('{"schema":"fpgai.frontend-reference/v1"}')
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text(f'''\nversion: 1\nmodel:\n  path: {model}\n  format: stablehlo\npipeline: {{mode: inference}}\noperators: {{supported: [Relu]}}\nvalidation:\n  numeric:\n    enabled: true\n    reference:\n      source: framework\n      compare_ir: true\n      bundle: {bundle}\n''')
+    cfg = load_config(str(cfg_path))
+    assert cfg.raw["validation"]["numeric"]["reference"]["bundle"] == str(bundle)
