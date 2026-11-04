@@ -59,3 +59,11 @@ The following observations are **not interchangeable**:
 Do not infer achieved frequency from a requested HLS clock. Some source configurations are numerically correct yet do not satisfy effective HLS timing. Earlier physical research includes out-of-context placed/routed cases, but those do not qualify all newer multi-operator experiments.
 
 For evidence methods see [Scientific reproducibility](SCIENTIFIC_REPRODUCIBILITY.md). For simple valid examples, begin with [Using FPGAI](USING_FPGAI.md).
+
+
+### Frozen ONNX weights and biases
+
+- Supported static float32 ONNX initializers and standard float32 Constant tensors are retained as Model IR constant payloads and emitted as `static const data_t` HLS C++ arrays; separately passing a weights file is not required for these supported models.
+- The generated RTL may implement these constants as block ROM/BRAM, distributed LUT structures or optimized logic, subject to synthesis. Fixed-point conversion (`ap_fixed`) means float32 values are not guaranteed to be represented exactly.
+- `fpgai-audit-weights --onnx ORIGINAL.onnx --case EXISTING_CASE` independently checks the exact generated C++ constant literals against the ONNX input and source manifest, without exporting the values, rerunning tools or modifying original results.
+- This audit **does not** establish final bitstream memory-cell values, FPGA programming, board execution, hot-loading new weights, or trained-model accuracy; a model-level Vitis/Vivado OOC result is not a board-deployed accelerator.

@@ -9,6 +9,12 @@
 
 This is the **public-facing project change summary**, not a replacement for the source-pinned scientific experiment archive. It does not claim a released software version or an approved open-source license.
 
+## Experimental ONNX weight-provenance audit — feature branch
+
+- Added a read-only `fpgai-audit-weights` command that checks the exact ONNX model hash, functional Model IR fingerprint, generated source hash, and every float32 initializer/Constant HLS C++ literal.
+- Reports aggregate parameter counts and a payload digest only; distinguishes source-level frozen weight evidence from fixed-point numerical equivalence, RTL-cell memory value verification and board deployment.
+- Added mutation and source-provenance regression tests; native tests remain workstation-only.
+
 ## Experimental disclosed OOC advisory observation — feature branch
 
 - Added a narrow, opt-in `--accept-ooc-advisories` path for timing-met, source-attested E4 OOC designs with only DPIP-2/DPOP-3/DPOP-4/RTSTAT-10 warnings. Default strict DRC qualification is unchanged.

@@ -33,6 +33,22 @@ python examples/make_neural_network_onnx.py cnn_pool_dense build/demo/model.onnx
 
 You can optionally provide `--input path/to/samples.npy` containing real representative **float32** samples, and `--labels path/to/labels.npy` for classification. Without `--input`, FPGAI automatically generates one reproducible synthetic smoke input. Passing that sample in C simulation is a compiler-check result **not** a statement about trained-model accuracy on a real dataset.
 
+## Verify original ONNX weights and biases in generated HLS source
+
+For a prepared case, run this **read-only** source audit with the exact ONNX file that was used to build that case:
+
+```bash
+fpgai-audit-weights \
+  --onnx build/demo/cnn_pool_dense.onnx \
+  --case build/neuro_cnn_01
+```
+
+The tool verifies that the original ONNX file and Model IR graph/constant fingerprint match the case's source manifest, that the generated C++ source is unchanged, and that **every emitted `static const data_t` array literal matches the ONNX float32 initializer or Constant tensor**. It reports only tensor counts, element counts and a payload hash, never raw model weights. It neither runs a vendor tool nor modifies the existing case.
+
+An ONNX model with no float32 constant tensors has no preloaded weights to audit; it may still have inputs. The audit concerns only **frozen, embedded parameters**. It does not read back the final RTL memory contents or a physical FPGA. Vitis may represent the constants in LUTs, ROMs or other optimized logic, and `ap_fixed` converts float32 to the configured numerical format. The current default is `ap_fixed<16,6,AP_RND,AP_SAT>`; that is **not** exact float32 storage. A passing generated-source audit + C simulation + source-attested synthesis supports the provenance of compiler-embedded constants, not bit-for-bit physical weight readback or deployed inference.
+
+For a private trained model, pass its original supported, static float32 ONNX file to `fpgai-run --onnx` as usual; the weights need not be supplied separately. They are not runtime-uploaded or reprogrammable through this model-only OOC workflow. Rebuilding after training changes is required. See [supported features](SUPPORTED_FEATURES.md) and the board-deployment limitations below.
+
 ## 3. Point to Vitis and Vivado installations
 
 Specify a **product installation directory**, or the actual program executable:
