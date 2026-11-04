@@ -1,3 +1,18 @@
+## PYNQ-Z2 source-backed PS/DDR read-only audit — feature branch
+
+- User-run second Vivado full-board implementation generated .bit/.hwh,
+  passed +2.311 ns routed slack, and resolved the read-only reset
+  warning. State remains `BOARD_NOT_QUALIFIED` with four independent
+  PSU-DDR critical warnings and RTSTAT-10/REQP-181 DRC observations.
+- Added `fpgai-board-ddr-audit` to verify untouched .bit/.hwh/report
+  hashes, native DDR warning messages and board-preset source values,
+  and compare those values to Xilinx/PYNQ's published PYNQ-Z2 hardware
+  reference (without changing DDR parameters or clearing warnings).
+- Added isolated negative tests for tampered artifacts, missing/changed
+  source warning values, incorrect board identity and symlinked
+  board presets. **The new audit must be tested on the workstation**;
+  no on-device testing or production qualification is claimed.
+
 ## First full PYNQ-Z2 bitstream evidence and qualification hardening — feature branch
 
 - User-run Vivado 2023.2 successfully generated `.bit` and `.hwh`,

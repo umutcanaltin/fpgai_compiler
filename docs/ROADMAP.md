@@ -33,6 +33,12 @@ This document identifies **areas open to contribution**, not promised delivery d
 - Implement a *separate* KV260 MPSoC PS/platform, clock/reset, DMA and Linux
   device-tree/runtime flow only after verifying exact carrier board files and
   OS image. Do not reuse PYNQ-Z2 bitstreams or software indiscriminately.
+- The second native full Vivado build (board_pynq_toy_bit_02) improved routed
+  WNS to +2.311 ns, removed the read-only reset warning and again generated
+  a full .bit/.hwh, but remains BOARD_NOT_QUALIFIED for four PSU DDR critical
+  warnings and three DRC observations. A read-only PS/DDR audit compares
+  the third-party board preset and published PYNQ reference values without
+  changing or approving either configuration.
 - Never mark board operation passed from an OOC E4 report or a generated
   source/Tcl file.
 

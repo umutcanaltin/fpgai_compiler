@@ -106,6 +106,52 @@ configuration, working DMA buffers/AXI-Lite registers, a completed
 transfer with TLAST, and numerical comparison against a separate
 software reference. None is inferred by Vivado's exit code alone.
 
+## Second full Vivado result and read-only PS/DDR source audit
+
+The user's follow-up build `build/board_pynq_toy_bit_02` passed the
+source-only board tests (**47 passed**), completed Vivado implementation
+and generated a second bitstream/HWH. Routing remained complete and routed
+WNS improved from **+2.197 to +2.311 ns**. The attempted write to the
+read-only `proc_sys_reset.C_EXT_RESET_HIGH` was resolved: **BD 41-737
+disappeared**. Four PSU DDR critical warnings and three full-board DRC
+observations (one `RTSTAT-10` Warning and two `REQP-181` Advisories)
+still remain. The preserved actual state is **BOARD_NOT_QUALIFIED**.
+
+A source-backed, read-only DDR audit is now available. It correlates
+the existing Vivado native warning lines with the third-party board
+preset, verifies the .bit, .hwh and four implementation-report hashes,
+and compares source values with the PYNQ project's own published
+PYNQ-Z2 hardware Tcl **without modifying either source**:
+
+~~~bash
+python -m pip install --no-deps -e .
+
+fpgai-board-ddr-audit \
+  --case build/board_pynq_toy_bit_02 \
+  --board-repo "$HOME/Desktop/fpga_board_defs/pynq-supported-board-file"
+~~~
+
+The user's installed third-party `pynq-z2/A.0/preset.xml` contains
+DQS-to-CLK delay (ns) **[-0.051, -0.006, -0.009, -0.033]** for lanes 0–3.
+The public reference source
+[Xilinx/PYNQ Pynq-Z2 hardware Tcl](https://github.com/Xilinx/PYNQ/blob/master/boards/Pynq-Z2/petalinux_bsp/hardware_project/pynqz2.tcl)
+contains **[+0.040, +0.058, -0.009, -0.033]**. This comparison does
+**not** establish that the local board configuration is erroneous;
+verify actual PYNQ-Z2 board revision and reference files before
+considering a different PS preset.
+
+The PS DDR controller is normally initialized by the bootloader before
+Linux starts, while PYNQ overlays program the PL. See
+[AMD Zynq PS/FSBL configuration](https://docs.amd.com/r/en-US/ug821-zynq-7000-swdev/First-Stage-Bootloader).
+That architectural distinction is useful for a future controlled
+on-device experiment but **does not itself verify DDR, DMA or a safe
+deployment**. Do not change the third-party preset, convert critical
+warnings into advisories or program this *unqualified* image merely
+because the audit compares source values. Any physical validation needs
+explicit human acceptance of the exact risks, a booted compatible PYNQ
+image, and actual error-checked DMA inference. The existing PYNQ runtime
+still fails closed for `BOARD_NOT_QUALIFIED`.
+
 ## Hardware path and interface
 
 PS DDR ↔ PS S_AXI_HP0 ↔ SmartConnect ↔ AXI DMA (MM2S/S2MM) ↔ AXI4-Stream adapter ↔ original FPGAI model; PS M_AXI_GP0 controls DMA and accelerator AXI-Lite registers.
