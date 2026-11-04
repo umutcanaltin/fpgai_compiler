@@ -30,6 +30,7 @@ PUBLIC_FILES=frozenset({
     "examples/make_sample_input.py",
     "examples/architecture.json","examples/architecture_scopes.json",
     "docs/README.md","docs/USING_FPGAI.md","docs/ARCHITECTURE.md",
+    "docs/NEUROSCIENTIST_QUICKSTART.md",
     "docs/SUPPORTED_FEATURES.md","docs/SCIENTIFIC_REPRODUCIBILITY.md",
     "docs/COMPILER_OPERATOR_CONTRIBUTION.md",
     "docs/FAQ.md","docs/RELEASE_PREVIEW.md","docs/ROADMAP.md",

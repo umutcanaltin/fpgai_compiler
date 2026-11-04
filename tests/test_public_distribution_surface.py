@@ -34,6 +34,7 @@ def test_gallery_and_community_guides_are_in_clean_room_preview():
         "examples/README.md",
         "tests/test_public_neural_network_examples.py",
         "docs/USING_FPGAI.md","docs/SUPPORTED_FEATURES.md",
+        "docs/NEUROSCIENTIST_QUICKSTART.md",
         ".github/ISSUE_TEMPLATE/bug_report.md",
         ".github/PULL_REQUEST_TEMPLATE.md",
     }

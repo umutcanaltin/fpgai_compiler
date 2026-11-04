@@ -18,6 +18,10 @@ This matrix describes the **research compiler's source capability**, not a guara
 | Toolchains | Explicit opt-in Vitis HLS and Vivado research workflows | Proprietary external tools not bundled; require license, target and independently qualified results |
 | RL research | Separate experimental environment under `rl_environment/` | Frozen for this compiler-paper phase; no claimed trained-agent improvements |
 
+## Automated local execution
+
+The `fpgai-run` onboarding command orchestrates existing source generation, attested C simulation, HLS synthesis, and optional Vivado out-of-context routing for a single supported static ONNX model. The feature does not expand the operator matrix or create board bitstreams. Vendor binaries execute only under `--execute-native`. See [Neuroscientist quickstart](NEUROSCIENTIST_QUICKSTART.md).
+
 ## Runnable multi-layer examples
 
 Three static ONNX networks are provided in the

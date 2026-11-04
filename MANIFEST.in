@@ -12,6 +12,7 @@ include Makefile
 recursive-include examples *.py *.json *.md
 include docs/README.md
 include docs/USING_FPGAI.md
+include docs/NEUROSCIENTIST_QUICKSTART.md
 include docs/ARCHITECTURE.md
 include docs/SUPPORTED_FEATURES.md
 include docs/SCIENTIFIC_REPRODUCIBILITY.md

@@ -1,0 +1,149 @@
+# Run a neural-network model through the FPGAI compiler
+
+This guide is for a researcher who has a **static ONNX model** and wants a single local command to generate HLS C++, run AMD Vitis HLS, and obtain routed Vivado **out-of-context (OOC)** results. It does not require learning vendor GUIs or editing Tcl. The original compiler, generated source and tool reports remain inspectable.
+
+**Scope:** The current workflow generates and evaluates a model-level hardware implementation. It **does not** produce a board bitstream, Linux inference application, AXI DMA subsystem or hardware measurements. A working Vitis/Vivado installation alone cannot supply missing board-specific PS/PL integration.
+
+## 1. Install FPGAI
+
+Use Linux and Python 3.10 or newer:
+
+
+```bash
+git clone https://github.com/umutcanaltin/fpgai_compiler.git
+cd fpgai_compiler
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[onnx,test]"
+```
+
+The Python package provides a new command, `fpgai-run`. No AMD software is bundled by the repository. Install AMD tools separately and comply with the license for each program.
+
+## 2. Choose a supported model
+
+Provide a local ONNX file, for example `models/network.onnx`. This workflow currently accepts one positive-static-shape runtime input and one output, with operators and architecture combinations supported by the existing compiler. Refer to [Supported features](SUPPORTED_FEATURES.md). Unsupported models fail explicitly rather than being silently transformed.
+
+To generate a public synthetic example (no private weights or data):
+
+
+```bash
+mkdir -p build/demo
+python examples/make_neural_network_onnx.py cnn_pool_dense build/demo/model.onnx
+```
+
+You can optionally provide `--input path/to/samples.npy` containing real representative **float32** samples, and `--labels path/to/labels.npy` for classification. Without `--input`, FPGAI automatically generates one reproducible synthetic smoke input. Passing that sample in C simulation is a compiler-check result **not** a statement about trained-model accuracy on a real dataset.
+
+## 3. Point to Vitis and Vivado installations
+
+Specify a **product installation directory**, or the actual program executable:
+
+
+```text
+/tools/Xilinx/Vitis/2023.2
+/tools/Xilinx/Vivado/2023.2
+```
+
+The command detects a `settings64.sh` when present and sources it in a **child process**. You do not need to manually open Vitis/Vivado or source those files in your shell. Tool locations are resolved before source preparation when native execution is requested. If multiple tool versions exist under one common directory, give the specific version directory.
+
+The target FPGA must also be explicit because the tool locations alone cannot identify the silicon. You can use `--board kv260` (which selects the established K26 part) or specify a verified part with `--part`. The selected part is **not** a complete board platform. Source-only mode uses the repository's existing K26 research default if no target was selected; this is only source packaging, not a hardware compatibility assertion.
+
+## 4. Preview without invoking vendor tools
+
+
+```bash
+fpgai-run \
+  --onnx build/demo/model.onnx \
+  --output build/demo/case01 \
+  --board kv260 \
+  --vitis /tools/Xilinx/Vitis/2023.2 \
+  --vivado /tools/Xilinx/Vivado/2023.2 \
+  --plan
+```
+
+Planning is read-only and never executes native tools, creates a case, programs hardware or starts GitHub Actions. Without `--execute-native`, requesting native stages also produces a read-only plan.
+
+## 5. Run one command on your workstation
+
+When you have reviewed the plan and are ready to invoke the locally installed licensed AMD programs:
+
+
+```bash
+fpgai-run \
+  --onnx build/demo/model.onnx \
+  --output build/demo/case01 \
+  --board kv260 \
+  --clock-ns 10 \
+  --vitis /tools/Xilinx/Vitis/2023.2 \
+  --vivado /tools/Xilinx/Vivado/2023.2 \
+  --stage ooc \
+  --execute-native
+```
+
+This one command will:
+
+1. Import ONNX, resolve the compiler's architecture constraints and emit HLS C++.
+2. Generate a matching numerical C-simulation testbench and HLS Tcl.
+3. Initialize the AMD installation environment and run Vitis HLS automatically.
+4. Verify that original HLS evidence exists **and** C simulation passed before launching Vivado.
+5. Stage source-matched ROM initialization data as needed and run out-of-context Vivado synthesis, placement and routing.
+6. Inspect attested routed timing and design-rule reports; report failure if CSim, HLS, route, timing or DRC checks do not qualify.
+
+The command does not claim all ONNX models will synthesize. Actual model support and performance depend on model shape, parameters, numerical precision and your FPGA.
+
+Useful alternatives:
+
+
+```bash
+# HLS-only: Vivado is not needed.
+fpgai-run --onnx models/network.onnx --output build/hls01 \
+  --part xck26-sfvc784-2LV-c \
+  --vitis /tools/Xilinx/Vitis/2023.2 \
+  --stage hls --execute-native
+
+# Generate source/testbench without AMD tools.
+fpgai-run --onnx models/network.onnx --output build/source01 \
+  --stage source
+```
+
+Other options include `--architecture` for JSON architecture mappings, `--tolerance` for fixed-point numerical acceptance, `--clock-ns` for the requested vendor clock, and `--hls-timeout` / `--vivado-timeout` for maximum execution durations.
+
+## 6. Read the results
+
+The case directory contains:
+
+| File or directory | Meaning |
+|---|---|
+| `model.cpp` | Compiler-generated HLS source |
+| `tb.cpp` | Numerical C simulation testbench |
+| `manifest.json` | Source and compiler evidence manifest |
+| `run_hls.tcl` | Generated Vitis script |
+| `vitis_invocation.json` | Native tool invocation receipt |
+| `logs/` | Live Vitis stdout/stderr |
+| `vivado/run_vivado.tcl` | Generated out-of-context implementation script |
+| `vivado/reports/` | Vivado timing, utilization, routing and DRC reports when produced |
+| `vivado/vivado_invocation.json` | Native Vivado receipt when invoked |
+| `user_run_summary.json` | Simplified qualification status and warnings |
+
+The recorded statuses are `SOURCE_READY`, `HLS_QUALIFIED`, `OOC_QUALIFIED`, or an explicit not-qualified failure. Tool exit code zero is **not** enough for qualification. The summary always states `board_bitstream_generated: false` and `device_programmed: false`.
+
+Use **a fresh output directory for every invocation**. The command intentionally refuses to overwrite prior evidence. When using private ONNX weights, remember that generated HLS C++ and the testbench can contain numeric constants. Keep case folders private and under ignored `build/` unless you have permission to share them.
+
+## 7. Validation on the local development PC
+
+From this feature branch, without calling Vitis/Vivado:
+
+
+```bash
+python -m compileall -q src/fpgai_research tests/test_neuroscientist_onboarding.py
+python -m pytest -q \
+  tests/test_neuroscientist_onboarding.py \
+  tests/test_native_tool_identity.py \
+  tests/test_public_distribution_surface.py
+python -m pytest -q
+```
+
+Then run `--plan`, a source-only smoke, and the real native command with installed Vitis/Vivado on the workstation. Preserve the complete logs and `user_run_summary.json` for review before merging this branch. This feature intentionally does **not** add or enable GitHub Actions.
+
+## What remains before board execution?
+
+A verified Vivado OOC implementation is **not** an FPGA bitstream. A deployable KV260/PYNQ/Alveo application still needs explicit board/platform integration, correct AXI/DDR/PS/DMA interfaces, clocks and resets, pins/constraints where applicable, host-side software, packaging and real on-device numerical tests. See [FPGA deployment](FPGA_DEPLOYMENT.md) for that separate work.

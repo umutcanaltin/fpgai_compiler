@@ -4,7 +4,8 @@ from fpgai_research.toolchains.runner import run_tool
 
 def run_vivado(directory: str | Path, *, executable: str = "vivado",
                timeout_seconds: int = 14400,
-               allow_verified_readmem_post_absence: bool = False) -> dict:
+               allow_verified_readmem_post_absence: bool = False,
+               environment: dict[str, str] | None = None) -> dict:
     root = Path(directory)
     if (root/"vivado"/"run_vivado.tcl").is_file():
         root = root/"vivado"
@@ -13,4 +14,5 @@ def run_vivado(directory: str | Path, *, executable: str = "vivado",
                     directory=root,executable=executable,
                     timeout_seconds=timeout_seconds,
                     allow_verified_readmem_post_absence=(
-                        allow_verified_readmem_post_absence))
+                        allow_verified_readmem_post_absence),
+                    environment=environment)

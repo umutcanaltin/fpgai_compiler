@@ -9,6 +9,13 @@
 
 This is the **public-facing project change summary**, not a replacement for the source-pinned scientific experiment archive. It does not claim a released software version or an approved open-source license.
 
+## Experimental feature branch — one-command neuroscientist workflow
+
+- Added a local `fpgai-run` command for ONNX -> HLS source -> Vitis CSim/synthesis -> optional Vivado OOC.
+- Added explicit vendor-installation directory resolution, source-preserving ROM staging, numerical and synthesis qualification gates, and output summaries.
+- Kept native tool invocation opt-in and GitHub Actions disabled; board bitstream/runtime generation remains out of scope.
+- Added source-only regression tests and a workstation validation guide. Results remain subject to local Vitis/Vivado testing before merge.
+
 ## Unreleased — repository onboarding and release preparation (November 2026)
 
 - Added an installable, documented architecture-aware ONNX-to-HLS research compiler quickstart using synthetic data.

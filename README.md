@@ -44,6 +44,10 @@ fpgai-research build/toy.onnx \
 
 Requests that exceed the supported shape, attribute, architecture or target constraints should fail explicitly rather than silently substituting an unrelated implementation. For scope-specific controls see [architecture and CLI guide](docs/USING_FPGAI.md).
 
+## One-command local HLS and Vivado workflow
+
+For supported ONNX networks, the [neuroscientist quickstart](docs/NEUROSCIENTIST_QUICKSTART.md) shows how to supply AMD installation paths and run compiler generation, numerical C simulation, HLS synthesis, and Vivado out-of-context routing through `fpgai-run`. Native execution always requires `--execute-native`; the command never invokes GitHub Actions or generates a board bitstream.
+
 ## Explore complete convolutional networks
 
 In addition to the tiny MatMul–ReLU example, the repository includes

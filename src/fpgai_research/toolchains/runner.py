@@ -59,7 +59,8 @@ def _fingerprints(paths: dict[str, Path]) -> dict[str, tuple[int,str]]:
 
 def run_tool(*, tool: str, argv: list[str], directory: str | Path,
              timeout_seconds: int = 7200, executable: str | None = None,
-             allow_verified_readmem_post_absence: bool = False) -> dict:
+             allow_verified_readmem_post_absence: bool = False,
+             environment: dict[str, str] | None = None) -> dict:
     if tool not in ("vitis_hls", "vivado"):
         raise ValueError("Unknown vendor tool")
     if type(allow_verified_readmem_post_absence) is not bool or (
@@ -98,6 +99,13 @@ def run_tool(*, tool: str, argv: list[str], directory: str | Path,
     started = datetime.now(timezone.utc).isoformat()
     before = time.monotonic()
     env = os.environ.copy()
+    if environment is not None:
+        if (not isinstance(environment, dict)
+                or any(not isinstance(k, str) or not isinstance(v, str)
+                       or not k or "=" in k or "\0" in k or "\0" in v
+                       for k, v in environment.items())):
+            raise ValueError("Invalid explicit native tool environment")
+        env.update(environment)
     env["LC_ALL"] = "C"
     # Stream directly to the same hash-attested log paths while the vendor
     # process is active. capture_output=True previously buffered hours of
@@ -162,7 +170,7 @@ def run_tool(*, tool: str, argv: list[str], directory: str | Path,
     version = None
     try:
         probe = subprocess.run([resolved,"-version"],cwd=cwd,text=True,
-                 capture_output=True,timeout=30,check=False)
+                 capture_output=True,timeout=30,check=False,env=env)
         if probe.returncode == 0:
             version = (probe.stdout or probe.stderr)[:4096]
     except (OSError,subprocess.TimeoutExpired):

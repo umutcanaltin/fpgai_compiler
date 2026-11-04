@@ -4,6 +4,12 @@ FPGAI Research generates HLS-oriented C++ from supported static neural networks.
 
 This guide describes the codebase's **currently implemented 2023.2-oriented command-line flow**. Vendor installation, operating-system requirements, device support, target platform, licenses and compatible board software remain the responsibility of the user.
 
+## One-command onboarding option
+
+If you already have Vitis HLS and Vivado installed, the [neuroscientist quickstart](NEUROSCIENTIST_QUICKSTART.md) describes `fpgai-run`, which accepts installation directories and loads AMD settings automatically in a child process. It can compile and route a supported static ONNX model without manually opening vendor GUIs. Actual vendor execution requires `--execute-native`. This is model-level HLS and out-of-context implementation, not board programming.
+
+The manual environment and native commands below remain available for advanced research and troubleshooting.
+
 ## Who should use which setup?
 
 | Goal | Requires | Does not require |
