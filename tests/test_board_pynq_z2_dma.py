@@ -108,11 +108,18 @@ def test_board_plan_never_runs_vendor_tools_or_writes_output(monkeypatch, tmp_pa
                         lambda case, onnx: _manifest())
     monkeypatch.setattr(cli, "resolve_vendor_tool",
                         lambda *args, **kwargs: pytest.fail("Vendor resolved in plan"))
-    (tmp_path / "original").mkdir()
+    original = tmp_path / "original"
+    original.mkdir()
+    # Even in a mocked read-only plan, the original provenance manifest
+    # must exist. It is checked before allocating a new board build folder.
+    manifest_path = original / "manifest.json"
+    manifest_path.write_text(json.dumps(_manifest()))
+    manifest_before = manifest_path.read_bytes()
     (tmp_path / "original.onnx").write_bytes(b"fake-only-plan")
     args = _args(tmp_path)
     assert cli.run(args) == 0
     assert not (tmp_path / "new_board").exists()
+    assert manifest_path.read_bytes() == manifest_before
     report = json.loads(capsys.readouterr().out)
     assert report["action"] == "PLAN_ONLY_NO_FILES_CREATED"
     assert report["board_inference_verified"] is False
