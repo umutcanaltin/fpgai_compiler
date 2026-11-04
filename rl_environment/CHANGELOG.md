@@ -1,3 +1,19 @@
+## 2026-11-04 — repair installed RL CLI package discovery
+
+- The user verified HW-RL-01 source functionality: **30 focused tests passed**
+  and **1,982 full passed / 21 skipped** on the local workstation.
+- Their installed `fpgai-rl-hardware-space` raised
+  `ModuleNotFoundError: No module named 'rl_environment'` because
+  setuptools only discovered packages under `src/`. Fixed by explicitly
+  mapping both package roots and finding `fpgai_research*` and
+  `rl_environment*` with proper subpackages.
+- Added regression tests for setuptools package discovery and real
+  console/Python imports **from outside the checkout with no
+  PYTHONPATH**. No source copy, script-level sys.path hack, vendor calls,
+  changes to native RL tasks, agent weights, rewards or experiments.
+- The new package correction and tests are pending reinstall and
+  workstation validation.
+
 ## 2026-11-04 — hardware knob source interface on separate RL feature branch
 
 - Explicitly reopened RL interface development after the earlier

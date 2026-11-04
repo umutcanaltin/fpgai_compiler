@@ -1,8 +1,14 @@
 # FPGAI RL hardware action space — first implementation sprint
 
 **Branch:** `feature/rl-hardware-knobs-environment-20261104`
-**Status (2026-11-04): source implementation committed separately from main; local
-source-only pytest and native Vitis tests still pending.**
+**Status (2026-11-04): HW-RL-01 local verification passed: 30 targeted
+tests, and 1,982 passed / 21 skipped in the full suite at commit
+`4242a55`. The installed console script then exposed a packaging bug:
+`pyproject.toml` discovered only `src/`, although
+`rl_environment/` lives at repository root. A packaging correction and
+independent-process CLI regressions are now on this feature branch but
+must be reinstalled and tested locally. No native Vitis experiments or RL
+training are included in this fix.**
 
 The user explicitly reopened RL interface development on 4 November 2026,
 after the 1 November compiler-paper freeze. This branch works on *source-only
@@ -93,8 +99,9 @@ After switching to the branch and installing it editable:
 
 ~~~bash
 python -m pip install --no-deps -e .
-python -m pytest -q tests/test_rl_full_hardware_space.py
+python -m pytest -q   tests/test_rl_full_hardware_space.py   tests/test_rl_installed_cli_packaging.py
 
+# This invokes the installed script, not a pytest-only source import:
 fpgai-rl-hardware-space \
   --onnx build/demo/cnn_pool_dense.onnx \
   --part xc7z020clg400-1 \
@@ -107,6 +114,13 @@ For a later native RL task, provide exact budgets using
 `--max-absolute-error TOLERANCE`. These inputs are **hard constraints**, not
 synthetic reward labels. Omitting them records explicit unknowns.
 
+The package now uses explicit setuptools source mappings for both
+`src/fpgai_research` and root `rl_environment`, including its
+subpackages. A clean wheel and editable installation should therefore
+have the same import paths; test from outside the repository with
+`(cd /tmp && fpgai-rl-hardware-space --help)`. No ad-hoc `PYTHONPATH`
+fix is required or recommended.
+
 This only reads ONNX and emits JSON to stdout. It creates no cases,
 does not invoke Vitis/Vivado, and does not claim reward/learning.
 The existing `rl_environment.gym_env`/historical Task, catalog,
@@ -116,7 +130,7 @@ reward, study and audit files remain unmodified.
 
 | Sprint | Scope | Evidence gate |
 |---|---|---|
-| HW-RL-01 | Full eight-field typed action inventory, bounded per-op menus, source-only masks and variable-size weight-private graph observation | Source regression with MatMul and multioperator Conv CNN; no backend calls; **implemented, local tests pending** |
+| HW-RL-01 | Full eight-field typed action inventory, bounded per-op menus, source-only masks and variable-size weight-private graph observation | Source regression with MatMul and multioperator Conv CNN; no backend calls; **30 targeted and 1,982 full tests passed before packaging fix; installed CLI needs recheck** |
 | HW-RL-02 | Introduce a new original-native Vitis backend for *this exact complete action state* with exact part, clock, source digest, immutable create-only case and independent CSim/CSynth qualification | One small original MatMul and one Conv toy native case, independently audited E2/E3; no stub metrics |
 | HW-RL-03 | Gymnasium `Env` with variable-size action features/masks and continuous clock head, invoking the HW-RL-02 real evaluator on each authorized step | `reset` read-only, `step` always a fresh case, consistent 5-resource/numerical/timing receipt, non-stale imports |
 | HW-RL-04 | Shared GNN actor for MatMul↔Conv↔CNN transfer with variable graph sizes and category-specific knob masks; preserve one shared policy across episodes | CPU gradients, correct invalid masking, no heldout leakage, no pretrained checkpoint |

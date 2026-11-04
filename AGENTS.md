@@ -1,3 +1,13 @@
+**2026-11-04 installed RL CLI packaging regression:** Setuptools previously
+discovered only `src/fpgai_research` while the historical `rl_environment`
+package lives at repository root. Both roots are now explicitly mapped
+in `pyproject.toml`; do not solve installed script imports with
+`PYTHONPATH` or duplicate source shims. Test actual
+`fpgai-rl-hardware-space --help` from outside the repo, then the
+read-only ONNX CLI. The workstation's previously passing full CPU suite
+does not prove the installed entrypoint. Keep native RL studies frozen
+until separately authorized and source-attested.
+
 **2026-11-04 RL interface branch authorization:** The user reopened
 RL hardware action-space development on
 `feature/rl-hardware-knobs-environment-20261104`. Preserve prior

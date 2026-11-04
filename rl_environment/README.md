@@ -1,3 +1,13 @@
+> **4 November 2026 CLI install correction.**
+> HW-RL-01 passed 30 focused and 1,982 full CPU tests (21 skipped),
+> but the installed `fpgai-rl-hardware-space` entrypoint initially
+> could not import the top-level `rl_environment` package.
+> Package discovery now explicitly includes both the root RL package
+> and the `src/` compiler. Install editable again and run
+> `tests/test_rl_installed_cli_packaging.py`, including subprocess
+> checks outside the repository. This is a packaging change only;
+> no native HLS execution or trained reward is claimed.
+
 > **4 November 2026 — Active RL hardware action-space sprint (separate branch).**
 > [HW-RL-01](HARDWARE_ACTION_SPACE.md) exposes the current compiler's
 > eight real architecture knobs plus continuous requested-clock actions
