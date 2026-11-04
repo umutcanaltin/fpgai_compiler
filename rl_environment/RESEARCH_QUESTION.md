@@ -1,3 +1,12 @@
+> **4 November 2026 RL restart notice.** The prior 1 November freeze
+> remains the scientific record for the previously paused training track.
+> New user authorization permits *source-only* hardware action/interface
+> implementation on `feature/rl-hardware-knobs-environment-20261104`.
+> See [HW-RL-01 action space](HARDWARE_ACTION_SPACE.md). No old native
+> source-pinned results or rewards have been reinterpreted; the new
+> environment is not allowed to claim trained performance without a
+> separately audited original Vitis HLS study.
+
 > **Research-track freeze (2026-11-01):** This RL research contract is preserved for later work, but new RL development, training campaigns and agent additions are paused while [the compiler-first FPGAI IR paper](../paper/compiler_ir/README.md) is prioritized. An already-running source-pinned L0 campaign may finish and be audited without modifying its local source; do not pull new remote `main` into that checkout until completion. The new compiler IR may expose a *future* graph/action interface compatible with RL; that is a design/interface property, not measured RL learning or improvement. Nothing below has been silently redefined.
 
 **Prospective Gym learning remediation (31 October 2026):** The first independently audited original-Vitis pilot at `eb4a799` ran 100 training episodes ×10 calls, but qualified only 71/1,000 actions, had five positive rewards, confounded frozen deterministic with adaptive stochastic sampling, and duplicated four baseline search trajectories. This does not establish learned generalization. The *next fresh source-pinned* study, defined in [SPRINT_RL_LEARNING_REDESIGN.md](SPRINT_RL_LEARNING_REDESIGN.md), retains the exact latency-only objective and reward while adding explicit original-HLS failure-gate diagnostics, trial-history-attentive graph policy, true compiler-legal global and local candidate proposals, and auxiliary binary original-HLS feasibility prediction trained alongside RL (not as replacement reward). New matched frozen stochastic and adaptive arms yield 100 online train + 1 validation + 8 controls =109 episodes capped at 10 evaluations each, total maximum 1090. New source is not yet workstation/native qualified; preserve the historical 1,070-case dataset and its independent audit.

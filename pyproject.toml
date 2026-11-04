@@ -39,6 +39,7 @@ fpgai-board = "fpgai_research.toolchains.board.cli:main"
 fpgai-pynq-run = "fpgai_research.toolchains.board.pynq_runtime:main"
 fpgai-board-reference = "fpgai_research.toolchains.board.reference:main"
 fpgai-board-ddr-audit = "fpgai_research.toolchains.board.ps_audit:main"
+fpgai-rl-hardware-space = "rl_environment.hardware_space:main"
 fpgai-diagnose = "fpgai_research.toolchains.diagnose:main"
 
 [tool.setuptools.packages.find]

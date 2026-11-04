@@ -1,3 +1,19 @@
+## 2026-11-04 — hardware knob source interface on separate RL feature branch
+
+- Explicitly reopened RL interface development after the earlier
+  compiler-first freeze, without restarting any frozen original native study.
+- Added `rl_environment.hardware_space`: all eight *currently implemented*
+  `ArchitectureRequest` categories, globally synchronized numeric format,
+  per-operator Conv/MatMul/Gemm mapping and tiling, continuous 2–32 ns
+  requested clock, immutable full candidate SHA and original compiler E0/E1
+  source checks. The policy cannot select fake memory/AXI/CDC/physical knobs.
+- Added deterministic bounded candidate menu and source action mask,
+  variable-size weight-private graph observation, and an explicit source-only
+  planning environment. No HLS latency, physical feasibility or training
+  reward is invented; Gym `step` stays disabled pending audited real Vitis.
+- Added source-only unit/integration tests and `fpgai-rl-hardware-space`
+  read-only ONNX CLI. **Workstation tests and native HW-RL-02 are pending**.
+
 ## 2026-11-01 — native L0 imported compiler source-binding guard
 
 - Diagnosed discrepancy: CPU test suite 734 passed, but first `gym_curriculum --stage L0 --smoke` stopped before native Vitis with `write_vitis_package() unexpected keyword clock_uncertainty_ns` even though checked-out `src/fpgai_research/toolchains/vitis_hls/package.py` already supports that parameter. Likely non-editable/stale installed package shadowing source during `python -m`; CPU pytest inserts repo src into its own imports.

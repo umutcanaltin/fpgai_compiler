@@ -1,3 +1,25 @@
+# RL interface development resumed — 2026-11-04 (new feature branch)
+
+User explicitly authorized work on RL readiness and full **implemented**
+hardware knob classes. Work only on
+`feature/rl-hardware-knobs-environment-20261104` while source changes are
+reviewed and tested. The **2026-11-01 freeze below is historical**; it
+continues to protect prior original native case folders, old agents,
+unbroken experiment methods, policy weights and evidence, not this new
+source-only hardware-action adapter.
+
+[New source-backed hardware-action sprint](HARDWARE_ACTION_SPACE.md):
+HW-RL-01 covers eight existing compiler `ArchitectureRequest` fields,
+model-global numeric type, per-Conv/MatMul/Gemm mapping, bounded candidate
+enumeration/source masks, variable-size weight-private graph observations
+and continuous requested-clock actions. Source-only code/tests are
+implemented but **not yet workstation-verified**; no Vitis, Vivado or
+training initiated. HW-RL-02 must bind the exact action state to original,
+qualified, independently replayable Vitis HLS evaluation before a
+reward-returning Gym `step` or online-learning campaign is allowed.
+
+---
+
 # RL development freeze — 2026-11-01
 
 **Status: FROZEN for further RL development and new RL experiments.** Primary research priority is now the [new FPGAI compiler-IR paper](../paper/compiler_ir/README.md) and its [implementation sprints](../paper/compiler_ir/SPRINTS.md). Do **not** implement PPO/A2C/REINFORCE/SAC, broaden stages, alter Gym reward/agents/auditor, or start additional RL native campaigns during this freeze. The existing RL sprint history below remains **backlog only**, not an active commitment.
