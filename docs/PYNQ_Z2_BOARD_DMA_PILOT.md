@@ -1,14 +1,16 @@
 # Experimental ONNX → AXI DMA → PYNQ-Z2 board-bitstream pilot
 
-**Status (2026-11-04): SOURCE ADDED; NEVER TESTED WITH NATIVE VITIS/VIVADO OR ON A PHYSICAL PYNQ-Z2.** This is an experimental, fail-closed deployment path, not an already qualified board release. It never modifies old OOC experiment folders.
+**Status (2026-11-04): NATIVE HLS IP EXPORTED AND VIVADO FULL BITSTREAM GENERATED, BUT BOARD NOT QUALIFIED OR PROGRAMMED.** The experimental pilot has now passed source-only tests, Vitis CSim/HLS IP export, and Vivado routing/bitstream generation for a toy model. That is not proof of safe PS DDR operation or physical DMA inference. This create-only path preserves all previous experimental case folders.
 
 The input is an existing *source-attested, CSim-qualified* FPGAI case and the exact source ONNX model. Frozen weights are checked against its Model IR/source manifest. New HLS synthesis is performed for the **PYNQ-Z2's xc7z020clg400-1**, regardless of the earlier OOC case's KV260 part.
 
-**2026-11-04 local regression:** 1,926 tests passed and 21 skipped on the
-user's workstation (feature branch f430ded), but no PYNQ-Z2 Vivado board
-part is installed. The first native **HLS-only** AXI IP export can now run
-without `--board-part`; it requires only the known Zynq-7020 silicon.
-Full-board Vivado compilation still requires the correct board preset.
+**2026-11-04 local progression:** 1,926 tests passed and 21 skipped on
+the workstation (earlier feature branch revision); 40 focused board tests
+passed after correcting a real Vitis HLS 2023.2 CSim mixed-proxy comparison
+error; the corrected native AXI HLS IP export passed. The user registered
+`tul.com.tw:pynq-z2:part0:1.0` using `FPGAI_BOARD_REPO` and completed
+the *first* full Vivado board implementation. **Its actual report is still
+`BOARD_NOT_QUALIFIED`**, not a deployable overlay.
 
 ## First real native HLS diagnostic and next qualification gate
 
@@ -44,6 +46,65 @@ Vitis CSim marker, C synthesis, IP catalog export and source-attested
 receipt all pass. If the next native stage fails, inspect **its own**
 `dma_hls/logs/stdout.log` and `stderr.log` rather than editing original
 evidence or suppressing tool diagnostics.
+
+## First real Vivado full-board result and outstanding warnings
+
+The preserved user-run case `build/board_pynq_toy_bit_01` reported:
+
+| Observation | Native result |
+|---|---|
+| Vitis HLS adapter/IP export | Succeeded |
+| Vivado exit | 0 |
+| Target | PYNQ-Z2 `xc7z020clg400-1` |
+| Placement/routing | Complete |
+| Routed WNS | +2.197 ns at 10 ns |
+| .bit plus matching .hwh | Generated |
+| Full-board DRC | 3 observations: RTSTAT-10 Warning (1); REQP-181 Advisory (2) |
+| DDR/PS native critical warnings | PSU-1/2/3/4 (negative DDR DQS-to-clock delays) |
+| Other native critical warnings | BD 41-737: attempted read-only reset polarity parameter write |
+| Board qualification | **BOARD_NOT_QUALIFIED** |
+| Physical PYNQ-Z2 inference | Not attempted / not proven |
+
+**Do not program the image solely because `.bit` and `.hwh` exist.**
+The DRC report's `drc_critical_warnings: 0` did **not** account for
+`CRITICAL WARNING` lines emitted during PS/BD configuration. A source
+revision now reports those independently in `vivado_log_diagnostics` and
+**fails closed even if the DRC itself is clean**.
+
+The new Vivado TCL no longer tries to set read-only
+`CONFIG.C_EXT_RESET_HIGH`. It reads the actual
+`proc_sys_reset` external-reset polarity and connects the PS
+`FCLK_RESET0_N` directly when active-low or through a dedicated
+single-bit inverter when active-high. If the polarity cannot be
+determined, Vivado stops. This change must still pass an actual new
+Vivado build before we conclude the reset-warning issue is resolved.
+
+The cloned PYNQ-Z2 third-party board preset includes negative DDR
+DQS-to-clock delays for all four lanes. Similar negative-delay warnings
+have been seen in PYNQ's own builds. They are **not proof of failing DDR,
+but neither are they proof of a correct PS configuration**. Do not
+silently replace these hardware values with zero, waive PSU warnings,
+or claim runtime functionality without checking a trusted PYNQ-Z2 PS
+reference design and DDR calibration/board operation. The REQP-181
+`WRITE_FIRST` advisory concerns memory-port address collisions
+inside AXI DMA FIFO primitives; the RTSTAT-10 warning concerns
+unroutable-load observations on SmartConnect reset nets. They remain
+explicit DRC observations, not automatically accepted as safe.
+
+### Follow-up qualification (new build, not the existing bitstream)
+
+Once local source-only tests pass, run `fpgai-board --stage bitstream`
+with the same verified preset and a fresh output directory. Preserve
+`board_pynq_toy_bit_01` exactly. Inspect the new
+`vivado_log_diagnostics`, full-board DRC, original hardware source
+attestation, reset-polarity marker, routed timing and .bit/.hwh metadata.
+No `--accept-board-advisories` override may convert unresolved
+native critical warnings to a qualified result.
+
+A board-level validation milestone also requires actual PYNQ-Z2
+configuration, working DMA buffers/AXI-Lite registers, a completed
+transfer with TLAST, and numerical comparison against a separate
+software reference. None is inferred by Vivado's exit code alone.
 
 ## Hardware path and interface
 
@@ -215,7 +276,7 @@ The result `on_device_numerics_verified: true` requires a **real** DMA transfer 
 
 ## What remains
 
-- **Native PYNQ-Z2 results and physical on-board measurements have not been executed by the assistant.** The local CPU regression suite has passed (1,926 passed, 21 skipped). Next run the HLS-only IP export independently, then the full board builder after board-part installation. Report the first failure and original logs for corrections on this branch.
+- **The first native PYNQ-Z2 HLS IP export and Vivado full-board bitstream generation succeeded on the user's workstation**, but the board remains unqualified. Inspect the native PSU/DDR and reset warnings, the RTSTAT-10 warning and REQP-181 advisories, then validate a fresh reset-corrected build. The assistant has not programmed a physical board or executed on-board inference.
 - The experimental PYNQ-Z2 profile is fixed to 100 MHz PL clock and uses 32-bit AXI stream words. Large CNNs may not meet Zynq-7020 resource/timing budgets.
 - **KV260 is not yet a valid target for this script:** its Kria MPSoC platform, PS HPM/HPC/HP interfaces and Linux device-tree/firmware/runtime require a separate verified recipe. A PYNQ overlay is not interchangeable with the standard KV260 Linux stack.
 - Board-specific clocks/resets, address map, DMA driver, bitstream, .hwh and numerical tests must each succeed before claiming 'directly runnable'.

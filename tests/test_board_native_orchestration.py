@@ -38,7 +38,8 @@ def _args(tmp_path, *, stage="hls", accept=False):
 
 
 def _mock_vendor(monkeypatch, drc_text="Violations found: 0\n",
-                 slack=1.25, vendor_failed=False):
+                 slack=1.25, vendor_failed=False,
+                 vivado_critical_lines="", vivado_stderr_critical_lines=""):
     monkeypatch.setattr(cli, "_verify_original_case", lambda case, onnx: {
         "input_shape": [2, 3], "output_shape": [2, 2],
         "precision_bits": 16, "integer_bits": 6,
@@ -51,6 +52,9 @@ def _mock_vendor(monkeypatch, drc_text="Violations found: 0\n",
     def fake_run(executable, argv, cwd, environment, timeout, label):
         calls.append(label)
         (cwd / "logs").mkdir(exist_ok=True)
+        (cwd / "logs" / "stderr.log").write_text(
+            vivado_stderr_critical_lines if label == "vivado_board" else ""
+        )
         if label == "vitis_board":
             assert argv == ["-f", "run_dma_hls.tcl"]
             assert (cwd / "fpgai_dma.cpp").is_file()
@@ -65,7 +69,7 @@ def _mock_vendor(monkeypatch, drc_text="Violations found: 0\n",
             assert argv == ["-mode", "batch", "-source",
                             "run_board.tcl", "-notrace"]
             (cwd / "logs" / "stdout.log").write_text(
-                "FPGAI_BOARD_ARTIFACTS_EXPORTED\n")
+                vivado_critical_lines + "FPGAI_BOARD_ARTIFACTS_EXPORTED\n")
             artifacts = cwd / "board_artifacts"
             artifacts.mkdir()
             (artifacts / "timing_summary.rpt").write_text(
@@ -201,3 +205,73 @@ def test_native_hls_export_works_without_vivado_board_preset(
     assert report["board_part"] is None
     assert report["board_preset_used_for_hls"] is False
     assert report["part"] == "xc7z020clg400-1"
+
+
+@pytest.mark.parametrize("native_warning,stderr_warning", [
+    ("CRITICAL WARNING: [PSU-1] Negative PS DDR clock-to-DQS delay\n", ""),
+    ("CRITICAL WARNING: [BD 41-737] Reset polarity property read-only\n", ""),
+    ("", "CRITICAL WARNING: [PSU-4] DDR skew violation\n"),
+    ("CRITICAL WARNING: [UNEXPECTED-77] Unknown board warning\n", ""),
+])
+def test_native_critical_warnings_block_board_qualification_even_if_drc_clean(
+        monkeypatch, tmp_path, native_warning, stderr_warning):
+    """Real Vivado can generate a bitstream despite critical PS/BD warnings."""
+    args = _args(tmp_path, stage="bitstream", accept=True)
+    _mock_vendor(monkeypatch, vivado_critical_lines=native_warning,
+                 vivado_stderr_critical_lines=stderr_warning)
+    assert cli.run(args) == 3
+    summary = json.loads(
+        (tmp_path / "new_board" / "board_build_summary.json").read_text()
+    )
+    assert summary["state"] == "BOARD_NOT_QUALIFIED"
+    assert summary["bitstream_generated"] is True
+    assert summary["drc_clean"] is True
+    assert summary["drc_critical_warnings"] == 0
+    assert summary["vivado_log_diagnostics"]["critical_warning_count"] == 1
+    assert summary["strict_board_drc_clean_qualified"] is False
+    assert not (tmp_path / "new_board" / "board_artifacts" /
+                "fpgai_pynq_runtime.py").exists()
+
+
+def test_board_warning_audit_counts_independent_ps_and_bd_messages(tmp_path):
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    (log_dir / "stdout.log").write_text(
+        "CRITICAL WARNING: [PSU-1] negative DDR lane 0\n"
+        "CRITICAL WARNING: [PSU-2] negative DDR lane 1\n"
+        "CRITICAL WARNING: [PSU-3] negative DDR lane 2\n"
+        "CRITICAL WARNING: [PSU-4] negative DDR lane 3\n"
+        "CRITICAL WARNING: [BD 41-737] invalid reset polarity parameter\n"
+        "WARNING: [DRC RTSTAT-10] no routable loads\n"
+        "INFO: [DRC REQP-181] writefirst\n"
+    )
+    (log_dir / "stderr.log").write_text("")
+    result = cli._vivado_log_diagnostics(tmp_path)
+    assert result["logs_inspected"] is True
+    assert result["critical_warning_count"] == 5
+    assert result["ps_ddr_critical_warning_count"] == 4
+    assert result["bd_configuration_critical_warning_count"] == 1
+    assert result["critical_warning_codes"]["BD 41-737"] == 1
+    assert "RTSTAT-10" not in result["critical_warning_codes"]
+
+
+def test_missing_vivado_log_blocks_qualification_even_with_fake_zero_drc(
+        monkeypatch, tmp_path):
+    args = _args(tmp_path, stage="bitstream")
+    calls = _mock_vendor(monkeypatch)
+    base_vendor = cli._run_vendor
+
+    def missing_stderr(*positional, **keyword):
+        receipt = base_vendor(*positional, **keyword)
+        if positional[-1] == "vivado_board":
+            (positional[2] / "logs" / "stderr.log").unlink()
+        return receipt
+
+    monkeypatch.setattr(cli, "_run_vendor", missing_stderr)
+    assert cli.run(args) == 3
+    summary = json.loads(
+        (tmp_path / "new_board" / "board_build_summary.json").read_text()
+    )
+    assert summary["vivado_log_diagnostics"]["logs_inspected"] is False
+    assert summary["state"] == "BOARD_NOT_QUALIFIED"
+    assert calls == ["vitis_board", "vivado_board"]

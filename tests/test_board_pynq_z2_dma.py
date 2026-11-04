@@ -344,3 +344,21 @@ def test_adapter_does_not_modify_canonical_fpga_model_parameters():
     assert 'fpgai_model(x,golden);' in tb
     assert "fpgai_model(x,y);" in adapter
     assert "static const data_t" not in adapter
+
+
+def test_ps_reset_polarity_is_read_not_unsafely_set_or_assumed():
+    """Vivado 2023.2 C_EXT_RESET_HIGH read-only critical warning regression."""
+    tcl = pynq_z2_board_tcl(
+        board_part="vendor.test:pynq-z2:part0:1.0",
+        part="xc7z020clg400-1", clock_ns=10.0,
+    )
+    assert "set_property CONFIG.C_EXT_RESET_HIGH" not in tcl
+    assert "get_property CONFIG.C_EXT_RESET_HIGH" in tcl
+    assert "error \"Cannot establish proc_sys_reset external reset polarity" in tcl
+    assert "CONFIG.C_OPERATION {not}" in tcl
+    assert "ps_reset_inverter/Op1" in tcl
+    assert "ps_reset_inverter/Res" in tcl
+    assert "FPGAI_PS_RESET_POLARITY_VERIFIED_ACTIVE_HIGH_INVERTED" in tcl
+    assert "FPGAI_PS_RESET_POLARITY_VERIFIED_ACTIVE_LOW_DIRECT" in tcl
+    assert "ps7/FCLK_RESET0_N" in tcl
+    assert "proc_reset/ext_reset_in" in tcl

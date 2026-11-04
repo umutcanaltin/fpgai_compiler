@@ -15,7 +15,9 @@ from datetime import datetime, timezone
 from hashlib import sha256
 import json
 import os
+from collections import Counter
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -167,6 +169,50 @@ def _has_marker(path: Path, marker: str) -> bool:
     return marker.encode() in path.read_bytes()
 
 
+def _vivado_log_diagnostics(case: Path) -> dict:
+    """Account for non-DRC critical warnings in source-attested Vivado logs.
+
+    Vivado may generate a .bit with zero DRC critical warnings while its
+    PS/DDR and block-design configuration emit CRITICAL WARNING messages.
+    A board image is never qualified if those warnings remain unreviewed.
+    """
+    log_dir = case / "logs"
+    paths = (log_dir / "stdout.log", log_dir / "stderr.log")
+    missing_or_unsafe = [
+        name.name for name in paths
+        if name.is_symlink() or not name.is_file()
+        or name.stat().st_size > 128 * 1024 * 1024
+    ]
+    if missing_or_unsafe:
+        return {
+            "logs_inspected": False,
+            "critical_warning_count": None,
+            "critical_warning_codes": {},
+            "unavailable_log_files": missing_or_unsafe,
+        }
+    codes = Counter()
+    total = 0
+    for path in paths:
+        with path.open("r", encoding="utf-8", errors="replace") as src:
+            for line in src:
+                if not re.match(r"^\s*CRITICAL WARNING\s*:", line, re.I):
+                    continue
+                total += 1
+                match = re.search(r"\[([^\]\r\n]+)\]", line)
+                codes[match.group(1) if match else "UNATTRIBUTED"] += 1
+    return {
+        "logs_inspected": True,
+        "critical_warning_count": total,
+        "critical_warning_codes": dict(sorted(codes.items())),
+        "ps_ddr_critical_warning_count": sum(
+            number for code, number in codes.items() if code.startswith("PSU-")
+        ),
+        "bd_configuration_critical_warning_count": sum(
+            number for code, number in codes.items() if code.startswith("BD ")
+        ),
+    }
+
+
 def _write_json(path: Path, data: dict):
     path.write_text(json.dumps(data, sort_keys=True, indent=2) + "\n")
 
@@ -295,6 +341,9 @@ def run(args: argparse.Namespace) -> int:
         _drc_summary, _worst_negative_slack, _complete_route,
     )
     drc = _drc_summary(artifacts / "drc.rpt")
+    # Independent audit: DRC's "0 critical" does not include PS/DDR
+    # or block-design CRITICAL WARNING messages in the Vivado log.
+    native_warnings = _vivado_log_diagnostics(output)
     route = artifacts / "route_status.rpt"
     route_complete = False
     if route.is_file() and not route.is_symlink():
@@ -322,6 +371,8 @@ def run(args: argparse.Namespace) -> int:
         and _has_marker(output / "logs" / "stdout.log", "FPGAI_BOARD_ARTIFACTS_EXPORTED")
         and timing is not None and timing >= 0
         and drc.get("summary_verified") is True
+        and native_warnings["logs_inspected"] is True
+        and native_warnings["critical_warning_count"] == 0
     )
     rules = drc.get("rules") or {}
     advisory_ok = (
@@ -358,6 +409,7 @@ def run(args: argparse.Namespace) -> int:
             and not (artifacts / name).is_symlink()
         },
         "drc_clean": drc.get("clean"),
+        "vivado_log_diagnostics": native_warnings,
         "drc_violations": drc.get("violations"),
         "drc_critical_warnings": drc.get("critical_warnings"),
         "drc_unconstrained_io": drc.get("unconstrained_io"),
@@ -370,7 +422,11 @@ def run(args: argparse.Namespace) -> int:
         "hwh_sha256": _hash(hwh) if outputs_exist else None,
         "bitstream_generated": outputs_exist,
         "on_device_inference_verified": False,
-        "note": "Board bitstream is not a verified on-device inference result; run board host validation",
+        "note": (
+            "Board bitstream creation is not an on-device inference result. "
+            "Qualification requires zero unreviewed native Vivado critical warnings, "
+            "source-attested routing/timing, and an accepted full-board DRC."
+        ),
     }
     _write_json(output / "board_build_summary.json", report)
     if qualified:

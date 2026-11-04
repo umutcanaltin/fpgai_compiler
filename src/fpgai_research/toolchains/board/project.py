@@ -85,7 +85,14 @@ set_property -dict [list CONFIG.NUM_SI {1} CONFIG.NUM_MI {2}] [get_bd_cells cont
 create_bd_cell -type ip -vlnv xilinx.com:ip:smartconnect:1.0 ddr_sc
 set_property -dict [list CONFIG.NUM_SI {2} CONFIG.NUM_MI {1}] [get_bd_cells ddr_sc]
 create_bd_cell -type ip -vlnv xilinx.com:ip:proc_sys_reset:5.0 proc_reset
-set_property CONFIG.C_EXT_RESET_HIGH {0} [get_bd_cells proc_reset]
+# CONFIG.C_EXT_RESET_HIGH is READ-ONLY in Vivado 2023.2.
+# Read back the actual external-reset polarity instead of unsuccessfully
+# attempting to set it. The PS FCLK_RESET0_N signal is active-low.
+set external_reset_high [string tolower [string trim   [get_property CONFIG.C_EXT_RESET_HIGH [get_bd_cells proc_reset]]]]
+if {$external_reset_high ni {0 1 false true}} {
+  error "Cannot establish proc_sys_reset external reset polarity: $external_reset_high"
+}
+puts "FPGAI_PROC_SYS_RESET_EXT_RESET_HIGH=$external_reset_high"
 
 # PS GP0 controls DMA and accelerator. DMA data masters reach DDR via PS HP0.
 connect_bd_intf_net [get_bd_intf_pins ps7/M_AXI_GP0] [get_bd_intf_pins control_sc/S00_AXI]
@@ -106,7 +113,18 @@ connect_bd_net [get_bd_pins ps7/FCLK_CLK0] \
   [get_bd_pins fpgai_dma_0/ap_clk] \
   [get_bd_pins control_sc/aclk] [get_bd_pins ddr_sc/aclk] \
   [get_bd_pins proc_reset/slowest_sync_clk]
-connect_bd_net [get_bd_pins ps7/FCLK_RESET0_N] [get_bd_pins proc_reset/ext_reset_in]
+# Match the actual proc_sys_reset input polarity to the active-low PS reset.
+# Use a dedicated 1-bit NOT only when the reset controller requires active-high.
+if {$external_reset_high in {1 true}} {
+  create_bd_cell -type ip -vlnv xilinx.com:ip:util_vector_logic:2.0 ps_reset_inverter
+  set_property -dict [list CONFIG.C_OPERATION {not} CONFIG.C_SIZE {1}]     [get_bd_cells ps_reset_inverter]
+  connect_bd_net [get_bd_pins ps7/FCLK_RESET0_N]     [get_bd_pins ps_reset_inverter/Op1]
+  connect_bd_net [get_bd_pins ps_reset_inverter/Res]     [get_bd_pins proc_reset/ext_reset_in]
+  puts "FPGAI_PS_RESET_POLARITY_VERIFIED_ACTIVE_HIGH_INVERTED"
+} else {
+  connect_bd_net [get_bd_pins ps7/FCLK_RESET0_N]     [get_bd_pins proc_reset/ext_reset_in]
+  puts "FPGAI_PS_RESET_POLARITY_VERIFIED_ACTIVE_LOW_DIRECT"
+}
 connect_bd_net [get_bd_pins proc_reset/peripheral_aresetn] \
   [get_bd_pins axi_dma_0/axi_resetn] [get_bd_pins fpgai_dma_0/ap_rst_n]
 connect_bd_net [get_bd_pins proc_reset/interconnect_aresetn] \

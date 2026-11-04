@@ -1,3 +1,22 @@
+## First full PYNQ-Z2 bitstream evidence and qualification hardening — feature branch
+
+- User-run Vivado 2023.2 successfully generated `.bit` and `.hwh`,
+  with +2.197 ns routed slack and completed routing, but correctly
+  returned `BOARD_NOT_QUALIFIED` for RTSTAT-10 (warning) and
+  REQP-181 (advisory). No physical hardware inference was run.
+- Identified four `PSU-` critical warnings for negative PS DDR skew
+  parameters and one read-only `BD 41-737` reset polarity warning
+  *outside* the separate full-board DRC summary.
+- New qualified-board gate inspects native Vivado stdout and stderr
+  for any `CRITICAL WARNING` and reports their separate code/count
+  without hiding them under `drc_critical_warnings: 0`.
+- Replaced the read-only `proc_sys_reset.C_EXT_RESET_HIGH` setter
+  with runtime Tcl polarity inspection and a conditional 1-bit reset
+  inverter. No PS DDR parameter guesses or DRC severity changes.
+- Added source-only tests for non-DRC critical warnings, unavailable
+  native logs, and the read-only reset polarity regression; the revised
+  full board system must be re-run with licensed Vivado before qualification.
+
 # Changelog
 
 ## Documentation maintenance — November 2026
