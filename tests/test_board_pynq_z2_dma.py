@@ -309,3 +309,38 @@ def test_vivado_board_tcl_accepts_explicit_repo_without_mutating_vendor_install(
         assert "FPGAI_BOARD_REPO" in src
         assert "set_param board.repoPaths [list $board_repo]" in src
         assert "if {![file isdirectory $board_repo]}" in src
+
+
+
+@pytest.mark.parametrize("width,integer", [(8, 3), (16, 6), (24, 8), (32, 12)])
+def test_dma_csim_uses_explicit_equal_width_bit_vectors_not_mixed_proxy_comparison(
+        width, integer):
+    """Regression: original Vitis HLS 2023.2 CSim rejected ap_range_ref != af_range_ref.
+
+    These are generated-source checks; the real native vendor compiler still
+    has to verify that its installed headers accept the explicit conversion.
+    """
+    m = {**_manifest(), "precision_bits": width, "integer_bits": integer}
+    tb = bridge_testbench_cpp(m)
+    assert "#include <ap_int.h>" in tb
+    assert (
+        f"ap_uint<{width}> observed_bits = beat.data.range({width - 1},0);"
+        in tb
+    )
+    assert (
+        f"ap_uint<{width}> expected_bits = golden[i].range({width - 1},0);"
+        in tb
+    )
+    assert "if (observed_bits != expected_bits) return 11;" in tb
+    assert f"beat.data.range({width - 1},0)!=golden[i].range" not in tb
+    assert "FPGAI_BOARD_DMA_CSIM_PASS" in tb
+
+
+def test_adapter_does_not_modify_canonical_fpga_model_parameters():
+    """The repaired comparison is a testbench-only change, not a numeric shortcut."""
+    tb = bridge_testbench_cpp(_manifest())
+    adapter = bridge_cpp(_manifest())
+    assert 'extern "C" void fpgai_model(const data_t*, data_t*);' in tb
+    assert 'fpgai_model(x,golden);' in tb
+    assert "fpgai_model(x,y);" in adapter
+    assert "static const data_t" not in adapter

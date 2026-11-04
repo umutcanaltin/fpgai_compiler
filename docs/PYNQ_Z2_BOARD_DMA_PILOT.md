@@ -10,6 +10,41 @@ part is installed. The first native **HLS-only** AXI IP export can now run
 without `--board-part`; it requires only the known Zynq-7020 silicon.
 Full-board Vivado compilation still requires the correct board preset.
 
+## First real native HLS diagnostic and next qualification gate
+
+The user's 2026-11-04 workstation passed **35 focused source-only tests**,
+and Vivado 2023.2 successfully enumerated the installed board-part preset
+`tul.com.tw:pynq-z2:part0:1.0` from the user-owned board repository.
+
+The first original Vitis HLS board-wrapper attempt
+(`build/board_pynq_toy_hls_nopreset_01`) **failed** at CSim C++
+compilation with `error: ambiguous overload for operator!=` in
+`fpgai_dma_tb.cpp`, comparing an `ap_range_ref` with an
+`af_range_ref`. Its original logs and receipt must be preserved. The
+compiler now generates explicit, equally sized `ap_uint<W>` temporaries
+for both raw bit fields before equality comparison. Source-only regression
+checks cover W=8,16,24,32; **this fix is not yet native-tested**.
+
+After updating to this revision and running focused tests, repeat the
+native HLS stage in a **fresh directory**:
+
+~~~bash
+fpgai-board \\
+  --onnx build/demo/model.onnx \\
+  --case build/neuro_ooc_02 \\
+  --output build/board_pynq_toy_hls_nopreset_02 \\
+  --board pynq-z2 \\
+  --clock-ns 10 \\
+  --vitis /tools/Xilinx/Vitis_HLS/2023.2 \\
+  --stage hls --execute-native
+~~~
+
+Do not proceed to full Vivado block design/bitstream until the original
+Vitis CSim marker, C synthesis, IP catalog export and source-attested
+receipt all pass. If the next native stage fails, inspect **its own**
+`dma_hls/logs/stdout.log` and `stderr.log` rather than editing original
+evidence or suppressing tool diagnostics.
+
 ## Hardware path and interface
 
 PS DDR ↔ PS S_AXI_HP0 ↔ SmartConnect ↔ AXI DMA (MM2S/S2MM) ↔ AXI4-Stream adapter ↔ original FPGAI model; PS M_AXI_GP0 controls DMA and accelerator AXI-Lite registers.

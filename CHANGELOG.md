@@ -9,6 +9,20 @@
 
 This is the **public-facing project change summary**, not a replacement for the source-pinned scientific experiment archive. It does not claim a released software version or an approved open-source license.
 
+## Experimental PYNQ-Z2 board HLS CSim compatibility — feature branch
+
+- Fixed a Vitis HLS 2023.2 compilation error in the generated *board
+  adapter testbench*: direct `ap_range_ref != af_range_ref` was an
+  ambiguous overload. Raw 32-bit AXI data and fixed-point golden output
+  bits are first materialized as matching explicit `ap_uint<W>` values,
+  then compared bit-for-bit.
+- Added source-only negative regression checks for W=8/16/24/32 and
+  preserved the canonical ONNX model, weights, AXI adapter and prior
+  failed original native case unchanged.
+- User independently confirmed 35 focused tests passed and PYNQ-Z2 board
+  definition was successfully discovered; **the corrected HLS testbench
+  still requires a new real native run**, with no bitstream claims.
+
 ## Experimental PYNQ-Z2 board preset decoupling — feature branch
 
 - The native HLS-only IP export and read-only HLS plan no longer require

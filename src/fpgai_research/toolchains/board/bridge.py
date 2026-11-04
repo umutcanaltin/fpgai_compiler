@@ -70,6 +70,7 @@ def bridge_testbench_cpp(manifest: dict) -> str:
     return f"""// Native Vitis CSim: verify AXIS element bits, framing and source model call.
 #include <cstdio>
 #include <ap_fixed.h>
+#include <ap_int.h>
 #include <ap_axi_sdata.h>
 #include <hls_stream.h>
 using data_t = ap_fixed<{width},{integer},AP_RND,AP_SAT>;
@@ -94,7 +95,12 @@ int main() {{
   for (int i=0; i<{nout}; ++i) {{
     if (dest.empty()) return 10;
     dma_word_t beat=dest.read();
-    if (beat.data.range({width - 1},0)!=golden[i].range({width - 1},0)) return 11;
+    // Materialize each proxy into the same explicit unsigned bit-vector
+    // before comparing. Vivado/Vitis HLS 2023.2 cannot choose operator!=
+    // between ap_range_ref (TDATA) and af_range_ref (ap_fixed).
+    ap_uint<{width}> observed_bits = beat.data.range({width - 1},0);
+    ap_uint<{width}> expected_bits = golden[i].range({width - 1},0);
+    if (observed_bits != expected_bits) return 11;
     if (beat.last!=(i=={nout - 1})) return 12;
     if (beat.keep!=15 || beat.strb!=15) return 13;
   }}
