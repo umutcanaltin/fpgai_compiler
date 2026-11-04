@@ -138,6 +138,8 @@ fpgai-diagnose --case build/neuro_ooc_01
 
 The diagnostic reports the original invocation receipt, staged-ROM integrity changes, original input stability, and whether timing/DRC reports can be parsed as **unpromoted observations**. It does **not** modify the failed case, rerun Vitis/Vivado, or retroactively qualify E4.
 
+The diagnostic also includes individual DRC rule IDs, severities, counts, and whether unconstrained I/O rules appear. A routed model-only out-of-context design may report external port constraints that do not describe an integrated board application; do not suppress such DRCs or claim a deployable image. First inspect all actual rule IDs and resolve their meaning before deciding whether to rerun the vendor tools.
+
 On some Vivado 2023.2 runs, the tool reports it successfully read an original ROM initialization file but the staged working-directory copy is absent after execution. A new run may explicitly opt into the **existing, strict source-pinned and log-hash-verified readmem post-absence protocol**:
 
 ```bash

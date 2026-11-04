@@ -405,7 +405,11 @@ def test_readonly_diagnosis_describes_unqualified_vendor_exit_zero(
                         })
     monkeypatch.setattr(report, "parse_vivado_reports", lambda case: {
         "timing": {"timing_met": True, "wns_ns": .2},
-        "drc": {"summary_verified": True, "clean": False, "violations": 1},
+        "drc": {
+            "summary_verified": True, "clean": False, "violations": 1,
+            "critical_warnings": 0, "unconstrained_io": True,
+            "rules": {"UCIO-1": {"severity": "Warning", "violations": 1}},
+        },
     })
     before = invocation.read_bytes()
     inspection = diagnose.inspect_case(case)
@@ -417,6 +421,11 @@ def test_readonly_diagnosis_describes_unqualified_vendor_exit_zero(
     assert inspection["original_evidence"] == "E3-HLS-synthesis-report"
     assert inspection["original_evidence_promoted"] is False
     assert inspection["physical_report_observation"]["drc_clean"] is False
+    assert inspection["physical_report_observation"]["drc_rules"] == {
+        "UCIO-1": {"severity": "Warning", "violations": 1}
+    }
+    assert inspection["physical_report_observation"]["drc_unconstrained_io"] is True
+    assert inspection["physical_report_observation"]["drc_critical_warnings"] == 0
     assert invocation.read_bytes() == before
     assert list(case.rglob("*.json")) == [invocation]
 
@@ -432,3 +441,36 @@ def test_readonly_diagnosis_without_vivado_receipt(monkeypatch, tmp_path):
     detail = diagnose.inspect_case(case)
     assert detail["status"] == "NO_VIVADO_INVOCATION"
     assert detail["original_evidence_promoted"] is False
+
+
+
+def test_onboarding_summary_keeps_drc_rule_breakdown(monkeypatch, tmp_path):
+    from fpgai_research.experiments import results
+    monkeypatch.setattr(results, "summarize_case", lambda case: {
+        "evidence": "E4-Vivado-implementation",
+        "csim_passed": True, "metrics": {},
+        "warnings": ["DRC has two violations"],
+        "vivado_metrics": {
+            "timing": {"timing_met": True, "wns_ns": 2.0},
+            "drc": {
+                "clean": False, "violations": 2, "critical_warnings": 1,
+                "unconstrained_io": True,
+                "rules": {
+                    "UCIO-1": {"severity": "Warning", "violations": 1},
+                    "OTHER-1": {"severity": "Critical Warning", "violations": 1},
+                },
+            },
+        },
+    })
+    case = tmp_path / "case"
+    report = app._case_summary(
+        case, stage="ooc", state="OOC_NOT_QUALIFIED",
+        sample_kind="synthetic_smoke_sample", message="test",
+        part="xck26-sfvc784-2LV-c",
+    )
+    assert report["drc_clean"] is False
+    assert report["drc_violations"] == 2
+    assert report["drc_critical_warnings"] == 1
+    assert report["drc_unconstrained_io"] is True
+    assert set(report["drc_rules"]) == {"UCIO-1", "OTHER-1"}
+    assert report["board_bitstream_generated"] is False

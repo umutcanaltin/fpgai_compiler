@@ -109,6 +109,9 @@ def inspect_case(directory: str | Path) -> dict:
             "drc_verified": physical["drc"].get("summary_verified"),
             "drc_clean": physical["drc"].get("clean"),
             "drc_violations": physical["drc"].get("violations"),
+            "drc_critical_warnings": physical["drc"].get("critical_warnings"),
+            "drc_unconstrained_io": physical["drc"].get("unconstrained_io"),
+            "drc_rules": physical["drc"].get("rules", {}),
             "attested_e4_claim": False,
             "note": "Read-only unpromoted report observation; original evidence retained",
         }
