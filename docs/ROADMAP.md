@@ -33,8 +33,8 @@ The RL/Gym code is currently preserved but **not a new compiler requirement**. A
 
 ## Documentation and governance
 
-- Complete the clean-room packaging test and public onboarding.
+- Improve source packaging, documentation consistency and onboarding.
 - Resolve source authorship, institutional/commercial IP, third-party attributions and final license.
-- Perform a full historical confidentiality/secret review before authorizing any public release.
+- Review the full repository history for confidentiality and secrets before authorizing separately licensed distribution.
 
 **Interested contributors:** Begin with a documented valid use case or reproducible bug in [Using FPGAI](USING_FPGAI.md), the [support matrix](SUPPORTED_FEATURES.md), [Contributing](../CONTRIBUTING.md) and [the operator guide](COMPILER_OPERATOR_CONTRIBUTION.md). No roadmap item authorizes unaudited vendor execution or claims unmeasured performance gains.

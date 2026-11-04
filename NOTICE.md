@@ -1,11 +1,17 @@
-# FPGAI Research — notice and scope
+# Notices
 
-FPGAI Research is an experimental, architecture-aware neural-network-to-HLS compiler and associated academic studies. It is **not** a safety-certified compiler, a general-purpose FPGA system builder, a validated hardware-performance optimizer or a managed deployment service.
+FPGAI Compiler is an architecture-aware neural-network compiler research project. This repository contains source code, examples, tests and associated research records.
 
-The repository is currently private and **has no approved source redistribution license**. Read access does not grant copying, re-licensing, publication or commercial redistribution rights. Publication requires institutional/intellectual-property clearance, review of third-party provenance and complete Git history, an explicit approved license and final owner approval.
+## Copyright and source permissions
 
-AMD Vitis HLS and Vivado, vendor board/device data, ONNX, PyTorch, Gymnasium and other dependencies remain subject to their own respective rights. No proprietary vendor binaries, license files, confidential models, model weights or private native experiment outputs are offered for redistribution.
+The repository is publicly viewable but currently has no operative source-code license. GitHub access does not itself grant the right to copy, modify, distribute, sublicense or commercially exploit copyrighted source. For permission requests, contact the repository maintainers. See [Licensing and permissions](docs/LICENSE_DECISION.md).
 
-Compiler source evidence, Vitis C simulation, HLS resource/cycle estimates, Vivado routed timing and actual board runtime measure different properties. They must not be represented as interchangeable. The separate RL environment does not establish a model-learning advantage without an actual qualified evaluation.
+Institutional contributions, third-party components and vendor tools remain subject to their respective owners and applicable agreements.
 
-Security disclosures should follow [SECURITY.md](SECURITY.md). See [Release checklist](docs/OPEN_SOURCE_RELEASE_CHECKLIST.md) for the remaining public-release blockers.
+## Dependencies and validation
+
+AMD Vitis HLS, Vivado and related vendor assets are neither included nor sublicensed. Do not publish confidential data, model weights, credentials or restricted hardware artifacts in issues or contributions.
+
+Source compilation, numerical checks, C simulation, HLS synthesis, routing and actual board execution establish different properties. See [Supported features](docs/SUPPORTED_FEATURES.md) and [Scientific reproducibility](docs/SCIENTIFIC_REPRODUCIBILITY.md).
+
+For security disclosures see [Security](SECURITY.md). For contribution guidance see [Contributing](CONTRIBUTING.md).

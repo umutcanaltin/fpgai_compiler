@@ -1,12 +1,12 @@
-# FPGAI Research
+# FPGAI Compiler
 
-**Research compiler for architecture-aware FPGA neural-network compilation.**
+**Architecture-aware FPGA neural-network research compiler.**
 
 FPGAI explores the relationship between a **functional neural-network graph**, an **explicit operator-level architecture request**, a **resolved implementation**, and generated **HLS C++**. It makes hardware choices such as precision, parallelism, processing elements (PEs), SIMD width, serialization, tiling, and pipeline requests inspectable before vendor synthesis.
 
 The research implementation also investigates bounded, typed source-event contracts for tensor-element production, consumption, last-reader memory reuse and source-order conformance. A separate, optional research environment explores compiler-guided architecture decisions. These are experimental interfaces, **not a finished general-purpose FPGA toolchain**.
 
-> **Licensing:** The intended future license is **non-commercial academic research-only (source-available, not OSI open source)**. The [draft terms](docs/ACADEMIC_RESEARCH_LICENSE_PROPOSAL.md) are **not yet effective**: the repository remains private without an approved LICENSE or public redistribution permission. See [who can use FPGAI](docs/WHO_CAN_USE_FPGAI.md) and [release requirements](docs/OPEN_SOURCE_RELEASE_CHECKLIST.md). AMD vendor tools are not bundled.
+**Licensing and permissions:** This public repository has no operative source-code license published at present. GitHub visibility alone does not grant rights to copy, modify, redistribute or commercialize copyrighted code. See [Licensing and permissions](docs/LICENSE_DECISION.md).
 
 ## Start here
 
@@ -15,8 +15,8 @@ You can generate HLS C++ locally without installing Vitis or Vivado. The example
 **Requirements:** Python 3.10+, pip, and a virtual environment. The ONNX example needs the optional ONNX extra.
 
 ```bash
-git clone https://github.com/umutcanaltin/fpgai_research.git
-cd fpgai_research
+git clone https://github.com/umutcanaltin/fpgai_compiler.git
+cd fpgai_compiler
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e ".[onnx]"
@@ -99,7 +99,7 @@ Not promised: arbitrary ONNX coverage, general RTL/board integration, formally v
 - **Installation, CLI, architecture configuration, outputs:** [Using FPGAI](docs/USING_FPGAI.md).
 - **Vitis/Vivado environment variables and HLS workflows:** [AMD toolchain setup](docs/AMD_TOOLCHAIN_SETUP.md).
 - **How to integrate and run models on actual FPGA hardware:** [FPGA deployment](docs/FPGA_DEPLOYMENT.md).
-- **Research-only use and commercial restrictions:** [Who may use FPGAI](docs/WHO_CAN_USE_FPGAI.md).
+- **Source licensing and permissions:** [Licensing and permissions](docs/LICENSE_DECISION.md).
 - **Conceptual compiler design and data flow:** [Architecture](docs/ARCHITECTURE.md).
 - **What works, what is restricted:** [Supported features](docs/SUPPORTED_FEATURES.md).
 - **Running examples without AMD tools:** [Examples](examples/README.md).
@@ -116,20 +116,19 @@ Not promised: arbitrary ONNX coverage, general RTL/board integration, formally v
 python -m pip install -e ".[onnx,test]"
 python -m compileall -q src/fpgai_research tests
 python -m pytest -q
-python scripts/check_open_source_readiness.py
 ```
 
 These commands do not intentionally launch Vitis/Vivado. A complete test suite covers research modules, so optional dependencies may be required for some specialized tests. **Never run original hardware experiments, enable self-hosted CI, or execute generated scripts solely because installation succeeded.** Native evidence requires separate explicit authorization and a compatible machine.
 
 ## Research and scientific use
 
-Experimental findings are separated by the evidence they actually establish: source semantics and generated C++ are not Vitis C simulation; synthesis estimates are not routed physical utilization or frequency; Vivado out-of-context reports are not board latency or power. For a safe overview of research evidence, see [Scientific reproducibility](docs/SCIENTIFIC_REPRODUCIBILITY.md). The complete private research archive and historical sprint notes are deliberately excluded from the clean-room compiler preview, and should not be used as user-facing API specifications.
+Experimental findings are separated by the evidence they actually establish: source semantics and generated C++ are not Vitis C simulation; synthesis estimates are not routed physical utilization or frequency; Vivado out-of-context reports are not board latency or power. For a safe overview of research evidence, see [Scientific reproducibility](docs/SCIENTIFIC_REPRODUCIBILITY.md). Historical research studies and sprint notes are maintained for scientific provenance; the current architecture and usage guides define supported user workflows.
 
 The policy-neutral source decision interface is **learning-compatible**, but training improvements belong to a different, future study. Source-level feasibility certificates must not be interpreted as a hardware QoR guarantee.
 
 ## Contributing, security, and citation
 
-We welcome proposals, reproducible bug reports and scoped contributions after the distribution/rights review. Read [CONTRIBUTING.md](CONTRIBUTING.md), [SUPPORT.md](SUPPORT.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), [SECURITY.md](SECURITY.md), [NOTICE.md](NOTICE.md) and [CITATION.md](CITATION.md). Do not include private model weights, nonredistributable datasets, secrets, vendor logs, university/commercial IP, or personal data in issues and pull requests. A paper DOI, release tag, public license and publication approval have **not** been assigned.
+We welcome reproducible bug reports, technical discussion and scoped contribution proposals. Coordinate contributions with maintainers before submitting copyrighted source. Read [CONTRIBUTING.md](CONTRIBUTING.md), [SUPPORT.md](SUPPORT.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md), [SECURITY.md](SECURITY.md), [NOTICE.md](NOTICE.md) and [CITATION.md](CITATION.md). Do not include private model weights, nonredistributable datasets, secrets, vendor logs, university/commercial IP, or personal data in issues and pull requests. For revision-specific scientific citations, see [CITATION.md](CITATION.md).
 
 ---
-**Repository status:** Research prototype; disclosure and license approval pending. Scientific limitations and negative results are part of the documented research, not hidden implementation details.
+**Project scope:** The compiler supports the documented operator families and research workflows. Scientific results and limitations are maintained in the reproducibility record.

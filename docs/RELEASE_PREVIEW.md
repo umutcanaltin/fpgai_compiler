@@ -1,17 +1,13 @@
-# Preparing a public source preview (not a release)
+# Curated source-distribution workflow
 
-The current research repository contains **scientific study history, unreviewed attribution/license questions, and potentially confidential prior Git objects**. Simply moving a document from the root to an `archive/` folder, or deleting it from `main`, **does not remove it from Git history**.
+This publicly viewable repository contains **scientific study history and material requiring separate rights and confidentiality review before licensed redistribution**. Simply moving a document from the root to an `archive/` folder, or deleting it from `main`, **does not remove it from Git history**.
 
-For this reason, publication is a two-stage process:
+For this reason, separately licensed distribution uses a two-stage process:
 
 1. **Prepare and review a clean-room source preview** assembled only from an explicit allowlist of files.
 2. **After author/IP/license/history approval**, decide separately how and where to publish. No tool in this repository makes that decision or changes GitHub visibility.
 
-The current intended license direction is **academic, non-commercial
-research-only**, under [proposed terms](ACADEMIC_RESEARCH_LICENSE_PROPOSAL.md).
-These terms are **not effective**, and they are not OSI open-source
-terms. The clean-room preview contains only the proposal, not an
-approved license grant.
+The repository does not currently publish an operative source-code license. A source preview supports technical and rights review; it is not an authorization to redistribute code. See [Licensing](LICENSE_DECISION.md).
 
 ## Read-only plan
 
@@ -56,7 +52,7 @@ A preview writes `PREVIEW_NOT_FOR_PUBLICATION.json` with `ready_to_publish=false
 
 ## Required independent release review
 
-Before a real public repository or package:
+Before a separately licensed release or package:
 
 - Obtain written institutional/employer and coauthor/third-party IP authorization.
 - Select and approve a license for the exact collection of distributable source files; record authorship and dependency obligations.
@@ -71,4 +67,4 @@ See [Open-source release checklist](OPEN_SOURCE_RELEASE_CHECKLIST.md) and [Licen
 
 ## Scope of safe current work
 
-Editing the private repository, maintaining a clean external-facing README, reviewing the allowlist and producing a preview are allowed without changing visibility. Publishing, adding an unapproved license, deleting source-pinned results or rewriting Git history are **not** implicitly authorized by this work.
+Maintaining documentation and preparing a local preview do not change visibility or confer distribution rights. Publishing a licensed release, deleting source-pinned evidence or rewriting Git history requires separate authorization.

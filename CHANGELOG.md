@@ -1,5 +1,12 @@
 # Changelog
 
+## Documentation maintenance — November 2026
+
+- Aligned the repository overview and installation instructions with the canonical `fpgai_compiler` GitHub URL.
+- Consolidated licensing and permission notices without presenting working terms as an adopted license.
+- Updated user guides, contribution information and documentation links.
+
+
 This is the **public-facing project change summary**, not a replacement for the source-pinned scientific experiment archive. It does not claim a released software version or an approved open-source license.
 
 ## Unreleased — repository onboarding and release preparation (November 2026)
@@ -12,7 +19,7 @@ This is the **public-facing project change summary**, not a replacement for the 
 - Curated source-distribution files to exclude internal research diaries and private hardware study materials.
 - Added a **nonpublishable, create-only clean-room source preview** and local documentation link checker, with regression coverage.
 - Preserved previous internal landing pages and long scientific review notes in maintainer archives.
-- Left the repository **private** with no new license, no change in Git history and no vendor execution.
+- The documentation maintenance did not issue a source license, rewrite history or execute vendor tools.
 
 - Added [academic research-only draft terms](docs/ACADEMIC_RESEARCH_LICENSE_PROPOSAL.md) and a [permitted-user guide](docs/WHO_CAN_USE_FPGAI.md) without issuing a license before IP clearance.
 - Added [AMD environment setup](docs/AMD_TOOLCHAIN_SETUP.md), read-only tool detection, a sourceable Vitis/Vivado shell helper, and [FPGA deployment guidance](docs/FPGA_DEPLOYMENT.md) explaining the distinction between HLS C++/OOC reports and real bitstream/board execution.
@@ -24,4 +31,4 @@ The research prototype evolved through static ONNX importing, scoped architectur
 
 Experiments have different source revisions, cohorts and evidence strengths; detailed histories are preserved under `paper/compiler_ir/` and the source repository's Git history. Those chronological notes are not a stable public API or a claim that a particular hardware benefit has been shown in all configurations.
 
-**Distribution status:** Not yet released; pending ownership/IP and license approval, complete Git-history/security review, clean-room installation and maintainer signoff.
+**Licensing:** The public repository has no operative source-code license. A separately licensed distribution requires the relevant rights and third-party review.

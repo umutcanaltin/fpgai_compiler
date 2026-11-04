@@ -18,9 +18,9 @@ classifiers = [
 ]
 
 [project.urls]
-Repository = "https://github.com/umutcanaltin/fpgai_research"
-Documentation = "https://github.com/umutcanaltin/fpgai_research/blob/main/docs/README.md"
-Issues = "https://github.com/umutcanaltin/fpgai_research/issues"
+Repository = "https://github.com/umutcanaltin/fpgai_compiler"
+Documentation = "https://github.com/umutcanaltin/fpgai_compiler/blob/main/docs/README.md"
+Issues = "https://github.com/umutcanaltin/fpgai_compiler/issues"
 
 [project.optional-dependencies]
 onnx = ["onnx>=1.14", "numpy>=1.24"]

@@ -43,9 +43,9 @@ See [AMD toolchain setup](AMD_TOOLCHAIN_SETUP.md) for sourceable settings script
 
 The current compiler only produces HLS C++ and research out-of-context implementation evidence. A full board image needs HLS IP/kernel export, interconnect/AXI and PS/PL integration, a bitstream and host-side software. See the [FPGA deployment guide](FPGA_DEPLOYMENT.md); no one-command board runtime is currently implemented.
 
-### Can I publish or redistribute this source now?
+### What permissions apply to the source?
 
-Not yet. The requested future model is [academic, non-commercial research-only use](WHO_CAN_USE_FPGAI.md), not OSI open source. The [license proposal](ACADEMIC_RESEARCH_LICENSE_PROPOSAL.md) is not effective until rights-holder approval. The private repository still requires IP, attribution and full-history review. See [Release preview](RELEASE_PREVIEW.md).
+This publicly viewable repository has no operative source-code license. Visibility does not grant general permission to copy, modify, redistribute or commercially deploy copyrighted source. See [Licensing and permissions](LICENSE_DECISION.md).
 
 ### Can I contribute a new operator?
 

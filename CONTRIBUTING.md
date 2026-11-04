@@ -1,12 +1,12 @@
-# Contributing to FPGAI Research
+# Contributing to FPGAI Compiler
 
 Thank you for improving FPGAI. The most useful contributions are small, independently reproducible changes to compiler semantics, operator support, source emission, documentation, and evidence qualification.
 
-**Important:** This repository is currently private and has **no approved public redistribution license**. Before contributing, the maintainer must confirm the proposed contribution can be accepted and redistributed under an eventual authorized license. Repository access alone grants no permission to publish, redistribute, or reuse its contents.
+**Important:** This repository is publicly viewable but currently has **no operative source-code license**. Before contributing, the maintainer must confirm the proposed contribution can be accepted and redistributed under an eventual authorized license. Repository access alone grants no permission to publish, redistribute, or reuse its contents.
 
 ## Before starting
 
-Read the [project README](README.md), [compiler architecture](docs/ARCHITECTURE.md), [supported features](docs/SUPPORTED_FEATURES.md), [academic-use policy](docs/WHO_CAN_USE_FPGAI.md), and [release constraints](docs/OPEN_SOURCE_RELEASE_CHECKLIST.md). Check for an existing issue or related implementation first. For operator extensions, follow [the operator guide](docs/COMPILER_OPERATOR_CONTRIBUTION.md).
+Read the [project README](README.md), [compiler architecture](docs/ARCHITECTURE.md), [supported features](docs/SUPPORTED_FEATURES.md), [licensing and permissions](docs/LICENSE_DECISION.md), and [release constraints](docs/OPEN_SOURCE_RELEASE_CHECKLIST.md). Check for an existing issue or related implementation first. For operator extensions, follow [the operator guide](docs/COMPILER_OPERATOR_CONTRIBUTION.md).
 
 A contribution should be **scoped to one component and one verifiable behavior**. Avoid unrelated formatting-only refactors in scientific source files, unnecessary compatibility wrappers, stale duplicate implementations or changes to preserved experimental records.
 
@@ -68,6 +68,6 @@ Fixing unclear terminology, broken links, stale examples, missing operator restr
 
 ## Vulnerabilities and support
 
-Security-sensitive reports should follow [SECURITY.md](SECURITY.md) rather than opening a public issue with a payload or secret. Feature requests and normal bugs can use the GitHub issue templates when the repository becomes available to contributors. There is no promised response SLA.
+Security-sensitive reports should follow [SECURITY.md](SECURITY.md) rather than opening a public issue with a payload or secret. Feature requests and normal bugs can use the GitHub issue templates once contributions have been coordinated with maintainers. There is no promised response SLA.
 
 For attribution, use [CITATION.md](CITATION.md); no published DOI or open-source license is asserted.

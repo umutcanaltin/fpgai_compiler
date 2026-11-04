@@ -7,8 +7,8 @@ FPGAI is a research compiler for **static ONNX → typed Model IR → generated 
 Python **3.10 or later** is required. Use an isolated virtual environment:
 
 ```bash
-git clone https://github.com/umutcanaltin/fpgai_research.git
-cd fpgai_research
+git clone https://github.com/umutcanaltin/fpgai_compiler.git
+cd fpgai_compiler
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip

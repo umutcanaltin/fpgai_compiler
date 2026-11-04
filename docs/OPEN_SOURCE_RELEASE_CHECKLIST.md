@@ -1,8 +1,6 @@
-# Source-available research release checklist — BLOCKED until cleared
+# Source-distribution readiness checklist
 
-This repository is currently PRIVATE. The release process must be safe for
-academic/employer/third-party intellectual property. The goal is to make the
-research reproducible; this document is not authorization to publish.
+This repository is publicly viewable but currently has no operative source-code license. A separately licensed source distribution requires review of institutional, contributor and third-party rights. This checklist does not grant permissions.
 
 ## Release-critical gates (currently unresolved)
 
@@ -10,7 +8,7 @@ research reproducible; this document is not authorization to publish.
       approval for all code, data, generated hardware source and paper-related
       material. Explicitly separate the independent academic compiler from
       any proprietary commercial Morfics or third-party materials.
-- [ ] Obtain written approval for a **research-only, non-commercial source-available LICENSE** compatible with all contributor, institutional and dependency rights. The [proposed academic research terms](ACADEMIC_RESEARCH_LICENSE_PROPOSAL.md) are **not effective** and there is currently **NO authorized LICENSE**. Do not describe the intended field-of-use-restricted terms as OSI open source.
+- [ ] Select and obtain written rights-holder approval for definitive source-code licensing terms compatible with institutional, contributor and third-party rights. The [historical academic distribution option](ACADEMIC_RESEARCH_LICENSE_PROPOSAL.md) is a working document, not an effective license. Use restrictions are not OSI open source.
 - [ ] Scan **full Git history, branches and tags**, not just working tree,
       for API keys, passwords, personal data, university NDA material,
       unpublished weights, student contributions, proprietary IP and
@@ -33,8 +31,7 @@ research reproducible; this document is not authorization to publish.
 - [ ] Verify public README, quick start, operator support, limitations,
       security policy, community contributions, citation, changelog,
       dataset/source provenance and reproducibility.
-- [ ] Obtain the user's explicit final approval before changing visibility.
-      Do not treat a failed/passing script as permission to publish.
+- [ ] Obtain explicit authorization before publishing licensed source or changing repository visibility. Passing a script is not licensing approval.
 
 ## Local read-only checks
 
@@ -60,9 +57,9 @@ must review the complete historical/security/license findings.
 
 ## Public release success criteria
 
-A finalized research-only source-available LICENSE approved by every relevant rightsholder; clean history scan,
+A definitive LICENSE approved by every relevant rightsholder; clean history scan,
 resolved third-party attribution, full passing source tests, truthful
 research limitations, private experimental data excluded from repository
 and archives, and the owner's explicit publication authorization.
 
-**Current status:** NOT READY TO MAKE PUBLIC. No visibility changes made.
+**Current licensing status:** No operative license published; public GitHub visibility is separate from a separately authorized source distribution.

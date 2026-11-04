@@ -8,4 +8,4 @@ Until an authorized paper or archival software release exists, describe any scie
 
 Research on online Gym/RL policies is a **separate investigation** from the compiler's Model IR and policy-independent decision interface. Do not represent successful source certification as proof of trained-agent performance.
 
-The repository currently lacks an approved open-source license and public distribution permission; see [Notice](NOTICE.md) and [release checklist](docs/OPEN_SOURCE_RELEASE_CHECKLIST.md).
+For source-use permissions see [Notice](NOTICE.md) and [Licensing](docs/LICENSE_DECISION.md).

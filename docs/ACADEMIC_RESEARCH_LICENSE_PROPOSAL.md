@@ -1,14 +1,8 @@
-# Academic Research-Only Source License — PROPOSED TERMS (NOT EFFECTIVE)
+# Academic Research Distribution — Working Terms
 
-**Draft for institutional and rights-holder review. This is not an operative
-software license and grants no rights by itself.**
+**Historical option — NOT EFFECTIVE. This is not an operative software license.**
 
-The FPGAI Research maintainers have selected **academic/non-commercial
-research-only licensing as the intended release policy**, rather than MIT,
-Apache, GPL, or another OSI-approved open-source license. These proposed
-terms become operative **only after the verified copyright owners approve
-them in writing and publish an explicitly finalized LICENSE with an
-effective date and identified licensor(s)**.
+This working document describes one possible non-commercial academic distribution model considered during release planning. It does not establish a licensing decision or authorize use or redistribution. Final terms require approval from all relevant rights holders.
 
 ## 1. Intended eligible users
 
@@ -84,6 +78,4 @@ legal drafting and approval; this note is **not a replacement for counsel**.
       effective date and exact scope.
 - [ ] Obtain explicit owner approval for release and repository visibility.
 
-**Current disposition: PROPOSED ONLY. Until a finalized approved LICENSE
-exists, do not treat the repository as open source, academic-use licensed,
-or otherwise publicly redistributable.**
+**Document status:** Working option only. No source-use or redistribution rights are granted by this text. See [Licensing](LICENSE_DECISION.md).
