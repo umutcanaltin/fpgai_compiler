@@ -39,7 +39,7 @@ Specify a **product installation directory**, or the actual program executable:
 
 
 ```text
-/tools/Xilinx/Vitis/2023.2
+/tools/Xilinx/Vitis_HLS/2023.2
 /tools/Xilinx/Vivado/2023.2
 ```
 
@@ -55,7 +55,7 @@ fpgai-run \
   --onnx build/demo/model.onnx \
   --output build/demo/case01 \
   --board kv260 \
-  --vitis /tools/Xilinx/Vitis/2023.2 \
+  --vitis /tools/Xilinx/Vitis_HLS/2023.2 \
   --vivado /tools/Xilinx/Vivado/2023.2 \
   --plan
 ```
@@ -73,7 +73,7 @@ fpgai-run \
   --output build/demo/case01 \
   --board kv260 \
   --clock-ns 10 \
-  --vitis /tools/Xilinx/Vitis/2023.2 \
+  --vitis /tools/Xilinx/Vitis_HLS/2023.2 \
   --vivado /tools/Xilinx/Vivado/2023.2 \
   --stage ooc \
   --execute-native
@@ -97,7 +97,7 @@ Useful alternatives:
 # HLS-only: Vivado is not needed.
 fpgai-run --onnx models/network.onnx --output build/hls01 \
   --part xck26-sfvc784-2LV-c \
-  --vitis /tools/Xilinx/Vitis/2023.2 \
+  --vitis /tools/Xilinx/Vitis_HLS/2023.2 \
   --stage hls --execute-native
 
 # Generate source/testbench without AMD tools.

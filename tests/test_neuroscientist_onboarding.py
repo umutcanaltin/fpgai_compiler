@@ -286,3 +286,17 @@ def test_native_execution_requires_explicit_opt_in(monkeypatch, tmp_path):
     args = _args(tmp_path, stage="ooc", native=False)
     assert app.run(args) == 0
     assert not (tmp_path / "new-case").exists()
+
+
+def test_vitis_hls_2023_2_explicit_installation_layout(tmp_path):
+    """Recognize the common standalone Vitis_HLS/2023.2 Linux install."""
+    product = tmp_path / "Xilinx" / "Vitis_HLS" / "2023.2"
+    (product / "bin").mkdir(parents=True)
+    binary = product / "bin" / "vitis_hls"
+    binary.write_text("#!/bin/sh\nexit 0\n")
+    binary.chmod(0o755)
+    setup = product / "settings64.sh"
+    setup.write_text("export FPGAI_HLS_LOCAL_SETUP=1\n")
+    resolved = app.resolve_vendor_tool("vitis_hls", str(product))
+    assert resolved.executable == str(binary.resolve())
+    assert resolved.settings_script == str(setup.resolve())

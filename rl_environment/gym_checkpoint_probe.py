@@ -48,11 +48,13 @@ def _metrics(probs, labels):
 
 
 def probe(study, output, *, holdout_first_episode=91):
-    if torch is None:
-        raise RuntimeError("PyTorch required for native-free checkpoint inference")
     if holdout_first_episode != 91:
         raise ValueError("Only preregistered episodes 91..100 permitted")
+    # Validate source provenance before checking optional ML dependencies.
+    # A missing original study is a file error even on compiler-only installs.
     original = training_reference(study)
+    if torch is None:
+        raise RuntimeError("PyTorch required for native-free checkpoint inference")
     root = original["root"]
     seed = original["seed"]
     old = original["campaign"]
