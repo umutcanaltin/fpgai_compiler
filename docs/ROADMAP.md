@@ -20,6 +20,10 @@ This document identifies **areas open to contribution**, not promised delivery d
 - Prototype PYNQ-Z2-specific HLS AXI4-Stream wrapper, AXI-Lite control,
   PS7/AXI DMA Vivado project, full .bit/.hwh build and standalone PYNQ host
   numerical comparison. See [PYNQ-Z2 board DMA pilot](PYNQ_Z2_BOARD_DMA_PILOT.md).
+- CPU qualification gate: the user confirmed 1,926 passed, 21 skipped on
+  2026-11-04. The installed Vivado 2023.2 has no PYNQ-Z2 board definitions.
+  The experimental HLS-only command now accepts the exact Zynq-7020 silicon
+  without a board preset; bitstream generation remains blocked without it.
 - Qualification sequence: run source-only tests locally, inspect the real
   Vitis export, fix the first actual Vivado BD/Tcl issue, enforce timing/DRC
   checks and finally test transfers and output comparison **on a PYNQ-Z2**.

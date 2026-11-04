@@ -19,6 +19,15 @@ _PYNQ_TCL = r'''# FPGAI experimental PYNQ-Z2 full-system 2023.2 recipe.
 # Inputs: prepared/frozen model.cpp, separately source-synthesized AXI IP.
 # All PS pin mux/DDR details MUST come from explicit installed PYNQ-Z2 board_part.
 # Never disable safety DRCs, change their severities, or waive timing to get .bit.
+# Honor an explicit local third-party board repo, without changing the Vivado install.
+# The caller must inspect and trust the board files (PS DDR/MIO presets).
+if {[info exists ::env(FPGAI_BOARD_REPO)]} {
+  set board_repo [file normalize $::env(FPGAI_BOARD_REPO)]
+  if {![file isdirectory $board_repo]} {
+    error "FPGAI_BOARD_REPO is not an existing directory"
+  }
+  set_param board.repoPaths [list $board_repo]
+}
 set expected_part {@PART@}
 set selected_board {@BOARD_PART@}
 set installed [get_board_parts -quiet $selected_board]

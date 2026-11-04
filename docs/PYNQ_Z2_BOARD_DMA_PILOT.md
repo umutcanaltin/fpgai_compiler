@@ -4,6 +4,12 @@
 
 The input is an existing *source-attested, CSim-qualified* FPGAI case and the exact source ONNX model. Frozen weights are checked against its Model IR/source manifest. New HLS synthesis is performed for the **PYNQ-Z2's xc7z020clg400-1**, regardless of the earlier OOC case's KV260 part.
 
+**2026-11-04 local regression:** 1,926 tests passed and 21 skipped on the
+user's workstation (feature branch f430ded), but no PYNQ-Z2 Vivado board
+part is installed. The first native **HLS-only** AXI IP export can now run
+without `--board-part`; it requires only the known Zynq-7020 silicon.
+Full-board Vivado compilation still requires the correct board preset.
+
 ## Hardware path and interface
 
 PS DDR ↔ PS S_AXI_HP0 ↔ SmartConnect ↔ AXI DMA (MM2S/S2MM) ↔ AXI4-Stream adapter ↔ original FPGAI model; PS M_AXI_GP0 controls DMA and accelerator AXI-Lite registers.
@@ -22,6 +28,42 @@ On your workstation, with Vivado 2023.2:
 ~~~
 
 One documented board-part identifier is `tul.com.tw:pynq-z2:part0:1.0`. **Only use an identifier that your own Vivado installation actually lists**. If nothing is listed, install and verify appropriate PYNQ-Z2 board files first. Do not replace the preset with a KV260 configuration or assume a part-only PS config provides correct DDR/MIO.
+
+### Install or register PYNQ-Z2 board definitions without administrator access
+
+AMD Vivado 2023.2 supports third-party board repositories using
+`set_param board.repoPaths`. FPGAI's board discovery and full Vivado
+scripts now recognize the explicitly configured `FPGAI_BOARD_REPO`
+environment variable; neither script copies vendor files into your Vivado
+installation.
+
+Obtain the PYNQ-Z2 board definition from an appropriate source and
+**inspect the files and license** before using them. The public
+[board-file collection](https://github.com/xupsh/pynq-supported-board-file)
+contains `pynq-z2/A.0/board.xml`, `preset.xml` and
+`part0_pins.xml`, with the TUL vendor and Zynq-7020 part. A local,
+user-owned copy can be registered as follows:
+
+~~~bash
+mkdir -p ~/Desktop/fpga_board_defs
+git clone https://github.com/xupsh/pynq-supported-board-file.git \
+  ~/Desktop/fpga_board_defs/pynq-supported-board-file
+
+export FPGAI_BOARD_REPO="$HOME/Desktop/fpga_board_defs/pynq-supported-board-file"
+/tools/Xilinx/Vivado/2023.2/bin/vivado -mode batch \
+  -source scripts/list_pynq_z2_board_parts.tcl
+~~~
+
+Verify the repository actually contains `pynq-z2/A.0/board.xml`,
+`preset.xml`, and `part0_pins.xml` before running Vivado. The *same
+exported environment variable* must remain set when running
+`fpgai-board --stage bitstream`. If Vivado does not discover a board part,
+stop and correct repository location or vendor-file compatibility first.
+
+See [AMD Vivado 2023.2 third-party board repositories](https://docs.amd.com/r/2023.2-English/ug895-vivado-system-level-design-entry/Elements-of-the-Platform-Board-Flow)
+and [PYNQ board-settings documentation](https://pynq.readthedocs.io/en/v2.7.0/overlay_design_methodology/board_settings.html).
+A trusted board-definition source and matching PS preset are essential;
+the target FPGA part alone is not a DDR/board configuration.
 
 ## 2. Read-only plan
 
@@ -47,6 +89,29 @@ fpgai-board \
 Plan mode does not create files, invoke vendor programs or use GitHub Actions.
 
 ## 3. Native HLS export, then full board build
+
+**You can do HLS export even when board-part discovery reported
+`NO_PYNQ_Z2_BOARD_PART_INSTALLED`.** For this source-qualified HLS-only
+stage, omit `--board-part` (the target silicon remains explicit):
+
+~~~bash
+fpgai-board \
+  --onnx build/demo/model.onnx \
+  --case build/neuro_ooc_02 \
+  --output build/board_pynq_toy_hls_no_preset_01 \
+  --board pynq-z2 \
+  --clock-ns 10 \
+  --vitis /tools/Xilinx/Vitis_HLS/2023.2 \
+  --stage hls --execute-native
+~~~
+
+This runs Vitis HLS C simulation, synthesis and IP-Catalog export for the
+Zynq-7020, but **not** Vivado's PS, DMA, DDR integration or a board
+bitstream. It can expose real AXI wrapper/RTL interface problems before
+spending time installing the third-party board files.
+
+The full bitstream stage below remains blocked until Vivado reports an
+installed PYNQ-Z2 board part.
 
 First qualify the new AXI wrapper and the real PYNQ-Z2 IP export:
 
@@ -115,7 +180,7 @@ The result `on_device_numerics_verified: true` requires a **real** DMA transfer 
 
 ## What remains
 
-- **Native vendor results and physical on-board measurements have not been executed by the assistant.** Run source-only tests on your workstation, then the HLS pilot, then the full board builder. Report the first failure and original logs for corrections on this branch.
+- **Native PYNQ-Z2 results and physical on-board measurements have not been executed by the assistant.** The local CPU regression suite has passed (1,926 passed, 21 skipped). Next run the HLS-only IP export independently, then the full board builder after board-part installation. Report the first failure and original logs for corrections on this branch.
 - The experimental PYNQ-Z2 profile is fixed to 100 MHz PL clock and uses 32-bit AXI stream words. Large CNNs may not meet Zynq-7020 resource/timing budgets.
 - **KV260 is not yet a valid target for this script:** its Kria MPSoC platform, PS HPM/HPC/HP interfaces and Linux device-tree/firmware/runtime require a separate verified recipe. A PYNQ overlay is not interchangeable with the standard KV260 Linux stack.
 - Board-specific clocks/resets, address map, DMA driver, bitstream, .hwh and numerical tests must each succeed before claiming 'directly runnable'.

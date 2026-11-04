@@ -9,6 +9,20 @@
 
 This is the **public-facing project change summary**, not a replacement for the source-pinned scientific experiment archive. It does not claim a released software version or an approved open-source license.
 
+## Experimental PYNQ-Z2 board preset decoupling — feature branch
+
+- The native HLS-only IP export and read-only HLS plan no longer require
+  installed third-party Vivado PYNQ-Z2 board files; both still use the exact
+  Zynq-7020 part. Full bitstream stage continues to require the verified
+  PYNQ-Z2 board preset.
+- Optional `FPGAI_BOARD_REPO` allows separate user-owned board file
+  repositories in Vivado discovery and full board build, without writing
+  to the AMD installation directory.
+- Added fail-closed tests for HLS without board-part, missing board-part
+  for bitstream stage, and explicit user repository setup.
+- Previous workstation test suite: 1,926 passed and 21 skipped; these
+  **new changes are not yet workstation-verified**.
+
 ## Experimental PYNQ-Z2 board DMA/bitstream pilot — feature branch
 
 - Added bounded 32-bit AXI4-Stream / AXI4-Lite HLS wrapper around existing model C++ and frozen ONNX constants, with separate native CSim and IP-Catalog export.

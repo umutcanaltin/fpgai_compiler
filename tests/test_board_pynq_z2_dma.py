@@ -260,3 +260,52 @@ def test_board_reference_matches_original_model_ir(tmp_path):
     with pytest.raises(FileExistsError):
         generate_reference(str(onnx_path), str(tmp_path / "input.npy"),
                            str(output_path))
+
+
+
+def test_hls_plan_is_allowed_without_installed_board_part(
+        monkeypatch, tmp_path, capsys):
+    """Exporting AXI IP for a known silicon part does not need a PS board preset."""
+    monkeypatch.setattr(cli, "_verify_original_case",
+                        lambda case, onnx: _manifest())
+    monkeypatch.setattr(cli, "resolve_vendor_tool",
+                        lambda *args, **kwargs: pytest.fail("No vendor in read-only plan"))
+    original = tmp_path / "original"
+    original.mkdir()
+    (original / "manifest.json").write_text(json.dumps(_manifest()))
+    (tmp_path / "original.onnx").write_bytes(b"fake-onnx-for-source-only-plan")
+    args = _args(tmp_path)
+    args.board_part = None
+    args.stage = "hls"
+    assert cli.run(args) == 0
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["action"] == "PLAN_ONLY_NO_FILES_CREATED"
+    assert plan["board_part"] is None
+    assert plan["board_part_required_for_full_bitstream"] is True
+    assert plan["part"] == "xc7z020clg400-1"
+    assert plan["board_preset_used_for_hls"] is False
+    assert not (tmp_path / "new_board").exists()
+
+
+def test_bitstream_plan_still_requires_explicit_installed_board_preset(tmp_path):
+    args = _args(tmp_path)
+    args.board_part = None
+    with pytest.raises(ValueError, match="Full board bitstream requires --board-part"):
+        cli.run(args)
+    assert not (tmp_path / "new_board").exists()
+
+
+def test_vivado_board_tcl_accepts_explicit_repo_without_mutating_vendor_install():
+    from pathlib import Path
+    tcl = pynq_z2_board_tcl(
+        board_part="vendor.test:pynq-z2:part0:1.0",
+        part="xc7z020clg400-1", clock_ns=10.0,
+    )
+    discovery = (
+        Path(__file__).resolve().parents[1] /
+        "scripts/list_pynq_z2_board_parts.tcl"
+    ).read_text()
+    for src in (tcl, discovery):
+        assert "FPGAI_BOARD_REPO" in src
+        assert "set_param board.repoPaths [list $board_repo]" in src
+        assert "if {![file isdirectory $board_repo]}" in src

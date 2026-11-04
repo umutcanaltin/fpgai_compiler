@@ -179,10 +179,21 @@ def run(args: argparse.Namespace) -> int:
         )
     if args.clock_ns != PYNQ_DMA_CLOCK_NS:
         raise ValueError("First PYNQ-Z2 deployment profile uses an explicit 100 MHz 10 ns clock")
-    if not args.board_part:
-        raise ValueError("Specify --board-part from your installed Vivado PYNQ-Z2 board files")
-    script = pynq_z2_board_tcl(
-        board_part=args.board_part, part=PYNQ_Z2_PART, clock_ns=args.clock_ns,
+    # A PYNQ-Z2 HLS IP export targets a known *silicon part* only.
+    # The full Vivado PS/DDR project needs the installed board preset.
+    # Keep these independent to unblock actual HLS verification when board
+    # files are not yet installed on a research workstation.
+    board_part = getattr(args, "board_part", None)
+    if not board_part and args.stage == "bitstream":
+        raise ValueError(
+            "Full board bitstream requires --board-part from an installed "
+            "Vivado PYNQ-Z2 board definition; HLS stage needs no board preset"
+        )
+    script = (
+        pynq_z2_board_tcl(
+            board_part=board_part, part=PYNQ_Z2_PART, clock_ns=args.clock_ns,
+        )
+        if board_part else None
     )
     source = Path(args.case).expanduser().resolve(strict=True)
     onnx = Path(args.onnx).expanduser().resolve(strict=True)
@@ -199,7 +210,9 @@ def run(args: argparse.Namespace) -> int:
     plan = {
         "schema": "fpgai-research/board-dma-build/v1",
         "board": args.board,
-        "board_part": args.board_part,
+        "board_part": board_part,
+        "board_part_required_for_full_bitstream": True,
+        "board_preset_used_for_hls": False,
         "part": PYNQ_Z2_PART,
         "clock_ns": args.clock_ns,
         "input_elements": nin,
@@ -381,8 +394,9 @@ def main(argv=None) -> int:
     parser.add_argument("--case", required=True, help="Existing source-attested HLS case")
     parser.add_argument("--output", required=True, help="New, create-only board build directory")
     parser.add_argument("--board", choices=("pynq-z2", "kv260"), required=True)
-    parser.add_argument("--board-part", required=True,
-                        help="Exact board_part installed in Vivado; no guessed board presets")
+    parser.add_argument("--board-part",
+                        help="Required for full bitstream only: exact installed Vivado "
+                             "PYNQ-Z2 board_part; optional for HLS IP export")
     parser.add_argument("--clock-ns", type=float, default=PYNQ_DMA_CLOCK_NS)
     parser.add_argument("--stage", choices=("hls", "bitstream"), default="bitstream")
     parser.add_argument("--vitis", help="Original Vitis HLS executable or product folder")

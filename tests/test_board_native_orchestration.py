@@ -183,3 +183,21 @@ def test_missing_original_manifest_rejected_before_vendor_calls(
         cli.run(args)
     assert calls == []
     assert not (tmp_path / "new_board").exists()
+
+
+
+def test_native_hls_export_works_without_vivado_board_preset(
+        monkeypatch, tmp_path):
+    """The mocked HLS export is part-qualified; no board_part is required."""
+    args = _args(tmp_path, stage="hls")
+    args.board_part = None
+    calls = _mock_vendor(monkeypatch)
+    assert cli.run(args) == 0
+    assert calls == ["vitis_board"]
+    report = json.loads(
+        (tmp_path / "new_board" / "board_build_summary.json").read_text()
+    )
+    assert report["state"] == "BOARD_IP_EXPORTED_NOT_BITSTREAM"
+    assert report["board_part"] is None
+    assert report["board_preset_used_for_hls"] is False
+    assert report["part"] == "xc7z020clg400-1"
