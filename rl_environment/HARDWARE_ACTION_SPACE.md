@@ -239,13 +239,130 @@ HW-RL-03 must first bind the source/action interface to this exact
 independently audited native case, then implement the reward-producing
 Gymnasium loop.
 
+## HW-RL-02 measured native baseline — 2026-11-04
+
+The user successfully executed an original Vitis HLS 2023.2 CNN experiment
+and independently audited the same immutable case, with **no second vendor
+call**. This is the first qualified, real-source HLS latency baseline for
+the new hardware-space backend. It is **not** a routed FPGA performance
+measurement or a pretraining result.
+
+| Native case | Requested clock | Worst cycles | HLS clock estimate | Effective scheduling | Status |
+|---|---:|---:|---:|---:|---|
+| `build/rl_hw02_cnn_native_01` | 10.00 ns | 690 | 8.462 ns | 7.300 ns | **Infeasible** (−1.162 ns scheduling margin) |
+| `build/rl_hw02_cnn_native_14ns_01` | 14.00 ns | 646 | 10.213 ns | 10.220 ns | **Qualified** (+0.007 ns scheduling margin) |
+
+The 14 ns case produced a source-attested HLS-estimated latency of
+**646 × 14 ns = 9,044 ns**, CSim max absolute error **0.0003907345**,
+LUT **10,238**, FF **3,734**, DSP **45**, BRAM18K **1**, URAM **0**.
+All five resource estimates were within the explicitly chosen task
+caps. The scheduling margin is **7 picoseconds**, so do not call this
+robust physical timing. The 10 ns case's worst-cycle count is diagnostic
+only and must not be used as a *qualified* HLS latency.
+
+The native cases remain immutable and are **not** silently imported as
+RL training experience. Future learning curves must identify any
+baseline seeding or pretraining explicitly. The first Gym episode starts
+with no qualified previous best; its first qualifying fresh case receives
+the established first-qualified reward, not a reward calculated against
+this external 14 ns case.
+
+## HW-RL-03 — original-Vitis Gymnasium integration
+
+**Status:** New `rl_environment.hardware_gym.GymHardwareNativeEnv`
+source and CPU-only unit tests added to the isolated RL branch.
+**Tests and first actual Gym-native step have not been run locally.**
+
+- Gymnasium-compatible `reset` and `step` return fixed padded
+  node/edge tensors for a variable-size typed network, explicit node,
+  edge and action masks, field/category-specific action features and
+  task budgets/accuracy context. No tensor weight values are exported.
+- Each action is a tuple `(source_action_index, requested_clock_ns)`.
+  Index zero changes the clock alone; other indices edit one existing
+  compiler-supported architecture knob and may change the same
+  requested clock simultaneously. The architecture choices originate
+  from `candidate_actions` and the original compiler `action_mask`.
+- The clock head is **continuous-valued**, not a discrete menu; a
+  hardware case is normalized to **0.01 ns** because original Vitis
+  HLS 2023.2 clock-report attribution is proven only at that
+  resolution. No native Fmax estimate is invented.
+- `reset`, graph observation and CLI preview invoke zero vendor
+  tools and do not allocate a native case. Each native `step` needs
+  explicit `execute_native=True`, makes one *new*
+  `episode_xxxxxx/case_xxxx`, and independently re-audits original
+  compiled source, original numerical CSim, original resource/timing
+  evidence and exact task/sample identity. Cases and original vendor
+  receipts are never overwritten. A step-level outcome lives at the
+  episode level, separate from original vendor files.
+- Source-invalid, masked, repeated or no-op proposals use **zero**
+  licensed calls and return no reward. Infeasible but genuinely
+  original-audited HLS cases receive `-0.05`. The first qualified
+  case gets `-0.005`; subsequent best improvements receive
+  `ln(previous_best/current_best)-0.005`, preserving existing
+  latency-only `reward.py` semantics. Rejected/unknown timing
+  never receives a fabricated qualified latency.
+- Source-only and CI tests simulate a vendor response solely to test
+  the Gym state machine; **test fixture receipts are not evidence of
+  a real HLS run**. A real native Gym case on the user's workstation
+  remains a separate acceptance gate.
+- No learned shared-GNN agent, checkpoints, 100-episode study or
+  physical FPGA metrics are produced by this sprint. The old
+  `gym_env.py`, agents, training tasks and paper experiments remain
+  untouched.
+
+### Source-only Gym preview and one native step
+
+If Gymnasium is missing, install `gymnasium>=1,<2` in the active
+virtual environment. Then reinstall the editable repository to
+register the new console entry point. This model and fixed sample file
+are the originals from HW-RL-02.
+
+~~~bash
+python -m pytest -q tests/test_rl_hardware_gym.py
+python -m pip install --no-deps -e .
+
+# Read-only, NO native calls or experiment output allocation:
+fpgai-rl-hardware-gym \
+  --onnx build/demo/cnn_pool_dense.onnx \
+  --samples build/rl_hw02_cnn_samples_seed123.npy \
+  --part xc7z020clg400-1 \
+  --resource-caps 53200 106400 220 280 0 \
+  --max-absolute-error 0.1 \
+  --initial-clock-ns 14.00 \
+  --output-root build/rl_hw03_cnn_pilot_01
+~~~
+
+Use a **new** experiment root for each study. The following is an
+explicit one-original-Vitis, no-training smoke test; action index zero
+changes only the requested clock from 14.00 to 15.00 ns. This is **not**
+an assumption that 15 ns will qualify:
+
+~~~bash
+fpgai-rl-hardware-gym \
+  --onnx build/demo/cnn_pool_dense.onnx \
+  --samples build/rl_hw02_cnn_samples_seed123.npy \
+  --part xc7z020clg400-1 \
+  --resource-caps 53200 106400 220 280 0 \
+  --max-absolute-error 0.1 \
+  --initial-clock-ns 14.00 \
+  --output-root build/rl_hw03_cnn_pilot_01 \
+  --action-index 0 \
+  --action-clock-ns 15.00 \
+  --vitis /tools/Xilinx/Vitis_HLS/2023.2/bin/vitis_hls \
+  --execute-native
+~~~
+
+The command will refuse an existing episode/case and will not rerun
+an old experiment in-place. Review the generated `original_vitis_audit`
+and `step_0000.json` before any multi-episode training.
+
 ## Next research-development sprints
 
 | Sprint | Scope | Evidence gate |
 |---|---|---|
 | HW-RL-01 | Full eight-field typed action inventory, bounded per-op menus, source-only masks and variable-size weight-private graph observation | Source regression with MatMul and multioperator Conv CNN; no backend calls; **30 targeted and 1,982 full tests passed before packaging fix; installed CLI needs recheck** |
-| HW-RL-02 | Original-native Vitis backend for the exact source-legal state, sample cohort, part, clock, immutable case and independent CSim/E3 gate | **Source-only implementation added; new tests and actual one-shot native MatMul/Conv cases pending workstation qualification** |
-| HW-RL-03 | Gymnasium `Env` with variable-size action features/masks and continuous clock head, invoking the HW-RL-02 real evaluator on each authorized step | `reset` read-only, `step` always a fresh case, consistent 5-resource/numerical/timing receipt, non-stale imports |
+| HW-RL-02 | Original-native Vitis backend for exact source state, samples, part, clock, immutable cases and independent CSim/E3 gate | **CPU tests passed; native CNN 10 ns infeasible and 14 ns qualified (9,044 ns HLS estimate); other model families pending** |
+| HW-RL-03 | Gymnasium native-step environment with bounded padded variable-sized graph, source action masks and continuous clock output, original Vitis per authorized step | **Source/test implementation added; local CPU and first real Gym-native step pending** |
 | HW-RL-04 | Shared GNN actor for MatMul↔Conv↔CNN transfer with variable graph sizes and category-specific knob masks; preserve one shared policy across episodes | CPU gradients, correct invalid masking, no heldout leakage, no pretrained checkpoint |
 | HW-RL-05 | Prospective matched on-line learning comparison vs random and no-GNN controls; original Vitis calls fixed per task/seed | Separate training/validation/test, same budgets, per-network qualified HLS nanoseconds and uncertainty; negative results retained |
 | HW-RL-06 | Optional system/board/physical action domains once compiler implements and verifies typed memory/AXI/CDC/board semantics | No fictional DMA or power knob; original physical board verification separately required |

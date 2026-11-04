@@ -1,3 +1,19 @@
+**2026-11-04 HW-RL-03 native Gym engineering gate:** The 14.00 ns
+CNN HW-RL-02 first real-Vitis case qualified (646 worst cycles,
+9,044 ns HLS estimate, only +0.007 ns scheduling margin). Do not
+treat this original case as pretraining or a routed timing claim.
+New `rl_environment.hardware_gym` must combine source-masked
+existing compiler architecture actions + continuous requested
+clock, then call original `hardware_native.execute_native_case`
+once per new case and separately audit source, fixed numeric samples,
+original CSim, resource and effective HLS timing before applying the
+existing `latency_only_reward`. Preserve all vendor case directories
+and fail closed on contradictory or unverified reports; never call
+the vendor from reset or source-only preview. CPU mock receipts
+only test control flow, never prove native qualification. The older
+Gym environment, agent, paper comparison runs and GitHub Actions
+must remain untouched.
+
 **2026-11-04 HW-RL-02 native source/evidence contract:** New opt-in
 `rl_environment.hardware_native` and `fpgai-rl-hardware-native`
 must reuse the existing `compile_architecture` source semantics,

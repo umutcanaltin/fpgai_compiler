@@ -1,3 +1,27 @@
+## 2026-11-04 — HW-RL-03 actual native-qualification Gym interface
+
+- User confirmed 14.00 ns mixed CNN original Vitis HLS case qualified:
+  CSim passed, 646 worst cycles, 9,044 ns estimated HLS latency, 10.213 ns
+  estimated target path vs 10.220 ns effective budget, 0.007 ns margin.
+  Independent audit reproduced E3 and provenance without a new Vitis call.
+  The earlier 10 ns case remains unqualified; nothing was overwritten.
+- Introduced a separate `GymHardwareNativeEnv` with bounded
+  tensor/operator graph nodes and edges, explicit source-mask and
+  action-field features, and a learned floating clock output quantized
+  only for original-Vitis report compatibility (0.01 ns).
+- An authorized native Gym step invokes the existing one-shot
+  `execute_native_case`, independently re-audits its original
+  source/numeric/resource/timing receipts and uses the established
+  latency-only reward. All original vendor source cases remain separate
+  from episode-level step records.
+- Added a read-only preview and one-step opt-in
+  `fpgai-rl-hardware-gym` CLI and CPU-only mock-lifecycle tests.
+  **The new HW-RL-03 code and first native Gym step have not yet
+  been tested on the user's workstation.**
+- No existing historical Gym/agent/reward/curriculum code, old Vitis
+  cases or GitHub Actions changed; no trained policy or physical Fmax
+  claim is made.
+
 ## 2026-11-04 — fix strict native receipt comparison after JSON round-trip
 
 - User ran HW-RL-02 locally: the focused suite reported **3 failed, 54 passed, 1 skipped**; the full suite **3 failed, 2,000 passed, 22 skipped**. All failures were the same strict action receipt comparison, before any original Vitis qualification.

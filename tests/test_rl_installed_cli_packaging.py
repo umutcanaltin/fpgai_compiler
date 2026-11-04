@@ -121,3 +121,26 @@ def test_installed_hardware_native_cli_help_outside_repository(tmp_path):
     assert "--samples" in process.stdout
     assert "--execute-native" in process.stdout
     assert "--audit" in process.stdout
+
+
+
+def test_installed_hardware_gym_preview_help_outside_repository(tmp_path):
+    """New Gym CLI must import without relying on pytest's root sys.path."""
+    exe = Path(sysconfig.get_path("scripts")) / (
+        "fpgai-rl-hardware-gym.exe" if os.name == "nt"
+        else "fpgai-rl-hardware-gym"
+    )
+    if not exe.is_file():
+        pytest.skip("Install editable project to verify new Gym console script")
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env.pop("PYTHONHOME", None)
+    proc = subprocess.run(
+        [str(exe), "--help"], cwd=tmp_path, env=env,
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + "\n" + proc.stderr
+    assert "--execute-native" in proc.stdout
+    assert "--action-index" in proc.stdout
+    assert "--action-clock-ns" in proc.stdout
+    assert "--resource-caps" in proc.stdout

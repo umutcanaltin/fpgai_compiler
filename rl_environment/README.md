@@ -1,3 +1,14 @@
+> **HW-RL-03 native Gym source added, testing pending (4 November 2026).**
+> The user completed a source-attested, independently audited 14 ns
+> CNN Vitis HLS case: 646 cycles × 14 ns = 9,044 ns HLS-estimated
+> latency, with +0.007 ns estimated scheduling margin. A new separate
+> `GymHardwareNativeEnv` exposes typed graph/action masks and
+> one fresh original Vitis call per explicitly authorized step,
+> with the existing real-latency reward. The source and CPU-only
+> tests now need workstation verification; a true Gym-native step
+> has not been run yet. No agent learning or physical speedup claimed.
+> See [HW-RL-03](HARDWARE_ACTION_SPACE.md).
+
 > **HW-RL-02 now staged on the RL feature branch (2026-11-04).**
 > The user confirmed `fpgai-rl-hardware-space` runs from `/tmp` and
 > inspects real Conv/MatMul/Gemm source operators. A new optional

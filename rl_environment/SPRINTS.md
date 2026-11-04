@@ -1,3 +1,24 @@
+# HW-RL-03 native Gymnasium environment — 2026-11-04
+
+The user's native HW-RL-02 CNN baseline at 14 ns has **qualified**
+original-HLS estimated latency of 9,044 ns (646 cycles). Its 7 ps
+effective-scheduling margin does not prove robust physical timing.
+The independent read-only audit reproduced the result; the earlier
+10 ns run was genuinely infeasible. Both original cases are preserved.
+
+New isolated HW-RL-03 source introduces a bounded variable-size graph
+Gym with typed architecture-choice masks, model-global numeric actions,
+continuous requested-clock head, one immutable new original Vitis case
+per authorized native step, exact source/sample/evidence replay and
+the existing latency-only reward. Default preview is read-only.
+**New tests and original Gym-native smoke remain pending**. No
+existing GNN weights, old paper cases or native reward definitions
+were rewritten.
+
+[HW-RL-03 scope and commands](HARDWARE_ACTION_SPACE.md)
+
+---
+
 # HW-RL-02 source-bound native HLS evaluation — 2026-11-04
 
 The user's installed CLI now successfully runs outside the repository
