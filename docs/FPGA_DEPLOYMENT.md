@@ -6,20 +6,27 @@ which ones the repository implements today. A working Vitis/Vivado
 installation and an FPGA board do not alone make `model.cpp` runnable
 on programmable logic.
 
-## Experimental, unverified PYNQ-Z2 AXI DMA board pilot
+## Experimental PYNQ-Z2 AXI DMA board pilot — bitstream built, not qualified
 
-An **optional new feature-branch prototype** generates a 32-bit AXI4-Stream
-interface around the original model, performs a fresh Vitis HLS export,
-creates a PYNQ-Z2 PS7/AXI DMA full-system block design, and attempts to
-produce a complete Vivado .bit/.hwh overlay. The bundled PYNQ-side runtime
-is intended to transfer original fixed-point model input/output and compare
-against an independent software reference.
+A separate source-attested `fpgai-board` workflow wraps the original model
+with 32-bit AXI4-Stream and AXI-Lite control, performs native Vitis HLS IP
+export, constructs a PYNQ-Z2 PS7/AXI DMA Vivado project, and generates
+matching .bit/.hwh artifacts. The user executed two actual full-system
+Vivado implementations on 4 November 2026. Both routed successfully
+with positive setup slack; the newer case, `board_pynq_toy_bit_02`,
+reported **+2.311 ns WNS** and exported a complete bitstream/HWH.
 
-**This source has not yet been run through native board Vitis/Vivado or
-verified on a physical PYNQ-Z2.** It does not change or certify the existing
-one-command OOC flow, nor does it work on KV260. See the [PYNQ-Z2 DMA board
-pilot](PYNQ_Z2_BOARD_DMA_PILOT.md). The rest of this page describes the
-already-established research OOC pipeline and the prior manual requirements.
+**Neither image is board-qualified or physically tested.** The second
+case retains four PS DDR critical warnings and three DRC observations
+(RTSTAT-10 Warning, REQP-181 Advisories), so its state is
+`BOARD_NOT_QUALIFIED`. A read-only audit matched the original board
+preset and vendor warnings and verified output hashes, but did not
+authorize programming. The original one-command `fpgai-run` still stops
+at OOC rather than creating a board image, and KV260 integration remains
+unimplemented in this separate experimental pilot. See
+[PYNQ-Z2 DMA board pilot](PYNQ_Z2_BOARD_DMA_PILOT.md) for results and
+limitations. The established manual flow below remains useful for other
+boards and toolchains.
 
 ## What FPGAI produces today
 
@@ -276,7 +283,7 @@ For Vivado hardware programming instructions, see
 
 | Missing product feature | Current state |
 |---|---|
-| One-command bitstream from ONNX | Experimental separate PYNQ-Z2 board build from an already source-qualified ONNX case; no native/board proof yet |
+| One-command bitstream from ONNX | Separate PYNQ-Z2 board builder has native Vitis/Vivado evidence and generated .bit/.hwh; full board **not qualified** and on-device inference not tested |
 | Board selection and board-level I/O/AXI metadata | Experimental PYNQ-Z2-specific source template and explicit external board files, not a verified platform system |
 | Generated host AXI/DMA drivers | Experimental standalone PYNQ overlay + AXI DMA Python runtime, not yet verified on board |
 | Device tree / kernel module generator | Not implemented |

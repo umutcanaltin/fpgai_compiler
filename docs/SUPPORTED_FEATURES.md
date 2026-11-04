@@ -69,8 +69,8 @@ For evidence methods see [Scientific reproducibility](SCIENTIFIC_REPRODUCIBILITY
 - This audit **does not** establish final bitstream memory-cell values, FPGA programming, board execution, hot-loading new weights, or trained-model accuracy; a model-level Vitis/Vivado OOC result is not a board-deployed accelerator.
 
 
-### Experimental board DMA/bitstream source (not native qualified)
+### Experimental board DMA/bitstream — native image generated, not qualified
 
-- `fpgai-board` creates a separate, source-attested attempt to export a PYNQ-Z2-compatible AXI-Stream/AXI-Lite HLS IP and full Zynq PS7 + AXI DMA Vivado design. It is **not** an extension of the already verified OOC case, and **no successful board bitstream or on-device inference has yet been demonstrated**.
+- `fpgai-board` exports source-attested PYNQ-Z2 AXI4-Stream/AXI-Lite IP, creates a complete PS7 + AXI DMA Vivado design, and **has generated actual .bit/.hwh artifacts in native Vivado 2023.2** for the bounded toy model. The user's second build met routed timing (+2.311 ns), but remains **`BOARD_NOT_QUALIFIED`** due to four PS DDR critical warnings plus RTSTAT-10 and REQP-181 DRC observations. **No physical board programming or inference was demonstrated.** This independent board pilot does not turn the existing OOC `fpgai-run` command into a board deployment.
 - `fpgai-board-reference` produces an independent float32 expected output. `fpgai-pynq-run` (or its copied standalone script) is intended to load a verified .bit/.hwh, run DMA and compare output on a real PYNQ-Z2 with explicit user consent.
 - KV260 is deliberately rejected until a distinct Kria MPSoC platform and Linux runtime are engineered and validated. See [pilot](PYNQ_Z2_BOARD_DMA_PILOT.md).
