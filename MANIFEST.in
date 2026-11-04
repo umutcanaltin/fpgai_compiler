@@ -1,0 +1,48 @@
+# Curated source distribution: user guidance, not internal research journals.
+include README.md
+include CONTRIBUTING.md
+include CHANGELOG.md
+include CITATION.md
+include NOTICE.md
+include SECURITY.md
+include SUPPORT.md
+include CODE_OF_CONDUCT.md
+include pyproject.toml
+include Makefile
+recursive-include examples *.py *.json *.md
+include docs/README.md
+include docs/USING_FPGAI.md
+include docs/ARCHITECTURE.md
+include docs/SUPPORTED_FEATURES.md
+include docs/SCIENTIFIC_REPRODUCIBILITY.md
+include docs/FAQ.md
+include docs/RELEASE_PREVIEW.md
+include docs/ROADMAP.md
+include docs/COMPILER_OPERATOR_CONTRIBUTION.md
+include docs/LICENSE_DECISION.md
+include docs/OPEN_SOURCE_RELEASE_CHECKLIST.md
+include docs/ACADEMIC_RESEARCH_LICENSE_PROPOSAL.md
+include docs/WHO_CAN_USE_FPGAI.md
+include docs/AMD_TOOLCHAIN_SETUP.md
+include docs/FPGA_DEPLOYMENT.md
+include scripts/setup_amd_environment.sh
+include scripts/check_amd_environment.py
+include scripts/check_fpga_deployment.py
+include scripts/check_open_source_readiness.py
+include scripts/prepare_public_preview.py
+include scripts/check_public_docs.py
+recursive-include src *.py
+
+# Deliberately NOT bundled: private/native study outputs, historical paper
+# protocols, RL development journals, internal maintenance notes and tests.
+prune build
+prune dist
+prune results
+prune datasets
+prune weights
+prune data
+prune paper
+prune rl_environment
+prune tests
+prune docs/maintainers
+global-exclude __pycache__ *.py[cod] *.onnx *.npy *.npz *.pt *.pth *.h5 *.hdf5 *.bit *.hwh

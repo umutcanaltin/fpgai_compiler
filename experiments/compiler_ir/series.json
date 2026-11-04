@@ -1,0 +1,65 @@
+{
+  "schema": "fpgai-research/compiler-ir-experiment-series-config/v1",
+  "description": "Source-pinned compiler experiments with small/medium original-HLS source candidates and explicit scientific gates",
+  "profiles": {
+    "quick": {
+      "array_cases": 12,
+      "array_host_pairs": 2,
+      "row_pairs": 4,
+      "row_host_pairs": 2,
+      "chain_cases": 4,
+      "chain_host_cases": 2,
+      "chain_traces": 1,
+      "mutation_graphs": 2,
+      "mutation_host": 2,
+      "mutation_traces": 1,
+      "oracle_domains": 2,
+      "scaling_graphs": 3,
+      "scaling_repetitions": 1,
+      "nonlinear_host": 2,
+      "nonlinear_traces": 1,
+      "tensor_native_cases": 3,
+      "block_native_cases": 3,
+      "decision_graphs": 2,
+      "decision_host_checks": 1,
+      "decision_seed": 37,
+      "value_trace_cases": 2
+    },
+    "paper": {
+      "array_cases": 96,
+      "array_host_pairs": 4,
+      "row_pairs": 18,
+      "row_host_pairs": 4,
+      "chain_cases": 12,
+      "chain_host_cases": 4,
+      "chain_traces": 2,
+      "mutation_graphs": 12,
+      "mutation_host": 6,
+      "mutation_traces": 3,
+      "oracle_domains": 5,
+      "scaling_graphs": 15,
+      "scaling_repetitions": 3,
+      "nonlinear_host": 6,
+      "nonlinear_traces": 3,
+      "tensor_native_cases": 12,
+      "block_native_cases": 12,
+      "decision_graphs": 4,
+      "decision_host_checks": 3,
+      "decision_seed": 37,
+      "value_trace_cases": 6
+    }
+  },
+  "native": {
+    "part": "xck26-sfvc784-2LV-c",
+    "clock_ns": 32,
+    "clock_uncertainty_ns": 8.64,
+    "tolerance": 0.05,
+    "timeout_seconds": 7200
+  },
+  "external_research_gates": [
+    "Trained MNIST requires exact source-verified original model, inputs, labels and metadata; synthetic weights are not substitutes.",
+    "Original Vitis HLS on a licensed machine is needed to qualify fixed-point CSim/CSynth.",
+    "ST-Flow, Allo and StreamTensor artifact-level parity is a separate uncompleted research comparison.",
+    "CST path does not yet establish arbitrary Conv2D/branched-graph lifetime lowering or physical FPGA QoR."
+  ]
+}

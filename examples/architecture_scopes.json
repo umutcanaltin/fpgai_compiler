@@ -1,0 +1,17 @@
+{
+  "default": {"precision_bits": 12, "integer_bits": 5},
+  "regions": {
+    "dense_stage": {
+      "operators": ["mm"],
+      "architecture": {"parallelism": 2, "pes": 2}
+    }
+  },
+  "operators": {
+    "mm": {"pes": 3}
+  },
+  "loops": {
+    "mm.k": {"simd": 2, "pipeline_ii": 2, "tile_extent": 2},
+    "mm.n": {"tile_extent": 2}
+  },
+  "target": {"max_parallel_units": 32}
+}

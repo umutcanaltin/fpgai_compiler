@@ -1,0 +1,6 @@
+{
+  "default": {"precision_bits": 12, "integer_bits": 5},
+  "operators": {
+    "mm": {"precision_bits": 12, "integer_bits": 5, "parallelism": 2, "pes": 2, "simd": 2, "serialization": 2, "tile": [1, 2, 2], "pipeline_ii": 2}
+  }
+}
