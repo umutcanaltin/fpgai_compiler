@@ -15,6 +15,15 @@ def _args(tmp_path, *, stage="hls", accept=False):
     case = tmp_path / "original_case"
     case.mkdir()
     (case / "model.cpp").write_text("// immutable original source")
+    # These tests intentionally stub the ONNX/Model IR verifier to exercise
+    # vendor orchestration only. Keep its required manifest present so a
+    # missing provenance file cannot mask all native orchestration assertions.
+    (case / "manifest.json").write_text(json.dumps({
+        "input_shape": [2, 3],
+        "output_shape": [2, 2],
+        "precision_bits": 16,
+        "integer_bits": 6,
+    }))
     onnx = tmp_path / "model.onnx"
     onnx.write_bytes(b"fake-original-onnx")
     return argparse.Namespace(
@@ -162,3 +171,15 @@ def test_unknown_rule_critical_count_mismatch_timing_or_native_failure_rejected(
     assert cli.run(args) == 3
     report = json.loads((tmp_path / "new_board" / "board_build_summary.json").read_text())
     assert report["state"] == "BOARD_NOT_QUALIFIED"
+
+
+
+def test_missing_original_manifest_rejected_before_vendor_calls(
+        monkeypatch, tmp_path):
+    args = _args(tmp_path)
+    calls = _mock_vendor(monkeypatch)
+    (tmp_path / "original_case" / "manifest.json").unlink()
+    with pytest.raises(FileNotFoundError, match="manifest.json"):
+        cli.run(args)
+    assert calls == []
+    assert not (tmp_path / "new_board").exists()

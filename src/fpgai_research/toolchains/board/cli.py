@@ -189,6 +189,12 @@ def run(args: argparse.Namespace) -> int:
     if source.is_symlink() or not source.is_dir() or not onnx.is_file():
         raise ValueError("Original case/ONNX source must be existing regular files")
     manifest = _verify_original_case(source, onnx)
+    # Fail before creating a new board experiment if the source's original
+    # provenance manifest disappeared (including in test/mocked flows).
+    manifest_file = source / "manifest.json"
+    if manifest_file.is_symlink() or not manifest_file.is_file():
+        raise FileNotFoundError("Missing or unsafe original source manifest.json")
+    original_manifest_sha256 = _hash(manifest_file)
     nin, nout, width, integer = validate_tensor_contract(manifest)
     plan = {
         "schema": "fpgai-research/board-dma-build/v1",
@@ -236,7 +242,7 @@ def run(args: argparse.Namespace) -> int:
         "onnx_sha256": _hash(onnx),
         "model_cpp_sha256": _hash(hls_dir / "model.cpp"),
         "bridge_cpp_sha256": _hash(hls_dir / "fpgai_dma.cpp"),
-        "original_manifest_sha256": _hash(source / "manifest.json"),
+        "original_manifest_sha256": original_manifest_sha256,
         "result": "SOURCE_READY_VENDOR_UNVERIFIED",
     })
     receipt = _run_vendor(
