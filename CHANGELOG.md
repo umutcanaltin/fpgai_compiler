@@ -9,6 +9,14 @@
 
 This is the **public-facing project change summary**, not a replacement for the source-pinned scientific experiment archive. It does not claim a released software version or an approved open-source license.
 
+## Experimental PYNQ-Z2 board DMA/bitstream pilot — feature branch
+
+- Added bounded 32-bit AXI4-Stream / AXI4-Lite HLS wrapper around existing model C++ and frozen ONNX constants, with separate native CSim and IP-Catalog export.
+- Added a PYNQ-Z2 PS7/AXI DMA/SmartConnect/reset full-board Vivado script, strict clock, board part, bitstream and HWH gates.
+- Added read-only planning, explicit vendor opt-in, DRC-clean default, narrowly opted-in full-board warning reports and standalone PYNQ host DMA/reference comparison.
+- Added source-only negative tests for wrong boards, unsafe Tcl values, DMA packing, hash/shape mismatches and missing board qualification; **no native or physical board validation yet**.
+- KV260 integration is a distinct follow-up; no files in older OOC cases or GitHub Actions were changed.
+
 ## Experimental ONNX weight-provenance audit — feature branch
 
 - Added a read-only `fpgai-audit-weights` command that checks the exact ONNX model hash, functional Model IR fingerprint, generated source hash, and every float32 initializer/Constant HLS C++ literal.

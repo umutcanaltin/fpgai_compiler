@@ -35,6 +35,9 @@ fpgai-research = "fpgai_research.cli:main"
 fpgai-research-tools = "fpgai_research.toolchains.workflow:main"
 fpgai-run = "fpgai_research.toolchains.onboarding:main"
 fpgai-audit-weights = "fpgai_research.toolchains.weights_audit:main"
+fpgai-board = "fpgai_research.toolchains.board.cli:main"
+fpgai-pynq-run = "fpgai_research.toolchains.board.pynq_runtime:main"
+fpgai-board-reference = "fpgai_research.toolchains.board.reference:main"
 fpgai-diagnose = "fpgai_research.toolchains.diagnose:main"
 
 [tool.setuptools.packages.find]

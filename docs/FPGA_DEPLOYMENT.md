@@ -6,6 +6,21 @@ which ones the repository implements today. A working Vitis/Vivado
 installation and an FPGA board do not alone make `model.cpp` runnable
 on programmable logic.
 
+## Experimental, unverified PYNQ-Z2 AXI DMA board pilot
+
+An **optional new feature-branch prototype** generates a 32-bit AXI4-Stream
+interface around the original model, performs a fresh Vitis HLS export,
+creates a PYNQ-Z2 PS7/AXI DMA full-system block design, and attempts to
+produce a complete Vivado .bit/.hwh overlay. The bundled PYNQ-side runtime
+is intended to transfer original fixed-point model input/output and compare
+against an independent software reference.
+
+**This source has not yet been run through native board Vitis/Vivado or
+verified on a physical PYNQ-Z2.** It does not change or certify the existing
+one-command OOC flow, nor does it work on KV260. See the [PYNQ-Z2 DMA board
+pilot](PYNQ_Z2_BOARD_DMA_PILOT.md). The rest of this page describes the
+already-established research OOC pipeline and the prior manual requirements.
+
 ## What FPGAI produces today
 
 ```text
@@ -143,7 +158,9 @@ qualification or an actual hardware execution.
 
 ## Step 3 — Export HLS RTL as an integrable IP or kernel
 
-**This step is not automated by the current FPGAI research CLI.**
+**The established research OOC CLI does not perform this step.** The separate experimental
+PYNQ-Z2 builder now contains a native IP-export recipe, but it remains
+unverified with AMD tools; see [the pilot](PYNQ_Z2_BOARD_DMA_PILOT.md).
 
 In Vitis HLS, configure/export the synthesized component as a **Vivado
 IP Catalog component** (for a Vivado block design), or a supported
@@ -259,11 +276,11 @@ For Vivado hardware programming instructions, see
 
 | Missing product feature | Current state |
 |---|---|
-| One-command bitstream from ONNX | Not implemented |
-| Board selection and board-level I/O/AXI metadata | Not integrated by this standalone research compiler |
-| Generated host AXI/DMA drivers | Not implemented |
+| One-command bitstream from ONNX | Experimental separate PYNQ-Z2 board build from an already source-qualified ONNX case; no native/board proof yet |
+| Board selection and board-level I/O/AXI metadata | Experimental PYNQ-Z2-specific source template and explicit external board files, not a verified platform system |
+| Generated host AXI/DMA drivers | Experimental standalone PYNQ overlay + AXI DMA Python runtime, not yet verified on board |
 | Device tree / kernel module generator | Not implemented |
-| FPGA programming and runtime inference command | Not implemented |
+| FPGA programming and runtime inference command | Experimental fpgai-pynq-run / standalone PYNQ runtime requires valid board bitstream and physical testing |
 | Board-level power/latency validation | Not established by existing source/HLS studies |
 
 Contributors can propose board-specific wrappers, manifests, host

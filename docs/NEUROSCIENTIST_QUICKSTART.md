@@ -212,6 +212,19 @@ python -m pytest -q
 
 Then run `--plan`, a source-only smoke, and the real native command with installed Vitis/Vivado on the workstation. Preserve the complete logs and `user_run_summary.json` for review before merging this branch. This feature intentionally does **not** add or enable GitHub Actions.
 
+## Optional experimental PYNQ-Z2 DMA/bitstream extension
+
+The OOC `fpgai-run` command does **not** generate an FPGA board bitstream.
+An **unverified, separate experimental** `fpgai-board` command now exists
+in the feature branch. It intends to create an AXI-Stream accelerator,
+PS/AXI DMA Vivado project and PYNQ-Z2 bitstream/HWH from an original
+source-attested ONNX model. Source-only regression, native IP export,
+board implementation and actual PYNQ DMA inference must be validated
+independently before calling it a supported board deployment.
+
+See the [PYNQ-Z2 board pilot and exact commands](PYNQ_Z2_BOARD_DMA_PILOT.md).
+KV260 requires a separate PS/PL and Linux platform implementation.
+
 ## What remains before board execution?
 
 A verified Vivado OOC implementation is **not** an FPGA bitstream. A deployable KV260/PYNQ/Alveo application still needs explicit board/platform integration, correct AXI/DDR/PS/DMA interfaces, clocks and resets, pins/constraints where applicable, host-side software, packaging and real on-device numerical tests. See [FPGA deployment](FPGA_DEPLOYMENT.md) for that separate work.

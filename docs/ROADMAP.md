@@ -15,6 +15,20 @@ This document identifies **areas open to contribution**, not promised delivery d
 - Investigate legal memory aliasing and source generation for more multi-operator graphs without treating source scratch as physical BRAM.
 - Carefully expand Conv2D/Dense/operator support while preserving numerical references, tail behavior and explicit unsupported cases.
 
+## Experimental board integration milestone (unverified)
+
+- Prototype PYNQ-Z2-specific HLS AXI4-Stream wrapper, AXI-Lite control,
+  PS7/AXI DMA Vivado project, full .bit/.hwh build and standalone PYNQ host
+  numerical comparison. See [PYNQ-Z2 board DMA pilot](PYNQ_Z2_BOARD_DMA_PILOT.md).
+- Qualification sequence: run source-only tests locally, inspect the real
+  Vitis export, fix the first actual Vivado BD/Tcl issue, enforce timing/DRC
+  checks and finally test transfers and output comparison **on a PYNQ-Z2**.
+- Implement a *separate* KV260 MPSoC PS/platform, clock/reset, DMA and Linux
+  device-tree/runtime flow only after verifying exact carrier board files and
+  OS image. Do not reuse PYNQ-Z2 bitstreams or software indiscriminately.
+- Never mark board operation passed from an OOC E4 report or a generated
+  source/Tcl file.
+
 ## Future FPGA deployment integration
 
 - Design and independently validate optional board-specific HLS IP/AXI interfaces, DMA buffers, clocks and resets, without changing existing compiler semantics silently.

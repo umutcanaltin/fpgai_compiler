@@ -67,3 +67,10 @@ For evidence methods see [Scientific reproducibility](SCIENTIFIC_REPRODUCIBILITY
 - The generated RTL may implement these constants as block ROM/BRAM, distributed LUT structures or optimized logic, subject to synthesis. Fixed-point conversion (`ap_fixed`) means float32 values are not guaranteed to be represented exactly.
 - `fpgai-audit-weights --onnx ORIGINAL.onnx --case EXISTING_CASE` independently checks the exact generated C++ constant literals against the ONNX input and source manifest, without exporting the values, rerunning tools or modifying original results.
 - This audit **does not** establish final bitstream memory-cell values, FPGA programming, board execution, hot-loading new weights, or trained-model accuracy; a model-level Vitis/Vivado OOC result is not a board-deployed accelerator.
+
+
+### Experimental board DMA/bitstream source (not native qualified)
+
+- `fpgai-board` creates a separate, source-attested attempt to export a PYNQ-Z2-compatible AXI-Stream/AXI-Lite HLS IP and full Zynq PS7 + AXI DMA Vivado design. It is **not** an extension of the already verified OOC case, and **no successful board bitstream or on-device inference has yet been demonstrated**.
+- `fpgai-board-reference` produces an independent float32 expected output. `fpgai-pynq-run` (or its copied standalone script) is intended to load a verified .bit/.hwh, run DMA and compare output on a real PYNQ-Z2 with explicit user consent.
+- KV260 is deliberately rejected until a distinct Kria MPSoC platform and Linux runtime are engineered and validated. See [pilot](PYNQ_Z2_BOARD_DMA_PILOT.md).
