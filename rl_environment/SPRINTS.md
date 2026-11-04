@@ -1,3 +1,24 @@
+# HW-RL-04 shared hardware GNN actor–critic — 2026-11-05
+
+The user verified the original HW-RL-03 Gym-native flow: **2,032 CPU
+tests passed**, **17 skipped**, 160 source-legal actions and one qualified
+Vitis case at 15 ns with 646 cycles, 9,690 ns HLS-estimated latency,
++0.105 ns scheduling margin and −0.005 first-qualified reward.
+
+The isolated HW-RL-04 implementation reuses the historical directed
+message-passing primitive but adapts it to the new typed tensor/operator
+graph. Exact action target indices and up to 30 previous real audited
+trial rows are now in the Gym observation. The shared actor has a
+compiler-masked categorical edit head, conditional Beta clock output,
+critic and feasibility auxiliary; gradient updates require the exact
+live Gym case/reward and fresh independent source-attested audit.
+Default CLI is source-only. All new CPU tests, installed CLI smoke and
+single original native-agent step remain **pending workstation run**.
+
+[Research question, evidence gates and commands](HARDWARE_ACTION_SPACE.md)
+
+---
+
 # HW-RL-03 native Gymnasium environment — 2026-11-04
 
 The user's native HW-RL-02 CNN baseline at 14 ns has **qualified**

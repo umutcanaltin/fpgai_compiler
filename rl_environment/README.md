@@ -1,3 +1,15 @@
+> **5 November 2026 — HW-RL-04 GNN hardware action integration added.**
+> HW-RL-03 is now truly native validated on the user's PC: 2,032
+> tests passed (17 skipped), and a qualified 15 ns single Gym step
+> produced 9,690 ns HLS-estimated latency and −0.005 first-qualified
+> reward. A new mixed Conv/MatMul/Gemm shared GNN reuses the original
+> directed MessagePass, adds per-operator target embeddings and attention
+> over up to 30 original audited trials. A new source-only preview CLI
+> and explicit one-Vitis/one-gradient path are on the feature branch.
+> **This newly added GNN/agent has not been workstation tested,
+> trained, or proven to generalize.** Read
+> [HW-RL-04 specification](HARDWARE_ACTION_SPACE.md).
+
 > **HW-RL-03 native Gym source added, testing pending (4 November 2026).**
 > The user completed a source-attested, independently audited 14 ns
 > CNN Vitis HLS case: 646 cycles × 14 ns = 9,044 ns HLS-estimated

@@ -1,3 +1,25 @@
+## 2026-11-05 — HW-RL-04 shared GNN bridge for full compiler hardware Gym
+
+- User verified HW-RL-03: 75 focused passing, one skipped; full CPU
+  2,032 passing, 17 skipped; source preview 160 legal actions.
+  Original Vitis 15 ns clock-only Gym step qualified at 646 worst cycles,
+  9,690 ns HLS latency, +0.105 ns scheduling margin and −0.005 reward.
+  Native case and prior 14 ns/10 ns observations remain immutable.
+- Added exact operator-target node indices plus a 30-step, masked
+  genuinely observed native-feedback history to `hardware_gym`.
+- Added one shared graph policy using existing `gym_agent.MessagePass`
+  with context-conditioned discrete compiler action mask, continuous
+  Beta clock, trial-history attention, critic and feasibility auxiliary.
+- Added policy update gate: original matching live Gym state/action/reward
+  plus a fresh read-only audit of the original case. Missing or
+  forged vendor evidence cannot earn updates via an ordinary dict.
+- Added `fpgai-rl-hardware-agent` read-only untrained action preview
+  and opt-in **single** original-Vitis source-audited gradient step.
+  No large native campaign or pretrained checkpoint is created.
+- Added CPU source/mask/gradient/metadata/checkpoint and installed
+  entrypoint tests. **New HW-RL-04 code and tests not yet executed on
+  the user workstation**; no trained transfer or speedup is claimed.
+
 ## 2026-11-04 — HW-RL-03 actual native-qualification Gym interface
 
 - User confirmed 14.00 ns mixed CNN original Vitis HLS case qualified:

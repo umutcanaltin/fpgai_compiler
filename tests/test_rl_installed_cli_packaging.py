@@ -144,3 +144,26 @@ def test_installed_hardware_gym_preview_help_outside_repository(tmp_path):
     assert "--action-index" in proc.stdout
     assert "--action-clock-ns" in proc.stdout
     assert "--resource-caps" in proc.stdout
+
+
+
+def test_installed_shared_hardware_agent_help_outside_repository(tmp_path):
+    """New actor-critic CLI must install correctly without pytest.pythonpath."""
+    exe = Path(sysconfig.get_path("scripts")) / (
+        "fpgai-rl-hardware-agent.exe" if os.name == "nt"
+        else "fpgai-rl-hardware-agent"
+    )
+    if not exe.is_file():
+        pytest.skip("Install editable repository to verify agent console script")
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    environment.pop("PYTHONHOME", None)
+    proc = subprocess.run(
+        [str(exe), "--help"], cwd=tmp_path, env=environment,
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + "\n" + proc.stderr
+    assert "--execute-native" in proc.stdout
+    assert "--seed" in proc.stdout
+    assert "--checkpoint" in proc.stdout
+    assert "--resource-caps" in proc.stdout

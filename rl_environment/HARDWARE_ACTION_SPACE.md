@@ -356,6 +356,90 @@ The command will refuse an existing episode/case and will not rerun
 an old experiment in-place. Review the generated `original_vitis_audit`
 and `step_0000.json` before any multi-episode training.
 
+## HW-RL-04: shared mixed-network GNN actor–critic — source implementation
+
+**Observed acceptance of HW-RL-03 (4 November, user workstation):**
+75 focused tests passed, one skipped; complete CPU suite **2,032 passed,
+17 skipped**. The read-only native Gym preview displayed **23 nodes,
+22 edges, 160 source-accepted actions** from the eight-operator CNN.
+One actual original-Vitis Gym step selected clock-only action 0 at
+**15.00 ns**, produced independently audited E3 qualified latency
+**646 × 15 = 9,690 ns**, original HLS scheduling margin **+0.105 ns**,
+numerical error **0.0003907345** and first-qualified reward **−0.005**.
+No policy weights were trained in that HW-RL-03 smoke; neither design
+has physically routed/board-verified timing.
+
+**New implementation on branch (5 November, workstation tests pending):**
+
+- `hardware_gym` now publishes `action_target_node` (exact operator node
+  index or −1 for global edits), plus up to **30 genuinely observed**
+  native-trial rows and `history_mask`. The rows expose the original
+  action, selected clock, qualified status, real reward, cycles, error,
+  HLS clock estimate, resource ratios, source E3 status and best-known
+  *qualified* latency; unavailable values retain presence semantics.
+  No raw tensor values or unknown Vitis results are invented.
+- `hardware_agent.SharedHardwareGraphPolicy` reuses the existing
+  directed `gym_agent.MessagePass` primitive with the new mixed
+  tensor/operator graph. It combines per-operator node embeddings,
+  source-legal action features, task constraints and attention over
+  real trial history. The actor selects a masked discrete compiler
+  hardware edit; a conditional **Beta continuous clock head** selects
+  2–32 ns, normalized to 0.01 ns for original Vitis report attribution.
+  A single critic is shared across networks. No per-network policy.
+- `HardwareGraphTrainer.update` uses the existing latency-only Gym
+  reward, entropy 0.001, gamma 0.95, gradient clip 5, Adam 0.0005 and
+  feasibility auxiliary (weight 0.2, positive class weight 8). It
+  **requires the matching live Gym step, exact selected action, exact
+  original reward and a second independent read-only native-case audit**
+  before optimizer updates. It does not run Vitis or accept an
+  unaudited result dict as a learning label.
+- `fpgai-rl-hardware-agent` previews a deterministic untrained GNN
+  action without creating a study or invoking Vitis by default.
+  `--execute-native` allows **one** fresh original Vitis case,
+  independent audit, and **one** gradient update only; no 100-episode
+  campaign is implicitly authorized. Private checkpoints are tensor-
+  only NPZ without optimizer state and support **evaluation restore
+  only**, not an incorrectly advertised resumable training run.
+- New CPU-only tests cover mixed graph sizes, invalid/padded action
+  masks, legal target nodes, continuous Beta clock head, GNN gradient,
+  trial-history masking, source-data privacy, tamper rejection and
+  no-feedback/no-case update refusal. Mocked E3-like dictionaries are
+  **fixtures only** and do not demonstrate native hardware performance.
+
+After testing the source locally and ensuring PyTorch is installed:
+
+~~~bash
+git pull --ff-only origin feature/rl-hardware-knobs-environment-20261104
+python -m pip install --no-deps -e .
+python -m pytest -q \
+  tests/test_rl_hardware_agent.py \
+  tests/test_rl_hardware_gym.py \
+  tests/test_rl_installed_cli_packaging.py
+python -m pytest -q
+
+# Preview only: no Vitis, no cases, no training.
+fpgai-rl-hardware-agent \
+  --onnx build/demo/cnn_pool_dense.onnx \
+  --samples build/rl_hw02_cnn_samples_seed123.npy \
+  --part xc7z020clg400-1 \
+  --resource-caps 53200 106400 220 280 0 \
+  --max-absolute-error 0.1 \
+  --initial-clock-ns 14.00 \
+  --seed 101 \
+  --output-root build/rl_hw04_cnn_agent_01
+~~~
+
+**Only if these tests pass**, an explicit single-step pilot is possible
+with the same argument list and `--execute-native --vitis
+/tools/Xilinx/Vitis_HLS/2023.2/bin/vitis_hls`. This step may select an
+HLS-infeasible action and earn −0.05, which is a legitimate measured
+negative example; missing original E3 evidence halts with no reward.
+Never reuse `rl_hw03_cnn_pilot_01` or `rl_hw02_cnn_native_14ns_01`.
+A single policy update proves nothing about RL generalization. Next,
+pre-register a fair multiple-task, multiple-seed original-Vitis
+comparison against masked random and no-message-passing ablations, with
+equal native-call budgets and independent test cohorts.
+
 ## Next research-development sprints
 
 | Sprint | Scope | Evidence gate |
@@ -363,7 +447,7 @@ and `step_0000.json` before any multi-episode training.
 | HW-RL-01 | Full eight-field typed action inventory, bounded per-op menus, source-only masks and variable-size weight-private graph observation | Source regression with MatMul and multioperator Conv CNN; no backend calls; **30 targeted and 1,982 full tests passed before packaging fix; installed CLI needs recheck** |
 | HW-RL-02 | Original-native Vitis backend for exact source state, samples, part, clock, immutable cases and independent CSim/E3 gate | **CPU tests passed; native CNN 10 ns infeasible and 14 ns qualified (9,044 ns HLS estimate); other model families pending** |
 | HW-RL-03 | Gymnasium native-step environment with bounded padded variable-sized graph, source action masks and continuous clock output, original Vitis per authorized step | **Source/test implementation added; local CPU and first real Gym-native step pending** |
-| HW-RL-04 | Shared GNN actor for MatMul↔Conv↔CNN transfer with variable graph sizes and category-specific knob masks; preserve one shared policy across episodes | CPU gradients, correct invalid masking, no heldout leakage, no pretrained checkpoint |
+| HW-RL-04 | Shared mixed-network graph actor–critic with exact per-operator node targets, real-trial history attention and continuous-clock Beta head | **Source + CPU test implementation added; local tests and first actual one-step online gradient pending** |
 | HW-RL-05 | Prospective matched on-line learning comparison vs random and no-GNN controls; original Vitis calls fixed per task/seed | Separate training/validation/test, same budgets, per-network qualified HLS nanoseconds and uncertainty; negative results retained |
 | HW-RL-06 | Optional system/board/physical action domains once compiler implements and verifies typed memory/AXI/CDC/board semantics | No fictional DMA or power knob; original physical board verification separately required |
 

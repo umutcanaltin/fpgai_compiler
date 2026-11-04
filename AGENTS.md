@@ -1,3 +1,23 @@
+**2026-11-05 HW-RL-04 original-native GNN learning rules:** The user's
+HW-RL-03 original Gym-native trial is source-attested and independently
+qualified: 646 whole-top HLS cycles, 15 ns requested, 9,690 ns
+estimated latency, +0.105 ns scheduling margin, −0.005 first-qualified
+reward. The eight-operator CNN action preview exposed 160 source-legal
+actions. These are verified HLS-only observations, **not** policy
+training or routed FPGA/board evidence. The new
+`rl_environment.hardware_agent` must use original
+`gym_agent.MessagePass`, preserve source masks and exact per-operator
+target nodes, treat 30-row history as previous REAL independent E3
+audits only, and use a learned continuous-clock Beta head with 0.01 ns
+native report normalization. A gradient update must have the matching
+live `GymHardwareNativeEnv` action/reward/case and fresh independent
+read-only original Vitis audit; direct metadata or simulated reward
+cannot train. Default CLI is preview only, native one-step opt-in.
+Never alter historical Gym policies, native cases, the original reward
+definition, main or GitHub Actions. Source-only tests and an original
+agent single-step native smoke on the user's workstation are still
+required before any broad RL study.
+
 **2026-11-04 HW-RL-03 native Gym engineering gate:** The 14.00 ns
 CNN HW-RL-02 first real-Vitis case qualified (646 worst cycles,
 9,044 ns HLS estimate, only +0.007 ns scheduling margin). Do not

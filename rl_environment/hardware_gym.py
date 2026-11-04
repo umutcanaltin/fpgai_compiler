@@ -37,6 +37,8 @@ MAX_ACTIONS = 512
 NODE_FEATURES = 40
 ACTION_FEATURES = 24
 GLOBAL_FEATURES = 20
+MAX_HISTORY = 30
+HISTORY_FEATURES = 18
 KIND_ORDER = (
     "Conv", "MatMul", "Gemm", "Relu", "MaxPool", "AveragePool",
     "Flatten", "Softmax", "Add", "Sub", "Mul", "Sigmoid", "Other",
@@ -214,6 +216,7 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
         self.last_audit = None
         self.done = False
         self.visited = set()
+        self.history: list[dict] = []
         self.offers: tuple[HardwareEdit | None, ...] = ()
         self._mask = np.zeros(MAX_ACTIONS, np.int8)
         self._episode_path = None
@@ -232,6 +235,11 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
             "action_features": spaces.Box(-1e6, 1e6, (MAX_ACTIONS, ACTION_FEATURES),
                                            np.float32),
             "action_mask": spaces.MultiBinary(MAX_ACTIONS),
+            "action_target_node": spaces.Box(-1, MAX_NODES - 1,
+                                              (MAX_ACTIONS,), np.int32),
+            "history": spaces.Box(-1e6, 1e6, (MAX_HISTORY, HISTORY_FEATURES),
+                                  np.float32),
+            "history_mask": spaces.MultiBinary(MAX_HISTORY),
             "global": spaces.Box(-1e6, 1e6, (GLOBAL_FEATURES,), np.float32),
             "clock_bounds_ns": spaces.Box(CLOCK_MIN_NS, CLOCK_MAX_NS,
                                           (2,), np.float32),
@@ -284,11 +292,14 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
         self.offers = (None, *candidates)
         self._mask = np.zeros(MAX_ACTIONS, np.int8)
         action_features = np.zeros((MAX_ACTIONS, ACTION_FEATURES), np.float32)
+        target_nodes = np.full(MAX_ACTIONS, -1, np.int32)
         self._mask[0] = 1  # clock-only action; a genuine change is required.
         action_features[0] = _features_for_action(None)
         for i, (candidate, valid) in enumerate(zip(candidates, source_mask), 1):
             self._mask[i] = int(valid)
             action_features[i] = _features_for_action(candidate)
+            if candidate.operator_index is not None:
+                target_nodes[i] = len(state.model.tensors) + candidate.operator_index
         caps = list(state.resource_caps)
         previous = self.last_audit or {}
         timing = previous.get("hls_timing") or {}
@@ -315,10 +326,41 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
             *[_ln(value) for value in caps],
         ]
         assert len(vals) == GLOBAL_FEATURES
+        history = np.zeros((MAX_HISTORY, HISTORY_FEATURES), np.float32)
+        history_mask = np.zeros(MAX_HISTORY, np.int8)
+        for i, row in enumerate(self.history[-MAX_HISTORY:]):
+            report = row["audit"]
+            measured = report.get("original_hls_resource_consumed") or {}
+            timing = report.get("hls_timing") or {}
+            latency = report.get("hls_estimated_latency_ns")
+            cycles = report.get("raw_hls_worst_case_cycles")
+            error = report.get("csim_max_absolute_error")
+            history[i] = [
+                row["action_index"] / MAX_ACTIONS,
+                row["clock_ns"] / CLOCK_MAX_NS,
+                float(report["qualified"]),
+                float(row["reward"]),
+                _ln(cycles) if cycles is not None else 0.,
+                _ln(error) if error is not None else 0.,
+                (float(timing["hls_estimated_clock_ns"]) / CLOCK_MAX_NS
+                 if timing.get("hls_estimated_clock_ns") is not None else 0.),
+                float(timing.get("hls_timing_feasible") is True),
+                _ln(latency) if latency is not None else 0.,
+                float(latency is not None),
+                *[float(measured[name]) / max(1, cap)
+                  if measured.get(name) is not None else 0.
+                  for name, cap in zip(RESOURCE_NAMES, state.resource_caps)],
+                float(report.get("evidence") == "E3-HLS-synthesis-report"),
+                1.,  # original vendor result present
+                _ln(row["best_ns"]) if row["best_ns"] is not None else 0.,
+            ]
+            history_mask[i] = 1
         return {
             "nodes": nodes, "node_mask": node_mask,
             "edge_index": edge_index, "edge_mask": edge_mask,
             "action_features": action_features, "action_mask": self._mask.copy(),
+            "action_target_node": target_nodes,
+            "history": history, "history_mask": history_mask,
             "global": np.asarray(vals, np.float32),
             "clock_bounds_ns": np.asarray([CLOCK_MIN_NS, CLOCK_MAX_NS],
                                           dtype=np.float32),
@@ -333,6 +375,7 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
         self.last_audit = None
         self.done = False
         self.visited = set()
+        self.history = []
         self._episode_path = self.root / f"episode_{self.episode_index:06d}"
         self._episode_allocated = False
         if self._episode_path.exists() or self._episode_path.is_symlink():
@@ -422,6 +465,10 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
         )
         self.current = state
         self.last_audit = audit
+        self.history.append({
+            "action_index": idx, "clock_ns": period, "audit": audit,
+            "reward": reward, "best_ns": self.best_latency_ns,
+        })
         self.done = self.calls >= self.max_vitis_calls
         try:
             observation = self._observation()

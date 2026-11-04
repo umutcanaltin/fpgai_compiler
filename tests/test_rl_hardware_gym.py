@@ -95,6 +95,9 @@ def test_hw03_reset_is_source_only_gym_observation_with_variable_graph(env_task)
     assert observation["edge_mask"].sum() > 0
     assert observation["action_mask"][0] == 1
     assert observation["action_mask"].sum() > 8
+    assert observation["action_target_node"][0] == -1
+    assert observation["history_mask"].sum() == 0
+    assert observation["history"].shape == (30, 18)
     assert observation["clock_bounds_ns"].tolist() == [2., 32.]
     assert np.isfinite(observation["nodes"]).all()
     assert np.isfinite(observation["global"]).all()
@@ -154,6 +157,9 @@ def test_hw03_qualified_infeasible_and_improvement_rewards_are_original_latency_
     assert info["hls_estimated_latency_ns"] == 646 * 15.
     assert env.best_latency_ns == 9690.
     assert done is False and truncated is False
+    assert obs["history_mask"].sum() == 1
+    assert obs["history"][0, 2] == 1.
+    assert obs["history"][0, 3] == pytest.approx(-.005)
     first_case = Path(info["native_case"])
     assert first_case.name == "case_0000"
     assert env.observation_space.contains(obs)
@@ -163,10 +169,15 @@ def test_hw03_qualified_infeasible_and_improvement_rewards_are_original_latency_
     assert info["hls_estimated_latency_ns"] is None
     assert env.best_latency_ns == 9690.
     assert done is False and truncated is False
+    assert obs["history_mask"].sum() == 2
+    assert obs["history"][1, 2] == 0.
+    assert obs["history"][1, 3] == pytest.approx(-.05)
     obs, reward, done, truncated, info = env.step((0, 14.5))
     assert reward == pytest.approx(log(9690 / (646 * 14.5)) - .005)
     assert info["qualified"] is True
     assert info["best_hls_estimated_latency_ns"] == 646 * 14.5
+    assert obs["history_mask"].sum() == 3
+    assert obs["history"][2, 2] == 1.
     assert truncated is True and done is False
     assert len(calls) == 6
     assert env.calls == 3
