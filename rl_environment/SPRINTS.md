@@ -1,3 +1,24 @@
+# HW-RL-02 source-bound native HLS evaluation — 2026-11-04
+
+The user's installed CLI now successfully runs outside the repository
+and inspected an eight-operator Conv→Pool→Conv→Dense ONNX model with
+zero native calls. The new optional
+`rl_environment.hardware_native` backend and
+`fpgai-rl-hardware-native` CLI reuse the existing Vitis HLS package,
+vendor runner, numerical CSim, source/evidence parser and strict
+effective-clock timing checks for this exact operator-level RL design
+state. Tests include negative tampering, fake vendor receipts, missing
+XML, unknown metrics, missing samples, original-case preservation, and
+opt-in native execution.
+
+**Status: new HW-RL-02 code is not yet tested on the workstation; no
+new real Vitis cases have been launched.** Native original call requires
+explicit opt-in, verified resource budgets, fixed float32 sample cohort,
+and fresh immutable output. See
+[hardware action space and one-shot smoke plan](HARDWARE_ACTION_SPACE.md).
+
+---
+
 # RL interface development resumed — 2026-11-04 (new feature branch)
 
 User explicitly authorized work on RL readiness and full **implemented**

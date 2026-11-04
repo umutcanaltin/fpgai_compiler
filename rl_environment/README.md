@@ -1,3 +1,13 @@
+> **HW-RL-02 now staged on the RL feature branch (2026-11-04).**
+> The user confirmed `fpgai-rl-hardware-space` runs from `/tmp` and
+> inspects real Conv/MatMul/Gemm source operators. A new optional
+> `fpgai-rl-hardware-native` command reuses original Vitis HLS
+> synthesis, numerical CSim and source/clock-timing evidence to
+> evaluate one immutable hardware action state. Default is read-only;
+> native execution is explicit and still **untested on the workstation**.
+> No learning, physical Fmax or achieved hardware improvement is claimed.
+> See [HW-RL-02 qualification plan](HARDWARE_ACTION_SPACE.md).
+
 > **4 November 2026 CLI install correction.**
 > HW-RL-01 passed 30 focused and 1,982 full CPU tests (21 skipped),
 > but the installed `fpgai-rl-hardware-space` entrypoint initially

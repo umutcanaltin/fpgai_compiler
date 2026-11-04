@@ -174,8 +174,8 @@ def initial_state(model: FunctionalModel, *, part: str,
     return state
 
 
-def validate_source(state: HardwareState) -> dict:
-    """Invoke the original resolver, Model IR checker and real HLS emitter."""
+def compile_state(state: HardwareState):
+    """Only original compiler resolver/IR/refinement/emitter; no vendor execution."""
     arch = resolve_scoped(
         state.model, ArchitectureRequest(),
         operators={
@@ -196,12 +196,19 @@ def validate_source(state: HardwareState) -> dict:
     digest = sha256(cpp.encode("utf-8")).hexdigest()
     if artifact.emission.manifest.get("cpp_sha256") != digest:
         raise ValueError("Generated source does not match compiler manifest")
+    return artifact
+
+
+def validate_source(state: HardwareState) -> dict:
+    """Compile and attest a complete RL architecture state, source evidence only."""
+    artifact = compile_state(state)
+    digest = sha256(artifact.emission.cpp.encode("utf-8")).hexdigest()
     return {
         "schema": SCHEMA,
         "state_sha256": state.state_sha256,
-        "functional_sha256": expected,
+        "functional_sha256": state.functional_sha256,
         "cpp_sha256": digest,
-        "operator_count": len(arch.points),
+        "operator_count": len(artifact.lowered.architectural.points),
         "source_compilable": True,
         "source_evidence_only": True,
         "native_vitis_calls": 0,

@@ -1,3 +1,23 @@
+## 2026-11-04 — HW-RL-02 original native HLS evaluation adapter
+
+- The user's installed `fpgai-rl-hardware-space --help` succeeded from
+  `/tmp`, and source-only CLI returned a real typed graph for eight
+  ONNX operators with two Conv nodes, MatMul, Gemm, and supported scalars.
+- Added a separate `compile_state` reuse of the original compiler's
+  resolver, Model IR refinement and HLS emitter; source-only receipts
+  and historical RL APIs preserve semantics.
+- Added `rl_environment.hardware_native` with bounded source-only
+  preparation, full-state and numerical-cohort source digests,
+  explicit one-case original Vitis HLS execution, immutable case
+  folders and independently replayed E2/CSim and E3/CSynth qualification.
+- Explicit uncertainty and a 0.01-ns native period requirement protect
+  existing Vitis 2023.2 XML target attribution; source clock remains
+  continuous to 0.001 ns.
+- Unknown/missing measurements are never imputed. No new rewards,
+  training policy, native physical timing or board evidence claimed.
+- Added source-only fail-closed tests and installed CLI subprocess smoke;
+  new tests and first licensed Vitis run must execute on the user's PC.
+
 ## 2026-11-04 — repair installed RL CLI package discovery
 
 - The user verified HW-RL-01 source functionality: **30 focused tests passed**

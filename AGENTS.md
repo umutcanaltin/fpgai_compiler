@@ -1,3 +1,17 @@
+**2026-11-04 HW-RL-02 native source/evidence contract:** New opt-in
+`rl_environment.hardware_native` and `fpgai-rl-hardware-native`
+must reuse the existing `compile_architecture` source semantics,
+`write_vitis_package`, `run_vitis`, `summarize_case` and
+`audited_hls_timing`. Do not duplicate a hardware QoR oracle or
+rewrite the historical `rl_environment.post_hls_env`, reward
+algorithm or immutable paper experiments. Normal preflight is source-only
+and produces zero Vitis calls. `--execute-native` must allocate a
+fresh immutable case with exact input samples, part, clock, numeric
+tolerance and five resource caps; failed cases remain unchanged.
+Never reward from exit=0, E1 source, unattested E3 XML, guessed resource
+counts, wrong/rounded native clock or unavailable physical metrics.
+The new source and tests are not yet workstation-verified.
+
 **2026-11-04 installed RL CLI packaging regression:** Setuptools previously
 discovered only `src/fpgai_research` while the historical `rl_environment`
 package lives at repository root. Both roots are now explicitly mapped

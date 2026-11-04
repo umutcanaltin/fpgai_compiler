@@ -126,12 +126,113 @@ does not invoke Vitis/Vivado, and does not claim reward/learning.
 The existing `rl_environment.gym_env`/historical Task, catalog,
 reward, study and audit files remain unmodified.
 
+## HW-RL-02 — source-attested original Vitis HLS evaluation
+
+**Status:** New source path and CPU-only negative tests are implemented
+on this branch, but **the new code and actual native Conv/MatMul HLS have
+not yet been run on the user's workstation**. No RL step/reward, learning
+curve, or improved FPGA latency is claimed.
+
+The new `rl_environment.hardware_native` path reuses the exact
+`compile_state -> write_vitis_package -> run_vitis -> summarize_case ->
+audited_hls_timing` workflow already implemented and independently
+tested for the existing FPGAI research compiler. It does not use an
+estimated/cached reward oracle or modify old frozen Gym studies.
+
+- A task must provide the exact ONNX model, original 1..256 finite
+  float32 C-contiguous input samples with shape
+  `[N,*model.input_shape]`, explicitly selected FPGA part, positive
+  numerical error limit, and five resource budgets in the order
+  LUT/FF/DSP/BRAM_18K/URAM.
+- The bounded RL design action state can be reconstructed from a typed
+  list of source-legal `HardwareEdit` objects in `--edits-json`.
+- **Dry run is the default**: no case directory, licensed tool call,
+  inferred latency or reward. `--execute-native` must be explicitly
+  selected with a fresh `--output` directory.
+- Before any output allocation, reject stale installed compiler
+  package, missing Vitis binary, noncanonical 2023.2 XML clock, invalid
+  numerical sample cohort and unexpected existing case directory.
+- Source+sample identity, clock uncertainty, real CSim testbench and
+  emitted HLS model source hashes are preserved in immutable source
+  and action receipts. The output case is never overwritten.
+- Independently re-audit the real Vitis invocation identity, qualified
+  E2/CSim numerical metrics, source-attested E3 XML, actual five resource
+  estimates and effective HLS scheduling clock. Rejected or absent
+  measurements stay `null`, not zeros, surrogate predictions or
+  fake synthesis reports.
+- Native HLS currently requires the policy-produced requested clock to
+  be canonical to **0.01 ns** for tool-report attribution. The source
+  planner still accepts **0.001 ns** continuous-valued actions. This
+  is a verified-report format limitation, not a finite clock choice grid.
+- The task samples are embedded in the generated CSim testbench. Do not
+  publish private/proprietary sample arrays or the native case directory
+  without appropriate review.
+- A qualified result is **only** an HLS-estimated latency:
+  `worst_case_cycles * requested_clock_ns`. It is not routed timing,
+  real achievable Fmax, physical board inference or a learned reward.
+
+### Local smoke sequence (does not reuse old native cases)
+
+The example model must exist (or create it using
+`python examples/make_neural_network_onnx.py cnn_pool_dense
+build/demo/cnn_pool_dense.onnx` with a fresh destination).
+
+Prepare a small **reproducible synthetic numerical input cohort**,
+not measured hardware data:
+
+~~~bash
+python - <<'PY'
+from pathlib import Path
+import numpy as np
+from fpgai_research.frontend.onnx import load_onnx
+m = load_onnx("build/demo/cnn_pool_dense.onnx")
+shape = m.tensor(m.inputs[0]).shape
+rng = np.random.default_rng(123)
+p = Path("build/rl_hw02_cnn_samples_seed123.npy")
+if p.exists():
+    raise FileExistsError(p)
+np.save(p, rng.uniform(-0.05, 0.05, size=(2, *shape)).astype(np.float32))
+print(p)
+PY
+~~~
+
+Inspect the source-only task **without** any Vitis call:
+
+~~~bash
+fpgai-rl-hardware-native \
+  --onnx build/demo/cnn_pool_dense.onnx \
+  --samples build/rl_hw02_cnn_samples_seed123.npy \
+  --part xc7z020clg400-1 \
+  --clock-ns 10.00 \
+  --resource-caps 20000 30000 100 80 0 \
+  --max-absolute-error 0.1
+~~~
+
+**The above example resource values are illustrative only**, not
+verified PYNQ-Z2 device capacities; replace them with independently
+confirmed task budgets before any source-accepted native qualification.
+The dry-run command creates no `--output` artifacts.
+
+After reviewing the source plan, testing the new source-only tests and
+verifying actual device limits, optionally execute one *new* native
+Vitis run by appending `--output build/rl_hw02_cnn_native_01
+--vitis /tools/Xilinx/Vitis_HLS/2023.2/bin/vitis_hls
+--execute-native`. Preserve that output even on failure. Independently
+replay with `--audit --output build/rl_hw02_cnn_native_01`, with all
+original task arguments unchanged, and compare the reports. Native
+evaluation will return exit code 3 when unqualified.
+
+**Do not** launch a new 100-episode RL study from HW-RL-02.
+HW-RL-03 must first bind the source/action interface to this exact
+independently audited native case, then implement the reward-producing
+Gymnasium loop.
+
 ## Next research-development sprints
 
 | Sprint | Scope | Evidence gate |
 |---|---|---|
 | HW-RL-01 | Full eight-field typed action inventory, bounded per-op menus, source-only masks and variable-size weight-private graph observation | Source regression with MatMul and multioperator Conv CNN; no backend calls; **30 targeted and 1,982 full tests passed before packaging fix; installed CLI needs recheck** |
-| HW-RL-02 | Introduce a new original-native Vitis backend for *this exact complete action state* with exact part, clock, source digest, immutable create-only case and independent CSim/CSynth qualification | One small original MatMul and one Conv toy native case, independently audited E2/E3; no stub metrics |
+| HW-RL-02 | Original-native Vitis backend for the exact source-legal state, sample cohort, part, clock, immutable case and independent CSim/E3 gate | **Source-only implementation added; new tests and actual one-shot native MatMul/Conv cases pending workstation qualification** |
 | HW-RL-03 | Gymnasium `Env` with variable-size action features/masks and continuous clock head, invoking the HW-RL-02 real evaluator on each authorized step | `reset` read-only, `step` always a fresh case, consistent 5-resource/numerical/timing receipt, non-stale imports |
 | HW-RL-04 | Shared GNN actor for MatMul↔Conv↔CNN transfer with variable graph sizes and category-specific knob masks; preserve one shared policy across episodes | CPU gradients, correct invalid masking, no heldout leakage, no pretrained checkpoint |
 | HW-RL-05 | Prospective matched on-line learning comparison vs random and no-GNN controls; original Vitis calls fixed per task/seed | Separate training/validation/test, same budgets, per-network qualified HLS nanoseconds and uncertainty; negative results retained |

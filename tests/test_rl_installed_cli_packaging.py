@@ -97,3 +97,27 @@ def test_isolated_installed_rl_module_imports_without_repository_root(tmp_path):
         pytest.skip("Installed CLI not present; run editable-install preflight")
     assert proc.returncode == 0, proc.stdout + "\n" + proc.stderr
     assert "INSTALLED_RL_PACKAGE_IMPORT_OK" in proc.stdout
+
+
+
+def test_installed_hardware_native_cli_help_outside_repository(tmp_path):
+    """HW-RL-02 entry point must not depend on pytest.pythonpath or cwd."""
+    exe = Path(sysconfig.get_path("scripts")) / (
+        "fpgai-rl-hardware-native.exe" if os.name == "nt"
+        else "fpgai-rl-hardware-native"
+    )
+    if not exe.is_file():
+        pytest.skip("Install editable project to verify new native RL entry point")
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    environment.pop("PYTHONHOME", None)
+    process = subprocess.run(
+        [str(exe), "--help"], cwd=tmp_path, env=environment,
+        capture_output=True, text=True, timeout=30,
+        check=False,
+    )
+    assert process.returncode == 0, process.stdout + "\n" + process.stderr
+    assert "--onnx" in process.stdout
+    assert "--samples" in process.stdout
+    assert "--execute-native" in process.stdout
+    assert "--audit" in process.stdout
