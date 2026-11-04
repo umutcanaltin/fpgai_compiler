@@ -8,6 +8,7 @@ Start with the [project overview](../README.md) or [Using FPGAI](USING_FPGAI.md)
 |---|---|
 | Installation and compiler CLI | [Using FPGAI](USING_FPGAI.md) |
 | One-command Vitis/Vivado workflow | [Neuroscientist quickstart](NEUROSCIENTIST_QUICKSTART.md) |
+| Diagnose an existing vendor run | [Read-only OOC diagnostics](NEUROSCIENTIST_QUICKSTART.md#when-vivado-exits-0-but-e4-is-rejected) |
 | Model IR and compiler stages | [Architecture](ARCHITECTURE.md) |
 | Operators and constraints | [Supported features](SUPPORTED_FEATURES.md) |
 | Neural-network examples | [Network gallery](../examples/NETWORK_GALLERY.md) |

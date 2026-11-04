@@ -9,6 +9,12 @@
 
 This is the **public-facing project change summary**, not a replacement for the source-pinned scientific experiment archive. It does not claim a released software version or an approved open-source license.
 
+## Experimental OOC diagnostics refinement — feature branch
+
+- Added `fpgai-diagnose` for read-only inspection of existing Vivado invocation receipts, ROM stability and unpromoted timing/DRC reports.
+- Exposed the existing strict source-/log-attested post-Vivado ROM-absence protocol only via explicit opt-in for new OOC cases; old runs remain unchanged.
+- Distinguished Vivado process exit zero from a rejected evidence receipt in user-facing diagnostics.
+
 ## Experimental feature branch — one-command neuroscientist workflow
 
 - Added a local `fpgai-run` command for ONNX -> HLS source -> Vitis CSim/synthesis -> optional Vivado OOC.

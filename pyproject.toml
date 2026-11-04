@@ -34,6 +34,7 @@ comparison = ["hls4ml[onnx]==1.3.0", "onnx>=1.14"]
 fpgai-research = "fpgai_research.cli:main"
 fpgai-research-tools = "fpgai_research.toolchains.workflow:main"
 fpgai-run = "fpgai_research.toolchains.onboarding:main"
+fpgai-diagnose = "fpgai_research.toolchains.diagnose:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

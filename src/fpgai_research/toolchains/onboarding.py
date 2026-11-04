@@ -232,6 +232,8 @@ def _plan(args: argparse.Namespace, part: str, shape: tuple[int, ...]) -> dict:
         "tolerance": args.tolerance,
         "stage": args.stage,
         "uses_synthetic_input": args.input is None,
+        "allow_verified_readmem_post_absence": bool(
+            getattr(args, "allow_verified_readmem_post_absence", False)),
         "vendor_tools_executed": False,
         "board_bitstream_generated": False,
         "steps": ["ONNX -> Model IR -> HLS C++ -> generated numerical testbench"],
@@ -261,6 +263,9 @@ def run(args: argparse.Namespace) -> int:
         raise ValueError("--labels requires a real --input sample file")
     if args.execute_native and args.stage == "source":
         raise ValueError("--execute-native is only valid for hls/ooc stages")
+    if (getattr(args, "allow_verified_readmem_post_absence", False)
+            and args.stage != "ooc"):
+        raise ValueError("--allow-verified-readmem-post-absence requires --stage ooc")
 
     shape = _validate_model(Path(args.onnx).expanduser())
     part = _select_part(args)
@@ -356,6 +361,8 @@ def run(args: argparse.Namespace) -> int:
     vivado = run_vivado(
         case, executable=tools[1].executable,
         timeout_seconds=args.vivado_timeout, environment=environment,
+        allow_verified_readmem_post_absence=bool(
+            getattr(args, "allow_verified_readmem_post_absence", False)),
     )
     final = summarize_case(str(case))
     routed = final["evidence"] == "E4-Vivado-implementation"
@@ -374,6 +381,24 @@ def run(args: argparse.Namespace) -> int:
                  "inspect reports, logs and warnings"),
         part=part,
     )
+    witness = vivado.get("verified_readmem_post_absence_witness") or {}
+    staged_after = vivado.get("staged_rom_input_integrity_after") or {}
+    summary["vivado_execution_diagnostics"] = {
+        "vendor_exit_code": vivado.get("returncode"),
+        "vendor_receipt_completed_successfully": vivado.get("completed_successfully"),
+        "source_inputs_unchanged": vivado.get("inputs_stable_during_execution"),
+        "original_hls_roms_unchanged": vivado.get("rom_inputs_stable_during_execution"),
+        "staged_roms_unchanged_after_run":
+            vivado.get("staged_rom_inputs_stable_during_execution"),
+        "missing_staged_roms_after_run": staged_after.get("missing_original_roms", []),
+        "modified_staged_roms_after_run": staged_after.get("modified_original_roms", []),
+        "unattributed_staged_roms_after_run": staged_after.get("unattributed_rom_files", []),
+        "verified_vendor_read_after_staged_rom_absence":
+            witness.get("qualified_postrun_absence"),
+        "postrun_absence_witness_reason": witness.get("reason"),
+        "postrun_absence_witness_used":
+            vivado.get("allow_verified_readmem_post_absence"),
+    }
     _write_summary(case, summary)
     print(json.dumps(summary, indent=2))
     return 0 if qualified else 3
@@ -404,6 +429,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--vivado-timeout", type=int, default=14400)
     parser.add_argument("--execute-native", action="store_true",
                         help="Explicitly authorize local AMD tool execution")
+    parser.add_argument("--allow-verified-readmem-post-absence",
+                        action="store_true",
+                        help="For a NEW OOC run only, opt into the strict source-and-log-hash "
+                             "verified Vivado post-run ROM read witness; never retroactive")
     parser.add_argument("--plan", action="store_true",
                         help="Read-only plan; never execute vendors or write a case")
     args = parser.parse_args(argv)

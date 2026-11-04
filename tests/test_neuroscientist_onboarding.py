@@ -300,3 +300,135 @@ def test_vitis_hls_2023_2_explicit_installation_layout(tmp_path):
     resolved = app.resolve_vendor_tool("vitis_hls", str(product))
     assert resolved.executable == str(binary.resolve())
     assert resolved.settings_script == str(setup.resolve())
+
+
+
+def test_postrun_rom_witness_opt_in_requires_ooc(monkeypatch, tmp_path):
+    monkeypatch.setattr(app, "_validate_model", lambda path: (1, 4))
+    args = _args(tmp_path, stage="hls", native=True)
+    args.allow_verified_readmem_post_absence = True
+    with pytest.raises(ValueError, match="requires --stage ooc"):
+        app.run(args)
+
+
+def test_opt_in_postrun_rom_attestation_is_forwarded_to_canonical_vivado(
+        monkeypatch, tmp_path):
+    _native_mocks(monkeypatch, tmp_path)
+    from fpgai_research.experiments import results
+    from fpgai_research.toolchains.vitis_hls import runner as vitis
+    from fpgai_research.toolchains.vivado import runner as vivado
+    snapshots = iter([
+        _evidence(level="E3-HLS-synthesis-report", csim=True),
+        _evidence(level="E4-Vivado-implementation", csim=True, timing=True, drc=True),
+        _evidence(level="E4-Vivado-implementation", csim=True, timing=True, drc=True),
+    ])
+    monkeypatch.setattr(results, "summarize_case", lambda case: next(snapshots))
+    monkeypatch.setattr(vitis, "run_vitis", lambda *a, **kw: {"completed_successfully": True})
+    monkeypatch.setattr(app, "_stage_roms", lambda case: None)
+    recorded = []
+
+    def fake_vivado(*args, **kwargs):
+        recorded.append(kwargs.get("allow_verified_readmem_post_absence"))
+        return {
+            "completed_successfully": True, "returncode": 0,
+            "inputs_stable_during_execution": True,
+            "rom_inputs_stable_during_execution": True,
+            "staged_rom_inputs_stable_during_execution": False,
+            "staged_rom_input_integrity_after": {
+                "missing_original_roms": ["original.dat"],
+                "modified_original_roms": [],
+                "unattributed_rom_files": [],
+            },
+            "verified_readmem_post_absence_witness": {
+                "qualified_postrun_absence": True,
+                "reason": "SOURCE_ATTESTED_VENDOR_READ_POST_RUN_ABSENCE",
+            },
+            "allow_verified_readmem_post_absence": True,
+        }
+
+    monkeypatch.setattr(vivado, "run_vivado", fake_vivado)
+    args = _args(tmp_path, native=True)
+    args.allow_verified_readmem_post_absence = True
+    assert app.run(args) == 0
+    assert recorded == [True]
+    summary = json.loads((tmp_path / "new-case" / "user_run_summary.json").read_text())
+    witness = summary["vivado_execution_diagnostics"]
+    assert summary["state"] == "OOC_QUALIFIED"
+    assert witness["verified_vendor_read_after_staged_rom_absence"] is True
+    assert witness["missing_staged_roms_after_run"] == ["original.dat"]
+    assert summary["board_bitstream_generated"] is False
+
+
+def test_readonly_diagnosis_describes_unqualified_vendor_exit_zero(
+        monkeypatch, tmp_path):
+    from fpgai_research.toolchains import diagnose
+    from fpgai_research.experiments import results
+    from fpgai_research.toolchains.vivado import report, rtl_inputs
+    from fpgai_research.toolchains.vivado import rom_read_attestation
+    case = tmp_path / "original_case"
+    vendor = case / "vivado"
+    vendor.mkdir(parents=True)
+    invocation = vendor / "vivado_invocation.json"
+    receipt = {
+        "schema": "fpgai-research/vendor-invocation/v1",
+        "tool": "vivado", "returncode": 0, "timed_out": False,
+        "completed_successfully": False,
+        "inputs_stable_during_execution": True,
+        "rom_inputs_stable_during_execution": True,
+        "staged_rom_input_integrity_before": {"matches_original_roms": True},
+        "staged_rom_input_integrity_after": {
+            "matches_original_roms": False,
+            "missing_original_roms": ["weight.dat"],
+            "modified_original_roms": [],
+            "unattributed_rom_files": [],
+            "invalid_rom_files": [],
+        },
+        "input_hashes_before_execution": {"model_cpp": "same"},
+        "input_hashes_after_execution": {"model_cpp": "same"},
+        "rom_input_sha256": {"weight.dat": "0" * 64},
+        "stdout_sha256": "1" * 64,
+        "fresh_report_sha256": {"timing_summary.rpt": "2" * 64},
+        "allow_verified_readmem_post_absence": False,
+    }
+    invocation.write_text(json.dumps(receipt))
+    monkeypatch.setattr(results, "summarize_case", lambda case: {
+        "evidence": "E3-HLS-synthesis-report",
+        "csim_passed": True, "warnings": ["Failed ROM gate"],
+    })
+    monkeypatch.setattr(rtl_inputs, "inventory_vitis_rtl",
+                        lambda case: {"literal_readmem_references": ["weight.dat"]})
+    monkeypatch.setattr(rom_read_attestation, "verify_post_run_readmem_absence",
+                        lambda **kwargs: {
+                            "reason": "SOURCE_ATTESTED_VENDOR_READ_POST_RUN_ABSENCE",
+                            "reported_successful_roms": ["weight.dat"],
+                            "qualified_postrun_absence": True,
+                        })
+    monkeypatch.setattr(report, "parse_vivado_reports", lambda case: {
+        "timing": {"timing_met": True, "wns_ns": .2},
+        "drc": {"summary_verified": True, "clean": False, "violations": 1},
+    })
+    before = invocation.read_bytes()
+    inspection = diagnose.inspect_case(case)
+    assert inspection["status"] == "VENDOR_RECEIPT_REJECTED"
+    assert inspection["vendor_exit_code"] == 0
+    assert inspection["missing_staged_roms_after"] == ["weight.dat"]
+    assert inspection["read_only_postrun_rom_observation"][
+        "source_hash_and_original_log_support_absence"] is True
+    assert inspection["original_evidence"] == "E3-HLS-synthesis-report"
+    assert inspection["original_evidence_promoted"] is False
+    assert inspection["physical_report_observation"]["drc_clean"] is False
+    assert invocation.read_bytes() == before
+    assert list(case.rglob("*.json")) == [invocation]
+
+
+def test_readonly_diagnosis_without_vivado_receipt(monkeypatch, tmp_path):
+    from fpgai_research.toolchains import diagnose
+    from fpgai_research.experiments import results
+    case = tmp_path / "source_only"
+    case.mkdir()
+    monkeypatch.setattr(results, "summarize_case",
+                        lambda case: {"evidence": "E1-HLS-source", "warnings": [],
+                                      "csim_passed": None})
+    detail = diagnose.inspect_case(case)
+    assert detail["status"] == "NO_VIVADO_INVOCATION"
+    assert detail["original_evidence_promoted"] is False

@@ -128,6 +128,33 @@ The recorded statuses are `SOURCE_READY`, `HLS_QUALIFIED`, `OOC_QUALIFIED`, or a
 
 Use **a fresh output directory for every invocation**. The command intentionally refuses to overwrite prior evidence. When using private ONNX weights, remember that generated HLS C++ and the testbench can contain numeric constants. Keep case folders private and under ignored `build/` unless you have permission to share them.
 
+## When Vivado exits 0 but E4 is rejected
+
+A finished Vivado command is not itself qualified evidence. If the result says `OOC_NOT_QUALIFIED` even though Vivado exits 0, inspect the original run **read-only**:
+
+```bash
+fpgai-diagnose --case build/neuro_ooc_01
+```
+
+The diagnostic reports the original invocation receipt, staged-ROM integrity changes, original input stability, and whether timing/DRC reports can be parsed as **unpromoted observations**. It does **not** modify the failed case, rerun Vitis/Vivado, or retroactively qualify E4.
+
+On some Vivado 2023.2 runs, the tool reports it successfully read an original ROM initialization file but the staged working-directory copy is absent after execution. A new run may explicitly opt into the **existing, strict source-pinned and log-hash-verified readmem post-absence protocol**:
+
+```bash
+fpgai-run \
+  --onnx build/demo/model.onnx \
+  --output build/neuro_ooc_02 \
+  --board kv260 \
+  --clock-ns 10 \
+  --vitis /tools/Xilinx/Vitis_HLS/2023.2 \
+  --vivado /tools/Xilinx/Vivado/2023.2 \
+  --stage ooc \
+  --execute-native \
+  --allow-verified-readmem-post-absence
+```
+
+This is **not** a blanket exception. It accepts only originally hash-attested ROM data, unchanged RTL/source inputs, exact literal Verilog readmem references, and actual vendor-reported successful reads in the matching original stdout log. Modified or unattributed ROM data still fail. The original `neuro_ooc_01` result stays unchanged, and independent routed timing and DRC qualification remain mandatory. Inspect the read-only diagnosis first; if failures have another cause, fix those instead of rerunning with this option.
+
 ## 7. Validation on the local development PC
 
 From this feature branch, without calling Vitis/Vivado:

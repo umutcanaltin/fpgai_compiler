@@ -213,12 +213,14 @@ def summarize_case(folder: str) -> dict:
             and failed.get("script_sha256")==sha256(script.read_bytes()).hexdigest()):
             exitcode=failed.get("returncode")
             suffix=("timeout" if failed.get("timed_out") is True
-                    else f"returncode={exitcode}" if type(exitcode) is int
+                    else "exit=0 but receipt integrity gates failed"
+                    if exitcode == 0 else
+                    f"returncode={exitcode}" if type(exitcode) is int
                     else "unknown exit status")
             row["warnings"].append(
-                "Vivado native invocation failed ("+suffix+
-                "); E4 not established. Inspect vivado/logs/vivado.stdout.log "
-                "and vivado/logs/vivado.stderr.log")
+                "Vivado invocation did not qualify ("+suffix+
+                "); E4 not established. Inspect vivado/vivado_invocation.json "
+                "and vivado/logs/vivado.stdout.log")
     host=case/"host_validation.json"
     if host.is_file():
         item=json.loads(host.read_text())
