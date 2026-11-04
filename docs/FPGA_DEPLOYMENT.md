@@ -61,6 +61,8 @@ bitstream/board deployment for any of those boards.
 
 ## Automated model-level evaluation
 
+The local one-command workflow can explicitly return a separate `OOC_ROUTED_WITH_ADVISORIES` *warning-only* result when supported, original source-attested routing and timing pass with only narrowly recognized DRC advisories. This is not strict DRC-clean qualification, hardware execution or deployment. The default remains fail-closed; see [the onboarding guide](NEUROSCIENTIST_QUICKSTART.md#routed-results-with-known-advisory-drc-warnings) for the precise opt-in gates.
+
 For researchers who want to avoid manual Vitis/Vivado interaction, [One-command neuroscientist workflow](NEUROSCIENTIST_QUICKSTART.md) automates the source, Vitis HLS and out-of-context Vivado stages with explicit `--execute-native` authorization. The stages below remain available as advanced manual/research controls. Neither workflow creates a board-programmable image.
 
 ## Step 1 — Run the source compiler

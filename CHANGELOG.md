@@ -9,6 +9,12 @@
 
 This is the **public-facing project change summary**, not a replacement for the source-pinned scientific experiment archive. It does not claim a released software version or an approved open-source license.
 
+## Experimental disclosed OOC advisory observation — feature branch
+
+- Added a narrow, opt-in `--accept-ooc-advisories` path for timing-met, source-attested E4 OOC designs with only DPIP-2/DPOP-3/DPOP-4/RTSTAT-10 warnings. Default strict DRC qualification is unchanged.
+- The `OOC_ROUTED_WITH_ADVISORIES` state preserves warning counts and explicitly marks strict DRC qualification false, never claiming a clean board image. Unknown, critical, unconstrained-I/O, incomplete, stale or timing-failing cases are rejected.
+- Added standalone and integrated fail-closed regression tests. The native behavior remains to be validated on the user's workstation before merge.
+
 ## Experimental OOC diagnostics refinement — feature branch
 
 - Added `fpgai-diagnose` for read-only inspection of existing Vivado invocation receipts, ROM stability and unpromoted timing/DRC reports.

@@ -236,6 +236,7 @@ def _plan(args: argparse.Namespace, part: str, shape: tuple[int, ...]) -> dict:
         "tolerance": args.tolerance,
         "stage": args.stage,
         "uses_synthetic_input": args.input is None,
+        "accept_ooc_advisories": bool(getattr(args, "accept_ooc_advisories", False)),
         "allow_verified_readmem_post_absence": bool(
             getattr(args, "allow_verified_readmem_post_absence", False)),
         "vendor_tools_executed": False,
@@ -258,6 +259,9 @@ def run(args: argparse.Namespace) -> int:
     from fpgai_research.toolchains.vitis_hls.runner import run_vitis
     from fpgai_research.toolchains.vivado.runner import run_vivado
     from fpgai_research.experiments.results import summarize_case
+    from fpgai_research.toolchains.vivado.advisory_observation import (
+        classify_ooc_advisory_observation,
+    )
 
     if not 1 <= args.hls_timeout <= 172800 or not 1 <= args.vivado_timeout <= 172800:
         raise ValueError("Vendor tool timeout must be between 1 and 172800 seconds")
@@ -270,6 +274,9 @@ def run(args: argparse.Namespace) -> int:
     if (getattr(args, "allow_verified_readmem_post_absence", False)
             and args.stage != "ooc"):
         raise ValueError("--allow-verified-readmem-post-absence requires --stage ooc")
+    if (getattr(args, "accept_ooc_advisories", False)
+            and args.stage != "ooc"):
+        raise ValueError("--accept-ooc-advisories requires --stage ooc")
 
     shape = _validate_model(Path(args.onnx).expanduser())
     part = _select_part(args)
@@ -375,16 +382,36 @@ def run(args: argparse.Namespace) -> int:
     drc_clean = (physical.get("drc") or {}).get("clean") is True
     qualified = bool(vivado.get("completed_successfully") and routed
                      and timing_met and drc_clean and final.get("csim_passed") is True)
+    advisory = classify_ooc_advisory_observation(final, vivado)
+    advisory_eligible = advisory["eligible"] is True
+    accept_advisory = bool(getattr(args, "accept_ooc_advisories", False))
+    advisory_accepted = advisory_eligible and accept_advisory and not qualified
+    if qualified:
+        state = "OOC_QUALIFIED"
+        message = ("Attested routed, timing-clean, DRC-clean model-only implementation; "
+                   "no board bitstream generated")
+    elif advisory_eligible:
+        state = "OOC_ROUTED_WITH_ADVISORIES"
+        message = ("Attested routed and timing-met OOC study with disclosed DRC "
+                   "advisory warnings. NOT DRC-clean or board-ready. "
+                   + ("The explicitly requested warning-only observation is accepted."
+                      if advisory_accepted else
+                      "Use --accept-ooc-advisories for a separate, explicitly "
+                      "disclosed warning-only completion status."))
+    else:
+        state = "OOC_NOT_QUALIFIED"
+        message = ("Vivado invocation, source evidence, routing, timing or DRC checks "
+                   "did not qualify; inspect reports and original logs.")
     summary = _case_summary(
-        case, stage=args.stage,
-        state="OOC_QUALIFIED" if qualified else "OOC_NOT_QUALIFIED",
-        sample_kind=sample_kind,
-        message=("Attested routed, timing-clean, DRC-clean model-only implementation; "
-                 "no board bitstream generated" if qualified else
-                 "Vivado execution or evidence, timing or DRC qualification did not pass; "
-                 "inspect reports, logs and warnings"),
-        part=part,
+        case, stage=args.stage, state=state,
+        sample_kind=sample_kind, message=message, part=part,
     )
+    summary["strict_drc_clean_qualified"] = qualified
+    summary["advisory_observation"] = {
+        **advisory,
+        "user_explicitly_accepted_warning_only_observation": accept_advisory,
+        "accepted_as_warning_only_workflow_completion": advisory_accepted,
+    }
     witness = vivado.get("verified_readmem_post_absence_witness") or {}
     staged_after = vivado.get("staged_rom_input_integrity_after") or {}
     summary["vivado_execution_diagnostics"] = {
@@ -405,7 +432,7 @@ def run(args: argparse.Namespace) -> int:
     }
     _write_summary(case, summary)
     print(json.dumps(summary, indent=2))
-    return 0 if qualified else 3
+    return 0 if (qualified or advisory_accepted) else 3
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -437,6 +464,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                         action="store_true",
                         help="For a NEW OOC run only, opt into the strict source-and-log-hash "
                              "verified Vivado post-run ROM read witness; never retroactive")
+    parser.add_argument("--accept-ooc-advisories", action="store_true",
+                        help="For NEW OOC studies only: return success for source-attested "
+                             "timing-met routing with only specified DSP/NOLOADS DRC warnings; "
+                             "never label warning-only studies DRC-clean or board-qualified")
     parser.add_argument("--plan", action="store_true",
                         help="Read-only plan; never execute vendors or write a case")
     args = parser.parse_args(argv)

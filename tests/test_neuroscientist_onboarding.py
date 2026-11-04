@@ -474,3 +474,97 @@ def test_onboarding_summary_keeps_drc_rule_breakdown(monkeypatch, tmp_path):
     assert report["drc_unconstrained_io"] is True
     assert set(report["drc_rules"]) == {"UCIO-1", "OTHER-1"}
     assert report["board_bitstream_generated"] is False
+
+
+
+def _mock_full_advisory_ooc(monkeypatch, tmp_path, *,
+                            rule_id="DPIP-2", timing_met=True, e4=True):
+    _native_mocks(monkeypatch, tmp_path)
+    from fpgai_research.experiments import results
+    from fpgai_research.toolchains.vitis_hls import runner as vitis
+    from fpgai_research.toolchains.vivado import runner as vivado
+    drc = {
+        "summary_verified": True,
+        "clean": False, "critical_warnings": 0, "unconstrained_io": False,
+        "violations": 2,
+        "rules": {rule_id: {"severity": "Warning", "violations": 2}},
+    }
+    complete = {
+        "evidence": "E4-Vivado-implementation" if e4 else "E3-HLS-synthesis-report",
+        "csim_passed": True,
+        "warnings": ["DSP input pipelining advisory"],
+        "metrics": {},
+        "vivado_metrics": {
+            "routed_nets_complete": True,
+            "timing": {"timing_met": timing_met, "wns_ns": 3.699 if timing_met else -1.0},
+            "drc": drc,
+        } if e4 else None,
+    }
+    snapshots = iter([
+        _evidence(level="E3-HLS-synthesis-report", csim=True),
+        complete, complete,
+    ])
+    monkeypatch.setattr(results, "summarize_case", lambda case: next(snapshots))
+    monkeypatch.setattr(vitis, "run_vitis",
+                        lambda *args, **kwargs: {"completed_successfully": True})
+    monkeypatch.setattr(vivado, "run_vivado",
+                        lambda *args, **kwargs: {
+                            "completed_successfully": True,
+                            "returncode": 0,
+                            "allow_verified_readmem_post_absence": True,
+                        })
+    monkeypatch.setattr(app, "_stage_roms", lambda case: None)
+
+
+def test_advisory_only_study_requires_explicit_cli_acceptance(monkeypatch, tmp_path):
+    _mock_full_advisory_ooc(monkeypatch, tmp_path)
+    args = _args(tmp_path, native=True)
+    assert app.run(args) == 3
+    summary = json.loads((tmp_path / "new-case" / "user_run_summary.json").read_text())
+    assert summary["state"] == "OOC_ROUTED_WITH_ADVISORIES"
+    assert summary["strict_drc_clean_qualified"] is False
+    assert summary["advisory_observation"]["eligible"] is True
+    assert summary["advisory_observation"][
+        "accepted_as_warning_only_workflow_completion"] is False
+    assert summary["board_bitstream_generated"] is False
+
+
+def test_user_may_opt_in_to_warning_only_ooc_completion(monkeypatch, tmp_path):
+    _mock_full_advisory_ooc(monkeypatch, tmp_path)
+    args = _args(tmp_path, native=True)
+    args.accept_ooc_advisories = True
+    assert app.run(args) == 0
+    summary = json.loads((tmp_path / "new-case" / "user_run_summary.json").read_text())
+    assert summary["state"] == "OOC_ROUTED_WITH_ADVISORIES"
+    assert summary["strict_drc_clean_qualified"] is False
+    assert summary["drc_clean"] is False
+    assert summary["advisory_observation"][
+        "accepted_as_warning_only_workflow_completion"] is True
+    assert summary["board_bitstream_generated"] is False
+    assert summary["device_programmed"] is False
+
+
+@pytest.mark.parametrize("rule_id,timing_met,e4", [
+    ("UNKNOWN-9", True, True),
+    ("DPOP-3", False, True),
+    ("DPIP-2", True, False),
+])
+def test_unknown_warning_timing_failure_or_unattributed_e4_remains_failure(
+        monkeypatch, tmp_path, rule_id, timing_met, e4):
+    _mock_full_advisory_ooc(monkeypatch, tmp_path,
+                            rule_id=rule_id, timing_met=timing_met, e4=e4)
+    args = _args(tmp_path, native=True)
+    args.accept_ooc_advisories = True
+    assert app.run(args) == 3
+    summary = json.loads((tmp_path / "new-case" / "user_run_summary.json").read_text())
+    assert summary["state"] == "OOC_NOT_QUALIFIED"
+    assert summary["advisory_observation"]["eligible"] is False
+    assert summary["strict_drc_clean_qualified"] is False
+
+
+def test_no_advisory_acceptance_for_hls_only(monkeypatch, tmp_path):
+    monkeypatch.setattr(app, "_validate_model", lambda path: (1, 4))
+    args = _args(tmp_path, stage="hls", native=True)
+    args.accept_ooc_advisories = True
+    with pytest.raises(ValueError, match="requires --stage ooc"):
+        app.run(args)

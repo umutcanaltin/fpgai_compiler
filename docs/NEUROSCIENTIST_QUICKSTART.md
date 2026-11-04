@@ -124,7 +124,7 @@ The case directory contains:
 | `vivado/vivado_invocation.json` | Native Vivado receipt when invoked |
 | `user_run_summary.json` | Simplified qualification status and warnings |
 
-The recorded statuses are `SOURCE_READY`, `HLS_QUALIFIED`, `OOC_QUALIFIED`, or an explicit not-qualified failure. Tool exit code zero is **not** enough for qualification. The summary always states `board_bitstream_generated: false` and `device_programmed: false`.
+The recorded statuses are `SOURCE_READY`, `HLS_QUALIFIED`, `OOC_QUALIFIED`, `OOC_ROUTED_WITH_ADVISORIES`, or an explicit not-qualified failure. Tool exit code zero is **not** enough for qualification. The summary always states `board_bitstream_generated: false` and `device_programmed: false`.
 
 Use **a fresh output directory for every invocation**. The command intentionally refuses to overwrite prior evidence. When using private ONNX weights, remember that generated HLS C++ and the testbench can contain numeric constants. Keep case folders private and under ignored `build/` unless you have permission to share them.
 
@@ -156,6 +156,29 @@ fpgai-run \
 ```
 
 This is **not** a blanket exception. It accepts only originally hash-attested ROM data, unchanged RTL/source inputs, exact literal Verilog readmem references, and actual vendor-reported successful reads in the matching original stdout log. Modified or unattributed ROM data still fail. The original `neuro_ooc_01` result stays unchanged, and independent routed timing and DRC qualification remain mandatory. Inspect the read-only diagnosis first; if failures have another cause, fix those instead of rerunning with this option.
+
+### Routed results with known advisory DRC warnings
+
+A fully routed, original source-attested model implementation can meet its requested clock and still receive **warning-level** DRC recommendations. For the initial Vitis HLS/Vivado 2023.2 test, these were `DPIP-2`, `DPOP-3`, `DPOP-4` (DSP pipeline optimization recommendations) and `RTSTAT-10` (no routable loads). These are **not** silently deleted or marked as clean.
+
+The default command remains strict: it returns a non-zero status if DRC is not clean, even if the routing and timing are otherwise source-attested. If a researcher explicitly accepts a **warning-only, model-level OOC observation**, a NEW run can use both options:
+
+```bash
+fpgai-run \
+  --onnx build/demo/model.onnx \
+  --output build/neuro_ooc_02 \
+  --board kv260 \
+  --clock-ns 10 \
+  --vitis /tools/Xilinx/Vitis_HLS/2023.2 \
+  --vivado /tools/Xilinx/Vivado/2023.2 \
+  --stage ooc --execute-native \
+  --allow-verified-readmem-post-absence \
+  --accept-ooc-advisories
+```
+
+This flag allows an exit code of zero only when the original verified E4 report shows complete routing, passing CSim, timing met, and an exact *known* subset of the four warning-only rules with no critical errors or unconstrained I/O. The summary state becomes `OOC_ROUTED_WITH_ADVISORIES`, **never** `OOC_QUALIFIED`. It explicitly records `strict_drc_clean_qualified: false`, the original warning rule counts, and the user's opt-in. Unknown rules, missing/modified/unattributed ROMs, source drift, CSim failure, timing failure and critical DRC still fail closed. No DRC severities, waivers, physical source or vendor Tcl are modified.
+
+This status is appropriate only for clearly labeled *warning-only out-of-context implementation observations*. It does not establish a clean DRC signoff, robust maximum clock, platform integration, a bitstream or hardware deployment. Fixing DSP pipeline utilization is a separate performance/architecture task, not a prerequisite to *reporting* a qualified-with-disclosures research observation. For public results, disclose the source-pinned reports and DRC rule details.
 
 ## 7. Validation on the local development PC
 
