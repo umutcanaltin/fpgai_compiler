@@ -128,6 +128,18 @@ reward, study and audit files remain unmodified.
 
 ## HW-RL-02 — source-attested original Vitis HLS evaluation
 
+**Local CPU feedback and patch (2026-11-04):** The user verified the
+new native CLI package install; local HW-RL-02 tests found three failures
+from an exact Python tuple-versus-JSON array comparison in the stored
+`complete_architecture[*].request.tile`. The full CPU suite reported
+2,000 passed, 22 skipped and those same three failures. The action plan
+now canonicalizes its complete source record to JSON-native data before
+saving and auditing, without relaxing strict equality or any E2/E3 gate.
+Regression tests cover both default and non-empty Conv tiles and nested
+tile tampering. **New patch verification on the workstation is pending.**
+
+
+
 **Status:** New source path and CPU-only negative tests are implemented
 on this branch, but **the new code and actual native Conv/MatMul HLS have
 not yet been run on the user's workstation**. No RL step/reward, learning

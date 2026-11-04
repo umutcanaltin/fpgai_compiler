@@ -134,7 +134,7 @@ def test_independent_audit_never_qualifies_e1_without_vitis(task, tmp_path):
     assert result["native_calls_by_audit"] == 0
 
 
-@pytest.mark.parametrize("kind", ["cpp", "tb", "manifest", "action", "samples"])
+@pytest.mark.parametrize("kind", ["cpp", "tb", "manifest", "action", "tile", "samples"])
 def test_independent_audit_rejects_tampered_source_or_task(task, tmp_path, kind):
     _, state, samples = task
     case = tmp_path / "attested_case"
@@ -153,6 +153,11 @@ def test_independent_audit_rejects_tampered_source_or_task(task, tmp_path, kind)
         path = case / "hardware_action.json"
         record = json.loads(path.read_text())
         record["resource_caps"]["dsp"] = 0
+        path.write_text(json.dumps(record))
+    elif kind == "tile":
+        path = case / "hardware_action.json"
+        record = json.loads(path.read_text())
+        record["complete_architecture"][0]["request"]["tile"] = [1, 2, 3]
         path.write_text(json.dumps(record))
     else:
         audited_samples = samples.copy()
@@ -233,3 +238,49 @@ def test_native_cli_action_edits_change_real_hls_source_state(task, tmp_path, ca
     assert result["state_sha256"] != state.state_sha256
     assert result["complete_architecture"][idx]["request"]["pes"] == 2
     assert result["reward"] is None
+
+
+
+def test_complete_action_plan_is_json_native_before_persisting(task, tmp_path):
+    """Regression: asdict(ArchitectureRequest).tile is tuple, JSON uses list.
+
+    The strict exact audit comparison must accept real saved plans without
+    dropping nested hardware action fields or bypassing hash checks.
+    """
+    _, state, samples = task
+    plan = native.planned_case(state, samples)
+    assert json.loads(json.dumps(plan, sort_keys=True)) == plan
+    assert len(plan["complete_architecture"]) == len(state.requests)
+    for row in plan["complete_architecture"]:
+        assert row["request"]["tile"] == []
+        assert type(row["request"]["tile"]) is list
+    case = tmp_path / "json_roundtrip_only"
+    _prepare_without_vendor(case, state, samples)
+    assert json.loads((case / "hardware_action.json").read_text()) == plan
+    # The baseline contains no vendor artifacts, so it must never qualify.
+    audited = native.audit_native_case(case, state, samples)
+    assert audited["qualified"] is False
+    assert audited["hls_estimated_latency_ns"] is None
+    assert audited["reward"] is None
+
+
+def test_nonempty_conv_tile_survives_json_case_audit(task, tmp_path):
+    """Multi-axis Conv tuple becomes a list on disk without losing exact shape."""
+    _, state, samples = task
+    idx = next(i for i, op in enumerate(state.model.operators) if op.kind == "Conv")
+    from rl_environment.hardware_space import knob_inventory
+    tile_candidates = knob_inventory(state)["operators"][idx]["active_operator_knobs"]["tile"]
+    tile = next(candidate for candidate in tile_candidates if candidate)
+    result = transition(state, HardwareEdit("operator", "tile", tile, idx))
+    assert result.status == "SOURCE_ACCEPTED", result.reason
+    selected = result.next
+    plan = native.planned_case(selected, samples)
+    assert plan["complete_architecture"][idx]["request"]["tile"] == tile
+    assert type(plan["complete_architecture"][idx]["request"]["tile"]) is list
+    case = tmp_path / "nonempty_tile_no_vendor"
+    _prepare_without_vendor(case, selected, samples)
+    assert json.loads((case / "hardware_action.json").read_text()) == plan
+    audit = native.audit_native_case(case, selected, samples)
+    assert audit["qualified"] is False
+    assert audit["source_cpp_sha256"] == plan["cpp_sha256"]
+    assert audit["hls_estimated_latency_ns"] is None

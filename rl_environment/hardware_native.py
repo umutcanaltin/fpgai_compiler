@@ -91,10 +91,22 @@ def _uncertainty(state: HardwareState) -> float:
     return uncertainty
 
 
+def _canonical_json(value: dict) -> dict:
+    """Construct JSON-native evidence before writing or comparing receipts.
+
+    ArchitectureRequest.tile is a tuple in immutable compiler state, but
+    json.dump serializes it as a list. Comparing a loaded JSON receipt to
+    raw dataclasses.asdict output falsely rejects a genuine saved case.
+    Canonicalize both source planning and persisted evidence identically;
+    never remove a field, ignore a mismatch, or relax source-hash checks.
+    """
+    return json.loads(json.dumps(value, sort_keys=True, allow_nan=False))
+
+
 def planned_case(state: HardwareState, samples: np.ndarray) -> dict:
     samples = _samples(state, samples)
     source_plan = native_evaluation_plan(state)
-    return {
+    return _canonical_json({
         **source_plan,
         "schema": SCHEMA,
         "status": "SOURCE_READY_NOT_NATIVE_EXECUTED",
@@ -104,7 +116,7 @@ def planned_case(state: HardwareState, samples: np.ndarray) -> dict:
         "original_native_evidence_expected": "E3-HLS-synthesis-report",
         "native_vitis_calls": 0,
         "reward": None,
-    }
+    })
 
 
 def _expected_testbench(state: HardwareState, samples: np.ndarray) -> str:

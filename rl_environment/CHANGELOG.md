@@ -1,3 +1,11 @@
+## 2026-11-04 — fix strict native receipt comparison after JSON round-trip
+
+- User ran HW-RL-02 locally: the focused suite reported **3 failed, 54 passed, 1 skipped**; the full suite **3 failed, 2,000 passed, 22 skipped**. All failures were the same strict action receipt comparison, before any original Vitis qualification.
+- Root cause: `dataclasses.asdict(ArchitectureRequest)` preserves `tile` as a Python tuple, while the saved `hardware_action.json` represents it as a JSON array. Comparing JSON-loaded data directly to an unnormalized Python plan rejected legitimate immutable source cases.
+- `planned_case` now canonicalizes its exact full content to JSON-native values before either saving or auditing. The audit still compares the **complete** action record and separately verifies source, testbench, part, clock, numerical tolerance, CSim, E3 and native evidence.
+- Added regressions for baseline and non-empty Conv tiling round-trips, plus tampering with the nested architecture tile value. No vendor execution or old case mutation.
+- This revision is committed separately on the RL feature branch and **requires new workstation pytest verification** before any original Vitis case.
+
 ## 2026-11-04 — HW-RL-02 original native HLS evaluation adapter
 
 - The user's installed `fpgai-rl-hardware-space --help` succeeded from
