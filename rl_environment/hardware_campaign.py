@@ -65,9 +65,11 @@ class HardwareTask:
     samples_sha256: str
 
     def metadata(self) -> dict:
+        """JSON-native provenance; persisted and replayed representations match."""
         return {
-            **{key: str(value) if isinstance(value, Path) else value
-               for key, value in asdict(self).items()},
+            key: (str(value) if isinstance(value, Path)
+                  else list(value) if isinstance(value, tuple) else value)
+            for key, value in asdict(self).items()
         }
 
 
@@ -425,6 +427,9 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
         raise ValueError("Original source revision mismatch: checkout pinned commit to audit")
     if [t.metadata() for t in tasks] != metadata["task_definitions"]:
         raise ValueError("Original task models/samples/constraints changed")
+    if (metadata["planned_max_original_vitis_calls"] !=
+            metadata["episodes"] * metadata["original_vitis_calls_per_episode"]):
+        raise ValueError("Original native-call budget was changed")
     task_index = {t.id: t for t in tasks}
     trials = _read_jsonl(directory / "trials.jsonl")
     episode_records = _read_jsonl(directory / "episodes.jsonl")
@@ -455,8 +460,10 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
         )
         best = None
         for j, trial in enumerate(group):
-            if trial["step"] != j:
-                raise ValueError("Out-of-order or duplicated native trial")
+            if (trial["step"] != j
+                    or trial["episode"] != episode_index
+                    or trial.get("method") != metadata["method"]):
+                raise ValueError("Out-of-order, duplicated, or wrong-method native trial")
             edit = trial["source_action"]
             if edit is not None:
                 decision = transition(state, HardwareEdit(**edit))
@@ -482,6 +489,9 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
             if (receipt["original_case_audit"] != independent
                     or receipt["reward"] != trial["reward"]
                     or receipt["action_index"] != trial["source_action_index"]
+                    or receipt["requested_clock_ns"] != trial["requested_clock_ns"]
+                    or receipt["state_sha256"] != trial["native_state_sha256"]
+                    or receipt["native_case"] != str(case)
                     or independent["state_sha256"] != trial["native_state_sha256"]
                     or original_hls_diagnostics(independent) != trial["original_audit"]
                     or trial["qualified"] is not independent["qualified"]
@@ -499,7 +509,32 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
                 raise ValueError("Original HLS latency-only reward was replaced")
             count += 1
             qualified += int(independent["qualified"])
-    complete = count == expected and len(episode_records) == metadata["episodes"]
+    for i, record in enumerate(episode_records):
+        if (record.get("schema") != "fpgai-research/hardware-rl-episode/v1"
+                or record.get("episode") != i
+                or record.get("task_id") != metadata["schedule"][i]
+                or record.get("native_calls") != metadata["original_vitis_calls_per_episode"]
+                or record.get("native_calls") != len(groups.get(i, ()))
+                or record.get("qualified_calls") != sum(
+                    bool(x["qualified"]) for x in groups.get(i, ())
+                )):
+            raise ValueError("Original episode journal or task schedule disagrees")
+        group = groups[i]
+        last = group[-1] if group else None
+        if (last is None
+                or record.get("best_qualified_latency_ns") != last["best_qualified_latency_ns"]
+                or record.get("no_feasible_design_censored") is not (
+                    last["best_qualified_latency_ns"] is None
+                )
+                or abs(record.get("reward_sum") - sum(
+                    float(x["reward"]) for x in group
+                )) > 1e-10):
+            raise ValueError("Original episode reward/censoring summary was altered")
+    complete = (
+        count == expected and len(episode_records) == metadata["episodes"]
+        and len(groups) == metadata["episodes"]
+        and (directory / "summary.json").is_file()
+    )
     if not complete and not allow_incomplete:
         raise ValueError("Native case count does not match preregistered budget")
     return {
