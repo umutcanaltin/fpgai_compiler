@@ -203,6 +203,8 @@ class HardwareActionTape:
     requested_clock_fraction: object
     predicted_feasibility: float
     source_action_index: int
+    sampled_clock_fraction: object | None = None
+    observation: dict | None = None
 
 
 def _native_feedback(info: dict, reward: float) -> bool:
@@ -244,6 +246,40 @@ def _native_feedback(info: dict, reward: float) -> bool:
                 or not audit.get("gate_failures") or reward != -.05):
             raise ValueError("Infeasible policy update is not an audited HLS rejection")
     return info["qualified"]
+
+
+def verify_original_hardware_step(
+        tape: HardwareActionTape, reward: float, *,
+        info: dict, env) -> bool:
+    """Replay the matching *live* original Vitis case before any algorithm learns.
+
+    This is a shared hard gate for actor-critic, REINFORCE and PPO. Metadata
+    alone cannot authorize an update, and this never launches vendor tools.
+    """
+    qualified = _native_feedback(info, reward)
+    # Require the original Gym instance and re-audit the immutable
+    # original vendor case. A caller-supplied metadata dict (even if
+    # structurally E3-like) is NEVER sufficient to update weights.
+    from . import hardware_native
+    from .hardware_gym import GymHardwareNativeEnv
+    if (not isinstance(env, GymHardwareNativeEnv)
+            or env.current is None or env.calls == 0
+            or env.current.state_sha256 != info["state_sha256"]
+            or env.last_audit != info["original_vitis_audit"]
+            or not isinstance(info.get("native_case"), str)
+            or not env.history
+            or env.history[-1]["audit"] != info["original_vitis_audit"]
+            or env.history[-1]["action_index"] != tape.source_action_index
+            or abs(float(env.history[-1]["reward"]) - float(reward)) > 1e-10):
+        raise ValueError("Policy update needs the matching live native Gym environment and exact reward")
+    reproduced = hardware_native.audit_native_case(
+        info["native_case"], env.current, env.samples
+    )
+    if reproduced != info["original_vitis_audit"]:
+        raise ValueError("Independent original Vitis replay differs before gradient update")
+    return qualified
+
+
 
 
 class HardwareGraphTrainer:
@@ -304,6 +340,10 @@ class HardwareGraphTrainer:
             tape = HardwareActionTape(
                 log_probability, entropy, value, contexts[chosen],
                 fraction, pred, int(chosen.item()),
+                sampled_clock_fraction=latent.detach(),
+                observation={
+                    k: np.array(v, copy=True) for k, v in obs.items()
+                },
             ) if training else None
             return (int(chosen.item()), clock), tape
         with torch.no_grad():
@@ -323,27 +363,9 @@ class HardwareGraphTrainer:
                terminated: bool = True, gamma: float = .95) -> dict:
         if not isinstance(tape, HardwareActionTape):
             raise ValueError("Policy update requires a prior trainable sampled tape")
-        qualified = _native_feedback(info, reward)
-        # Require the original Gym instance and re-audit the immutable
-        # original vendor case. A caller-supplied metadata dict (even if
-        # structurally E3-like) is NEVER sufficient to update weights.
-        from . import hardware_native
-        from .hardware_gym import GymHardwareNativeEnv
-        if (not isinstance(env, GymHardwareNativeEnv)
-                or env.current is None or env.calls == 0
-                or env.current.state_sha256 != info["state_sha256"]
-                or env.last_audit != info["original_vitis_audit"]
-                or not isinstance(info.get("native_case"), str)
-                or not env.history
-                or env.history[-1]["audit"] != info["original_vitis_audit"]
-                or env.history[-1]["action_index"] != tape.source_action_index
-                or abs(float(env.history[-1]["reward"]) - float(reward)) > 1e-10):
-            raise ValueError("Policy update needs the matching live native Gym environment and exact reward")
-        reproduced = hardware_native.audit_native_case(
-            info["native_case"], env.current, env.samples
+        qualified = verify_original_hardware_step(
+            tape, reward, info=info, env=env
         )
-        if reproduced != info["original_vitis_audit"]:
-            raise ValueError("Independent original Vitis replay differs before gradient update")
         if type(gamma) not in (float, int) or not 0 <= gamma < 1:
             raise ValueError("Actor-critic TD discount must be within [0,1)")
         if not terminated and next_obs is None:

@@ -390,3 +390,59 @@ def test_hw04_untrained_agent_cli_preview_no_vitis_or_training(tmp_path, capsys)
     assert 2 <= result["requested_clock_ns"] <= 32
     assert not root.exists()
     assert sample_file.is_file()
+
+def test_hw05_episodic_methods_audit_before_real_policy_updates(
+        tmp_path, monkeypatch):
+    """These are shape-only CPU fixtures; never paper/native evidence."""
+    from rl_environment.hardware_algorithms import create_hardware_method
+    env = _env(tmp_path, "cnn_pool_dense")
+    obs, _ = env.reset(seed=101)
+    for method in ("reinforce", "ppo"):
+        model = create_hardware_method(method, seed=101, hidden=16,
+                                      ppo_epochs=2)
+        action, tape = model.choose(obs, training=True)
+        assert tape.observation is not None
+        assert tape.sampled_clock_fraction is not None
+        fake = _fake_transition_info(env, qualified=False)
+        env.calls = 1
+        env.last_audit = fake["original_vitis_audit"]
+        env.history = [{
+            "audit": env.last_audit, "action_index": tape.source_action_index,
+            "clock_ns": action[1], "reward": -.05, "best_ns": None,
+        }]
+        monkeypatch.setattr(hardware_native, "audit_native_case",
+                            lambda case, state, samples: fake["original_vitis_audit"])
+        status = model.observe(tape, -.05, info=fake, env=env)
+        assert status["buffered_steps"] == 1
+        assert model.updates == 0
+        with pytest.raises(ValueError, match="Interrupted"):
+            model.finish_episode(complete=False)
+        receipt = model.finish_episode()
+        assert receipt["algorithm"] == method
+        assert receipt["qualified_steps"] == 0
+        assert receipt["audited_steps"] == 1
+        assert model.updates == (2 if method == "ppo" else 1)
+        assert all(isfinite(x["loss"]) for x in receipt["gradient_epochs"])
+        assert not model.pending
+
+
+def test_hw05_episodic_methods_reject_metadata_only_and_random_is_separate(
+        tmp_path):
+    from rl_environment.hardware_algorithms import (
+        RandomHardwarePolicy, create_hardware_method,
+    )
+    env = _env(tmp_path, "cnn_pool_dense")
+    obs, _ = env.reset(seed=101)
+    a = create_hardware_method("random", seed=1001)
+    b = RandomHardwarePolicy(seed=1001)
+    assert a.choose(obs) == b.choose(obs)
+    for method in ("reinforce", "ppo"):
+        model = create_hardware_method(method, seed=101, hidden=16)
+        _, tape = model.choose(obs, training=True)
+        with pytest.raises(ValueError, match="Missing original-native"):
+            model.observe(tape, -.05, info={}, env=env)
+        assert model.updates == 0
+        assert model.pending == []
+    with pytest.raises(ValueError, match="Unsupported"):
+        create_hardware_method("fake-ppo")
+
