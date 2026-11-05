@@ -36,9 +36,11 @@ from .hardware_algorithms import (
 )
 from .hardware_checkpoint import save_training_state
 from .hardware_agent import original_hls_diagnostics
-from .hardware_gym import GymHardwareNativeEnv
+from .hardware_gym import GymHardwareNativeEnv, MAX_ACTIONS
 from .hardware_native import _regular_file, audit_native_case
-from .hardware_space import HardwareEdit, initial_state, transition
+from .hardware_space import (
+    HardwareEdit, candidate_actions, initial_state, transition,
+)
 from .reward import latency_only_reward
 from .study import _append_jsonl, _source_revision, _write_json_new
 
@@ -480,6 +482,21 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
                     or trial["episode"] != episode_index
                     or trial.get("method") != metadata["method"]):
                 raise ValueError("Out-of-order, duplicated, or wrong-method native trial")
+            # Recreate the exact source-defined action index from the
+            # *pre-step* architecture state, not merely a plausible edit.
+            original_offers = (
+                None, *candidate_actions(state, max_actions=MAX_ACTIONS - 1)
+            )
+            index = trial["source_action_index"]
+            if type(index) is not int or not 0 <= index < len(original_offers):
+                raise ValueError("Original GNN action index is not in the source catalog")
+            offered = original_offers[index]
+            serialized_offer = (
+                json.loads(json.dumps(asdict(offered), allow_nan=False))
+                if offered is not None else None
+            )
+            if trial["source_action"] != serialized_offer:
+                raise ValueError("Archived action index/edit disagrees with exact compiler menu")
             edit = trial["source_action"]
             if edit is not None:
                 decision = transition(state, HardwareEdit(**edit))
@@ -511,7 +528,8 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
                     or independent["state_sha256"] != trial["native_state_sha256"]
                     or original_hls_diagnostics(independent) != trial["original_audit"]
                     or trial["qualified"] is not independent["qualified"]
-                    or trial["qualified_latency_ns"] != independent["hls_estimated_latency_ns"]):
+                    or trial["qualified_latency_ns"] != independent["hls_estimated_latency_ns"]
+                    or trial["native_case"] != independent["case"]):
                 raise ValueError("Independent original HLS campaign replay disagrees")
             prior_best = best
             if independent["qualified"]:
