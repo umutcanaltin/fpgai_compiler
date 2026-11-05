@@ -358,6 +358,32 @@ class HardwareGraphTrainer:
             )
         return (chosen, clock), None
 
+    def ranked_frozen_actions(self, obs: dict) -> tuple[tuple[int, float], ...]:
+        """Deterministic greedy candidates in actor-score order, no sampling.
+
+        Each candidate keeps its *own* conditional Beta mean clock. Callers
+        may select the highest-ranked source-novel candidate without changing
+        weights, sampling a hidden random fallback, or spending a vendor call.
+        The sorted fallback rank must be reported in evaluation receipts.
+        """
+        with torch.no_grad():
+            logits, _, contexts = self.policy(obs, with_context=True)
+            mask = np.asarray(obs["action_mask"], dtype=bool)
+            allowed = np.flatnonzero(mask).tolist()
+            ranked = sorted(allowed, key=lambda i: (-float(logits[i]), i))
+            low, high = [float(x) for x in obs["clock_bounds_ns"]]
+            result = []
+            for index in ranked:
+                params = torch.nn.functional.softplus(
+                    self.policy.clock_head(contexts[index])
+                ) + 1.01
+                fraction = float((params[0] / params.sum()).item())
+                clock = normalize_clock_period_ns(
+                    low + (high - low) * fraction, decimals=2
+                )
+                result.append((index, clock))
+            return tuple(result)
+
     def update(self, tape: HardwareActionTape, reward: float, *,
                info: dict, env, next_obs: dict | None = None,
                terminated: bool = True, gamma: float = .95) -> dict:
