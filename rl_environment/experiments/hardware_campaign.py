@@ -43,6 +43,9 @@ from ..environments.hardware_space import (
 )
 from ..reward import latency_only_reward
 from ..study import _append_jsonl, _source_revision, _write_json_new
+from .hardware_regimes import (
+    CLOCK_REGIMES, NETWORK_REGIMES, validate_experiment_regimes,
+)
 
 TASK_SCHEMA = "fpgai-research/hardware-rl-tasks/v1"
 CAMPAIGN_SCHEMA = "fpgai-research/hardware-rl-campaign/v1"
@@ -159,7 +162,8 @@ def episode_schedule(tasks: tuple[HardwareTask, ...], *,
 def campaign_plan(*, tasks, split, method, episodes, calls_per_episode,
                   total_authorized_calls, seed, evaluation,
                   checkpoint, hidden, ppo_epochs, ppo_clip,
-                  message_passing=True, use_trial_history=True):
+                  message_passing=True, use_trial_history=True,
+                  network_regime="auto", clock_regime="search"):
     if method not in METHODS:
         raise ValueError("Unsupported hardware optimization method")
     if (type(calls_per_episode) is not int
@@ -186,7 +190,11 @@ def campaign_plan(*, tasks, split, method, episodes, calls_per_episode,
         raise ValueError("PPO clip must be in [0.05,0.4]")
     schedule = episode_schedule(tasks, split=split, episodes=episodes, seed=seed)
     unique_tasks = len({task.id for task in schedule})
+    regime = validate_experiment_regimes(
+        schedule, network_regime=network_regime, clock_regime=clock_regime,
+    )
     return {
+        **regime,
         "schema": CAMPAIGN_SCHEMA,
         "method": method,
         "split": split,
@@ -219,13 +227,15 @@ def _load_task(task: HardwareTask):
 
 def _environment(task: HardwareTask, *, root: Path,
                  calls_per_episode: int, native: bool,
-                 vitis: str, timeout: int):
+                 vitis: str, timeout: int,
+                 clock_regime: str = "search"):
     model, samples = _load_task(task)
     return GymHardwareNativeEnv(
         model, samples, root,
         part=task.part, resource_caps=task.resource_caps,
         max_absolute_error=task.max_absolute_error,
         initial_clock_ns=task.initial_clock_ns,
+        fixed_clock_ns=(task.initial_clock_ns if clock_regime == "fixed" else None),
         max_parallel_units=task.max_parallel_units,
         max_vitis_calls=calls_per_episode,
         execute_native=native,
@@ -350,6 +360,7 @@ def run_campaign(*, tasks, plan: dict, output_root: str | Path,
             task, root=root / "preflight" / task.id,
             calls_per_episode=plan["original_vitis_calls_per_episode"],
             native=False, vitis=vitis, timeout=timeout,
+            clock_regime=plan.get("clock_regime", "search"),
         )
     agent = create_hardware_method(
         plan["method"], seed=plan["seed"], hidden=plan["hidden"],
@@ -377,6 +388,7 @@ def run_campaign(*, tasks, plan: dict, output_root: str | Path,
             task, root=root / "episodes" / f"episode_{i:06d}",
             calls_per_episode=plan["original_vitis_calls_per_episode"],
             native=True, vitis=vitis, timeout=timeout,
+            clock_regime=plan.get("clock_regime", "search"),
         )
         observation, info = environment.reset(seed=plan["seed"] + i)
         rewards = []
@@ -442,6 +454,9 @@ def run_campaign(*, tasks, plan: dict, output_root: str | Path,
                 "algorithm": plan["method"],
                 "task_manifest_provenance": [x.metadata() for x in tasks],
                 "learning_mode": "online_original_hls",
+                "network_regime": plan.get("network_regime", "auto"),
+                "clock_regime": plan.get("clock_regime", "search"),
+                "fixed_clock_ns": plan.get("fixed_clock_ns"),
             }
             export = (root / "checkpoints" / f"episode_{i:06d}")
             agent.save_private(export, provenance)
@@ -522,6 +537,14 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
             metadata["episodes"] * metadata["original_vitis_calls_per_episode"]):
         raise ValueError("Original native-call budget was changed")
     task_index = {t.id: t for t in tasks}
+    validated_regime = validate_experiment_regimes(
+        tuple(task_index[k] for k in metadata["schedule"]),
+        network_regime=metadata.get("network_regime", "auto"),
+        clock_regime=metadata.get("clock_regime", "search"),
+    )
+    if any(metadata.get(k) != v for k, v in validated_regime.items()
+           if k in metadata):
+        raise ValueError("Campaign network/clock regime metadata disagrees")
     trials = _read_jsonl(directory / "trials.jsonl")
     episode_records = _read_jsonl(directory / "episodes.jsonl")
     expected = metadata["planned_max_original_vitis_calls"]
@@ -574,6 +597,11 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
             )
             if trial["source_action"] != serialized_offer:
                 raise ValueError("Archived action index/edit disagrees with exact compiler menu")
+            if metadata.get("clock_regime", "search") == "fixed" and (
+                index == 0
+                or trial["requested_clock_ns"] != task.initial_clock_ns
+            ):
+                raise ValueError("Fixed-clock campaign contains a clock edit")
             edit = trial["source_action"]
             if edit is not None:
                 decision = transition(state, HardwareEdit(**edit))
@@ -656,6 +684,8 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
         "original_native_cases_expected": expected,
         "qualified_cases": qualified,
         "source_revision_sha": metadata["source_revision_sha"],
+        "network_regime": metadata.get("network_regime", "auto"),
+        "clock_regime": metadata.get("clock_regime", "search"),
         "native_vitis_calls_by_audit": 0,
         "physical_routed_timing": False,
         "no_learning_superiority_inferred": True,
@@ -668,6 +698,14 @@ def main(argv=None) -> int:
                         help="Original JSON manifest of disjoint train/validation/test tasks")
     parser.add_argument("--split", choices=SPLITS, default="train")
     parser.add_argument("--method", choices=METHODS, default="actor_critic")
+    parser.add_argument(
+        "--network-regime", choices=NETWORK_REGIMES, default="auto",
+        help="auto=legacy scheduling; same=one immutable model; general=2+ genuinely different ONNX graphs",
+    )
+    parser.add_argument(
+        "--clock-regime", choices=CLOCK_REGIMES, default="search",
+        help="search=learned 2..32ns Vitis clock; fixed=one shared manifest initial clock, no clock actor",
+    )
     parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--calls-per-episode", type=int, default=10)
     parser.add_argument("--max-total-vitis-calls", type=int)
@@ -712,6 +750,8 @@ def main(argv=None) -> int:
                 ppo_epochs=args.ppo_epochs, ppo_clip=args.ppo_clip,
                 message_passing=not args.no_message_passing,
                 use_trial_history=not args.no_trial_history,
+                network_regime=args.network_regime,
+                clock_regime=args.clock_regime,
             )
             if args.execute_native:
                 if not args.output_root or args.max_total_vitis_calls is None:

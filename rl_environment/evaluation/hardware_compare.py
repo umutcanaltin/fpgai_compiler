@@ -87,6 +87,9 @@ def paired_summary(baseline: dict, candidate: dict) -> tuple[list[dict], dict]:
             or a["original_vitis_calls_per_episode"] !=
                b["original_vitis_calls_per_episode"]
             or a["task_definitions"] != b["task_definitions"]
+            or a.get("network_regime", "auto") != b.get("network_regime", "auto")
+            or a.get("clock_regime", "search") != b.get("clock_regime", "search")
+            or a.get("fixed_clock_ns") != b.get("fixed_clock_ns")
             or a["source_revision_sha"] != b["source_revision_sha"]):
         raise ValueError(
             "Paired comparison requires same seed, disjoint heldout split, "
