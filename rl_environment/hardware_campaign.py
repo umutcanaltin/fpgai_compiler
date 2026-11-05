@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import argparse
 import csv
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
 import json
 from math import isfinite
@@ -272,6 +272,7 @@ def _choose_admitted_action(agent, environment, observation, *,
             or not 1 <= max_source_proposals <= 256):
         raise ValueError("Bounded source-only proposal budget required")
     rejected = 0
+    rejected_tapes = []
     deterministic = (not train and not stochastic_evaluation
                      and not isinstance(agent, RandomHardwarePolicy))
     ranked = iter(agent.ranked_frozen_actions(observation)) if deterministic else None
@@ -296,7 +297,29 @@ def _choose_admitted_action(agent, environment, observation, *,
                     or reason.startswith("Repeated complete hardware state")):
                 raise
             rejected += 1
+            if train:
+                if tape is None:
+                    raise RuntimeError("Trainable rejected proposal lacks original policy tape")
+                rejected_tapes.append(tape)
             continue
+        if train and rejected_tapes:
+            if tape is None:
+                raise RuntimeError("Accepted proposal lacks original policy tape")
+            # Rejection sampling is a random-length trajectory. Its exact
+            # likelihood is the PRODUCT of rejected and accepted original
+            # draws. The sum of their log probabilities is the unbiased
+            # score-function estimator for the accepted HLS reward.
+            # Rejected proposals have no fabricated HLS rewards/labels.
+            tape = replace(
+                tape,
+                log_probability=(tape.log_probability + sum(
+                    (t.log_probability for t in rejected_tapes), 0
+                )),
+                entropy=(tape.entropy + sum(
+                    (t.entropy for t in rejected_tapes), 0
+                )),
+                rejected_proposal_tapes=tuple(rejected_tapes),
+            )
         return action, tape, environment.offers[action[0]], admitted, rejected
     raise RuntimeError(
         f"No novel source-backed proposal after {max_source_proposals} "
