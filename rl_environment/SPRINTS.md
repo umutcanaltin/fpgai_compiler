@@ -4,7 +4,8 @@
 - [x] Reuse `Gym.preview_action` for both source-only admission and native-step validation; no vendor call for no-op/visited state.
 - [x] Bounded source-only rejection/retry for stochastic agents and uniform random; no fabricated reward.
 - [x] Deterministic frozen GNN ranking over source actions and their own conditional clock means, with novelty fallback and explicit rejection counts.
-- [x] CPU regression source tests added.
+- [x] CPU regression source tests added, including a PPO whole-admission-trace likelihood check.
+- [x] Preserve rejected stochastic proposals in policy score-function likelihood; re-evaluate their full likelihood for PPO rather than assuming an unconditioned accepted action.
 - [ ] Actual workstation targeted/full regression and installed CLI.
 - [ ] Real per-algorithm original Vitis multi-step smoke, separate independent audit and complete-budget trace.
 - [ ] Source-revision and journal reconciled crash-safe continuation; no automatic resume until this passes.
