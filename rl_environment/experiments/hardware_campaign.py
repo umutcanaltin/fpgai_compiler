@@ -377,6 +377,12 @@ def run_campaign(*, tasks, plan: dict, output_root: str | Path,
             raise ValueError(
                 "Private evaluation checkpoint belongs to another source revision"
             )
+        if (plan.get("clock_regime", "search") == "search"
+                and checkpoint_manifest.get("clock_regime", "search") != "search"):
+            raise ValueError(
+                "Cannot run clock search using a policy trained without "
+                "the Beta clock head; use an original search-clock checkpoint"
+            )
     root.mkdir(parents=True, exist_ok=False)
     metadata = {
         **plan, "source_only_plan": False, "native_execution_authorized": True,
@@ -544,6 +550,13 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
     metadata = json.loads(_regular_file(directory / "campaign.json").read_text())
     if metadata.get("schema") != CAMPAIGN_SCHEMA:
         raise ValueError("Unknown native hardware campaign schema")
+    regime_fields = (
+        "network_regime", "clock_regime", "fixed_clock_ns",
+        "fixed_clock_ns_by_task", "clock_action_bounds_ns",
+        "distinct_onnx_model_count", "onnx_graph_sha256_by_task",
+    )
+    if any(field not in metadata for field in regime_fields):
+        raise ValueError("New-source native campaign lacks original regime contract")
     if metadata.get("source_revision_sha") != _source_revision():
         raise ValueError("Original source revision mismatch: checkout pinned commit to audit")
     if [t.metadata() for t in tasks] != metadata["task_definitions"]:

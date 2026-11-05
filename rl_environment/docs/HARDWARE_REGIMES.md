@@ -91,3 +91,13 @@ The exported descriptive summary records both clock modes and the explicit
 ablation authorization; it does not claim statistical significance. Different
 clock action spaces are different treatments, not naturally interchangeable
 method labels. This opt-in does not authorize HLS calls or source changes.
+
+### Policy checkpoint compatibility
+
+The private checkpoint records the original training network regime, clock
+regime and source SHA. Native evaluation fails closed on a checkpoint from
+another source revision. A policy trained with `fixed` or `task_fixed`
+clock has **not trained a Beta clock actor**; the runner will not silently
+use that untrained head in a `search` evaluation. Fixed-target evaluation
+of a search-trained policy, or transfers between globally fixed and task-fixed
+targets, remains possible but is labeled as a different training treatment.
