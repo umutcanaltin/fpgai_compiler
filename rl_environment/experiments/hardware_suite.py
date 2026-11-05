@@ -130,16 +130,28 @@ def plan_scenario_suite(tasks, *, holdout="structure", seed=101,
                     cohort = _pick_cohort(
                         available, network_regime=network, clock_regime=clock,
                     )
+                    is_heldout = split != "train"
+                    needs_checkpoint = is_heldout and method != "random"
+                    placeholder_checkpoint = (
+                        "__REQUIRES_PINNED_ORIGINAL_TRAINING_CHECKPOINT__"
+                        if needs_checkpoint else None
+                    )
                     plan = campaign_plan(
                         tasks=cohort, split=split, method=method,
                         episodes=len(cohort), calls_per_episode=calls_per_episode,
                         total_authorized_calls=None, seed=seed,
-                        evaluation=False, checkpoint=None,
+                        evaluation=is_heldout,
+                        checkpoint=placeholder_checkpoint,
                         hidden=64, ppo_epochs=3, ppo_clip=.2,
                         network_regime=network, clock_regime=clock,
                         reward_mode=reward_mode,
                         reward_reference_ns=reward_reference_ns,
                     )
+                    if needs_checkpoint:
+                        # The placeholder validates the source-only plan;
+                        # it is NEVER a usable artifact or native credential.
+                        plan["checkpoint_loaded_for_frozen_evaluation"] = None
+                    plan["checkpoint_required_before_native"] = needs_checkpoint
                     runs.append({
                         "id": name, "status": "SOURCE_PLAN_AVAILABLE",
                         "network_regime": network, "clock_regime": clock,

@@ -262,3 +262,28 @@ def test_hw05_trial_receipt_binds_exact_pre_step_edit(tmp_path):
     }
     assert receipt["source_action_index"] == 2
     assert receipt["rejected_source_proposals_before_native"] == 3
+
+
+def test_hw09_heldout_training_is_refused_before_any_native_case(tmp_path):
+    """No trainable method may optimize weights on validation/test graphs."""
+    path = _manifest(tmp_path)
+    document = json.loads(path.read_text())
+    document["tasks"][0]["split"] = "validation"
+    path.write_text(json.dumps(document))
+    tasks = campaign.read_tasks(path)
+    with pytest.raises(ValueError, match="frozen --evaluation"):
+        campaign.campaign_plan(
+            tasks=tasks, split="validation", method="ppo",
+            episodes=1, calls_per_episode=1,
+            total_authorized_calls=None, seed=101,
+            evaluation=False, checkpoint=None,
+            hidden=32, ppo_epochs=2, ppo_clip=.2,
+        )
+    root = tmp_path / "no_vendor_allocation"
+    assert campaign.main([
+        "--tasks", str(path), "--split", "validation",
+        "--method", "ppo", "--episodes", "1",
+        "--calls-per-episode", "1", "--output-root", str(root),
+        "--execute-native", "--max-total-vitis-calls", "1",
+    ]) == 2
+    assert not root.exists()

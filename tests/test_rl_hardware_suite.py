@@ -68,6 +68,10 @@ def test_source_suite_marks_missing_regimes_explicit_and_keeps_full_splits(tmp_p
     for split in ("train", "validation", "test"):
         assert by_name[f"{split}_same_fixed"]["status"] == "SOURCE_PLAN_AVAILABLE"
         assert by_name[f"{split}_same_search"]["status"] == "SOURCE_PLAN_AVAILABLE"
+        source_plan = by_name[f"{split}_same_fixed"]["plan"]
+        assert source_plan["evaluation"] is (split != "train")
+        assert source_plan["checkpoint_required_before_native"] is (split != "train")
+        assert source_plan["checkpoint_loaded_for_frozen_evaluation"] is None
         assert by_name[f"{split}_family_fixed"]["status"] == "UNAVAILABLE_SOURCE_COHORT"
         assert by_name[f"{split}_cross_family_search"]["status"] == "UNAVAILABLE_SOURCE_COHORT"
 

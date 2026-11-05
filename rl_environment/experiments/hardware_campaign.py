@@ -171,6 +171,8 @@ def campaign_plan(*, tasks, split, method, episodes, calls_per_episode,
                   reward_reference_ns=DEFAULT_HARDWARE_REFERENCE_NS):
     if method not in METHODS:
         raise ValueError("Unsupported hardware optimization method")
+    if split in ("validation", "test") and not evaluation:
+        raise ValueError("Heldout validation/test tasks require frozen --evaluation; training is forbidden")
     if (type(calls_per_episode) is not int
             or not 1 <= calls_per_episode <= 30):
         raise ValueError("Native calls per episode must be in [1,30]")
@@ -355,6 +357,8 @@ def run_campaign(*, tasks, plan: dict, output_root: str | Path,
                  vitis: str, timeout: int, stochastic_evaluation: bool):
     if authorized_calls != plan["planned_max_original_vitis_calls"]:
         raise ValueError("The exact native Vitis authorization is required")
+    if plan["evaluation"] and plan["method"] != "random" and checkpoint is None:
+        raise ValueError("Native heldout evaluation requires a trained, pinned private checkpoint")
     if type(timeout) is not int or not 1 <= timeout <= 172800:
         raise ValueError("Native Vitis timeout outside allowed range")
     # Explicit provenance; no dirty *tracked* source is allowed. Untracked
