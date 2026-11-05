@@ -22,10 +22,19 @@ from .hardware_campaign import (
 from .hardware_regimes import (
     onnx_structure_sha256, onnx_operator_family,
 )
+from ..reward import hardware_reward_contract
 
 SUITE_SCHEMA = "fpgai-research/hardware-rl-scenario-suite/v1"
 SCENARIOS = ("same", "family", "general", "cross_family")
 CLOCKS = ("fixed", "task_fixed", "search")
+
+
+def _task_definition(task):
+    """Resolve original source paths for derived nested manifests."""
+    record = task.metadata()
+    record["onnx"] = str(task.onnx.resolve(strict=True))
+    record["samples"] = str(task.samples.resolve(strict=True))
+    return record
 
 
 def _pick_cohort(candidates, *, network_regime, clock_regime):
@@ -87,6 +96,13 @@ def plan_scenario_suite(tasks, *, holdout="structure", seed=101,
                         reward_reference_ns=10000.0):
     if holdout not in ("structure", "bytes"):
         raise ValueError("Holdout protocol must be structure or bytes")
+    if type(seed) is not int or not 0 <= seed <= 2**31:
+        raise ValueError("Suite schedule seed must be in [0, 2**31]")
+    if type(calls_per_episode) is not int or not 1 <= calls_per_episode <= 30:
+        raise ValueError("Suite calls per episode must be in [1, 30]")
+    reward_contract = hardware_reward_contract(
+        mode=reward_mode, reference_ns=reward_reference_ns,
+    )
     if any(not any(t.split == split for t in tasks) for split in SPLITS):
         raise ValueError("A research suite requires train, validation and test tasks")
     if len({t.id for t in tasks}) != len(tasks):
@@ -129,7 +145,7 @@ def plan_scenario_suite(tasks, *, holdout="structure", seed=101,
                         "network_regime": network, "clock_regime": clock,
                         "split": split,
                         "task_ids": [t.id for t in cohort],
-                        "task_definitions": [t.metadata() for t in cohort],
+                        "task_definitions": [_task_definition(t) for t in cohort],
                         "plan": plan,
                     })
                 except ValueError as error:
@@ -142,9 +158,9 @@ def plan_scenario_suite(tasks, *, holdout="structure", seed=101,
         "schema": SUITE_SCHEMA, "holdout": holdout,
         "seed": seed, "method": method,
         "calls_per_episode": calls_per_episode,
-        "reward_mode": reward_mode,
-        "reward_reference_ns": float(reward_reference_ns),
+        **reward_contract,
         "task_count": len(tasks),
+        "all_task_definitions": [_task_definition(t) for t in tasks],
         "task_family_by_id": dict(sorted(graph_families.items())),
         "source_only": True,
         "native_vitis_calls": 0,
@@ -188,26 +204,23 @@ def write_scenario_suite(root: str | Path, suite: dict):
             raise ValueError("Scenario references changed during suite allocation")
     # Also write full source train/validation/test manifests.
     for split in SPLITS:
-        original = [
-            t for t in suite["scenarios"]
-            if t["split"] == split and t["status"] == "SOURCE_PLAN_AVAILABLE"
-        ]
-        identities = {}
-        for entry in original:
-            for definition in entry["task_definitions"]:
-                identities[definition["id"]] = definition
-        # A split's complete source cohort can include tasks not selected by
-        # any compatible scenario. Retain that distinction in suite.json.
-        with (root / f"selected_{split}_tasks.json").open("x", encoding="utf-8") as f:
+        all_split = sorted(
+            (t for t in suite["all_task_definitions"] if t["split"] == split),
+            key=lambda item: item["id"],
+        )
+        with (root / f"tasks_{split}.json").open("x", encoding="utf-8") as f:
             json.dump({
                 "schema": TASK_SCHEMA,
                 "tasks": [{
                     k: v for k, v in task.items()
                     if k not in ("onnx_sha256", "samples_sha256")
-                } for task in sorted(identities.values(), key=lambda x: x["id"])
-                ],
+                } for task in all_split],
             }, f, sort_keys=True, indent=2, allow_nan=False)
             f.write("\n")
+        if [t.onnx_sha256 for t in read_tasks(root / f"tasks_{split}.json")] != [
+            t["onnx_sha256"] for t in all_split
+        ]:
+            raise ValueError("Suite split manifest changed the original models")
     with (root / "suite.json").open("x", encoding="utf-8") as f:
         json.dump(suite, f, sort_keys=True, indent=2, allow_nan=False)
         f.write("\n")
