@@ -146,6 +146,8 @@ def validate_experiment_regimes(schedule, *, network_regime: str,
     family_by_task = {}
     if network_regime in ("family", "general", "cross_family"):
         if len(model_ids) < 2:
+            if network_regime == "general":
+                raise ValueError("General-network regime requires at least two distinct ONNX models")
             raise ValueError("Multi-network regime requires at least two distinct ONNX models")
         for task in schedule:
             if task.id not in structure_by_task:
