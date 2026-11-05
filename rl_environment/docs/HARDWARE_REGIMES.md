@@ -78,3 +78,16 @@ remain valid for their **own** pinned source versions only. Any new regime
 requires fresh create-only original Vitis runs and independent audits on its
 new source revision; do not rewrite those case folders or claim hardware
 superiority from tests/smokes.
+
+### Opt-in fixed-clock versus clock-search ablation
+
+Ordinary matched paired comparisons reject different clock action spaces.
+To compare `fixed` against `search` (or `task_fixed`) deliberately,
+use `--allow-clock-regime-ablation` on the existing
+`fpgai-rl-hardware-compare` CLI. Both runs must still be independently
+audited frozen heldout campaigns with **identical** ONNX/sample/task manifest,
+split, seed, source revision, episode schedule and exact original Vitis budget.
+The exported descriptive summary records both clock modes and the explicit
+ablation authorization; it does not claim statistical significance. Different
+clock action spaces are different treatments, not naturally interchangeable
+method labels. This opt-in does not authorize HLS calls or source changes.

@@ -65,6 +65,8 @@ def _label(meta: dict) -> str:
         name += "_no_message_passing"
     if name != "random" and not meta["trial_history"]:
         name += "_no_trial_history"
+    if meta.get("clock_regime") in ("fixed", "task_fixed", "search"):
+        name += "_" + meta["clock_regime"] + "_clock"
     return name
 
 
@@ -75,7 +77,8 @@ def _first_feasible(group):
     return None
 
 
-def paired_summary(baseline: dict, candidate: dict) -> tuple[list[dict], dict]:
+def paired_summary(baseline: dict, candidate: dict, *,
+                   allow_clock_regime_ablation: bool = False) -> tuple[list[dict], dict]:
     """Provenance-checked per-task censoring categories and latency ratios."""
     a, b = baseline["metadata"], candidate["metadata"]
     if (a["split"] not in ("test", "validation")
@@ -88,12 +91,19 @@ def paired_summary(baseline: dict, candidate: dict) -> tuple[list[dict], dict]:
                b["original_vitis_calls_per_episode"]
             or a["task_definitions"] != b["task_definitions"]
             or a.get("network_regime", "auto") != b.get("network_regime", "auto")
-            or a.get("clock_regime", "search") != b.get("clock_regime", "search")
-            or a.get("fixed_clock_ns") != b.get("fixed_clock_ns")
             or a["source_revision_sha"] != b["source_revision_sha"]):
         raise ValueError(
             "Paired comparison requires same seed, disjoint heldout split, "
             "source revision, task cohort and real Vitis call budget"
+        )
+    clock_ablation = (
+        a.get("clock_regime", "search") != b.get("clock_regime", "search")
+        or a.get("fixed_clock_ns") != b.get("fixed_clock_ns")
+    )
+    if clock_ablation and not allow_clock_regime_ablation:
+        raise ValueError(
+            "Different clock action spaces require explicit "
+            "--allow-clock-regime-ablation with identical heldout cases/budgets"
         )
     if _label(a) == _label(b):
         raise ValueError("Paired method/ablation labels must differ")
@@ -154,6 +164,12 @@ def paired_summary(baseline: dict, candidate: dict) -> tuple[list[dict], dict]:
         "source_revision_sha": a["source_revision_sha"],
         "split": a["split"], "seed": a["seed"],
         "baseline": _label(a), "candidate": _label(b),
+        "baseline_clock_regime": a.get("clock_regime", "search"),
+        "candidate_clock_regime": b.get("clock_regime", "search"),
+        "cross_clock_action_space_ablation": clock_ablation,
+        "cross_clock_ablation_explicitly_authorized": (
+            bool(clock_ablation and allow_clock_regime_ablation)
+        ),
         "task_episode_pairs": all_n,
         "distinct_task_ids": len(set(r["task_id"] for r in rows)),
         "original_vitis_calls_per_method":
@@ -179,12 +195,15 @@ def paired_summary(baseline: dict, candidate: dict) -> tuple[list[dict], dict]:
     return rows, summary
 
 
-def compare_audited_campaigns(*, tasks, baseline_root, candidate_root):
+def compare_audited_campaigns(*, tasks, baseline_root, candidate_root,
+                              allow_clock_regime_ablation=False):
     if (Path(baseline_root).resolve() == Path(candidate_root).resolve()):
         raise ValueError("Comparison requires two distinct source-pinned campaign roots")
     a = _read_audited_run(baseline_root, tasks)
     b = _read_audited_run(candidate_root, tasks)
-    rows, summary = paired_summary(a, b)
+    rows, summary = paired_summary(
+        a, b, allow_clock_regime_ablation=allow_clock_regime_ablation,
+    )
     # This status can only be granted by the two successful full source/native
     # audits above; ordinary fixture dictionaries never receive it.
     summary.update({
@@ -223,12 +242,15 @@ def main(argv=None) -> int:
                         help="Root of independently auditable frozen learned campaign")
     parser.add_argument("--output", required=True,
                         help="New paper comparison directory, never an original native root")
+    parser.add_argument("--allow-clock-regime-ablation", action="store_true",
+                        help="Explicitly compare different clock action spaces on identical heldout tasks/budgets")
     args = parser.parse_args(argv)
     try:
         tasks = read_tasks(args.tasks)
         rows, summary = compare_audited_campaigns(
             tasks=tasks, baseline_root=args.baseline,
             candidate_root=args.candidate,
+            allow_clock_regime_ablation=args.allow_clock_regime_ablation,
         )
         saved = export_comparison(args.output, rows, summary)
         print(json.dumps({**summary, "comparison_output": str(saved)},

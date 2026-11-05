@@ -105,3 +105,28 @@ def test_hw05_comparison_export_requires_independent_original_case_audit(tmp_pat
     assert (root / "paired_native_hls.csv").is_file()
     with pytest.raises(FileExistsError, match="already exists"):
         compare.export_comparison(root, rows, stamp)
+
+
+def test_hw06_cross_clock_ablation_requires_explicit_opt_in():
+    """Source-only shape fixtures do NOT represent original native cases."""
+    baseline = _run("ppo", latency=[1000., None], qualified_index=[1, None])
+    candidate = _run("ppo", latency=[800., None], qualified_index=[1, None])
+    baseline["metadata"].update(clock_regime="fixed", fixed_clock_ns=14.)
+    candidate["metadata"].update(clock_regime="search", fixed_clock_ns=None)
+    with pytest.raises(ValueError, match="allow-clock-regime-ablation"):
+        compare.paired_summary(baseline, candidate)
+    rows, report = compare.paired_summary(
+        baseline, candidate, allow_clock_regime_ablation=True,
+    )
+    assert report["cross_clock_action_space_ablation"] is True
+    assert report["cross_clock_ablation_explicitly_authorized"] is True
+    assert report["baseline"] == "ppo_fixed_clock"
+    assert report["candidate"] == "ppo_search_clock"
+    assert rows[0]["candidate_over_baseline_latency_ratio"] == .8
+    assert report["paired_significance_claim"] is False
+    mismatch = copy.deepcopy(candidate)
+    mismatch["metadata"]["seed"] = 222
+    with pytest.raises(ValueError, match="Paired comparison requires"):
+        compare.paired_summary(
+            baseline, mismatch, allow_clock_regime_ablation=True,
+        )
