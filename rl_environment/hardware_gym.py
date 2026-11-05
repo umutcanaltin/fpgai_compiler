@@ -391,13 +391,18 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
             "source_mask_is_not_native_feasibility": True,
         }
 
-    def step(self, action):
+    def preview_action(self, action) -> HardwareState:
+        """Source-only admission before spending an original Vitis call.
+
+        Return the exact complete compiler state, or reject a masked, no-op,
+        previously synthesized or source-invalid proposal. This method is
+        read-only: no case allocation, vendor call, reward, or history update.
+        Both campaign admission and step() use this same implementation.
+        """
         if self.current is None:
             raise RuntimeError("Gym reset required before step")
         if self.done:
             raise RuntimeError("Episode completed; no additional Vitis calls permitted")
-        if not self.execute_native:
-            raise RuntimeError("Native Vitis requires explicit execute_native=True")
         if (not isinstance(action, (tuple, list)) or len(action) != 2
                 or type(action[0]) not in (int, np.int64, np.int32)):
             raise ValueError("Expected (source action index, floating requested clock)")
@@ -408,8 +413,6 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
         if not self.action_space.contains((idx, np.asarray(period, np.float64))):
             raise ValueError("Clock action outside Gym action-space bounds")
 
-        # Source transition is independent of native HLS. Never spend a
-        # licensed call for a rejected/duplicate/no-op source candidate.
         state = self.current
         if idx:
             decision = transition(state, self.offers[idx])
@@ -425,6 +428,13 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
             raise ValueError("No-op architecture-clock action; native case not started")
         if state.state_sha256 in self.visited:
             raise ValueError("Repeated complete hardware state; no new native case")
+        return state
+
+    def step(self, action):
+        if not self.execute_native:
+            raise RuntimeError("Native Vitis requires explicit execute_native=True")
+        state = self.preview_action(action)
+        idx, period = int(action[0]), _clock(action[1])
         source = hardware_native.planned_case(state, self.samples)
         case = self._episode_path / f"case_{self.calls:04d}"
         if case.exists() or case.is_symlink():
