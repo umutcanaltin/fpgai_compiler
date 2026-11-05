@@ -167,3 +167,29 @@ def test_installed_shared_hardware_agent_help_outside_repository(tmp_path):
     assert "--seed" in proc.stdout
     assert "--checkpoint" in proc.stdout
     assert "--resource-caps" in proc.stdout
+
+
+@pytest.mark.parametrize("entrypoint,flags", [
+    ("fpgai-rl-hardware-campaign",
+     ("--tasks", "--execute-native", "--audit", "--max-total-vitis-calls")),
+    ("fpgai-rl-hardware-compare",
+     ("--tasks", "--baseline", "--candidate", "--output")),
+])
+def test_new_hw05_installed_cli_help_outside_checkout(
+        tmp_path, entrypoint, flags):
+    """Installed scripts must work without PYTHONPATH and launch no Vitis."""
+    exe = Path(sysconfig.get_path("scripts")) / (
+        entrypoint + ".exe" if os.name == "nt" else entrypoint
+    )
+    if not exe.is_file():
+        pytest.skip("Install editable repository to verify HW-RL-05 CLI")
+    environment = os.environ.copy()
+    environment.pop("PYTHONPATH", None)
+    environment.pop("PYTHONHOME", None)
+    proc = subprocess.run(
+        [str(exe), "--help"], cwd=tmp_path, env=environment,
+        capture_output=True, text=True, timeout=30, check=False,
+    )
+    assert proc.returncode == 0, proc.stdout + "\n" + proc.stderr
+    assert all(flag in proc.stdout for flag in flags)
+    assert not list(tmp_path.iterdir()), "CLI --help must create no native cases"
