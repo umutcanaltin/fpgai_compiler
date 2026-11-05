@@ -147,7 +147,7 @@ def paired_summary(baseline: dict, candidate: dict) -> tuple[list[dict], dict]:
     # No fabricated zero/infinity for a task when no qualified design exists.
     summary = {
         "schema": "fpgai-research/hardware-rl-paired-result/v1",
-        "status": "INDEPENDENT_NATIVE_CASES_AUDITED_PAIR_DESCRIPTIVE",
+        "status": "DESCRIPTIVE_PAIR_REQUIRES_ORIGINAL_CASE_AUDIT",
         "source_revision_sha": a["source_revision_sha"],
         "split": a["split"], "seed": a["seed"],
         "baseline": _label(a), "candidate": _label(b),
@@ -182,7 +182,10 @@ def compare_audited_campaigns(*, tasks, baseline_root, candidate_root):
     a = _read_audited_run(baseline_root, tasks)
     b = _read_audited_run(candidate_root, tasks)
     rows, summary = paired_summary(a, b)
+    # This status can only be granted by the two successful full source/native
+    # audits above; ordinary fixture dictionaries never receive it.
     summary.update({
+        "status": "INDEPENDENT_NATIVE_CASES_AUDITED_PAIR_DESCRIPTIVE",
         "baseline_campaign": a["root"],
         "candidate_campaign": b["root"],
         "baseline_audit": a["audit"],

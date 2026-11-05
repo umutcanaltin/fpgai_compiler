@@ -249,3 +249,30 @@ is prohibited.
   bounded crash recovery, and additional baselines before the main study.
 - Only then schedule the large original Vitis campaigns and draft a
   manuscript around independently measured outcomes.
+
+## Audited matched heldout comparison (HW-RL-05D source-added)
+
+A second installed command `fpgai-rl-hardware-compare` takes two
+**completed frozen validation/test** campaign roots from the same
+source SHA, seed, original network schedule, source hashes and per-task
+original Vitis budget. It independently replays every original native
+case in each campaign; then it writes a new create-only pairwise
+`comparison.json` and `paired_native_hls.csv`. No new Vitis calls or
+optimizer steps are performed.
+
+```bash
+fpgai-rl-hardware-compare \
+  --tasks build/rl_hw05_tasks_heldout.json \
+  --baseline build/rl_hw05_random_test_seed111_01 \
+  --candidate build/rl_hw05_ppo_test_seed111_01 \
+  --output build/rl_hw05_paper_pairs_ppo_vs_random_seed111_01
+```
+
+These paths are illustrative future experiments, **not existing
+measured cases**. The comparator refuses train-vs-test leakage,
+unequal schedules/budgets and incomplete native runs. It reports
+qualified discovery rates and all four censoring categories, first
+feasible call and conditional HLS latency ratios. It does not infer
+statistical significance from a tiny smoke or fake training data.
+The implementation/tests still require workstation verification.
+

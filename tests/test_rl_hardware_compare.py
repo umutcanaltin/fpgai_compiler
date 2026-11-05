@@ -85,15 +85,23 @@ def test_hw05_pairwise_requires_distinct_controls_and_no_proxy_latency():
         compare.paired_summary(b, bad)
 
 
-def test_hw05_comparison_export_is_create_only(tmp_path):
+def test_hw05_comparison_export_requires_independent_original_case_audit(tmp_path):
+    # Shape-only fixture dictionaries must never masquerade as paper E3.
     baseline = _run("random", latency=[1000., None],
                     qualified_index=[1, None])
     candidate = _run("reinforce", latency=[900., None],
                      qualified_index=[1, None])
-    rows, summary = compare.paired_summary(baseline, candidate)
+    rows, unverified = compare.paired_summary(baseline, candidate)
     root = tmp_path / "paper_pairs"
-    compare.export_comparison(root, rows, summary)
+    with pytest.raises(ValueError, match="independently audited"):
+        compare.export_comparison(root, rows, unverified)
+    assert not root.exists()
+    # Simulates the status granted by compare_audited_campaigns AFTER full
+    # actual native source replay, but never claims this fixture is real.
+    stamp = dict(unverified,
+                 status="INDEPENDENT_NATIVE_CASES_AUDITED_PAIR_DESCRIPTIVE")
+    compare.export_comparison(root, rows, stamp)
     assert (root / "comparison.json").is_file()
     assert (root / "paired_native_hls.csv").is_file()
     with pytest.raises(FileExistsError, match="already exists"):
-        compare.export_comparison(root, rows, summary)
+        compare.export_comparison(root, rows, stamp)

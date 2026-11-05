@@ -1,3 +1,19 @@
+## 2026-11-05 — HW-RL-05 read-only heldout pairs
+
+- Added `hardware_compare.py`: compares two independently replayed,
+  complete, frozen validation/test native campaigns only if source SHA,
+  task split/schedule/cohorts, seed, hardware caps and licensed-call
+  budgets match exactly. Retains both-feasible, baseline-only,
+  candidate-only and neither-feasible classes. Latency ratios exist
+  only for both-qualified native pairs; no fabricated zeros/infinities.
+- Added create-only descriptive comparison CSV/JSON and CPU negative
+  tests for mismatched splits, schedule, revisions, invalid/censored
+  ns and output overwrite attempts.
+- Hardened scientific export so direct shape-only `paired_summary`
+  fixtures cannot claim `INDEPENDENT_NATIVE_CASES_AUDITED`.
+- This is **source-only/unverified** until local CPU gate and actual
+  original two-study audit; no experimental superiority claim.
+
 ## 2026-11-05 — HW-RL-05 multi-network auditable algorithms
 
 - Added one shared GNN policy interface for genuine one-step actor-critic,
