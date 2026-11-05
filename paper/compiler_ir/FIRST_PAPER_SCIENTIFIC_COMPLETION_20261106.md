@@ -2,6 +2,8 @@
 
 **Decision, 6 November 2026.** Pause development on the RL hardware-optimization branch. Preserve the branch, its original checkpoints, and all experiments without modification. This paper addresses **architectural semantics, safe tensor-element storage reuse, generated-source verification, and measured source-to-HLS translation**. Trained RL optimization is a separate publication.
 
+**Read the [existing evidence inventory](EXISTING_EVIDENCE_INVENTORY_20261106.md) before any additional study.** Most original memory, GCC, RTL and HLS experiments were already completed in the former `fpgai_research` checkout. The inventory distinguishes finished work from genuinely missing experiments and provides safe, read-only file discovery.
+
 **Status: MAJOR REVISION / NOT SUBMISSION READY.** New code and tests are proposed experiments, not observed results. Never overwrite or silently rerun source-pinned native observations.
 
 ## Scientific hypotheses and the required contrasts
