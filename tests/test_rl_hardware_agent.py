@@ -478,3 +478,53 @@ def test_hw05_frozen_ranked_fallback_keeps_gnn_deterministic_and_source_novel(
     assert torch.equal(torch.get_rng_state(), before_rng)
     assert env.calls == 0
     assert not env.root.exists()
+
+
+def test_hw05_ppo_likelihood_replays_rejected_source_only_draws(tmp_path):
+    """Acceptance-conditioned PPO ratio uses every original sampled proposal.
+
+    Fixture returns no Vitis result: only the trainable score-function
+    probability is tested; no reward or HLS feasibility is fabricated.
+    """
+    from types import SimpleNamespace
+    from rl_environment.hardware_algorithms import (
+        HardwareEpisodicTrainer, AuditedExperience,
+    )
+    from rl_environment.hardware_campaign import _choose_admitted_action
+
+    env = _env(tmp_path, "cnn_pool_dense")
+    obs, _ = env.reset(seed=101)
+
+    class SourceOnly:
+        offers = (None,) * MAX_ACTIONS
+
+        def __init__(self):
+            self.proposals = 0
+
+        def preview_action(self, action):
+            self.proposals += 1
+            if self.proposals == 1:
+                raise ValueError("Repeated complete hardware state; no new native case")
+            return SimpleNamespace(state_sha256="SOURCE_ONLY_NOT_HLS")
+
+    source = SourceOnly()
+    trainer = HardwareEpisodicTrainer(
+        algorithm="ppo", seed=101, hidden=24, ppo_epochs=2,
+    )
+    action, tape, _, _, rejected = _choose_admitted_action(
+        trainer, source, obs, train=True, stochastic_evaluation=False,
+    )
+    assert action[0] >= 0
+    assert rejected == 1
+    assert len(tape.rejected_proposal_tapes) == 1
+    assert tape.rejected_proposal_tapes[0].observation is not None
+    assert torch.isfinite(tape.log_probability)
+    parts = trainer._ppo_objective(
+        [AuditedExperience(tape, -.05, False, "CPU_NOT_VENDOR")],
+        torch.tensor([-.05], dtype=torch.float32),
+    )
+    assert all(bool(torch.isfinite(x)) for x in parts[:4])
+    assert parts[4] == pytest.approx(0., abs=1e-7)
+    assert trainer.updates == 0
+    assert env.calls == 0
+    assert not env.root.exists()
