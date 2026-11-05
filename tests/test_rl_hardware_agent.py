@@ -336,6 +336,35 @@ def test_hw04_rejects_reward_substitution_and_wrong_action_tape(tmp_path, monkey
 
 
 
+def test_hw04_original_hls_diagnostics_forward_real_audit_without_proxy():
+    """CLI diagnostics expose gate failures, never fabricate qualified ns."""
+    from rl_environment.hardware_agent import original_hls_diagnostics
+
+    native_audit = {
+        "gate_failures": ["ORIGINAL_HLS_SCHEDULING_NOT_FEASIBLE"],
+        "csim_passed": True,
+        "csim_max_absolute_error": 0.0004,
+        "raw_hls_worst_case_cycles": 646,
+        "requested_clock_ns": 6.55,
+        "hls_timing": {
+            "hls_timing_feasible": False,
+            "estimated_clock_period_ns": 10.2,
+        },
+        "original_hls_resource_consumed": {"lut": 10238},
+        "resource_caps": {"lut": 53200},
+        "qualified": False,
+        "hls_estimated_latency_ns": None,
+    }
+    snapshot = copy.deepcopy(native_audit)
+    reported = original_hls_diagnostics(native_audit)
+    assert reported["gate_failures"] == ["ORIGINAL_HLS_SCHEDULING_NOT_FEASIBLE"]
+    assert reported["raw_hls_worst_case_cycles"] == 646
+    assert reported["requested_clock_ns"] == 6.55
+    assert reported["hls_timing"]["hls_timing_feasible"] is False
+    assert "hls_estimated_latency_ns" not in reported
+    assert native_audit == snapshot
+
+
 def test_hw04_untrained_agent_cli_preview_no_vitis_or_training(tmp_path, capsys):
     from rl_environment.hardware_agent import main
     original = save_model("cnn_pool_dense", tmp_path / "source.onnx")

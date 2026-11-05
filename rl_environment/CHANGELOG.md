@@ -1,3 +1,18 @@
+## 2026-11-05 — HW-RL-04 native smoke and diagnostic visibility
+
+- User's first real shared-GNN/Vitis one-step smoke returned one audited
+  native call and gradient update, but the sampled 6.55 ns / operator-5
+  tile (1,4,27) design was infeasible and earned -0.05. Exact original
+  rejection gates must be read from the immutable local episode record.
+- Forward source-attested gate failures, CSim/numeric values, raw cycles,
+  HLS timing, resource consumption and caps in future agent CLI outputs.
+  Qualified latency stays null for rejected cases; no fake Fmax or
+  secondary native execution is introduced.
+- Report `private_weights_saved` accurately. The smoke did not specify
+  a checkpoint, so its one gradient update did not persist.
+- Added CPU regression for passthrough of an infeasible source audit.
+  The new GitHub patch has not yet been workstation-tested.
+
 ## 2026-11-05 — HW-RL-04 optional PyTorch installation diagnosis
 
 - Workstation confirmed 2,033 passing / 18 skipped full CPU tests, but

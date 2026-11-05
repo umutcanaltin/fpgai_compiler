@@ -1,3 +1,33 @@
+## HW-RL-04 first original-Vitis one-gradient smoke — 2026-11-05
+
+User workstation verified PyTorch and Gymnasium 1.4.0; 40 focused
+tests passed after the dependency patch. Source-only shared-GNN preview
+selected clock-only index 0 and 16.85 ns (no vendor call, no update).
+The first explicit seed-101 single Vitis native call on the
+`cnn_pool_dense` source then completed in 31 seconds with exit 0,
+one independently replayed original E3 audit and one online gradient
+update. The sampled joint action edited operator-5 tile to
+`(1,4,27)` at requested clock `6.55 ns`. This particular
+architecture did **not** qualify: reward `-0.05`,
+`hls_estimated_latency_ns=null`. The exact rejection gates
+are stored in the user's immutable
+`build/rl_hw04_cnn_agent_native_seed101_01/episode_000000/step_0000.json`;
+they have **not yet been supplied to this repository**. Do not assert
+a timing or resource failure without inspecting them. No
+`--checkpoint` was specified, so the update was not persisted for
+future episodes. The one-step budget legitimately set `truncated=true`.
+
+Added a source-only CLI diagnostics passthrough to surface the
+original independent audit's gate failures, CSim, raw cycles, timing
+and resource evidence in the output **without recomputing or relaxing
+any gate**. Also report whether private trained weights were saved.
+New patch/tests are pending local workstation verification.
+The next gate is read-only inspection of the existing case; only
+then plan a prospective multi-task online-training and matched
+heldout comparison (HW-RL-05) with proper checkpoint provenance.
+
+---
+
 ## HW-RL-04 dependency/runtime gate — 2026-11-05
 
 The user confirmed 2,033 full CPU tests passed (18 skipped), and 25

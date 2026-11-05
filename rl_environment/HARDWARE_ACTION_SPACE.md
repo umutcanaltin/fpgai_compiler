@@ -151,6 +151,43 @@ with a random/fake policy, a guessed HLS reward or an automatic vendor
 fallback. GitHub-only source edits do not verify that workstation
 PyTorch is installed or the agent's gradient step works.
 
+### HW-RL-04 first original native GNN step and rejection diagnosis
+
+On 5 November 2026 the user completed 40 focused workstation tests,
+then successfully previewed the GNN and ran exactly one original
+Vitis HLS case with one independently audited policy gradient.
+The sampled action was operator-5 `tile=(1,4,27)` and requested
+clock `6.55 ns`. Vitis exit was zero, but the hardware candidate
+was **unqualified** (reward -0.05; qualified latency null). This is
+a valid negative original-native learning label, not a demonstrated
+hardware speedup. The actual native rejection gates are recorded in
+the private, immutable `episode_000000/step_0000.json` and must be
+examined before attributing failure to timing/resources/numerics.
+
+The agent CLI now forwards a read-only
+`original_hls_diagnostics` object for newly executed native steps,
+including the original audit's gate failures and raw metrics.
+It does not rerun Vitis or invent a latency from raw infeasible cycles.
+`private_weights_saved=false` means an in-process gradient update
+was not exported as a trained checkpoint. The source-only
+`--execute-native`-absent preview remains unchanged.
+The latest diagnostics addition is not yet locally tested.
+
+For the existing case (without touching original Vitis files):
+
+```bash
+python - <<'PY'
+import json
+from pathlib import Path
+step = Path("build/rl_hw04_cnn_agent_native_seed101_01/episode_000000/step_0000.json")
+audit = json.loads(step.read_text())["original_case_audit"]
+for key in ("gate_failures", "csim_passed", "csim_max_absolute_error",
+            "raw_hls_worst_case_cycles", "requested_clock_ns",
+            "hls_timing", "original_hls_resource_consumed", "resource_caps"):
+    print(key, json.dumps(audit.get(key), sort_keys=True))
+PY
+```
+
 ## HW-RL-02 — source-attested original Vitis HLS evaluation
 
 **Local CPU feedback and patch (2026-11-04):** The user verified the

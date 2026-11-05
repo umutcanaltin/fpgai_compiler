@@ -457,6 +457,20 @@ class HardwareGraphTrainer:
 
 
 
+def original_hls_diagnostics(audit: dict) -> dict:
+    """Read-only presentation of already independently audited evidence.
+
+    Never infer latency or timing qualification from raw cycle counts.
+    The original audit remains the only authority for the result.
+    """
+    fields = (
+        "gate_failures", "csim_passed", "csim_max_absolute_error",
+        "raw_hls_worst_case_cycles", "requested_clock_ns", "hls_timing",
+        "original_hls_resource_consumed", "resource_caps",
+    )
+    return {key: audit[key] for key in fields}
+
+
 def main(argv=None) -> int:
     """Source-only shared GNN preview or exactly ONE original Vitis online step.
 
@@ -552,7 +566,11 @@ def main(argv=None) -> int:
                 "reward": reward,
                 "online_gradient_updates": agent.updates,
                 "gradient_receipt": metrics,
+                "original_hls_diagnostics": original_hls_diagnostics(
+                    info["original_vitis_audit"]
+                ),
                 "training_started": True,
+                "private_weights_saved": bool(args.checkpoint),
                 "terminated": terminated, "truncated": truncated,
             })
             if args.checkpoint:
