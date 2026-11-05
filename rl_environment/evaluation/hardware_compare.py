@@ -73,6 +73,8 @@ def _label(meta: dict) -> str:
         name += "_trained_" + meta["checkpoint_training_network_regime"]
     if meta.get("checkpoint_training_clock_regime") in ("fixed", "task_fixed", "search"):
         name += "_trainedclock_" + meta["checkpoint_training_clock_regime"]
+    if meta.get("checkpoint_training_reward_mode") in ("best_improvement", "dense_latency"):
+        name += "_trainedreward_" + meta["checkpoint_training_reward_mode"]
     return name
 
 
@@ -170,6 +172,8 @@ def paired_summary(baseline: dict, candidate: dict, *,
         "source_revision_sha": a["source_revision_sha"],
         "split": a["split"], "seed": a["seed"],
         "baseline": _label(a), "candidate": _label(b),
+        "baseline_training_reward_mode": a.get("checkpoint_training_reward_mode"),
+        "candidate_training_reward_mode": b.get("checkpoint_training_reward_mode"),
         "baseline_training_network_regime": a.get("checkpoint_training_network_regime"),
         "candidate_training_network_regime": b.get("checkpoint_training_network_regime"),
         "baseline_training_clock_regime": a.get("checkpoint_training_clock_regime"),

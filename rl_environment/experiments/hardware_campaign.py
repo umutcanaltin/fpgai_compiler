@@ -41,7 +41,10 @@ from ..infrastructure.hardware_native import _regular_file, audit_native_case
 from ..environments.hardware_space import (
     HardwareEdit, candidate_actions, initial_state, transition,
 )
-from ..reward import latency_only_reward
+from ..reward import (
+    HARDWARE_REWARD_MODES, DEFAULT_HARDWARE_REFERENCE_NS,
+    hardware_reward_contract, hardware_trial_reward,
+)
 from ..study import _append_jsonl, _source_revision, _write_json_new
 from .hardware_regimes import (
     CLOCK_REGIMES, NETWORK_REGIMES, validate_experiment_regimes,
@@ -163,7 +166,9 @@ def campaign_plan(*, tasks, split, method, episodes, calls_per_episode,
                   total_authorized_calls, seed, evaluation,
                   checkpoint, hidden, ppo_epochs, ppo_clip,
                   message_passing=True, use_trial_history=True,
-                  network_regime="auto", clock_regime="search"):
+                  network_regime="auto", clock_regime="search",
+                  reward_mode="best_improvement",
+                  reward_reference_ns=DEFAULT_HARDWARE_REFERENCE_NS):
     if method not in METHODS:
         raise ValueError("Unsupported hardware optimization method")
     if (type(calls_per_episode) is not int
@@ -193,8 +198,12 @@ def campaign_plan(*, tasks, split, method, episodes, calls_per_episode,
     regime = validate_experiment_regimes(
         schedule, network_regime=network_regime, clock_regime=clock_regime,
     )
+    reward = hardware_reward_contract(
+        mode=reward_mode, reference_ns=reward_reference_ns,
+    )
     return {
         **regime,
+        **reward,
         "schema": CAMPAIGN_SCHEMA,
         "method": method,
         "split": split,
@@ -228,7 +237,9 @@ def _load_task(task: HardwareTask):
 def _environment(task: HardwareTask, *, root: Path,
                  calls_per_episode: int, native: bool,
                  vitis: str, timeout: int,
-                 clock_regime: str = "search"):
+                 clock_regime: str = "search",
+                 reward_mode: str = "best_improvement",
+                 reward_reference_ns: float = DEFAULT_HARDWARE_REFERENCE_NS):
     model, samples = _load_task(task)
     return GymHardwareNativeEnv(
         model, samples, root,
@@ -238,6 +249,8 @@ def _environment(task: HardwareTask, *, root: Path,
         fixed_clock_ns=(task.initial_clock_ns if clock_regime in ("fixed", "task_fixed") else None),
         max_parallel_units=task.max_parallel_units,
         max_vitis_calls=calls_per_episode,
+        reward_mode=reward_mode,
+        reward_reference_ns=reward_reference_ns,
         execute_native=native,
         vitis_executable=vitis,
         timeout_seconds=timeout,
@@ -361,6 +374,10 @@ def run_campaign(*, tasks, plan: dict, output_root: str | Path,
             calls_per_episode=plan["original_vitis_calls_per_episode"],
             native=False, vitis=vitis, timeout=timeout,
             clock_regime=plan.get("clock_regime", "search"),
+            reward_mode=plan.get("reward_mode", "best_improvement"),
+            reward_reference_ns=plan.get(
+                "reward_reference_ns", DEFAULT_HARDWARE_REFERENCE_NS
+            ),
         )
     agent = create_hardware_method(
         plan["method"], seed=plan["seed"], hidden=plan["hidden"],
@@ -389,6 +406,14 @@ def run_campaign(*, tasks, plan: dict, output_root: str | Path,
         "source_revision_sha": source_rev, "original_cases_private": True,
         "task_definitions": [task.metadata() for task in tasks],
         "training_checkpoint_resume_supported": False,
+        "checkpoint_training_reward_mode": (
+            checkpoint_manifest.get("reward_mode", "best_improvement")
+            if checkpoint_manifest is not None else None
+        ),
+        "checkpoint_training_reward_reference_ns": (
+            checkpoint_manifest.get("reward_reference_ns", DEFAULT_HARDWARE_REFERENCE_NS)
+            if checkpoint_manifest is not None else None
+        ),
         "checkpoint_training_network_regime": (
             checkpoint_manifest.get("network_regime")
             if checkpoint_manifest is not None else None
@@ -410,6 +435,10 @@ def run_campaign(*, tasks, plan: dict, output_root: str | Path,
             calls_per_episode=plan["original_vitis_calls_per_episode"],
             native=True, vitis=vitis, timeout=timeout,
             clock_regime=plan.get("clock_regime", "search"),
+            reward_mode=plan.get("reward_mode", "best_improvement"),
+            reward_reference_ns=plan.get(
+                "reward_reference_ns", DEFAULT_HARDWARE_REFERENCE_NS
+            ),
         )
         observation, info = environment.reset(seed=plan["seed"] + i)
         rewards = []
@@ -475,6 +504,10 @@ def run_campaign(*, tasks, plan: dict, output_root: str | Path,
                 "algorithm": plan["method"],
                 "task_manifest_provenance": [x.metadata() for x in tasks],
                 "learning_mode": "online_original_hls",
+                "reward_mode": plan.get("reward_mode", "best_improvement"),
+                "reward_reference_ns": plan.get(
+                    "reward_reference_ns", DEFAULT_HARDWARE_REFERENCE_NS
+                ),
                 "network_regime": plan.get("network_regime", "auto"),
                 "clock_regime": plan.get("clock_regime", "search"),
                 "fixed_clock_ns": plan.get("fixed_clock_ns"),
@@ -558,6 +591,12 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
     )
     if any(field not in metadata for field in regime_fields):
         raise ValueError("New-source native campaign lacks original regime contract")
+    contract = hardware_reward_contract(
+        mode=metadata.get("reward_mode", "best_improvement"),
+        reference_ns=metadata.get("reward_reference_ns", DEFAULT_HARDWARE_REFERENCE_NS),
+    )
+    if any(metadata.get(key, value) != value for key, value in contract.items()):
+        raise ValueError("Campaign reward contract differs from canonical reward profile")
     if metadata.get("source_revision_sha") != _source_revision():
         raise ValueError("Original source revision mismatch: checkout pinned commit to audit")
     if [t.metadata() for t in tasks] != metadata["task_definitions"]:
@@ -655,6 +694,8 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
             independent = audit_native_case(case, state, samples)
             if (receipt["original_case_audit"] != independent
                     or receipt["reward"] != trial["reward"]
+                    or receipt.get("reward_mode", "best_improvement") != contract["reward_mode"]
+                    or receipt.get("reward_reference_ns", DEFAULT_HARDWARE_REFERENCE_NS) != contract["reward_reference_ns"]
                     or receipt["action_index"] != trial["source_action_index"]
                     or receipt["requested_clock_ns"] != trial["requested_clock_ns"]
                     or receipt["state_sha256"] != trial["native_state_sha256"]
@@ -669,8 +710,12 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
             if independent["qualified"]:
                 latency = independent["hls_estimated_latency_ns"]
                 best = latency if best is None else min(best, latency)
-            expected_reward = latency_only_reward(
-                prior_best, best, qualified=independent["qualified"]
+            expected_reward = hardware_trial_reward(
+                mode=contract["reward_mode"],
+                reference_ns=contract["reward_reference_ns"],
+                previous_best_ns=prior_best, updated_best_ns=best,
+                qualified=independent["qualified"],
+                evaluated_latency_ns=independent["hls_estimated_latency_ns"],
             )
             if (abs(float(trial["reward"]) - float(expected_reward)) > 1e-10
                     or trial["best_qualified_latency_ns"] != best):
@@ -712,6 +757,8 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
         "original_native_cases_replayed": count,
         "original_native_cases_expected": expected,
         "qualified_cases": qualified,
+        "reward_mode": contract["reward_mode"],
+        "reward_reference_ns": contract["reward_reference_ns"],
         "source_revision_sha": metadata["source_revision_sha"],
         "network_regime": metadata.get("network_regime", "auto"),
         "clock_regime": metadata.get("clock_regime", "search"),
@@ -735,6 +782,12 @@ def main(argv=None) -> int:
         "--clock-regime", choices=CLOCK_REGIMES, default="search",
         help="search=learned 2..32ns clock; fixed=one global clock; task_fixed=distinct per-task fixed clocks, no clock actor",
     )
+    parser.add_argument("--reward-mode", choices=HARDWARE_REWARD_MODES,
+                        default="best_improvement",
+                        help="Original best-improvement baseline or explicit dense audited latency ablation")
+    parser.add_argument("--reward-reference-ns", type=float,
+                        default=DEFAULT_HARDWARE_REFERENCE_NS,
+                        help="Fixed preregistered latency normalization for dense reward only")
     parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--calls-per-episode", type=int, default=10)
     parser.add_argument("--max-total-vitis-calls", type=int)
@@ -781,6 +834,8 @@ def main(argv=None) -> int:
                 use_trial_history=not args.no_trial_history,
                 network_regime=args.network_regime,
                 clock_regime=args.clock_regime,
+                reward_mode=args.reward_mode,
+                reward_reference_ns=args.reward_reference_ns,
             )
             if args.execute_native:
                 if not args.output_root or args.max_total_vitis_calls is None:

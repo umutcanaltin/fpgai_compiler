@@ -29,7 +29,10 @@ from .hardware_space import (
     HardwareEdit, HardwareState, RESOURCE_NAMES, action_mask,
     candidate_actions, graph_observation, initial_state, transition,
 )
-from ..reward import latency_only_reward
+from ..reward import (
+    hardware_reward_contract, hardware_trial_reward,
+    DEFAULT_HARDWARE_REFERENCE_NS,
+)
 
 MAX_NODES = 256
 MAX_EDGES = 512
@@ -177,7 +180,14 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
                  vitis_executable: str = "vitis_hls",
                  timeout_seconds: int = 7200,
                  execute_native: bool = False,
-                 fixed_clock_ns: float | None = None):
+                 fixed_clock_ns: float | None = None,
+                 reward_mode: str = "best_improvement",
+                 reward_reference_ns: float = DEFAULT_HARDWARE_REFERENCE_NS):
+        reward_contract = hardware_reward_contract(
+            mode=reward_mode, reference_ns=reward_reference_ns,
+        )
+        self.reward_mode = reward_contract["reward_mode"]
+        self.reward_reference_ns = reward_contract["reward_reference_ns"]
         if gym is None:
             raise RuntimeError("Install gymnasium>=1,<2 to use native hardware Gym")
         if type(execute_native) is not bool:
@@ -486,8 +496,11 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
             if self.best_latency_ns is None or latency < self.best_latency_ns:
                 self.best_latency_ns = latency
                 self.best_state_sha256 = state.state_sha256
-        reward = latency_only_reward(
-            previous, self.best_latency_ns, qualified=qualified,
+        reward = hardware_trial_reward(
+            mode=self.reward_mode, previous_best_ns=previous,
+            updated_best_ns=self.best_latency_ns, qualified=qualified,
+            evaluated_latency_ns=audit["hls_estimated_latency_ns"],
+            reference_ns=self.reward_reference_ns,
         )
         self.current = state
         self.last_audit = audit
@@ -509,6 +522,8 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
             "native_case": str(case.absolute()),
             "native_vitis_calls": self.calls,
             "qualified": qualified,
+            "reward_mode": self.reward_mode,
+            "reward_reference_ns": self.reward_reference_ns,
             "hls_estimated_latency_ns": audit["hls_estimated_latency_ns"],
             "best_hls_estimated_latency_ns": self.best_latency_ns,
             "hls_worst_case_cycles": audit["hls_worst_case_cycles"],
@@ -522,6 +537,8 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
             "schema": SCHEMA, "state_sha256": state.state_sha256,
             "action_index": idx, "requested_clock_ns": period,
             "qualified": qualified, "reward": reward, "native_case": str(case),
+            "reward_mode": self.reward_mode,
+            "reward_reference_ns": self.reward_reference_ns,
             "best_hls_estimated_latency_ns": self.best_latency_ns,
             "original_case_audit": audit,
         }
