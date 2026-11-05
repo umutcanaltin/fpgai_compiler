@@ -1,3 +1,21 @@
+> **HW-RL-05H protocol amendment (5 November 2026; source-only, unverified):**
+> Every native candidate now passes a no-case/no-vendor source-only novelty
+> check. The runner binds original journal action identity before `step()`
+> re-enumerates the menu. Training/random methods retry no-op/visited
+> complete states up to 64 times; these rejected *source* proposals cost
+> zero original Vitis calls and are recorded per accepted native trial.
+> Frozen deterministic evaluation uses the same GNN's descending actor
+> scores and candidate-conditional Beta mean clocks, choosing the first
+> source-novel proposal. This is **greedy valid-candidate selection**, not
+> the original unconstrained argmax once a duplicate is encountered.
+> The stochastic accepted-sample law is acceptance-conditioned, and the
+> present policy-gradient log-probability has **not** been corrected for
+> the admission normalization term. Publish rejection frequencies and
+> analyze that bias before attributing comparative effects. All new
+> CPU/native experiments and full method comparisons remain pending.
+> Automatic continuation of interrupted original case campaigns is
+> still not implemented.
+>
 # FPGAI HW-RL-05 — auditable online learning across neural networks
 
 **Prospective scientific protocol, version 0.1 (5 November 2026).**
