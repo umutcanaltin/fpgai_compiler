@@ -1,3 +1,10 @@
+## 2026-11-05 — HW-RL module organization (new revision unverified)
+
+- Moved eight large hardware RL modules into existing responsibility packages: `agents/`, `environments/`, `infrastructure/`, `experiments/`, `evaluation/`. Root `hardware_*.py` entries remain as exact module aliases to retain import/monkeypatch identity and CLI entry points.
+- Added CPU-only package-layout regression tests, including both canonical and compatibility `python -m ... --help` paths.
+- Verified *before refactoring*, on `f8ffe2d`: 2,086 CPU tests passed (3 skipped); actor-critic, REINFORCE, PPO, and random each completed 2 original Vitis calls and a 2/2 independent replay audit. Qualified counts 1, 0, 0, and 1 respectively. No transfer, learning superiority, or board-measured performance claim.
+- Source revision changed for refactor. Fresh tests/native cases are required and original source-pinned results remain immutable.
+
 ## 2026-11-05 — HW-RL-05H source-novel admission and receipt repair (pending local gate)
 
 - Fixed campaign provenance: the exact pre-step `HardwareEdit` is captured before `Gym.step()` replaces the action catalog. Independent replay can now match the actual proposed compiler edit, rather than accidentally recording the next state's edit.
