@@ -8,11 +8,16 @@
 > scores and candidate-conditional Beta mean clocks, choosing the first
 > source-novel proposal. This is **greedy valid-candidate selection**, not
 > the original unconstrained argmax once a duplicate is encountered.
-> The stochastic accepted-sample law is acceptance-conditioned, and the
-> present policy-gradient log-probability has **not** been corrected for
-> the admission normalization term. Publish rejection frequencies and
-> analyze that bias before attributing comparative effects. All new
-> CPU/native experiments and full method comparisons remain pending.
+> In the current patch, the likelihood of each accepted native step
+> includes the log probabilities of **all preceding rejected source-only
+> policy draws**, followed by the accepted draw. REINFORCE and actor-critic
+> use that full score-function trajectory; PPO recomputes the likelihood
+> of the same full trace on every clipped optimizer epoch. This avoids
+> treating rejection sampling as if the accepted draw were unconditioned.
+> No extra Vitis reward or feasibility label is assigned to a rejected
+> proposal. Publish the rejection frequencies and test the exact
+> sampling-likelihood regression before attributing effects. All new
+> CPU/native experiments and method comparisons remain pending.
 > Automatic continuation of interrupted original case campaigns is
 > still not implemented.
 >
