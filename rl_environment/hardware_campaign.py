@@ -34,6 +34,7 @@ from .hardware_algorithms import (
     METHODS, HardwareEpisodicTrainer, RandomHardwarePolicy,
     create_hardware_method,
 )
+from .hardware_checkpoint import save_training_state
 from .hardware_agent import original_hls_diagnostics
 from .hardware_gym import GymHardwareNativeEnv
 from .hardware_native import _regular_file, audit_native_case
@@ -356,17 +357,28 @@ def run_campaign(*, tasks, plan: dict, output_root: str | Path,
                 and isinstance(agent, HardwareEpisodicTrainer)):
             gradient_receipt = agent.finish_episode(complete=True)
         export = None
+        optimizer_snapshot = None
         if (not plan["evaluation"]
                 and not isinstance(agent, RandomHardwarePolicy)):
-            export = (root / "checkpoints" / f"episode_{i:06d}")
-            agent.save_private(export, {
+            provenance = {
                 "campaign_source_sha": source_rev,
                 "task_id": task.id,
                 "episode": i,
                 "algorithm": plan["method"],
                 "task_manifest_provenance": [x.metadata() for x in tasks],
                 "learning_mode": "online_original_hls",
-            })
+            }
+            export = (root / "checkpoints" / f"episode_{i:06d}")
+            agent.save_private(export, provenance)
+            optimizer_snapshot = (
+                root / "training_state" / f"episode_{i:06d}"
+            )
+            save_training_state(
+                agent, optimizer_snapshot,
+                method=plan["method"],
+                source_revision_sha=source_rev,
+                metadata=provenance,
+            )
         _append_jsonl(episode_journal, {
             "schema": "fpgai-research/hardware-rl-episode/v1",
             "episode": i, "task_id": task.id,
@@ -382,6 +394,10 @@ def run_campaign(*, tasks, plan: dict, output_root: str | Path,
                 else None
             ),
             "evaluation_only_checkpoint": str(export) if export else None,
+            "full_optimizer_rng_snapshot": (
+                str(optimizer_snapshot) if optimizer_snapshot else None
+            ),
+            "automatic_resume_authorized": False,
         })
         print(json.dumps({
             "completed_episode": i + 1, "of": len(schedule),
