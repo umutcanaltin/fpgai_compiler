@@ -1,3 +1,9 @@
+## HW-RL-05H branch handoff — action admission and original-case history (5 Nov 2026)
+
+New unverified source fixes a replay-critical journal issue: `hardware_campaign._trial_record` previously selected `environment.offers[index]` *after* `step()`, when the Gym already exposed the next state's catalog. The runner now stores the real pre-step offer, and fails closed if source-only admission and original audit state hashes disagree. `Gym.preview_action` is pure; train/random policies discard up to 64 no-op/duplicate proposals without spending native calls. Frozen deterministic GNN evaluation uses ranked valid alternatives without sampling. Every accepted trial stores `rejected_source_proposals_before_native` (not Vitis attempts). Scientific interpretation must disclose admission-conditioned sampling; no recovered continuation or performance claim is implied.
+
+**Required workstation gate:** `python -m pip install -e '.[rl,onnx]'`, `python -m compileall -q rl_environment tests`, focused `pytest` for hardware gym/agent/campaign/compare/checkpoint, then the full suite. Run a fresh 1-episode ×2 original Vitis smoke per algorithm and separate `--audit` before merge. Existing original Vitis cases are immutable. Automatic interrupted-campaign continuation and native scientific benchmarking are still open.
+
 ## HW-RL-05 newer modules and workstation gate (5 Nov 2026)
 
 Further source-only commits added `hardware_compare.py` and
