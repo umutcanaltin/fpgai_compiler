@@ -205,6 +205,10 @@ class HardwareActionTape:
     source_action_index: int
     sampled_clock_fraction: object | None = None
     observation: dict | None = None
+    # Previous source-only rejected draws are part of the probability
+    # of the accepted native step. They have no vendor reward/label of
+    # their own, but must enter the joint score-function likelihood.
+    rejected_proposal_tapes: tuple["HardwareActionTape", ...] = ()
 
 
 def _native_feedback(info: dict, reward: float) -> bool:
