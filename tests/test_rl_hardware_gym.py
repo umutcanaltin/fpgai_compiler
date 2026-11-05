@@ -5,6 +5,7 @@ Real reward requires unmocked execute_native_case + independent audit.
 """
 from __future__ import annotations
 
+import json
 from math import log
 from pathlib import Path
 
