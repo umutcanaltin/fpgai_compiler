@@ -160,3 +160,70 @@ A suite emits one candidate manifest per supported regime/split with
 explicit** `fpgai-rl-hardware-campaign --execute-native --max-total-vitis-calls
 N --output-root NEW_NATIVE_ROOT` with original source, exact budget and
 separate independent replay.
+
+
+## HW-RL-09: executable scenario suite and explicit reward treatments
+
+Create a deterministic **source-only** example catalog containing six untrained
+ONNX graphs: train CNN + dense MLP, validation strided CNN + small MatMul,
+and test two-convolution CNN + alternate MatMul chain. Graph structures are
+disjoint across train/validation/test; initial resource caps and requested
+clock are declared identically across the demo cohort. This does not assert
+that every graph can synthesize or fit on the target part.
+
+
+    python -m examples.make_hw_rl_scenario_demo \
+      build/rl_hw09_demo_inputs_seed111_01 --seed 111
+
+    # Read-only preview: enumerate 36 source-planning cells (12 × 3 splits).
+    fpgai-rl-hardware-suite \
+      --tasks build/rl_hw09_demo_inputs_seed111_01/tasks.json
+
+    # Create-only scenario manifests and train/validation/test inventories:
+    fpgai-rl-hardware-suite \
+      --tasks build/rl_hw09_demo_inputs_seed111_01/tasks.json \
+      --output-root build/rl_hw09_scenario_suite_seed111_01
+
+    # Read-only PPO scenario preview (no original Vitis calls):
+    fpgai-rl-hardware-campaign \
+      --tasks build/rl_hw09_scenario_suite_seed111_01/scenarios/train_cross_family_fixed.json \
+      --network-regime cross_family --clock-regime fixed \
+      --method ppo --episodes 2 --calls-per-episode 2 \
+      --reward-mode dense_latency --reward-reference-ns 10000
+
+
+The suite marks absent source cohorts as \`UNAVAILABLE_SOURCE_COHORT\` rather
+than silently substituting another network family/clock. A structural holdout
+disallows identical ONNX **computation graph fingerprints** across splits;
+\`--holdout bytes\` permits the same structure with changed initializer data,
+and must **not** be reported as architecture generalization. The suite only
+references original model/sample files (absolute paths to their immutable
+content); it does not duplicate or update HLS cases.
+
+For an HLS-qualified original trial with audited latency \(L_{\mathrm{HLS}}\)
+in ns and a fixed preregistered latency reference \(R\):
+
+- \`--reward-mode best_improvement\` (default): first qualified action
+  \(-0.005\); later \(\log(L_{\mathrm{best,old}}/L_{\mathrm{best,new}})-0.005\).
+- \`--reward-mode dense_latency\`: every qualified action earns
+  \(R/(R+L_{\mathrm{HLS}})-0.005\), using that actual trial's original HLS latency.
+  \`--reward-reference-ns\` defaults to 10000; if changed, record the value.
+- **Both** modes: a source-valid but original HLS-unqualified design earns
+  \(-0.05\), even if it exceeds DSP budget or misses timing. Compiler-illegal
+  proposals are rejected without inventing hardware feedback.
+
+Both rewards are verified in the same independent source-native audit. A
+reward-mode study must hold its original model inputs, resource constraints,
+target FPGA, Vitis version, source commit and HLS-call budget fixed within
+each planned treatment. The observed HLS metrics remain the evaluation
+criterion even when optimizer reward scales differ. Read-only paired reports
+require \`--allow-reward-mode-ablation\` to intentionally compare different
+evaluation reward profiles; otherwise mismatched reward contracts fail closed.
+
+Validation and test task manifests may **only** be run as frozen evaluations.
+For trainable methods use \`--evaluation --checkpoint ORIGINAL_PRIVATE_POLICY\`;
+the suite does not invent a checkpoint or authorize native evaluation before
+one exists. A \`random\` control can run with \`--evaluation\` without a
+checkpoint. Existing campaign call limits and create-only original case
+directories still apply. Interrupted campaigns cannot be automatically
+resumed. **Suite readiness is source-only planning, not Vitis qualification.**

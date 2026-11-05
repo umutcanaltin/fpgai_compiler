@@ -1,3 +1,12 @@
+## 2026-11-05 — HW-RL-09 reusable scenario suite and reward ablation (source not yet native-validated)
+
+- Added opt-in \`dense_latency\` native HLS reward that scores **each qualified trial**; preserved the original \`best_improvement\` default and original −0.05 for audited infeasibility. Both require source- and report-attested original HLS cycles/clock/CSim/resource/timing evidence; no proxy latency allowed.
+- Campaign plan, Gym receipts, private checkpoint training provenance and independent replay carry the original reward contract. Paired evaluation refuses differing reward contracts by default, requiring explicit \`--allow-reward-mode-ablation\` to compare different treatments using HLS ns rather than incompatible scalar rewards.
+- Added \`fpgai-rl-hardware-suite\`: from an existing v1 task manifest containing train/validation/test, select source-compatible exact-model/within-family/graph-diverse/cross-family × fixed/task-fixed/clock-search scenarios. Report ineligible cells, preserve full original source split definitions, forbid structural heldout leakage by default and use create-only output manifests. The alternative bytes-only holdout is explicitly weaker.
+- Added a deterministic six-graph CNN/MatMul source-only example generator with disjoint train/validation/test graphs and shape-correct input arrays. Scenarios remain source-only until explicitly authorized native campaigns and independent audits.
+- Training on validation or test splits is now blocked. Trainable validation/test study plans require frozen checkpoints; no optimizer updates, hidden re-training, or automatically resumed native cases.
+- New CPU-only tests for reward equations, negative outcome integrity, Gym reward plumbing, scenario outputs, holdout leakage and example reproducibility. Prior native experiments remain pinned to their older revisions; current source needs workstation tests and new source-specific native acceptance.
+
 ## 2026-11-05 — HW-RL-06 explicit generalization/clock regime setup (unverified)
 
 - Same-network and ONNX graph-diverse general-network plans; two/three-way source-only preflight.

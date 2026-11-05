@@ -1,3 +1,11 @@
+## HW-RL-09 — reward and reusable scenario source protocols (2026-11-05; CPU/native gates pending)
+
+**Implemented:** \`--reward-mode best_improvement|dense_latency\`; \`--reward-reference-ns\` (default 10000); independent original HLS reward recomputation and private checkpoint provenance. The legacy original per-step native penalty and reward are unchanged unless the operator explicitly selects the alternative. Invalid/partial Vitis evidence is not negative training data.
+
+**Implemented:** \`fpgai-rl-hardware-suite\` consumes a single immutable tasks/v1 source manifest with train/validation/test tasks, enforces default structure-disjoint holdouts, emits all three full split manifests and create-only available source-only scenario manifests. Missing combinations are recorded as unavailable. A deterministic six-network example generator supports the first proof-of-planning demonstrations. Validation/test policy updates are forbidden by source contract.
+
+**Required acceptance before science:** compileall, focused and full pytest on the new source, source-only example generator and suite CLI check, reward profile tests, new original Vitis smoke under a fresh directory for any newly executed reward protocol, separate independent audit, then multi-seed matched training plus frozen evaluation. No claim of trained success, generalization, physical routed timing or benchmark completeness from these source changes alone.
+
 ## HW-RL-08 — trainable infeasibility and graph-family research questions (source only)
 
 - Source-legal actions can choose too many DSPs or fail scheduling; these are real HLS observations with original `-0.05` penalty. Never change the timing target or resource caps just to make random samples feasible.
