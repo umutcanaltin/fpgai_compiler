@@ -87,6 +87,8 @@ def onnx_structure_sha256(path) -> str:
                       tuple(sorted(attribute(a) for a in node.attribute)),
                       len(node.output)))
         for j, name in enumerate(node.output):
+            if not name:
+                continue  # ONNX permits omitted optional output slots.
             if name in producers or name in input_indices or name in weights:
                 raise ValueError("ONNX graph has duplicate tensor producers")
             producers[name] = (i, j)
