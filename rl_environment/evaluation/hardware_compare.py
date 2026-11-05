@@ -86,7 +86,8 @@ def _first_feasible(group):
 
 
 def paired_summary(baseline: dict, candidate: dict, *,
-                   allow_clock_regime_ablation: bool = False) -> tuple[list[dict], dict]:
+                   allow_clock_regime_ablation: bool = False,
+                   allow_reward_mode_ablation: bool = False) -> tuple[list[dict], dict]:
     """Provenance-checked per-task censoring categories and latency ratios."""
     a, b = baseline["metadata"], candidate["metadata"]
     if (a["split"] not in ("test", "validation")
@@ -113,7 +114,18 @@ def paired_summary(baseline: dict, candidate: dict, *,
             "Different clock action spaces require explicit "
             "--allow-clock-regime-ablation with identical heldout cases/budgets"
         )
-    if _label(a) == _label(b):
+    reward_ablation = (
+        a.get("reward_mode", "best_improvement") !=
+        b.get("reward_mode", "best_improvement")
+        or a.get("reward_reference_ns", 10000.0) !=
+           b.get("reward_reference_ns", 10000.0)
+    )
+    if reward_ablation and not allow_reward_mode_ablation:
+        raise ValueError(
+            "Different original HLS reward profiles require explicit "
+            "--allow-reward-mode-ablation; compare audited HLS metrics, not reward scales"
+        )
+    if _label(a) == _label(b) and not reward_ablation:
         raise ValueError("Paired method/ablation labels must differ")
     rows = []
     categories = {
@@ -172,6 +184,12 @@ def paired_summary(baseline: dict, candidate: dict, *,
         "source_revision_sha": a["source_revision_sha"],
         "split": a["split"], "seed": a["seed"],
         "baseline": _label(a), "candidate": _label(b),
+        "baseline_reward_mode": a.get("reward_mode", "best_improvement"),
+        "candidate_reward_mode": b.get("reward_mode", "best_improvement"),
+        "reward_profile_ablation": reward_ablation,
+        "reward_mode_ablation_explicitly_authorized": bool(
+            reward_ablation and allow_reward_mode_ablation
+        ),
         "baseline_training_reward_mode": a.get("checkpoint_training_reward_mode"),
         "candidate_training_reward_mode": b.get("checkpoint_training_reward_mode"),
         "baseline_training_network_regime": a.get("checkpoint_training_network_regime"),
@@ -210,13 +228,15 @@ def paired_summary(baseline: dict, candidate: dict, *,
 
 
 def compare_audited_campaigns(*, tasks, baseline_root, candidate_root,
-                              allow_clock_regime_ablation=False):
+                              allow_clock_regime_ablation=False,
+                              allow_reward_mode_ablation=False):
     if (Path(baseline_root).resolve() == Path(candidate_root).resolve()):
         raise ValueError("Comparison requires two distinct source-pinned campaign roots")
     a = _read_audited_run(baseline_root, tasks)
     b = _read_audited_run(candidate_root, tasks)
     rows, summary = paired_summary(
         a, b, allow_clock_regime_ablation=allow_clock_regime_ablation,
+        allow_reward_mode_ablation=allow_reward_mode_ablation,
     )
     # This status can only be granted by the two successful full source/native
     # audits above; ordinary fixture dictionaries never receive it.
@@ -258,6 +278,8 @@ def main(argv=None) -> int:
                         help="New paper comparison directory, never an original native root")
     parser.add_argument("--allow-clock-regime-ablation", action="store_true",
                         help="Explicitly compare different clock action spaces on identical heldout tasks/budgets")
+    parser.add_argument("--allow-reward-mode-ablation", action="store_true",
+                        help="Allow reward-contract difference on matched original HLS cases (report metrics in physical ns)")
     args = parser.parse_args(argv)
     try:
         tasks = read_tasks(args.tasks)
@@ -265,6 +287,7 @@ def main(argv=None) -> int:
             tasks=tasks, baseline_root=args.baseline,
             candidate_root=args.candidate,
             allow_clock_regime_ablation=args.allow_clock_regime_ablation,
+            allow_reward_mode_ablation=args.allow_reward_mode_ablation,
         )
         saved = export_comparison(args.output, rows, summary)
         print(json.dumps({**summary, "comparison_output": str(saved)},

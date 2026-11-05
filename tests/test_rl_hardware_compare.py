@@ -145,3 +145,20 @@ def test_hw06_general_network_training_provenance_distinguishes_same_method():
     assert "trained_same" in report["baseline"]
     assert "trained_general" in report["candidate"]
     assert report["paired_significance_claim"] is False
+
+
+def test_hw09_paired_reward_mode_ablation_is_explicit_and_hls_metric_only():
+    a = _run("ppo", latency=[9500., None], qualified_index=[1, None])
+    b = _run("ppo", latency=[8400., None], qualified_index=[1, None])
+    a["metadata"].update(reward_mode="best_improvement", reward_reference_ns=10000.)
+    b["metadata"].update(reward_mode="dense_latency", reward_reference_ns=10000.)
+    with pytest.raises(ValueError, match="allow-reward-mode-ablation"):
+        compare.paired_summary(a, b)
+    rows, report = compare.paired_summary(
+        a, b, allow_reward_mode_ablation=True,
+    )
+    assert report["reward_profile_ablation"] is True
+    assert report["reward_mode_ablation_explicitly_authorized"] is True
+    assert report["paired_significance_claim"] is False
+    assert rows[0]["candidate_over_baseline_latency_ratio"] == 8400. / 9500.
+    assert rows[1]["candidate_over_baseline_latency_ratio"] is None
