@@ -126,6 +126,31 @@ does not invoke Vitis/Vivado, and does not claim reward/learning.
 The existing `rl_environment.gym_env`/historical Task, catalog,
 reward, study and audit files remain unmodified.
 
+### HW-RL-04 dependency gate (5 November 2026)
+
+The shared mixed-network GNN agent requires PyTorch (the `rl` project
+extra), Gymnasium and ONNX. In particular, `pip install --no-deps -e .`
+**does not install PyTorch** and the PyTorch-dependent test module is
+skipped if the library is absent. This is not evidence of a functioning
+agent. The repaired CLI now fails early with an actionable explanation
+before reading ONNX, creating a native case or running Vitis.
+
+From the activated workstation environment:
+
+```bash
+python -m pip install -e '.[rl,onnx]'
+python -c "import torch, gymnasium, onnx; print(torch.__version__)"
+python -m pytest -q tests/test_rl_hardware_optional_dependencies.py tests/test_rl_hardware_agent.py tests/test_rl_hardware_gym.py
+```
+
+Then rerun the **same source-only** `fpgai-rl-hardware-agent` preview
+with the existing ONNX, samples, part, caps and fresh output root. Do
+not add `--execute-native` until the installed policy, action masks
+and source-only preview all pass. Missing PyTorch cannot be replaced
+with a random/fake policy, a guessed HLS reward or an automatic vendor
+fallback. GitHub-only source edits do not verify that workstation
+PyTorch is installed or the agent's gradient step works.
+
 ## HW-RL-02 — source-attested original Vitis HLS evaluation
 
 **Local CPU feedback and patch (2026-11-04):** The user verified the

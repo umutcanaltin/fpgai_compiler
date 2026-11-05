@@ -19,11 +19,15 @@ from pathlib import Path
 
 import numpy as np
 
+_TORCH_IMPORT_ERROR = None
 try:
     import torch
     from torch import nn
     from torch.distributions import Beta, Categorical
-except ImportError:
+except (ImportError, OSError) as exc:
+    # Distinguish a missing wheel from a broken torch/shared-library import.
+    # Neither may silently fall back to an untrained or synthetic policy.
+    _TORCH_IMPORT_ERROR = f"{type(exc).__name__}: {exc}"
     torch, nn, Beta, Categorical = None, None, None, None
 
 from .clock_actions import CLOCK_MAX_NS, CLOCK_MIN_NS, normalize_clock_period_ns
@@ -176,6 +180,20 @@ else:
     SharedHardwareGraphPolicy = None
 
 
+def _require_torch() -> None:
+    """Fail before touching a model or native output when RL extras are absent."""
+    if torch is not None:
+        return
+    reason = f" Import failure: {_TORCH_IMPORT_ERROR}." if _TORCH_IMPORT_ERROR else ""
+    raise RuntimeError(
+        "PyTorch is required for the hardware GNN agent." + reason
+        + " Install RL dependencies in this virtualenv with "
+        + "python -m pip install -e '.[rl,onnx]' (without --no-deps), "
+        + "or install a CPU-only PyTorch wheel from "
+        + "https://download.pytorch.org/whl/cpu."
+    )
+
+
 @dataclass(frozen=True)
 class HardwareActionTape:
     log_probability: object
@@ -238,8 +256,7 @@ class HardwareGraphTrainer:
     def __init__(self, *, seed: int = 101, hidden: int = 64,
                  lr: float = 5e-4, message_passing: bool = True,
                  use_trial_history: bool = True):
-        if torch is None:
-            raise RuntimeError("PyTorch optional dependency required for GNN")
+        _require_torch()
         if type(seed) is not int or not 0 <= seed <= 2**31:
             raise ValueError("Explicit bounded shared-policy seed required")
         if type(lr) not in (float, int) or not isfinite(lr) or lr <= 0:
@@ -449,7 +466,6 @@ def main(argv=None) -> int:
     """
     import argparse
     import sys
-    from fpgai_research.frontend.onnx import load_onnx
     from .hardware_gym import GymHardwareNativeEnv
 
     parser = argparse.ArgumentParser(description=__doc__)
@@ -476,6 +492,8 @@ def main(argv=None) -> int:
     try:
         if args.checkpoint and not args.execute_native:
             raise ValueError("Cannot save a training checkpoint from source-only preview")
+        _require_torch()
+        from fpgai_research.frontend.onnx import load_onnx
         from .hardware_native import _regular_file
         model = load_onnx(args.onnx)
         cohort = np.load(_regular_file(Path(args.samples).expanduser()),

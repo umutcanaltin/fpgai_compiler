@@ -1,3 +1,18 @@
+## HW-RL-04 dependency/runtime gate — 2026-11-05
+
+The user confirmed 2,033 full CPU tests passed (18 skipped), and 25
+focused passed (2 skipped) on the hardware agent feature branch, but
+`fpgai-rl-hardware-agent` stopped at runtime because PyTorch was absent.
+The workstation used `pip install --no-deps -e .`, which intentionally
+skips the already-declared `rl` extra. Add a fail-early install message,
+a non-skipped missing-dependency regression, and exact workstation
+`pip install -e '.[rl,onnx]'` instructions. The GitHub patch is not a
+workstation PyTorch installation; new GNN source preview, targeted
+PyTorch tests and a first native gradient remain **unverified** until
+the user runs them. No old source-pinned native artifacts are touched.
+
+---
+
 # HW-RL-04 shared hardware GNN actor–critic — 2026-11-05
 
 The user verified the original HW-RL-03 Gym-native flow: **2,032 CPU

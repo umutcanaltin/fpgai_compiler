@@ -1,3 +1,15 @@
+## 2026-11-05 — HW-RL-04 optional PyTorch installation diagnosis
+
+- Workstation confirmed 2,033 passing / 18 skipped full CPU tests, but
+  the GNN CLI stopped because `pip install --no-deps -e .` had not
+  installed the `rl` extra's PyTorch requirement.
+- Fail before model loading or native execution with the precise
+  `python -m pip install -e '.[rl,onnx]'` remediation and preserve
+  the import failure when a torch wheel is broken.
+- Added dependency-path regressions that do not skip when PyTorch is
+  absent, and documented workstation install and source-only preview.
+  No vendor qualification or GNN learning is claimed from this patch.
+
 ## 2026-11-05 — HW-RL-04 shared GNN bridge for full compiler hardware Gym
 
 - User verified HW-RL-03: 75 focused passing, one skipped; full CPU

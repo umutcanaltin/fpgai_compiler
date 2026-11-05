@@ -55,6 +55,31 @@
 
 **New 100×10 Gym RL learning redesign:** [SPRINT_RL_LEARNING_REDESIGN.md](SPRINT_RL_LEARNING_REDESIGN.md). Source-only changes add 30-step original-HLS history observations, compiler-validated global/local offers (no forced first baseline), native-feasibility auxiliary actor signal, explicit source/CSim/worst-case-cycle/resources/timing failure gates, stochastic frozen-policy evaluation and baseline no-incumbent fallback differentiation. Earlier 1,070-case pilot at `eb4a799` remains immutable and demonstrated **no reliable transfer-learning trend**. Use `python -m rl_environment.qualification_funnel --study build/gym_100_train_30_hls_seed101_paper_v2` to diagnose the original 926 missing timing/qualification cases without a Vitis call. The new campaign is **109 episodes including 100 training, at 10 native steps each = 1090 maximum Vitis calls**, pending CPU smoke and original-native audit. Do not infer success before running tests.
 
+## HW-RL-04: install GNN runtime dependencies on the workstation
+
+The installed GNN CLI requires **PyTorch**, **Gymnasium** and the ONNX
+frontend. The default editable install with `--no-deps` intentionally
+installs none of these optional extras; success of the CPU test suite
+does not guarantee GNN readiness, because tests requiring PyTorch may
+skip. Install into the **same activated virtualenv**:
+
+```bash
+python -m pip install -e '.[rl,onnx]'
+python -c "import torch, gymnasium, onnx; print('torch', torch.__version__)"
+python -m pytest -q tests/test_rl_hardware_optional_dependencies.py tests/test_rl_hardware_agent.py tests/test_rl_hardware_gym.py
+```
+
+CPU-only PyTorch is sufficient for the graph policy on a Linux CPU.
+An alternative wheel source is
+`python -m pip install torch --index-url https://download.pytorch.org/whl/cpu`
+followed by `python -m pip install 'gymnasium>=1.0,<2'` if the
+other dependencies are already present. Re-run the existing
+`fpgai-rl-hardware-agent` command **without** `--execute-native`
+first; this creates no original Vitis cases or gradient updates.
+The CLI reports an explicit install instruction before attempting to
+load the model when PyTorch cannot be imported. A corrupted PyTorch
+installation must be repaired, not bypassed.
+
 # Gym Graph RL — single active neural-network HLS optimization research track
 
 **AUTHORITATIVE:** [RESEARCH_QUESTION.md](RESEARCH_QUESTION.md). The Gym/GNN/clock-aware source passed **31 focused and 658 full tests** on the user's workstation at `0cc2a22`. An actual Vitis HLS 2023.2 CSynth XML was parsed read-only, revealing that the old raw-target comparison was too permissive; the effective clock-margin gate was corrected and subsequently passed CPU tests. Later 100-episode campaign setup (max 30 HLS calls per episode) and checkpoint/audit updates need a fresh CPU retest. **No new source-pinned original Vitis timing qualification has run.**
