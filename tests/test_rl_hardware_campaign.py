@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -123,6 +124,9 @@ def test_hw05_stubbed_random_campaign_only_proves_journal_plumbing(
                 "clock_bounds_ns": np.asarray([2., 32.], np.float32),
             }
 
+        def preview_action(self, action):
+            return SimpleNamespace(state_sha256=f"fake-state-{self.calls + 1}")
+
         def reset(self, *, seed):
             return self.observation, {"state_sha256": "cpu-fixture"}
 
@@ -172,3 +176,82 @@ def test_hw05_stubbed_random_campaign_only_proves_journal_plumbing(
             checkpoint=None, vitis="DO_NOT_CALL_VITIS", timeout=1,
             stochastic_evaluation=False,
         )
+
+
+def test_hw05_source_admission_retries_novelty_without_native_calls():
+    """No-op and duplicate proposals are discarded before Gym.step/Vitis."""
+    class SequencePolicy(campaign.RandomHardwarePolicy):
+        def __init__(self):
+            super().__init__(seed=101)
+            self.actions = iter(((0, 14.0), (0, 15.0)))
+
+        def choose(self, observation):
+            return next(self.actions)
+
+    class SourceOnly:
+        offers = (None,)
+        native_calls = 0
+
+        def preview_action(self, action):
+            if action[1] == 14.0:
+                raise ValueError("No-op architecture-clock action; native case not started")
+            return SimpleNamespace(state_sha256="novel-state")
+
+    env = SourceOnly()
+    action, tape, selected, preview, rejected = campaign._choose_admitted_action(
+        SequencePolicy(), env, {"action_mask": np.asarray([1])},
+        train=False, stochastic_evaluation=False,
+    )
+    assert (action, tape, selected, preview.state_sha256, rejected) == (
+        (0, 15.0), None, None, "novel-state", 1,
+    )
+    assert env.native_calls == 0
+
+
+def test_hw05_source_admission_fails_closed_when_all_proposals_repeat():
+    class NeverNovel(campaign.RandomHardwarePolicy):
+        def choose(self, observation):
+            return 0, 14.0
+
+    class SourceOnly:
+        offers = (None,)
+
+        def preview_action(self, action):
+            raise ValueError("Repeated complete hardware state; no new native case")
+
+    with pytest.raises(RuntimeError, match="after 2 source-only attempts"):
+        campaign._choose_admitted_action(
+            NeverNovel(seed=101), SourceOnly(), {},
+            train=False, stochastic_evaluation=False,
+            max_source_proposals=2,
+        )
+
+
+def test_hw05_trial_receipt_binds_exact_pre_step_edit(tmp_path):
+    """The next state's re-enumerated offers must not corrupt action history."""
+    from rl_environment.hardware_space import HardwareEdit
+
+    task = campaign.read_tasks(_manifest(tmp_path))[0]
+    original = HardwareEdit("operator", "pes", 2, 0)
+    audit = {
+        "qualified": False,
+        "hls_estimated_latency_ns": None,
+        "gate_failures": ["ORIGINAL_HLS_SCHEDULING_NOT_FEASIBLE"],
+    }
+    receipt = campaign._trial_record(
+        0, 0, task, source_action=original, action=(2, 15.0),
+        reward=-.05, info={
+            "original_vitis_audit": audit,
+            "state_sha256": "pre-step-result",
+            "native_case": "CPU_NOT_VENDOR",
+            "qualified": False,
+            "best_hls_estimated_latency_ns": None,
+        }, gradient=None, method="random",
+        rejected_source_proposals=3,
+    )
+    assert receipt["source_action"] == {
+        "scope": "operator", "field": "pes", "value": 2,
+        "operator_index": 0,
+    }
+    assert receipt["source_action_index"] == 2
+    assert receipt["rejected_source_proposals_before_native"] == 3
