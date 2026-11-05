@@ -117,7 +117,9 @@ def test_same_network_refuses_multiple_structures_and_fixed_refuses_mixed_clocks
         _plan(tasks, "same", "search", episodes=2)
     with pytest.raises(ValueError, match="one identical initial_clock"):
         _plan(tasks, "general", "fixed", episodes=2)
-    equal = campaign.read_tasks(_manifest(tmp_path, general=True))
+    equal_dir = tmp_path / "equal_clock_cohort"
+    equal_dir.mkdir()
+    equal = campaign.read_tasks(_manifest(equal_dir, general=True))
     with pytest.raises(ValueError, match="at least two different initial clock"):
         _plan(equal, "general", "task_fixed", episodes=2)
 

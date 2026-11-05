@@ -361,7 +361,9 @@ class HardwareGraphTrainer:
             tape = HardwareActionTape(
                 log_probability, entropy, value, contexts[chosen],
                 fraction, pred, int(chosen.item()),
-                sampled_clock_fraction=latent.detach(),
+                sampled_clock_fraction=(
+                    latent.detach() if latent is not None else None
+                ),
                 observation={
                     k: np.array(v, copy=True) for k, v in obs.items()
                 },
