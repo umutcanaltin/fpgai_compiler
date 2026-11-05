@@ -43,6 +43,7 @@ fpgai-rl-hardware-space = "rl_environment.hardware_space:main"
 fpgai-rl-hardware-native = "rl_environment.hardware_native:main"
 fpgai-rl-hardware-gym = "rl_environment.hardware_gym:main"
 fpgai-rl-hardware-agent = "rl_environment.hardware_agent:main"
+fpgai-rl-hardware-campaign = "rl_environment.hardware_campaign:main"
 fpgai-diagnose = "fpgai_research.toolchains.diagnose:main"
 
 # fpgai_research is in the src/ layout; the historical RL package is

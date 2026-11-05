@@ -245,16 +245,22 @@ class RandomHardwarePolicy:
 
 def create_hardware_method(method: str, *, seed: int = 101,
                            hidden: int = 64, ppo_epochs: int = 3,
-                           ppo_clip: float = .2):
+                           ppo_clip: float = .2,
+                           message_passing: bool = True,
+                           use_trial_history: bool = True):
     """Explicit four-method registry with no plugin loading or fake policies."""
     if method not in METHODS:
         raise ValueError(f"Unsupported hardware RL method: {method!r}")
     if method == "random":
         return RandomHardwarePolicy(seed=seed)
     _require_torch()
+    common = dict(
+        seed=seed, hidden=hidden,
+        message_passing=message_passing, use_trial_history=use_trial_history,
+    )
     if method == "actor_critic":
-        return HardwareGraphTrainer(seed=seed, hidden=hidden)
+        return HardwareGraphTrainer(**common)
     return HardwareEpisodicTrainer(
-        algorithm=method, seed=seed, hidden=hidden,
-        ppo_epochs=ppo_epochs, ppo_clip=ppo_clip,
+        algorithm=method, ppo_epochs=ppo_epochs, ppo_clip=ppo_clip,
+        **common,
     )
