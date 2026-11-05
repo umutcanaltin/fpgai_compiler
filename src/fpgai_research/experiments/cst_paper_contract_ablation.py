@@ -1,8 +1,8 @@
 """Controlled source-contract ablation on existing typed MatMul fanout traces.
 
 The comparison holds graph, mapping and events constant and removes ONLY
-the Phi issue-order predicate from the full source contract. The source
-value-safety-only baseline is an internal ablation, NOT another compiler,
+the Phi issue-order predicate from the full source contract. The baseline checks source value readiness, last-reader lifetime AND
+Phi owner coordinates, but omits the exact Phi READ issue order. It is an internal ablation, NOT another compiler,
 whole-output equivalence oracle, or a measured HLS/physical speedup.
 
 The original R3j study remains separate and is never overwritten.
@@ -32,7 +32,7 @@ CSV_FIELDS = (
 
 
 def summarize(original: dict) -> dict:
-    """Analyze the same fixed trace population under two source predicates."""
+    """Compare owner-aware source safety with the additional issue-order predicate."""
     if (
         original.get("schema") != INPUT_SCHEMA
         or original.get("prespecified_source_cases") != 24
