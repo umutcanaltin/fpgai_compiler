@@ -554,6 +554,7 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
         "network_regime", "clock_regime", "fixed_clock_ns",
         "fixed_clock_ns_by_task", "clock_action_bounds_ns",
         "distinct_onnx_model_count", "onnx_graph_sha256_by_task",
+        "onnx_operator_family_by_task", "distinct_onnx_operator_family_count",
     )
     if any(field not in metadata for field in regime_fields):
         raise ValueError("New-source native campaign lacks original regime contract")
@@ -728,7 +729,7 @@ def main(argv=None) -> int:
     parser.add_argument("--method", choices=METHODS, default="actor_critic")
     parser.add_argument(
         "--network-regime", choices=NETWORK_REGIMES, default="auto",
-        help="auto=legacy scheduling; same=one immutable model; general=2+ genuinely different ONNX graphs",
+        help="auto=legacy; same=one exact ONNX; family=2+ graphs of one operator family; general=2+ graphs; cross_family=2+ operator families",
     )
     parser.add_argument(
         "--clock-regime", choices=CLOCK_REGIMES, default="search",

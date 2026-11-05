@@ -1,6 +1,6 @@
 # Hardware-RL environment experiment regimes
 
-Six scientific settings share **one** compiler-grounded native Gym, real Vitis
+Twelve explicit network/clock settings share **one** compiler-grounded native Gym, real Vitis
 HLS backend and independent case audit. Regimes control the source-legal
 **task schedule** and the requested-clock **action space**; they are not six
 reimplemented simulators and never substitute cached/surrogate rewards.
@@ -10,9 +10,15 @@ reimplemented simulators and never substitute cached/surrogate rewards.
 | `same` (one immutable ONNX model) | `fixed` (identical initial clock for all tasks) | Can the optimizer tune one model's architecture at one target? |
 | `same` | `task_fixed` (different fixed target per task) | Does one learned policy adapt architectural choices to target timing across episodes of the *same* model? |
 | `same` | `search` (learnable 2–32 ns requested clock) | Does clock + architecture co-design help on a known model? |
+| `family` (2+ distinct ONNX graphs in one operator family) | `fixed` | Does training transfer across architectures within one CNN/dense family? |
+| `family` | `task_fixed` | Does within-family architectural adaptation transfer across fixed timing targets? |
+| `family` | `search` | Does co-design learn across different networks of the same type? |
 | `general` (2+ distinct ONNX structural graphs per schedule) | `fixed` | Can the policy transfer among graphs under one timing target? |
 | `general` | `task_fixed` | Does one policy adapt to new graphs **and** different fixed target clocks? |
 | `general` | `search` | Does shared architecture + clock search generalize across graphs? |
+| `cross_family` (2+ different operator families) | `fixed` | Does the policy transfer between fundamentally different operator families? |
+| `cross_family` | `task_fixed` | Does that cross-family transfer persist across fixed timing targets? |
+| `cross_family` | `search` | Can one architecture/clock search policy operate across heterogeneous graph families? |
 
 Select the regimes with the existing `fpgai-rl-hardware-campaign` CLI:
 
@@ -101,3 +107,34 @@ clock has **not trained a Beta clock actor**; the runner will not silently
 use that untrained head in a `search` evaluation. Fixed-target evaluation
 of a search-trained policy, or transfers between globally fixed and task-fixed
 targets, remains possible but is labeled as a different training treatment.
+
+### Research question: fixed network type versus heterogeneous types
+
+A `same` regime repeatedly optimizes one **exact** ONNX file. A `family`
+regime requires 2+ distinct ONNX graph fingerprints but just one inferred
+operator family. A `general` regime requires 2+ structures and permits either
+same-family or mixed-family sampling. A `cross_family` regime requires 2+
+**different** source-inferred operator families; it may not be used unless
+preflight supports the ONNX models. The coarse classes are
+`convolutional` (Conv anywhere), `dense_matmul` (MatMul/Gemm without Conv),
+`attention` (explicit Attention op) and `other`. This taxonomy is not a
+claim that all networks in a family are equivalent or independently held out.
+
+In each training episode the policy decides legal architecture parameters,
+including tile/parallelism/pipeline/precision, and continuous clock when the
+scenario permits. Native HLS determines resource, numerical and timing
+qualification. **A source-valid case with 349 DSPs against a 220-DSP cap is a
+real failed action and receives the original -0.05 penalty**; it must not
+be silently removed from the action set. Likewise an original timing miss
+at the selected clock is a negative experience. The source mask ONLY rejects
+compiler-illegal changes or duplicate/no-op designs, never secretly predicts
+resource/timing feasibility.
+
+**Current reward contract:** source-valid, independently audited unqualified
+cases receive exactly -0.05; the first qualified design receives -0.005;
+subsequent qualified changes receive log(best_previous_ns/best_new_ns)-0.005.
+The policy's feasibility auxiliary may learn *from* the failed HLS reports,
+but failure is not a reason to change a requested clock or resource cap during
+the same predefined scientific run. If graded penalties are later introduced,
+that is a separate named reward ablation with independent replay, not an
+unannounced replacement for this established baseline.

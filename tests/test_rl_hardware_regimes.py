@@ -232,3 +232,68 @@ def test_explicit_regimes_require_identical_hardware_constraints(tmp_path):
     tasks = campaign.read_tasks(path)
     with pytest.raises(ValueError, match="same FPGA part"):
         _plan(tasks, "general", "search", episodes=2)
+
+
+def test_hw08_family_and_cross_family_questions_are_source_only(tmp_path):
+    """Two CNNs are within-family, never evidence of cross-family transfer."""
+    tasks = campaign.read_tasks(_manifest(tmp_path, general=True))
+    within = _plan(tasks, "family", "fixed", episodes=2)
+    assert within["distinct_onnx_graph_count"] == 2
+    assert within["distinct_onnx_operator_family_count"] == 1
+    assert set(within["onnx_operator_family_by_task"].values()) == {
+        "convolutional"
+    }
+    with pytest.raises(ValueError, match="two distinct ONNX operator families"):
+        _plan(tasks, "cross_family", "fixed", episodes=2)
+
+
+def test_hw08_cross_family_rejects_same_family_even_if_graph_is_different(tmp_path):
+    tasks = campaign.read_tasks(_manifest(tmp_path, general=True))
+    # General mixes graph structures; cross-family additionally requires
+    # different operator families. No HLS, Gym or synthetic vendor calls.
+    assert _plan(tasks, "general", "search", episodes=2)[
+        "distinct_onnx_operator_family_count"
+    ] == 1
+    with pytest.raises(ValueError, match="two distinct ONNX operator families"):
+        _plan(tasks, "cross_family", "search", episodes=2)
+
+
+def test_hw08_fixed_family_refuses_mixed_conv_and_dense_graphs(tmp_path):
+    from onnx import TensorProto, helper, numpy_helper
+    from rl_environment.experiments.hardware_regimes import onnx_operator_family
+
+    manifest = _manifest(tmp_path)
+    data = json.loads(manifest.read_text())
+    dense = tmp_path / "dense.onnx"
+    weight = numpy_helper.from_array(
+        np.ones((4, 2), dtype=np.float32), name="w"
+    )
+    graph = helper.make_graph(
+        [helper.make_node("MatMul", ["x", "w"], ["out"])],
+        "dense_network",
+        [helper.make_tensor_value_info("x", TensorProto.FLOAT, [1, 4])],
+        [helper.make_tensor_value_info("out", TensorProto.FLOAT, [1, 2])],
+        initializer=[weight],
+    )
+    model = helper.make_model(graph, opset_imports=[helper.make_opsetid("", 13)])
+    onnx.checker.check_model(model)
+    dense.write_bytes(model.SerializeToString())
+    assert onnx_operator_family(dense) == "dense_matmul"
+    data["tasks"].append(_task("dense", "dense.onnx"))
+    manifest.write_text(json.dumps(data))
+    tasks = campaign.read_tasks(manifest)
+    with pytest.raises(ValueError, match="one ONNX operator family"):
+        _plan(tasks, "family", "fixed", episodes=2)
+    different = _plan(tasks, "cross_family", "fixed", episodes=2)
+    assert different["distinct_onnx_operator_family_count"] == 2
+    assert set(different["onnx_operator_family_by_task"].values()) == {
+        "convolutional", "dense_matmul"
+    }
+    assert different["native_execution_authorized"] is False
+
+
+def test_hw08_hardware_infeasibility_is_real_negative_rl_feedback():
+    from rl_environment.reward import latency_only_reward
+    assert latency_only_reward(None, None, qualified=False) == -.05
+    assert latency_only_reward(9072., 9072., qualified=False) == -.05
+    assert latency_only_reward(None, 9072., qualified=True) == -.005

@@ -12,7 +12,7 @@ from hashlib import sha256
 import json
 from math import isfinite
 
-NETWORK_REGIMES = ("auto", "same", "general")
+NETWORK_REGIMES = ("auto", "same", "family", "general", "cross_family")
 CLOCK_REGIMES = ("search", "fixed", "task_fixed")
 
 
@@ -101,9 +101,29 @@ def onnx_structure_sha256(path) -> str:
                              separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
+def onnx_operator_family(path) -> str:
+    """Conservative operator-family label for research task grouping.
+
+    This is a *source-derived* taxonomy, not a guarantee of semantics or
+    hardware compatibility. A graph with Conv is convolutional even if it
+    also contains Gemm/Softmax. Unsupported operators remain an other family.
+    """
+    import onnx
+
+    graph = onnx.load(str(path), load_external_data=False).graph
+    ops = {node.op_type for node in graph.node}
+    if ops & {"Attention", "MultiHeadAttention"}:
+        return "attention"
+    if "Conv" in ops:
+        return "convolutional"
+    if ops & {"MatMul", "Gemm"}:
+        return "dense_matmul"
+    return "other"
+
+
 def validate_experiment_regimes(schedule, *, network_regime: str,
                                 clock_regime: str) -> dict:
-    """Validate four preregistered same/general × fixed/search settings."""
+    """Validate exact-network, within-family and cross-family studies."""
     if network_regime not in NETWORK_REGIMES or clock_regime not in CLOCK_REGIMES:
         raise ValueError("Unknown network or clock experiment regime")
     if not schedule:
@@ -123,14 +143,21 @@ def validate_experiment_regimes(schedule, *, network_regime: str,
     if network_regime == "same" and len(model_ids) != 1:
         raise ValueError("Same-network regime requires exactly one immutable ONNX model")
     structure_by_task = {}
-    if network_regime == "general":
+    family_by_task = {}
+    if network_regime in ("family", "general", "cross_family"):
         if len(model_ids) < 2:
-            raise ValueError("General-network regime requires at least two distinct ONNX models")
+            raise ValueError("Multi-network regime requires at least two distinct ONNX models")
         for task in schedule:
             if task.id not in structure_by_task:
                 structure_by_task[task.id] = onnx_structure_sha256(task.onnx)
+                family_by_task[task.id] = onnx_operator_family(task.onnx)
         if len(set(structure_by_task.values())) < 2:
-            raise ValueError("General-network regime needs distinct ONNX graph architectures, not only weights")
+            raise ValueError("Multi-network regime needs distinct ONNX graph architectures, not only weights")
+        families = set(family_by_task.values())
+        if network_regime == "family" and len(families) != 1:
+            raise ValueError("Fixed network-family regime requires one ONNX operator family")
+        if network_regime == "cross_family" and len(families) < 2:
+            raise ValueError("Cross-family regime needs at least two distinct ONNX operator families")
     unique_clocks = {task.initial_clock_ns for task in schedule}
     if clock_regime == "fixed" and len(unique_clocks) != 1:
         raise ValueError("Fixed-clock regime requires one identical initial_clock_ns across all scheduled tasks")
@@ -147,6 +174,10 @@ def validate_experiment_regimes(schedule, *, network_regime: str,
             len(set(structure_by_task.values())) if structure_by_task else None
         ),
         "onnx_graph_sha256_by_task": dict(sorted(structure_by_task.items())),
+        "onnx_operator_family_by_task": dict(sorted(family_by_task.items())),
+        "distinct_onnx_operator_family_count": (
+            len(set(family_by_task.values())) if family_by_task else None
+        ),
         "fixed_clock_ns": clock,
         "fixed_clock_ns_by_task": dict(sorted(by_task.items())),
         "clock_action_bounds_ns": (

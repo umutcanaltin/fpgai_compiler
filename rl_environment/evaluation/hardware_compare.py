@@ -67,7 +67,9 @@ def _label(meta: dict) -> str:
         name += "_no_trial_history"
     if meta.get("clock_regime") in ("fixed", "task_fixed", "search"):
         name += "_" + meta["clock_regime"] + "_clock"
-    if meta.get("checkpoint_training_network_regime") in ("same", "general"):
+    if meta.get("checkpoint_training_network_regime") in (
+        "same", "family", "general", "cross_family"
+    ):
         name += "_trained_" + meta["checkpoint_training_network_regime"]
     if meta.get("checkpoint_training_clock_regime") in ("fixed", "task_fixed", "search"):
         name += "_trainedclock_" + meta["checkpoint_training_clock_regime"]
