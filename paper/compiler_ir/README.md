@@ -2,6 +2,8 @@
 
 This directory contains the extended compiler-paper research history, experiment protocols, proof sketches and manuscript work. It is **not the compiler user guide**. For installation and usage start at [FPGAI Research](../../README.md) and [Using FPGAI](../../docs/USING_FPGAI.md).
 
+**Active first-paper work (6 November 2026):** [Scientific completion and validation gates](FIRST_PAPER_SCIENTIFIC_COMPLETION_20261106.md). The RL branch is preserved and paused; new source-contract ablation and HLS/RTL memory-translation analysis are proposed experiments, not verified measurements.
+
 ## Scientific scope
 
 The current compiler-paper work investigates two related questions:
