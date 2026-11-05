@@ -23,8 +23,7 @@ def test_hw09_demo_source_models_split_and_samples_are_reproducible(tmp_path):
         (t.onnx_sha256, t.samples_sha256) for t in b
     ]
     for t in a:
-        with np.load(t.samples, allow_pickle=False) if False else open(t.samples, "rb") as stream:
-            samples = np.load(stream, allow_pickle=False)
+        samples = np.load(t.samples, allow_pickle=False)
         assert samples.dtype == np.float32
         assert samples.shape[0] == 2
         assert np.isfinite(samples).all()
