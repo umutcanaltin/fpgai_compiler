@@ -235,15 +235,18 @@ def _environment(task: HardwareTask, *, root: Path,
 
 
 def _trial_record(episode: int, step: int, task: HardwareTask, *,
-                  environment, action, reward, info,
-                  gradient, method: str):
+                  source_action: HardwareEdit | None,
+                  action, reward, info, gradient, method: str,
+                  rejected_source_proposals: int = 0):
+    """Store the pre-step compiler action, never the next state's offer."""
     audit = info["original_vitis_audit"]
-    chosen = environment.offers[action[0]]
+    chosen = source_action
     return {
         "schema": "fpgai-research/hardware-rl-trial/v1",
         "episode": episode, "step": step, "task_id": task.id,
         "method": method, "source_action_index": action[0],
         "source_action": asdict(chosen) if chosen else None,
+        "rejected_source_proposals_before_native": rejected_source_proposals,
         "requested_clock_ns": action[1],
         "native_state_sha256": info["state_sha256"],
         "native_case": info["native_case"],
@@ -253,6 +256,51 @@ def _trial_record(episode: int, step: int, task: HardwareTask, *,
         "original_audit": original_hls_diagnostics(audit),
         "gradient": gradient,
     }
+
+
+def _choose_admitted_action(agent, environment, observation, *,
+                           train: bool, stochastic_evaluation: bool,
+                           max_source_proposals: int = 64):
+    """Reject no-op/visited complete states before an original Vitis call.
+
+    Only an accepted original policy sample enters the learning trajectory.
+    These are acceptance-conditioned samples; proposal rejections are logged
+    and must be disclosed in any scientific policy comparison. Frozen
+    deterministic evaluation never silently changes its policy.
+    """
+    if (type(max_source_proposals) is not int
+            or not 1 <= max_source_proposals <= 256):
+        raise ValueError("Bounded source-only proposal budget required")
+    rejected = 0
+    for _ in range(max_source_proposals):
+        if isinstance(agent, RandomHardwarePolicy):
+            action, tape = agent.choose(observation), None
+        else:
+            action, tape = agent.choose(
+                observation, training=train,
+                sample=(train or stochastic_evaluation),
+            )
+        try:
+            admitted = environment.preview_action(action)
+        except ValueError as exc:
+            reason = str(exc)
+            if not (reason.startswith("No-op architecture-clock")
+                    or reason.startswith("Repeated complete hardware state")):
+                raise
+            rejected += 1
+            if not train and not stochastic_evaluation and not isinstance(
+                    agent, RandomHardwarePolicy):
+                raise RuntimeError(
+                    "Deterministic frozen policy proposed a duplicate; "
+                    "run with --stochastic-evaluation only as an explicitly "
+                    "reported experimental treatment"
+                ) from exc
+            continue
+        return action, tape, environment.offers[action[0]], admitted, rejected
+    raise RuntimeError(
+        f"No novel source-backed proposal after {max_source_proposals} "
+        "source-only attempts; no Vitis call made"
+    )
 
 
 def run_campaign(*, tasks, plan: dict, output_root: str | Path,
@@ -312,20 +360,20 @@ def run_campaign(*, tasks, plan: dict, output_root: str | Path,
         gradient_receipt = None
         for step in range(plan["original_vitis_calls_per_episode"]):
             train = not plan["evaluation"] and plan["method"] != "random"
-            if isinstance(agent, RandomHardwarePolicy):
-                action = agent.choose(observation)
-                tape = None
-            else:
-                action, tape = agent.choose(
-                    observation, training=train,
-                    sample=(train or stochastic_evaluation),
+            (action, tape, source_action, admitted, rejected_proposals) = (
+                _choose_admitted_action(
+                    agent, environment, observation, train=train,
+                    stochastic_evaluation=stochastic_evaluation,
                 )
-            # The only native call is inside Gym.step(). It is independently
-            # audited there; training separately replays before gradients.
+            )
+            if total_calls >= authorized_calls:
+                raise RuntimeError("Native Vitis call authorization exceeded")
+            # Gym.step() rebuilds the action catalog for the NEXT state,
+            # so the exact pre-step offer was captured above.
             observation, reward, terminated, truncated, info = environment.step(action)
             total_calls += 1
-            if total_calls > authorized_calls:
-                raise RuntimeError("Native Vitis call authorization exceeded")
+            if admitted.state_sha256 != info["state_sha256"]:
+                raise RuntimeError("Preflight source state and original HLS receipt disagree")
             if train:
                 if isinstance(agent, HardwareEpisodicTrainer):
                     gradient_receipt = agent.observe(
@@ -340,9 +388,10 @@ def run_campaign(*, tasks, plan: dict, output_root: str | Path,
             else:
                 gradient_receipt = None
             _append_jsonl(journal, _trial_record(
-                i, step, task, environment=environment, action=action,
+                i, step, task, source_action=source_action, action=action,
                 reward=reward, info=info, gradient=gradient_receipt,
                 method=plan["method"],
+                rejected_source_proposals=rejected_proposals,
             ))
             rewards.append(reward)
             qualified_calls += int(info["qualified"])
@@ -480,7 +529,11 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
         for j, trial in enumerate(group):
             if (trial["step"] != j
                     or trial["episode"] != episode_index
-                    or trial.get("method") != metadata["method"]):
+                    or trial.get("method") != metadata["method"]
+                    or type(trial.get("rejected_source_proposals_before_native", 0))
+                       is not int
+                    or not 0 <= trial.get(
+                        "rejected_source_proposals_before_native", 0) < 64):
                 raise ValueError("Out-of-order, duplicated, or wrong-method native trial")
             # Recreate the exact source-defined action index from the
             # *pre-step* architecture state, not merely a plausible edit.
