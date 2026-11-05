@@ -13,7 +13,7 @@ import json
 from math import isfinite
 
 NETWORK_REGIMES = ("auto", "same", "general")
-CLOCK_REGIMES = ("search", "fixed")
+CLOCK_REGIMES = ("search", "fixed", "task_fixed")
 
 
 def onnx_structure_sha256(path) -> str:
@@ -121,7 +121,11 @@ def validate_experiment_regimes(schedule, *, network_regime: str,
     unique_clocks = {task.initial_clock_ns for task in schedule}
     if clock_regime == "fixed" and len(unique_clocks) != 1:
         raise ValueError("Fixed-clock regime requires one identical initial_clock_ns across all scheduled tasks")
+    if clock_regime == "task_fixed" and len(unique_clocks) < 2:
+        raise ValueError("Task-fixed clock transfer requires at least two different initial clock targets")
     clock = next(iter(unique_clocks)) if clock_regime == "fixed" else None
+    by_task = ({task.id: task.initial_clock_ns for task in schedule}
+               if clock_regime == "task_fixed" else {})
     return {
         "network_regime": network_regime,
         "clock_regime": clock_regime,
@@ -131,5 +135,9 @@ def validate_experiment_regimes(schedule, *, network_regime: str,
         ),
         "onnx_graph_sha256_by_task": dict(sorted(structure_by_task.items())),
         "fixed_clock_ns": clock,
-        "clock_action_bounds_ns": [clock, clock] if clock is not None else [2.0, 32.0],
+        "fixed_clock_ns_by_task": dict(sorted(by_task.items())),
+        "clock_action_bounds_ns": (
+            [clock, clock] if clock is not None else
+            None if clock_regime == "task_fixed" else [2.0, 32.0]
+        ),
     }

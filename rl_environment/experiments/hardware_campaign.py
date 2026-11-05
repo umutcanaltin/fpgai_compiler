@@ -235,7 +235,7 @@ def _environment(task: HardwareTask, *, root: Path,
         part=task.part, resource_caps=task.resource_caps,
         max_absolute_error=task.max_absolute_error,
         initial_clock_ns=task.initial_clock_ns,
-        fixed_clock_ns=(task.initial_clock_ns if clock_regime == "fixed" else None),
+        fixed_clock_ns=(task.initial_clock_ns if clock_regime in ("fixed", "task_fixed") else None),
         max_parallel_units=task.max_parallel_units,
         max_vitis_calls=calls_per_episode,
         execute_native=native,
@@ -597,7 +597,7 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
             )
             if trial["source_action"] != serialized_offer:
                 raise ValueError("Archived action index/edit disagrees with exact compiler menu")
-            if metadata.get("clock_regime", "search") == "fixed" and (
+            if metadata.get("clock_regime", "search") in ("fixed", "task_fixed") and (
                 index == 0
                 or trial["requested_clock_ns"] != task.initial_clock_ns
             ):
@@ -704,7 +704,7 @@ def main(argv=None) -> int:
     )
     parser.add_argument(
         "--clock-regime", choices=CLOCK_REGIMES, default="search",
-        help="search=learned 2..32ns Vitis clock; fixed=one shared manifest initial clock, no clock actor",
+        help="search=learned 2..32ns clock; fixed=one global clock; task_fixed=distinct per-task fixed clocks, no clock actor",
     )
     parser.add_argument("--episodes", type=int, default=1)
     parser.add_argument("--calls-per-episode", type=int, default=10)
