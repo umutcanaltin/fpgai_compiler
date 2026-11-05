@@ -376,3 +376,62 @@ def test_hw03_source_preview_is_pure_and_rejects_visited_candidates(env_task):
         env.preview_action((0, 15.0))
     assert env.calls == 0
     assert not env_task[2].exists()
+
+
+@pytest.mark.parametrize("reward_mode", ["best_improvement", "dense_latency"])
+def test_hw09_reward_profiles_use_each_original_audited_step_not_a_surrogate(
+        env_task, monkeypatch, reward_mode):
+    """Synthetic CPU fixture checks reward plumbing; this is NOT Vitis evidence."""
+    model, samples, root = env_task
+    env = GymHardwareNativeEnv(
+        model, samples, root, part=PART, resource_caps=CAPS,
+        max_absolute_error=.1, initial_clock_ns=14.,
+        max_vitis_calls=2, execute_native=True,
+        reward_mode=reward_mode, reward_reference_ns=10000.,
+    )
+    audit_calls = []
+
+    def mock_execute(case, state, values, **kwargs):
+        audit_calls.append(("fake_original", state.clock_ns))
+        assert not case.exists()
+        case.mkdir(parents=True)
+        (case / "CPU_MOCK_NOT_E3_HLS").write_text("not vendor evidence")
+        return _fake_hls_result(
+            case, state, values, qualified=state.clock_ns != 13.,
+        )
+
+    def mock_audit(case, state, values):
+        audit_calls.append(("fake_readonly_replay", state.clock_ns))
+        assert (case / "CPU_MOCK_NOT_E3_HLS").exists()
+        return _fake_hls_result(
+            case, state, values, qualified=state.clock_ns != 13.,
+        )
+
+    monkeypatch.setattr(hardware_native, "execute_native_case", mock_execute)
+    monkeypatch.setattr(hardware_native, "audit_native_case", mock_audit)
+    obs, info = env.reset(seed=101)
+    assert info["native_vitis_calls"] == 0
+    assert not root.exists()
+
+    _, failed_reward, _, _, failed_info = env.step((0, 13.))
+    assert failed_reward == -.05
+    assert failed_info["qualified"] is False
+    assert failed_info["reward_mode"] == reward_mode
+    _, feasible_reward, _, truncated, good_info = env.step((0, 15.))
+    expected_ns = 646 * 15.
+    assert good_info["hls_estimated_latency_ns"] == expected_ns
+    assert good_info["qualified"] is True
+    assert truncated is True
+    if reward_mode == "best_improvement":
+        assert feasible_reward == -.005
+    else:
+        assert feasible_reward == 10000. / (10000. + expected_ns) - .005
+    assert [kind for kind, _ in audit_calls] == [
+        "fake_original", "fake_readonly_replay",
+        "fake_original", "fake_readonly_replay",
+    ]
+    first = root / "episode_000000" / "step_0000.json"
+    second = root / "episode_000000" / "step_0001.json"
+    assert first.is_file() and second.is_file()
+    assert json.loads(first.read_text())["reward"] == -.05
+    assert json.loads(second.read_text())["reward"] == feasible_reward
