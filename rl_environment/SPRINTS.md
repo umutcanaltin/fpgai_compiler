@@ -1,3 +1,11 @@
+## HW-RL-08 — trainable infeasibility and graph-family research questions (source only)
+
+- Source-legal actions can choose too many DSPs or fail scheduling; these are real HLS observations with original `-0.05` penalty. Never change the timing target or resource caps just to make random samples feasible.
+- Distinguish one exact network (`same`) from several structurally distinct networks of one type (`family`), mixed structures (`general`) and heterogeneous operator families (`cross_family`).
+- The GNN sees graph structure, target clock, resources and audited previous trials; when clocks are searchable it chooses the target period too. Same-family and cross-family distinctions are based on source-derived ONNX operator categories, not arbitrary file names or different weights.
+- Keep original task samples, exact Vitis call accounting, independent replay, negative outcomes and output directories immutable. Hold out model bytes *and* structural families where applicable before claiming cross-family generalization.
+- Next gates: new source CPU regression, source-only family/cross-family plans, a genuinely supported cross-family ONNX task manifest (per-model sample geometry), and independent original Vitis audits. No new original Vitis results yet.
+
 ## HW-RL-06 — network and clock regime factorization (2026-11-05; source only)
 
 **Implemented on RL feature branch; workstation tests/new source-native audits pending.**
