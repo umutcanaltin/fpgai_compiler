@@ -368,14 +368,29 @@ def run_campaign(*, tasks, plan: dict, output_root: str | Path,
         message_passing=plan["message_passing"],
         use_trial_history=plan["trial_history"],
     )
+    checkpoint_manifest = None
     if checkpoint is not None:
-        agent.load_private(checkpoint, load_optimizer=False)
+        checkpoint_manifest = agent.load_private(
+            checkpoint, load_optimizer=False
+        )
+        if checkpoint_manifest.get("campaign_source_sha") != source_rev:
+            raise ValueError(
+                "Private evaluation checkpoint belongs to another source revision"
+            )
     root.mkdir(parents=True, exist_ok=False)
     metadata = {
         **plan, "source_only_plan": False, "native_execution_authorized": True,
         "source_revision_sha": source_rev, "original_cases_private": True,
         "task_definitions": [task.metadata() for task in tasks],
         "training_checkpoint_resume_supported": False,
+        "checkpoint_training_network_regime": (
+            checkpoint_manifest.get("network_regime")
+            if checkpoint_manifest is not None else None
+        ),
+        "checkpoint_training_clock_regime": (
+            checkpoint_manifest.get("clock_regime", "search")
+            if checkpoint_manifest is not None else None
+        ),
         "independent_campaign_audit_completed": False,
     }
     _write_json_new(root / "campaign.json", metadata)

@@ -106,6 +106,17 @@ def validate_experiment_regimes(schedule, *, network_regime: str,
         raise ValueError("Unknown network or clock experiment regime")
     if not schedule:
         raise ValueError("An experiment needs a nonempty bounded task schedule")
+    if network_regime != "auto":
+        hardware_cohorts = {
+            (task.part, task.resource_caps, task.max_absolute_error,
+             task.max_parallel_units)
+            for task in schedule
+        }
+        if len(hardware_cohorts) != 1:
+            raise ValueError(
+                "Explicit network/clock regimes require the same FPGA part, "
+                "resource caps, numerical error limit and parallelism limits"
+            )
     model_ids = {task.onnx_sha256 for task in schedule}
     if network_regime == "same" and len(model_ids) != 1:
         raise ValueError("Same-network regime requires exactly one immutable ONNX model")

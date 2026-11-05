@@ -130,3 +130,18 @@ def test_hw06_cross_clock_ablation_requires_explicit_opt_in():
         compare.paired_summary(
             baseline, mismatch, allow_clock_regime_ablation=True,
         )
+
+
+def test_hw06_general_network_training_provenance_distinguishes_same_method():
+    one = _run("ppo", latency=[1000., None], qualified_index=[1, None])
+    many = copy.deepcopy(one)
+    one["metadata"]["checkpoint_training_network_regime"] = "same"
+    one["metadata"]["checkpoint_training_clock_regime"] = "fixed"
+    many["metadata"]["checkpoint_training_network_regime"] = "general"
+    many["metadata"]["checkpoint_training_clock_regime"] = "fixed"
+    rows, report = compare.paired_summary(one, many)
+    assert report["baseline_training_network_regime"] == "same"
+    assert report["candidate_training_network_regime"] == "general"
+    assert "trained_same" in report["baseline"]
+    assert "trained_general" in report["candidate"]
+    assert report["paired_significance_claim"] is False

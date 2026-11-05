@@ -220,3 +220,13 @@ def test_regime_cli_flags_plan_source_only_without_vendor(tmp_path, capsys):
     assert plan["clock_regime"] == "fixed"
     assert plan["clock_action_bounds_ns"] == [14.0, 14.0]
     assert not root.exists()
+
+
+def test_explicit_regimes_require_identical_hardware_constraints(tmp_path):
+    path = _manifest(tmp_path, general=True)
+    source = json.loads(path.read_text())
+    source["tasks"][1]["resource_caps"][0] -= 1
+    path.write_text(json.dumps(source))
+    tasks = campaign.read_tasks(path)
+    with pytest.raises(ValueError, match="same FPGA part"):
+        _plan(tasks, "general", "search", episodes=2)
