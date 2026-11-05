@@ -355,3 +355,24 @@ def test_hw03_unattributed_infrastructure_failures_never_become_negative_rewards
     assert env.best_latency_ns is None
     assert cases[0].is_dir()
     assert not list(cases[0].parent.glob("step_*.json"))
+
+
+def test_hw03_source_preview_is_pure_and_rejects_visited_candidates(env_task):
+    """Shared campaign/Gym preflight never consumes a native call."""
+    env = _new_env(env_task, execute_native=True)
+    observation, _ = env.reset(seed=101)
+    first = env.preview_action((0, 15.0))
+    assert first.clock_ns == 15.0
+    assert first.state_sha256 != env.current.state_sha256
+    assert env.preview_action((0, 15.0)).state_sha256 == first.state_sha256
+    assert env.calls == 0
+    assert env.current.clock_ns == 14.0
+    assert not env_task[2].exists()
+    assert observation["action_mask"][0] == 1
+    with pytest.raises(ValueError, match="No-op"):
+        env.preview_action((0, 14.0))
+    env.visited.add(first.state_sha256)
+    with pytest.raises(ValueError, match="Repeated complete"):
+        env.preview_action((0, 15.0))
+    assert env.calls == 0
+    assert not env_task[2].exists()
