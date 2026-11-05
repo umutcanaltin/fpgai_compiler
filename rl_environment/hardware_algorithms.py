@@ -114,35 +114,44 @@ class HardwareEpisodicTrainer(HardwareGraphTrainer):
         return actor, critic, entropy_loss, feasibility, 0.
 
     def _ppo_objective(self, experiences, returns):
-        # A new forward pass after *every* PPO optimizer epoch. The behavior
-        # log probability comes from original pre-update actions, including
-        # their exact latent Beta clock samples (not rounded Vitis clocks).
+        # Fresh policy likelihood for the entire source-admission trace,
+        # including rejected source-only draws and the final accepted Vitis
+        # candidate. No invented rewards from rejected proposals.
         current_logprobs = []
         values = []
         entropies = []
         feasibility_logits = []
         for item in experiences:
-            tape = item.tape
-            logits, value, contexts = self.policy(
-                tape.observation, with_context=True
-            )
-            chosen = tape.source_action_index
-            cat = Categorical(logits=logits)
-            params = torch.nn.functional.softplus(
-                self.policy.clock_head(contexts[chosen])
-            ) + 1.01
-            beta = Beta(params[0], params[1])
-            latent = tape.sampled_clock_fraction
-            current_logprobs.append(
-                cat.log_prob(torch.tensor(chosen))
-                + beta.log_prob(latent)
-            )
-            values.append(value)
-            entropies.append(cat.entropy() + beta.entropy())
-            feasibility_logits.append(self.policy.feasibility_head(
-                torch.cat((contexts[chosen],
-                           tape.requested_clock_fraction), dim=-1)
-            ).squeeze(-1))
+            accepted = item.tape
+            trace = (*accepted.rejected_proposal_tapes, accepted)
+            trace_logprobs = []
+            trace_entropies = []
+            for attempt in trace:
+                if (attempt.observation is None
+                        or attempt.sampled_clock_fraction is None):
+                    raise ValueError("PPO admission trace lacks a sampled original policy action")
+                logits, value, contexts = self.policy(
+                    attempt.observation, with_context=True
+                )
+                chosen = attempt.source_action_index
+                cat = Categorical(logits=logits)
+                params = torch.nn.functional.softplus(
+                    self.policy.clock_head(contexts[chosen])
+                ) + 1.01
+                beta = Beta(params[0], params[1])
+                trace_logprobs.append(
+                    cat.log_prob(torch.tensor(chosen))
+                    + beta.log_prob(attempt.sampled_clock_fraction)
+                )
+                trace_entropies.append(cat.entropy() + beta.entropy())
+                if attempt is accepted:
+                    values.append(value)
+                    feasibility_logits.append(self.policy.feasibility_head(
+                        torch.cat((contexts[chosen],
+                                   accepted.requested_clock_fraction), dim=-1)
+                    ).squeeze(-1))
+            current_logprobs.append(torch.stack(trace_logprobs).sum())
+            entropies.append(torch.stack(trace_entropies).sum())
         new_lp = torch.stack(current_logprobs)
         old_lp = torch.stack([
             v.tape.log_probability.detach() for v in experiences
