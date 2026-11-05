@@ -237,6 +237,13 @@ def test_hw05_trial_receipt_binds_exact_pre_step_edit(tmp_path):
         "qualified": False,
         "hls_estimated_latency_ns": None,
         "gate_failures": ["ORIGINAL_HLS_SCHEDULING_NOT_FEASIBLE"],
+        "csim_passed": True,
+        "csim_max_absolute_error": 0.0004,
+        "raw_hls_worst_case_cycles": 780,
+        "requested_clock_ns": 15.0,
+        "hls_timing": {"hls_timing_feasible": False},
+        "original_hls_resource_consumed": {},
+        "resource_caps": {},
     }
     receipt = campaign._trial_record(
         0, 0, task, source_action=original, action=(2, 15.0),
