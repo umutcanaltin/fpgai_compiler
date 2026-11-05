@@ -1,3 +1,17 @@
+**2026-11-05 HW-RL-05 checkpoint/replay note:** The new
+`rl_environment/hardware_checkpoint.py` persists source-pinned,
+tensor-only shared-GNN weights, Adam moments and torch CPU RNG after
+completed audited native episodes. It never calls `torch.load`,
+reads optimizer data as `np.load(..., allow_pickle=False)`, and refuses
+unknown Adam state or mismatched source/model/seed metadata. This is a
+*private snapshot for future resume design*, **NOT authorization to
+resume an interrupted native study**. Both the original native case
+and campaign journal must be independently re-audited before any
+continuation, and resumed sections need exact source provenance.
+The source-only `hardware_compare` also requires complete independent
+native replay for *both* heldout campaigns and retains censored
+outcomes. New source changes are not yet verified on the user's PC.
+
 **2026-11-05 HW-RL-05 new-paper algorithm campaign rules:** The user
 authorized continuing the original-HLS hardware RL environment and adding
 scientifically comparable algorithms on the *existing* feature branch.

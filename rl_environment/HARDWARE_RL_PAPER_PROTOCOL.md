@@ -115,10 +115,17 @@ than GAE, and a learned critic; describe those implementation choices
 precisely. Both REINFORCE and PPO update only at episode boundaries;
 actor-critic updates after each audited step.
 
-Current private tensor-only checkpoints permit **evaluation restore
-only**. They do not contain Adam moments and cannot be represented as
-an exact optimization resumption. Interrupted native campaigns remain
-provisional; never relaunch them into the same case folder.
+Private evaluation-only `shared_hardware_gnn.npz` checkpoints
+remain restore-only and contain **no optimizer state**. Separately,
+HW-RL-05 now writes `training_state/episode_*/training_tensors.npz`,
+containing the shared GNN, the exact Adam moment tensors, torch CPU
+sampling RNG, source SHA and episode/task metadata. This separate
+snapshot is validated with `allow_pickle=False` and SHA checks.
+It is **not an automatically resumable original-Vitis campaign**:
+the remaining original call budget, previous immutable case journal
+and source identity must all be reconciled before continuation.
+Interrupted native campaigns remain provisional; never relaunch
+into an existing case folder.
 
 ## Experimental design (preregister before big native runs)
 
@@ -275,4 +282,51 @@ qualified discovery rates and all four censoring categories, first
 feasible call and conditional HLS latency ratios. It does not infer
 statistical significance from a tiny smoke or fake training data.
 The implementation/tests still require workstation verification.
+
+
+### Source-level reproducibility gates added 5 November
+
+The standalone `hardware_campaign --audit` now reconstructs not
+only the emitted source states and original numerical/HLS receipts,
+but also the *exact compiler action catalog index* recorded for each
+trial. The original case path, source SHA, requested clock, reward,
+qualified latency/null censoring and per-episode summaries are
+checked without any vendor tool call.
+
+The paper comparator only grants an `INDEPENDENT_NATIVE_CASES_AUDITED`
+result after two full successful original-native replays. A direct
+unit-test summary over synthetic dictionaries is **unverified** and
+is rejected by the paper export gate. No source-level audit
+automatically proves that a PyTorch optimizer produced superior
+heldout hardware performance; effect sizes must be measured from
+frozen, source-matched original Vitis runs.
+
+### Methods and losses
+
+Let `a_t` be the compiler-legal masked discrete action and
+`u_t` the original policy-sampled Beta clock latent. Its canonical
+Vitis clock `c_t` is recorded exactly; the policy-gradient log
+probability is `log pi_theta(a_t|s_t) + log Beta_theta(u_t|a_t,s_t)`.
+The three policy objectives differ only in how they use independently
+observed reward data:
+
+- One-step actor-critic: TD target `r_t + gamma*V(s_(t+1))` for
+  nonterminal steps, plus value loss and the shared observed
+  feasibility auxiliary.
+- REINFORCE with learned baseline: complete episode discounted
+  `G_t = sum_(k>=t) gamma^(k-t)*r_k`; actor loss
+  `-mean[log pi_t * (G_t - V(s_t).detach())]`, with critic
+  squared error and feasibility auxiliary, once per full episode.
+- PPO-Clip: old rollout log probabilities are frozen; each optimizer
+  epoch re-evaluates the original observation/action/latent under the
+  current GNN, applies the standard
+  `min(rho_t*A_t, clip(rho_t,1-eps,1+eps)*A_t)` objective,
+  plus critic, entropy and the same feasibility auxiliary.
+  Current PPO is full-episode, not minibatch/GAE PPO.
+
+No algorithm uses a learned QoR surrogate as its reward. The
+`torch` RNG is private to the active shared-actor run and the
+random search baseline uses its own independent NumPy generator.
+None of these mathematical definitions claim an empirical advantage
+before actual frozen heldout benchmark results.
 

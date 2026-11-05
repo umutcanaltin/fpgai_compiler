@@ -1,3 +1,12 @@
+**HW-RL-05 source progress, 5 Nov 2026:** Three trainable native-audited
+GNN methods + random, multi-network opt-in campaign, original-case
+independent replay, matched heldout pair reporting and separate private
+Adam/RNG snapshots are implemented on the active feature branch.
+All new source remains pending workstation tests. Safe automatic
+resume of interrupted original experiments and novelty-aware exact
+action admission are still missing; no multi-network native study
+has run. Full paper claims require actual multi-seed audited outcomes.
+
 ## 5 November 2026 — HW-RL-05 paper environment (new prospective track)
 
 1. Source-only environment/algorithms: typed mixed-operator graph,

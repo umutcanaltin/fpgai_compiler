@@ -12,7 +12,7 @@ with one re-audited gradient. No GNN learning superiority established.
 | HW-RL-05B | Bounded multi-task plan/runner, disjoint task manifest, explicit original Vitis call cap, create-only cases, per-episode journal, evaluation-only checkpoints | **PENDING** source-only CLI and full CPU suite |
 | HW-RL-05C | Read-only complete native campaign audit reproducing original source/task/reward, cases, episode summaries | **PENDING** original 2-case replay and negative tamper tests |
 | HW-RL-05D | Frozen heldout/paired random/no-GNN comparisons, censoring-aware scientific report | **SOURCE IMPLEMENTED**, `hardware_compare.py` verifies original native source, exact paired tasks, seed, call budgets and censoring; pending CPU/native audit |
-| HW-RL-05E | Optimizer+RNG resumable checkpoint with safe interrupted-case recovery | **NOT IMPLEMENTED**, eval NPZ-only |
+| HW-RL-05E | Private tensor-only Adam+torch RNG snapshots after completed episodes | **SOURCE IMPLEMENTED** under `training_state/`; CPU gate pending; **automatic interrupted-case resume NOT IMPLEMENTED** |
 | HW-RL-05F | Evolution/TPE, fixed-clock ablations and prospective 3-seed transfer benchmark | **NOT IMPLEMENTED** methods/data; no native campaign |
 | HW-RL-05G | Manuscript: falsifiable RQs, prior work, data/figures, actual effect sizes | **PROTOCOL ONLY**; results not available |
 

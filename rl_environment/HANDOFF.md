@@ -1,3 +1,37 @@
+## HW-RL-05 newer modules and workstation gate (5 Nov 2026)
+
+Further source-only commits added `hardware_compare.py` and
+`hardware_checkpoint.py`, plus CPU tests. The former independently
+replays two source-matched, full-budget, frozen heldout campaigns
+before exporting censored-aware pairs. The latter saves and validates
+pickle-free GNN+Adam+torch RNG state at completed episode boundaries.
+The campaign runner now writes *both* evaluation-only NPZ policy
+checkpoints and separate private training-state NPZ snapshots. There
+is **no automatic original-case resume**, and the snapshot cannot
+replace the case and episode journal audit. No new native Vitis run
+has happened since the user-supplied original HW-RL-04 rejection.
+
+After pulling branch, run:
+```bash
+python -m pip install --no-deps -e .
+python -m compileall -q rl_environment tests
+python -m pytest -q \
+  tests/test_rl_hardware_agent.py \
+  tests/test_rl_hardware_gym.py \
+  tests/test_rl_hardware_campaign.py \
+  tests/test_rl_hardware_compare.py \
+  tests/test_rl_hardware_checkpoint.py \
+  tests/test_rl_installed_cli_packaging.py
+python -m pytest -q
+```
+Only after passing, test the *source-only* HW-RL-05 plan example
+in `HARDWARE_RL_PAPER_PROTOCOL.md`; then ask for actual native
+1×2-call results, independently replay and inspect optimizer
+snapshot provenance before a large experiment. Do not claim that
+Python syntax balance alone establishes full test success.
+
+---
+
 ## HW-RL-05 current branch handoff — 5 November 2026
 
 The user wants to complete the hardware native Gym RL environment

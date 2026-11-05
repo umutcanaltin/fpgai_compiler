@@ -1,3 +1,11 @@
+> **HW-RL-05 update:** The new `hardware_compare.py` can independently
+> re-audit two matching complete frozen heldout original-HLS campaigns
+> before creating censored-aware paired comparison files. The separate
+> `hardware_checkpoint.py` adds tensor-only Adam/CPU RNG snapshots
+> at completed episode boundaries. It **does not** implement automatic
+> native campaign resume. Both modules and their CPU tests have not
+> yet been verified on the user's PC.
+
 > **5 November 2026 — HW-RL-05 online algorithms + bounded campaign
 > runner source committed (workstation tests pending).** The user's
 > HW-RL-04 workstation passed 40 focused tests, then 33 focused tests;

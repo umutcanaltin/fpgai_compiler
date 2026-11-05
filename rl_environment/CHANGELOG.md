@@ -1,3 +1,21 @@
+## 2026-11-05 — HW-RL-05 private Adam/RNG snapshots and stronger audit
+
+- Added source-revision-pinned, create-only `hardware_checkpoint.py`
+  with exact GNN state, Adam moment tensors and CPU torch RNG in
+  `npz` (no pickle). Validator checks model/method/parameter order,
+  seed, optimizer group, PyTorch version, SHA and original metadata.
+- Integrated training-state output at completed original-native
+  training episode boundaries, separate from evaluation-only
+  checkpoint exports. **No resumed native campaign execution is
+  authorized or implemented**; optimizer state alone cannot prove
+  continuity of original HLS cases or budgets.
+- Original `hardware_campaign --audit` now recreates the exact
+  pre-step source-action catalog/index and checks original immutable
+  case paths, beside model/source/reward/CSim/E3 validation.
+- Added CPU checkpoint roundtrip, tamper/wrong-algorithm tests and
+  outside-repository installed CLI regressions. New local tests and
+  real native campaigns still pending.
+
 ## 2026-11-05 — HW-RL-05 read-only heldout pairs
 
 - Added `hardware_compare.py`: compares two independently replayed,

@@ -5,11 +5,14 @@ per-step Vitis HLS feedback, multiple genuine on-policy algorithms,
 independent random/no-GNN baselines, disjoint heldout tasks, strict
 total licensed-call budgets and create-only original case evidence.
 New algorithm/runner source is not yet workstation tested; no
-generalization or learned improvement demonstrated. Private NPZ
-checkpoints are evaluation-only and **do not support exact optimizer
-resume**; full product completion still requires safe resume,
-novelty-aware action admission, read-only paired reporting and
-multi-seed native experiments. Do not treat partial build progress as
+generalization or learned improvement demonstrated. Private evaluation NPZ
+checkpoints remain restore-only; a separate source-level
+`hardware_checkpoint.py` now stores Adam optimizer moments and torch
+CPU RNG in strict tensor-only format at completed episode boundaries.
+**Automatic interrupted-campaign continuation is still not implemented**
+and requires a verified original journal/source/call-budget handoff.
+Full product completion also requires novelty-aware action admission
+and multi-seed native experiments. Do not treat partial build progress as
 a complete RL environment. Protocol:
 [HARDWARE_RL_PAPER_PROTOCOL.md](HARDWARE_RL_PAPER_PROTOCOL.md).
 
