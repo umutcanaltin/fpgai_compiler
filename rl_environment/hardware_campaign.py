@@ -272,8 +272,16 @@ def _choose_admitted_action(agent, environment, observation, *,
             or not 1 <= max_source_proposals <= 256):
         raise ValueError("Bounded source-only proposal budget required")
     rejected = 0
+    deterministic = (not train and not stochastic_evaluation
+                     and not isinstance(agent, RandomHardwarePolicy))
+    ranked = iter(agent.ranked_frozen_actions(observation)) if deterministic else None
     for _ in range(max_source_proposals):
-        if isinstance(agent, RandomHardwarePolicy):
+        if deterministic:
+            try:
+                action, tape = next(ranked), None
+            except StopIteration:
+                break
+        elif isinstance(agent, RandomHardwarePolicy):
             action, tape = agent.choose(observation), None
         else:
             action, tape = agent.choose(
@@ -288,13 +296,6 @@ def _choose_admitted_action(agent, environment, observation, *,
                     or reason.startswith("Repeated complete hardware state")):
                 raise
             rejected += 1
-            if not train and not stochastic_evaluation and not isinstance(
-                    agent, RandomHardwarePolicy):
-                raise RuntimeError(
-                    "Deterministic frozen policy proposed a duplicate; "
-                    "run with --stochastic-evaluation only as an explicitly "
-                    "reported experimental treatment"
-                ) from exc
             continue
         return action, tape, environment.offers[action[0]], admitted, rejected
     raise RuntimeError(
