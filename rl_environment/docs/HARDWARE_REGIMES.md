@@ -138,3 +138,25 @@ but failure is not a reason to change a requested clock or resource cap during
 the same predefined scientific run. If graded penalties are later introduced,
 that is a separate named reward ablation with independent replay, not an
 unannounced replacement for this established baseline.
+
+### Source-only multi-scenario suite builder
+
+Use `fpgai-rl-hardware-suite --tasks MASTER.json` to preview source-valid
+`same|family|general|cross_family` × `fixed|task_fixed|search`
+plans for each train/validation/test split. Add `--output-root NEW_DIR`
+only when you want create-only scenario manifest files and `suite.json`.
+The default holdout is **structural** (ONNX operator-graph fingerprints
+must not occur across train, validation and test). Alternatively use
+`--holdout bytes` to allow identical structures with different model bytes,
+which is a weaker generalization claim. The same master manifest must include
+all three splits. An unavailable combination is recorded explicitly as
+`UNAVAILABLE_SOURCE_COHORT`, never silently filled by an unrelated model.
+Output scenario manifests refer to the original user-owned ONNX/samples;
+no Vitis/Gym call occurs. Benchmark mode is a protocol definition, not a
+claim of successful source compilation or native performance.
+
+A suite emits one candidate manifest per supported regime/split with
+`SOURCE_PLAN_AVAILABLE` status. **Native use still requires a separate
+explicit** `fpgai-rl-hardware-campaign --execute-native --max-total-vitis-calls
+N --output-root NEW_NATIVE_ROOT` with original source, exact budget and
+separate independent replay.
