@@ -66,6 +66,8 @@ def save_training_state(trainer: HardwareGraphTrainer, directory: str | Path,
     _revision(source_revision_sha)
     if getattr(trainer, "pending", ()):
         raise ValueError("Unfinished on-policy trajectory cannot be checkpointed")
+    if type(trainer.updates) is not int or trainer.updates <= 0:
+        raise ValueError("An actual completed optimizer update is required")
     if not isinstance(metadata, dict):
         raise TypeError("Source/task/episode provenance metadata required")
     # Reject non-serializable and nonfinite metadata before creating any dir.
@@ -111,7 +113,9 @@ def save_training_state(trainer: HardwareGraphTrainer, directory: str | Path,
         "array_keys": sorted(tensors),
         "tensor_file_sha256": sha256(data_path.read_bytes()).hexdigest(),
         "metadata": metadata,
-        "private_original_hls_training_data": True,
+        "private_training_state": True,
+        "snapshot_itself_does_not_reaudit_vendor": True,
+        "source_native_replay_required_for_publication": True,
         "optimizer_and_sampling_rng_included": True,
         "automatic_native_campaign_resume_authorized": False,
         "physical_fpga_measurements": False,
