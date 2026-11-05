@@ -1,3 +1,11 @@
+## 2026-11-05 — HW-RL-05H source-novel admission and receipt repair (pending local gate)
+
+- Fixed campaign provenance: the exact pre-step `HardwareEdit` is captured before `Gym.step()` replaces the action catalog. Independent replay can now match the actual proposed compiler edit, rather than accidentally recording the next state's edit.
+- Added `GymHardwareNativeEnv.preview_action()`, the same source-only, no-Vitis/no-case check used by native `step()`. It refuses masked, no-op, already-visited and invalid complete source/clock states before native budget is spent.
+- The campaign retries bounded source-only novelty rejections for stochastic learning and random baseline. Frozen deterministic GNN evaluation uses the model's own score-ranked alternative action/conditional clock, not hidden random sampling; records rejected proposals per accepted original trial. Exhaustion fails closed, preserving cases.
+- Added CPU regressions for source preflight purity, bounded retries, deterministic frozen fallback and pre-step source-action receipts. **No local or native test results are claimed yet.** Accepted stochastic training samples are conditioned on source admission; report that sampling effect explicitly in the paper.
+- Automatic crash-safe campaign resume, extra classical search methods and multi-seed native results remain unimplemented.
+
 ## 2026-11-05 — HW-RL-05 private Adam/RNG snapshots and stronger audit
 
 - Added source-revision-pinned, create-only `hardware_checkpoint.py`
