@@ -1,3 +1,15 @@
+## HW-RL-05H — source identity and novelty safety (source committed, CPU gate pending)
+
+- [x] Capture the exact pre-step source action in the immutable trial journal (do not use post-step `offers`).
+- [x] Reuse `Gym.preview_action` for both source-only admission and native-step validation; no vendor call for no-op/visited state.
+- [x] Bounded source-only rejection/retry for stochastic agents and uniform random; no fabricated reward.
+- [x] Deterministic frozen GNN ranking over source actions and their own conditional clock means, with novelty fallback and explicit rejection counts.
+- [x] CPU regression source tests added.
+- [ ] Actual workstation targeted/full regression and installed CLI.
+- [ ] Real per-algorithm original Vitis multi-step smoke, separate independent audit and complete-budget trace.
+- [ ] Source-revision and journal reconciled crash-safe continuation; no automatic resume until this passes.
+- [ ] Additional evolutionary/Bayesian baselines and multi-seed, disjoint-network evidence.
+
 # HW-RL-05 — Multi-network online research and new algorithms (5 Nov 2026)
 
 **Current branch:** `feature/rl-hardware-knobs-environment-20261104`.
