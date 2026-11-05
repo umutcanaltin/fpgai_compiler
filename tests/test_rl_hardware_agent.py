@@ -446,3 +446,35 @@ def test_hw05_episodic_methods_reject_metadata_only_and_random_is_separate(
     with pytest.raises(ValueError, match="Unsupported"):
         create_hardware_method("fake-ppo")
 
+
+
+def test_hw05_frozen_ranked_fallback_keeps_gnn_deterministic_and_source_novel(
+        tmp_path):
+    """Frozen heldout evaluation can fill budgets without hidden RNG calls."""
+    from rl_environment.hardware_campaign import _choose_admitted_action
+
+    env = _env(tmp_path, "cnn_pool_dense")
+    obs, _ = env.reset(seed=101)
+    trainer = HardwareGraphTrainer(seed=101, hidden=24)
+    before_rng = torch.get_rng_state().clone()
+    ranked = trainer.ranked_frozen_actions(obs)
+    initial_choice, tape = trainer.choose(obs, training=False, sample=False)
+    assert tape is None
+    assert ranked[0] == initial_choice
+    assert len(ranked) == int(obs["action_mask"].sum())
+    assert len({index for index, _ in ranked}) == len(ranked)
+    assert all(obs["action_mask"][index] and 2. <= clock <= 32.
+               for index, clock in ranked)
+    assert torch.equal(torch.get_rng_state(), before_rng)
+    first = env.preview_action(ranked[0])
+    env.visited.add(first.state_sha256)
+    action, accepted_tape, _, admitted, rejected = _choose_admitted_action(
+        trainer, env, obs, train=False, stochastic_evaluation=False,
+    )
+    assert accepted_tape is None
+    assert rejected >= 1
+    assert action == ranked[rejected]
+    assert admitted.state_sha256 != first.state_sha256
+    assert torch.equal(torch.get_rng_state(), before_rng)
+    assert env.calls == 0
+    assert not env.root.exists()
