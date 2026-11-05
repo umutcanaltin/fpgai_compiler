@@ -1,3 +1,5 @@
+> **HW-RL-06 prospective factorized environments:** See [source-only environment regime matrix](docs/HARDWARE_REGIMES.md) for `--network-regime same|general` × `--clock-regime fixed|task_fixed|search`. The `general` regime now requires distinct operator/shape ONNX fingerprints, not weight differences. Fixed modes enforce clock constraints before native execution and drop the Beta clock gradient term. This design is still **unverified on native HLS** for the new source commit and is not a learning result.
+
 > **HW-RL-05H protocol amendment (5 November 2026; source-only, unverified):**
 > Every native candidate now passes a no-case/no-vendor source-only novelty
 > check. The runner binds original journal action identity before `step()`

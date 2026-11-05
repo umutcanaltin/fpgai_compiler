@@ -1,3 +1,11 @@
+## 2026-11-05 — HW-RL-06 explicit generalization/clock regime setup (unverified)
+
+- Same-network and ONNX graph-diverse general-network plans; two/three-way source-only preflight.
+- Global fixed, varying task-fixed, and continuous clock-search policies share compiler source actions and original native audit.
+- Fixed-clock action mask and discrete-only GNN/REINFORCE/PPO likelihood (no Beta clock-gradients), fixed-clock drift rejected before Vitis.
+- Campaign and independent audit record/check regime contracts; auditable heldout comparison rejects mismatched protocol conditions.
+- Added CPU-only six-way matrix, ONNX shape-fingerprint, clock-constraint and policy-gradient regression tests. No vendor calls/results claimed for this source.
+
 ## 2026-11-05 — HW-RL module organization (new revision unverified)
 
 - Moved eight large hardware RL modules into existing responsibility packages: `agents/`, `environments/`, `infrastructure/`, `experiments/`, `evaluation/`. Root `hardware_*.py` entries remain as exact module aliases to retain import/monkeypatch identity and CLI entry points.
