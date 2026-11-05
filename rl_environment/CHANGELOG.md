@@ -1,3 +1,25 @@
+## 2026-11-05 — HW-RL-05 multi-network auditable algorithms
+
+- Added one shared GNN policy interface for genuine one-step actor-critic,
+  original-HLS-audited episodic REINFORCE with value baseline and
+  clipped PPO with multiple real on-policy optimizer epochs, plus
+  independent-RNG random baseline. No fake vendor feedback.
+- Added create-only `hardware_campaign` experiment driver with explicit
+  complete budget, disjoint model-fingerprint train/val/test manifest,
+  per-episode original-Vitis execution, per-trial and per-episode raw
+  journals, evaluation-only tensor checkpoints, read-only source/task/
+  report/reward replay and no physical-Fmax claims.
+- Added focused no-Vitis unit tests for budgets, disjoint network
+  fingerprints, no-pretrained-eval gate, algorithm audit guard and
+  synthetic-only campaign plumbing.
+- Registered `fpgai-rl-hardware-campaign` installed CLI. Default is
+  source-only; native requires a fresh `--output-root`,
+  `--execute-native` and exact `--max-total-vitis-calls`.
+- Documented a falsifiable, prospective second-paper protocol with
+  prior-work differentiation and explicit missing gates. **All new
+  HW-RL-05 code and tests still need workstation verification.**
+  No real multi-network learning results are claimed.
+
 ## 2026-11-05 — HW-RL-04 native smoke and diagnostic visibility
 
 - User's first real shared-GNN/Vitis one-step smoke returned one audited

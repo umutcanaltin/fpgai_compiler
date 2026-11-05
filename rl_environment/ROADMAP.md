@@ -1,3 +1,29 @@
+## 5 November 2026 — HW-RL-05 paper environment (new prospective track)
+
+1. Source-only environment/algorithms: typed mixed-operator graph,
+   original policy and independent feasibility-first HLS audit
+   inherited from HW-RL-01..04. New actor-critic, REINFORCE,
+   PPO and random algorithms, source-only schedule/manifest and
+   native-call bounded multi-episode campaign are committed;
+   **workstation CPU gate still pending**.
+2. Native acceptance: targeted + full CPU suites, independent
+   pristine source/CSim/E3 replay, fresh 1×2-call smoke for each
+   algorithm; preserve old 6.55 ns original timing-failed case.
+3. Scientific evaluation: disjoint network families, same per-task
+   Vitis-call budget, training/validation/test, matched random/no-GNN
+   controls, repeat ≥3 seeds, proper censored feasibility data.
+4. Missing technical gates before a full study: tested multi-method
+   original native audit, novelty-aware no-op/duplicate action
+   handling, crash recovery and optimizer-state resume, automated
+   paired paper report, broader classical baselines.
+5. Paper: preregistered RQs and explicit novelty versus prior RL/HLS
+   and GNN/HLS DSE; experimental effects determine whether novelty
+   is supported. Never claim policy superiority prematurely.
+
+See [HW-RL-05 scientific protocol](HARDWARE_RL_PAPER_PROTOCOL.md).
+
+---
+
 **Next gated milestone — Native Gym RL 100×10 learning revision:** Source changes described in [SPRINT_RL_LEARNING_REDESIGN.md](SPRINT_RL_LEARNING_REDESIGN.md) are pending the CPU suite and a an audited fresh smoke-case diagnosis (old native folders deleted to free space); then execute a source-pinned 22-native-call smoke and only after an independent audit consider the 109-episode/1090-maximum-call study. Track full state/action/feasibility/loss curves and matched heldout controls. Do not claim improved learning until verified by comparative evidence.
 
 # Roadmap — canonical Gym-based graph RL research

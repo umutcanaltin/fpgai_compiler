@@ -1,3 +1,18 @@
+**HW-RL-05 supplementary acceptance contract (5 November 2026):**
+The active hardware RL paper direction now requires one shared model
+across multiple *actually different* neural-network graphs, real-native
+per-step Vitis HLS feedback, multiple genuine on-policy algorithms,
+independent random/no-GNN baselines, disjoint heldout tasks, strict
+total licensed-call budgets and create-only original case evidence.
+New algorithm/runner source is not yet workstation tested; no
+generalization or learned improvement demonstrated. Private NPZ
+checkpoints are evaluation-only and **do not support exact optimizer
+resume**; full product completion still requires safe resume,
+novelty-aware action admission, read-only paired reporting and
+multi-seed native experiments. Do not treat partial build progress as
+a complete RL environment. Protocol:
+[HARDWARE_RL_PAPER_PROTOCOL.md](HARDWARE_RL_PAPER_PROTOCOL.md).
+
 **Learning reliability supplement — 31 October 2026:** [SPRINT_RL_LEARNING_REDESIGN.md](SPRINT_RL_LEARNING_REDESIGN.md) defines full original Vitis qualification-gate visibility and read-only historical diagnosis, source-grounded HLS-search history attention, compiler-validated legal global/local architecture selection from the very first step, original HLS-labelled feasibility auxiliary learning without altering the minimum feasible latency objective, fair matched stochastic/frozen adaptive comparisons, distinct search-control random streams, and censored no-feasible test reporting. This is prospective source code, **not a promise that 100 episodes will yield monotonic reward**. Keep immutable old-pilot scientific evidence and require full native audit for every new measurement.
 
 # End product — FPGAI Gym Graph RL (new research track)

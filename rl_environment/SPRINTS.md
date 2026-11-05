@@ -1,3 +1,39 @@
+# HW-RL-05 — Multi-network online research and new algorithms (5 Nov 2026)
+
+**Current branch:** `feature/rl-hardware-knobs-environment-20261104`.
+**Workstation verified predecessor:** 33 targeted tests passed after
+HW-RL-04 diagnostics patch; one true Vitis CNN case at 6.55 ns
+original-native-rejected **only** for scheduling margin −1.155 ns,
+with one re-audited gradient. No GNN learning superiority established.
+
+| Sprint | GitHub implementation | Workstation gate |
+|---|---|---|
+| HW-RL-05A | Shared GNN method registry: one-step actor-critic, REINFORCE with value baseline, PPO-Clip, independent random | **PENDING** new algorithm CPU tests; one isolated native smoke/method |
+| HW-RL-05B | Bounded multi-task plan/runner, disjoint task manifest, explicit original Vitis call cap, create-only cases, per-episode journal, evaluation-only checkpoints | **PENDING** source-only CLI and full CPU suite |
+| HW-RL-05C | Read-only complete native campaign audit reproducing original source/task/reward, cases, episode summaries | **PENDING** original 2-case replay and negative tamper tests |
+| HW-RL-05D | Frozen heldout/paired random/no-GNN comparisons, censoring-aware scientific report | **NOT IMPLEMENTED** native report aggregation and statistics |
+| HW-RL-05E | Optimizer+RNG resumable checkpoint with safe interrupted-case recovery | **NOT IMPLEMENTED**, eval NPZ-only |
+| HW-RL-05F | Evolution/TPE, fixed-clock ablations and prospective 3-seed transfer benchmark | **NOT IMPLEMENTED** methods/data; no native campaign |
+| HW-RL-05G | Manuscript: falsifiable RQs, prior work, data/figures, actual effect sizes | **PROTOCOL ONLY**; results not available |
+
+The source now supports up to 30 explicit Vitis evaluations per episode
+and one shared policy across successive network episodes in the same
+process. Policy gradients only observe matching independently replayed
+original Vitis cases. REINFORCE/PPO buffer already-audited labels and
+update at episode end; PPO optimizer epochs invoke no vendor programs.
+Every output root is new; no historical native folder is mutated.
+Default CLI is source-only and never launches Vitis. An incomplete
+campaign remains provisional, not a completed result. The original
+one-step HW-RL-04 experiment did **not** save optimizer or checkpoint
+state. Read [paper protocol](HARDWARE_RL_PAPER_PROTOCOL.md).
+
+**Next:** install editable, run new focused tests + full regression,
+build a single-network one-task manifest, verify a zero-Vitis plan,
+then explicitly authorize a *fresh* 1 episode × 2 real Vitis calls
+and replay all original source receipts before any larger run.
+
+---
+
 ## HW-RL-04 first original-Vitis one-gradient smoke — 2026-11-05
 
 User workstation verified PyTorch and Gymnasium 1.4.0; 40 focused

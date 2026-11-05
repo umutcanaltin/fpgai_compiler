@@ -1,3 +1,21 @@
+> **5 November 2026 — HW-RL-05 online algorithms + bounded campaign
+> runner source committed (workstation tests pending).** The user's
+> HW-RL-04 workstation passed 40 focused tests, then 33 focused tests;
+> one original Vitis 6.55 ns mixed-CNN action produced one independently
+> audited negative reward (-0.05) and one genuine GNN optimizer update.
+> Rejection was **only HLS scheduling**: 5.935 ns estimate versus
+> 4.78 ns effective budget (−1.155 ns margin). CPU GNN operation was
+> verified, not multi-network learning or physical speedup.
+>
+> New `hardware_algorithms.py` adds episodic REINFORCE-with-value-baseline,
+> clipped PPO and an independent random control alongside the original
+> one-step actor-critic. `hardware_campaign.py` introduces explicit
+> source-only plans, source-pinned/opt-in multi-network original-Vitis
+> episodes, task splits, persistent evaluation-only checkpoints,
+> journaled native outcomes and read-only independent replay. **All
+> new HW-RL-05 source and tests still require local verification.**
+> See [prospective paper protocol](HARDWARE_RL_PAPER_PROTOCOL.md).
+
 > **5 November 2026 — HW-RL-04 GNN hardware action integration added.**
 > HW-RL-03 is now truly native validated on the user's PC: 2,032
 > tests passed (17 skipped), and a qualified 15 ns single Gym step

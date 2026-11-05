@@ -1,3 +1,23 @@
+**2026-11-05 HW-RL-05 new-paper algorithm campaign rules:** The user
+authorized continuing the original-HLS hardware RL environment and adding
+scientifically comparable algorithms on the *existing* feature branch.
+See [HW-RL-05 paper protocol](rl_environment/HARDWARE_RL_PAPER_PROTOCOL.md)
+before editing. Preserve one authoritative compiler, immutable E3/CSim
+case receipts and original latency-only reward. New
+`hardware_campaign` uses explicit 1..30 calls/episode, total-call
+authorization, source-pinned fresh directories, original-native
+independent replay, disjoint task manifests and the same GNN/action
+encoder for actor-critic, episodic REINFORCE and PPO-Clip. Random
+baseline has an independent RNG. Neither missing HLS feasibility nor
+a successful gradient is an FPGA speedup. PPO uses exactly sampled
+Beta latent probability (not invented probability of rounded clock).
+Never infer a physics result from CPU test fixtures. Checkpoints are
+private evaluation-only NPZ, not optimizer-resumable. Current
+HW-RL-05 implementation/tests are pending workstation regression.
+Never run native HLS without the user's explicit foreground opt-in.
+Do not modify older source-pinned cases, or merge/delete branches
+without separate authorization.
+
 **2026-11-05 HW-RL-04 original-native GNN learning rules:** The user's
 HW-RL-03 original Gym-native trial is source-attested and independently
 qualified: 646 whole-top HLS cycles, 15 ns requested, 9,690 ns
