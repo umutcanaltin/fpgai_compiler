@@ -1,6 +1,50 @@
 """Single latency-only HLS reward: no area, power, energy or Pareto score."""
 from math import isfinite, log
 
+HARDWARE_REWARD_MODES = ("best_improvement", "dense_latency")
+DEFAULT_HARDWARE_REFERENCE_NS = 10000.0
+
+
+def hardware_reward_contract(*, mode="best_improvement", reference_ns=10000.0) -> dict:
+    """Validate immutable study reward knobs before original HLS execution."""
+    if mode not in HARDWARE_REWARD_MODES:
+        raise ValueError("Unknown original-HLS hardware reward mode")
+    if (type(reference_ns) not in (int, float)
+            or not isfinite(reference_ns) or reference_ns <= 0):
+        raise ValueError("Reward latency reference must be positive and finite")
+    return {"reward_mode": mode, "reward_reference_ns": float(reference_ns)}
+
+
+def hardware_trial_reward(*, mode, previous_best_ns, updated_best_ns,
+                          qualified, evaluated_latency_ns,
+                          reference_ns=DEFAULT_HARDWARE_REFERENCE_NS) -> float:
+    """Reward one independently audited original Vitis HLS result.
+
+    Legacy best-improvement behavior is unchanged. Dense mode rewards each
+    qualified actual HLS-estimated latency (not a proxy prediction). Both
+    modes give -0.05 for independently audited HLS infeasibility.
+    Caller verifies original native-case evidence before this function.
+    """
+    contract = hardware_reward_contract(mode=mode, reference_ns=reference_ns)
+    if type(qualified) is not bool:
+        raise ValueError("Reward requires an explicit original HLS qualification flag")
+    if not qualified:
+        if evaluated_latency_ns is not None:
+            raise ValueError("Infeasible original HLS design has no qualified latency")
+        return -0.05
+    if (type(evaluated_latency_ns) not in (int, float)
+            or not isfinite(evaluated_latency_ns) or evaluated_latency_ns <= 0):
+        raise ValueError("Qualified reward requires actual positive original HLS latency")
+    if contract["reward_mode"] == "best_improvement":
+        return latency_only_reward(
+            previous_best_ns, updated_best_ns, qualified=True,
+        )
+    return float(
+        contract["reward_reference_ns"] /
+        (contract["reward_reference_ns"] + float(evaluated_latency_ns)) - .005
+    )
+
+
 
 def qualified_latency_ns(cycles, requested_period_ns, *, feasible):
     if not feasible:

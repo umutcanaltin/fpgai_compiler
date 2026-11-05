@@ -39,10 +39,27 @@ fpgai-board = "fpgai_research.toolchains.board.cli:main"
 fpgai-pynq-run = "fpgai_research.toolchains.board.pynq_runtime:main"
 fpgai-board-reference = "fpgai_research.toolchains.board.reference:main"
 fpgai-board-ddr-audit = "fpgai_research.toolchains.board.ps_audit:main"
+fpgai-rl-hardware-space = "rl_environment.hardware_space:main"
+fpgai-rl-hardware-native = "rl_environment.hardware_native:main"
+fpgai-rl-hardware-gym = "rl_environment.hardware_gym:main"
+fpgai-rl-hardware-agent = "rl_environment.hardware_agent:main"
+fpgai-rl-hardware-campaign = "rl_environment.hardware_campaign:main"
+fpgai-rl-hardware-compare = "rl_environment.hardware_compare:main"
+fpgai-rl-hardware-suite = "rl_environment.experiments.hardware_suite:main"
 fpgai-diagnose = "fpgai_research.toolchains.diagnose:main"
 
+# fpgai_research is in the src/ layout; the historical RL package is
+# intentionally at repository root. Both must be distributable for the
+# installed fpgai-rl-hardware-space console entry point to work outside
+# the repository (not just under pytest.pythonpath).
+[tool.setuptools.package-dir]
+fpgai_research = "src/fpgai_research"
+rl_environment = "rl_environment"
+
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["src", "."]
+include = ["fpgai_research*", "rl_environment*"]
+namespaces = false
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]

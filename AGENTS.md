@@ -1,3 +1,113 @@
+**2026-11-05 HW-RL-05 checkpoint/replay note:** The new
+`rl_environment/hardware_checkpoint.py` persists source-pinned,
+tensor-only shared-GNN weights, Adam moments and torch CPU RNG after
+completed audited native episodes. It never calls `torch.load`,
+reads optimizer data as `np.load(..., allow_pickle=False)`, and refuses
+unknown Adam state or mismatched source/model/seed metadata. This is a
+*private snapshot for future resume design*, **NOT authorization to
+resume an interrupted native study**. Both the original native case
+and campaign journal must be independently re-audited before any
+continuation, and resumed sections need exact source provenance.
+The source-only `hardware_compare` also requires complete independent
+native replay for *both* heldout campaigns and retains censored
+outcomes. New source changes are not yet verified on the user's PC.
+
+**2026-11-05 HW-RL-05 new-paper algorithm campaign rules:** The user
+authorized continuing the original-HLS hardware RL environment and adding
+scientifically comparable algorithms on the *existing* feature branch.
+See [HW-RL-05 paper protocol](rl_environment/HARDWARE_RL_PAPER_PROTOCOL.md)
+before editing. Preserve one authoritative compiler, immutable E3/CSim
+case receipts and original latency-only reward. New
+`hardware_campaign` uses explicit 1..30 calls/episode, total-call
+authorization, source-pinned fresh directories, original-native
+independent replay, disjoint task manifests and the same GNN/action
+encoder for actor-critic, episodic REINFORCE and PPO-Clip. Random
+baseline has an independent RNG. Neither missing HLS feasibility nor
+a successful gradient is an FPGA speedup. PPO uses exactly sampled
+Beta latent probability (not invented probability of rounded clock).
+Never infer a physics result from CPU test fixtures. Checkpoints are
+private evaluation-only NPZ, not optimizer-resumable. Current
+HW-RL-05 implementation/tests are pending workstation regression.
+Never run native HLS without the user's explicit foreground opt-in.
+Do not modify older source-pinned cases, or merge/delete branches
+without separate authorization.
+
+**2026-11-05 HW-RL-04 original-native GNN learning rules:** The user's
+HW-RL-03 original Gym-native trial is source-attested and independently
+qualified: 646 whole-top HLS cycles, 15 ns requested, 9,690 ns
+estimated latency, +0.105 ns scheduling margin, −0.005 first-qualified
+reward. The eight-operator CNN action preview exposed 160 source-legal
+actions. These are verified HLS-only observations, **not** policy
+training or routed FPGA/board evidence. The new
+`rl_environment.hardware_agent` must use original
+`gym_agent.MessagePass`, preserve source masks and exact per-operator
+target nodes, treat 30-row history as previous REAL independent E3
+audits only, and use a learned continuous-clock Beta head with 0.01 ns
+native report normalization. A gradient update must have the matching
+live `GymHardwareNativeEnv` action/reward/case and fresh independent
+read-only original Vitis audit; direct metadata or simulated reward
+cannot train. Default CLI is preview only, native one-step opt-in.
+Never alter historical Gym policies, native cases, the original reward
+definition, main or GitHub Actions. Source-only tests and an original
+agent single-step native smoke on the user's workstation are still
+required before any broad RL study.
+
+**2026-11-04 HW-RL-03 native Gym engineering gate:** The 14.00 ns
+CNN HW-RL-02 first real-Vitis case qualified (646 worst cycles,
+9,044 ns HLS estimate, only +0.007 ns scheduling margin). Do not
+treat this original case as pretraining or a routed timing claim.
+New `rl_environment.hardware_gym` must combine source-masked
+existing compiler architecture actions + continuous requested
+clock, then call original `hardware_native.execute_native_case`
+once per new case and separately audit source, fixed numeric samples,
+original CSim, resource and effective HLS timing before applying the
+existing `latency_only_reward`. Preserve all vendor case directories
+and fail closed on contradictory or unverified reports; never call
+the vendor from reset or source-only preview. CPU mock receipts
+only test control flow, never prove native qualification. The older
+Gym environment, agent, paper comparison runs and GitHub Actions
+must remain untouched.
+
+**2026-11-04 HW-RL-02 native source/evidence contract:** New opt-in
+`rl_environment.hardware_native` and `fpgai-rl-hardware-native`
+must reuse the existing `compile_architecture` source semantics,
+`write_vitis_package`, `run_vitis`, `summarize_case` and
+`audited_hls_timing`. Do not duplicate a hardware QoR oracle or
+rewrite the historical `rl_environment.post_hls_env`, reward
+algorithm or immutable paper experiments. Normal preflight is source-only
+and produces zero Vitis calls. `--execute-native` must allocate a
+fresh immutable case with exact input samples, part, clock, numeric
+tolerance and five resource caps; failed cases remain unchanged.
+Never reward from exit=0, E1 source, unattested E3 XML, guessed resource
+counts, wrong/rounded native clock or unavailable physical metrics.
+The new source and tests are not yet workstation-verified.
+
+**2026-11-04 installed RL CLI packaging regression:** Setuptools previously
+discovered only `src/fpgai_research` while the historical `rl_environment`
+package lives at repository root. Both roots are now explicitly mapped
+in `pyproject.toml`; do not solve installed script imports with
+`PYTHONPATH` or duplicate source shims. Test actual
+`fpgai-rl-hardware-space --help` from outside the repo, then the
+read-only ONNX CLI. The workstation's previously passing full CPU suite
+does not prove the installed entrypoint. Keep native RL studies frozen
+until separately authorized and source-attested.
+
+**2026-11-04 RL interface branch authorization:** The user reopened
+RL hardware action-space development on
+`feature/rl-hardware-knobs-environment-20261104`. Preserve prior
+source-pinned Gym studies and numeric/reward/audit semantics exactly.
+New `rl_environment.hardware_space` is a source-only policy-neutral
+adapter using the original `ArchitectureRequest`, `resolve_scoped`
+and `compile_architecture` (no shadow HLS emitter, fake model runtime
+or synthetic physical QoR). Map all eight currently implemented
+request fields, model-global numeric type, per-op supported knobs and
+continuous selected clock, with unsupported memory/AXI/CDC/physical
+knobs explicitly inactive. Do not run Gym training or native campaigns
+until a new source SHA-attested native backend and independent replay
+gate are implemented and verified on the user's workstation.
+The earlier RL freeze is retained below as historical context, not a
+new prohibition on this user-requested isolated branch.
+
 **Contributor architecture and stale-import policy, 2026-11-01:** Keep `src/fpgai_research/` compiler, `rl_environment/agents/` DRL policy, `environments/` Gym, `experiments/` protocol, `infrastructure/` source/native, `evaluation/` audit separated; preserve historical source-pinned API paths during incremental migration. Complete contributor maps in [docs/RESEARCH_EXTENSION_ARCHITECTURE.md](docs/RESEARCH_EXTENSION_ARCHITECTURE.md), [docs/COMPILER_OPERATOR_CONTRIBUTION.md](docs/COMPILER_OPERATOR_CONTRIBUTION.md), and [CONTRIBUTING.md](CONTRIBUTING.md). When Python imports old `fpgai_research_rl_native_v8_20261030` despite editable install, `rl_environment/__init__.py` inserts current sibling `src/` before other checkout paths and `runtime_contract` independently refuses wrong native compiler source. Source-only subprocess test `tests/test_gym_native_source_binding.py` recreates stale PYTHONPATH without any Vitis. Do not alter old original case folders, collapse compiler stages or claim a future DRL algorithm is implemented merely by registering a name.\n\n**2026-11-01 critical native source import rule:** `pytest` inserts repository `src` into Python path; normal `python -m rl_environment.gym_curriculum` can import a STALE installed `fpgai_research` and fail native case packaging though all 734 tests passed. The actual source `write_vitis_package(... clock_uncertainty_ns=...)` was already correctly declared; do not weaken HLS qualification or duplicate packaging shims. New single `runtime_contract.verify_local_compiler_package()` checks the exact checked-out `src/fpgai_research/toolchains/vitis_hls/package.py` physical origin, writer/Tcl parameter support and the backend bound writer BEFORE allocating original native study directories. Standardize environment with `python -m pip install --no-deps -e .`, verify `python -m rl_environment.runtime_contract`, run full tests. A previous L0 smoke `build/gym_curriculum_L0_smoke_seed111_v2` is PARTIAL, likely zero HLS invocations and must not be reused or counted as learning; source-pinned fresh `v3` is required. Full L0-L6 original HLS 100×10 minimum still mandatory; no claims of learning without original source-attested tests.\n\n**Mandatory REAL-HLS RL research minimum, 2026-11-01:** Each of the seven independently trained L0..L6 environments MUST have >=100 *complete* online training episodes with **exactly 10 original source-attributed Vitis evaluations in every episode**, irrespective of improvement. Source and audit/report enforce this; explicit `--smoke` 22-call tests are never full learning data. Do not condition reporting on a positive reward curve. The original 1009-case requested-clock mismatch probe found 911 target differences, often 0.001–0.004 ns consistent with Vitis HLS 2023.2 XML two-decimal rounding; new curriculum stage policy canonicalizes requested clocks to 0.01ns and executed explicit Tcl uncertainty to 0.01ns, historical 0.001ns source-pinned studies unchanged; no arbitrary tolerance loosening or report rewrites. Source-attested original HLS qualification and CSim/resource/uncertainty gates stay fail-closed. Stage `gym_curriculum_report` outputs raw and descriptive rolling 100-episode reward and feasibility, matched trained-vs-untrained heldout HLS ns, and explicit observed pilot/no-consistent-improvement/inconclusive statuses; a single test case does not prove generalizable learning/non-learning. Original user workstation previous checkpoint: 716 tests passed; new changes pending verification. See [rl_environment/GYM_CURRICULUM_L0_L6.md](rl_environment/GYM_CURRICULUM_L0_L6.md).\n\n**2026-11-01 L0–L6 REAL-Vitis Gym research benchmark:** Source [rl_environment/GYM_CURRICULUM_L0_L6.md](rl_environment/GYM_CURRICULUM_L0_L6.md). Seven independently source-pinned stages, one global from-scratch GNN per stage; original Functional Model IR (small single MatMul through 1/2 then 3/4 operator transfer), progressively unlocks 4 architecture knobs, tiling+II, precision, continuous clock. No pretrained checkpoint between stages in v1, no synthetic/estimated proxy QoR. Stages use source-generated real Vitis HLS, strict CSim/accuracy/resources/XML target-estimate/explicit 27%-uncertainty hash attestation. Curriculum reward is source-attested monotone `32ns*Model_IR_MACs/(32ns*Model_IR_MACs + original_HLS_worst_cycles*requested_clock_ns)` only for *qualified* native cases; reject -0.05; standard Gym historical reward unchanged. A stage run is ONLY allowed with explicit `--execute-native`/fresh output/full budget. CLI `python -m rl_environment.gym_curriculum --list-stages` and `--plan-all` require ZERO Vitis; `--stage L0` is first. Before ANY new big study, investigate 850/1009 original timing rejections: **all 850 were different_reported_target, NOT missing uncertainty**, so do not assume extra uncertainty Tcl fixes mismatch. `python -m rl_environment.clock_mismatch_probe --study build/gym_100_train_10_hls_seed101_learning_v3` is read-only and shows actual requested-vs-reported XML target deltas. Run full CPU tests; original L0 22-call smoke, independently audit and qualify; only then 100×10. Separate per-stage `gym_curriculum_report` compares trained/untrained on same heldout tasks, never average heterogeneous absolute ns or claim learning without actual matched qualified results. Prior native studies remain unchanged.\n\n**2026-11-01 true beginner RL milestone — final prospective scientific contract:** The user wants a convincing FIRST learnable but REAL Vitis HLS problem with 100 online episodes × ≤10 original calls; no synthetic QoR. Optional `--beginner-pilot --freeze-numeric-format --fixed-clock-ablation-ns 32.000` selects one MatMul (train widths 4→4/4→8/8→4/8→8; distinct same-depth val/test widths), exact compiler baseline ap_fixed<16,6>, four searched operator-local knobs parallelism/PEs/SIMD/serialization, untiled/no II override, 32ns requested HLS target. GNN still from scratch; standard compiler defaults and full multi-layer product are untouched. For NEW pilot only, dense reward every qualified original worst-cycle case: MACs/(MACs + original HLS worst cycles); infeasible -0.05; original best-only reward preserved outside this mode. This has different training semantics and MUST NOT be compared on same reward scale to previous campaigns; evaluate best qualified HLS ns heldout separately. Original Vitis Tcl explicitly sets 8.640ns uncertainty, verified against native script hashes before+after execution. If XML omits uncertainty, parser accepts ONLY hash-attested executed Tcl setting and original fresh XML target/estimate; any source/XML conflict still fails closed. **No claim of achieved physical Fmax, no assumed defaults, no relaxed numeric/resource gates.** Before 1090-case experiment run CPU tests, 22-case original-native smoke, independent audit and qualification funnel, pre-registered >=14/22 qualified with no invalid timing reports. See [rl_environment/BEGINNER_MATMUL_100X10.md](rl_environment/BEGINNER_MATMUL_100X10.md). User’s earlier 24ns smoke was 22 Vitis exit=0, NOT independently proven qualified. Preserve old evidence and report anything failing honestly.\n\n**Explicit 2026-11-01 easier RL ablation:** The model-wide `--freeze-numeric-format` flag is an opt-in study constraint: exact compiler baseline 16 total bits/6 integer bits in *all* offered architectures, no global precision/integer mutation, source-pinned Task and independently audited actions. `--fixed-clock-ablation-ns 32.000` is the slowest requested HLS period within existing 2–32ns envelope, *not verified physically safe*; original strict numeric, resource and uncertainty-aware HLS XML timing gates are still mandatory. Preserve regular 5-layer product/domain numeric and clock search outside this experiment. User requested genuine learning at 100×10, not artificially increasing reward. The earlier new 24ns 22-case smoke has only verified Vitis exit=0, not qualified HLS; audit original revision first and inspect 850 timing parse errors using read-only `qualification_funnel`. Do not run full study until source report semantics are diagnosed and 32ns locked-numeric smoke passes. Full guide [rl_environment/FIXED_CLOCK_NUMERIC_LOCKED_PILOT_100X10.md](rl_environment/FIXED_CLOCK_NUMERIC_LOCKED_PILOT_100X10.md).\n\n**RL research integrity update, 2026-11-01:** 100×10 actual training shows unchanged 8.4% feasibility across first/last 50, only eight positive within-task improvements, and raw feasibility Brier 0.192 due in part to positive-weight=8 BCE. Do not call this proof of learning or visually manufacture monotonic reward. Read-only `gym_learning_diagnostics` reports raw and analytically corrected positive-weighted classifier probabilities, AUC and logged episode means. New `gym_checkpoint_probe` evaluates untrained and checkpoint 10..90 classifiers on the **same 100 actual HLS cases from original episodes 91..100**, strictly without Vitis or using any checkpoint trained on test cases. This observational classifier probe is NOT a causal policy-latency improvement result; keep distinct from source-pinned 90-call heldout evaluation. Run full local CPU tests and `qualification_funnel` on existing source-pinned 1009-case study before prospective RL reward redesign.\n\n**1 Nov 2026 source-pinned interrupted Gym campaign:** Actual user log showed 1000 original native train calls +9 frozen validation calls completed; then deterministic frozen GNN proposed a duplicate architecture/clock pair and original full experiment terminated without summary. **Never recommend rerunning 1000 training calls or deleting the interrupted study.** Source fix `gym_study._choose_unused_hls_action` prevents this in new evaluations. Preservation & recovery are documented in [rl_environment/INTERRUPTED_1000_CALL_RECOVERY.md](rl_environment/INTERRUPTED_1000_CALL_RECOVERY.md): first CPU tests, read-only `gym_partial_audit` + provisional paper curves; then **separately source-pinned 90-call** heldout continuation from original checkpoint with its own independent audit and method comparison. Explicitly disclose that training and recovery evaluation used different Git commits, so this is NOT one unbroken 1090-call single-source experiment. Strict original HLS qualification, latency-only reward and immutable source case evidence remain mandatory.
 
 **2026-10-31 learning-remediation addendum:** Preserve the 1,070-case audited pilot at `eb4a7991a5ec870f2b543412dc60dde2da237c41` unchanged. The new sprint is [SPRINT_RL_LEARNING_REDESIGN.md](rl_environment/SPRINT_RL_LEARNING_REDESIGN.md). Keep the original latency-only scientific reward and strict CSim/resource/HLS timing gates. New trial-history attention, global/legal/local proposals and original-HLS-labelled auxiliary *feasibility classification* are permitted, but classification must never replace or invent native HLS latency/reward. Frozen stochastic and adaptive comparisons must match exploration modes and baseline RNGs must be independent. Run CPU tests, read-only diagnostic on the NEW smoke (old source directories deleted) and a source-pinned 20-original-HLS-call native smoke before the 109-episode/1090-call fresh pilot. Never modify old experiment cases or pass off unverified new source as tested.

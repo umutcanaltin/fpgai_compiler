@@ -4,6 +4,18 @@
 
 FPGAI explores the relationship between a **functional neural-network graph**, an **explicit operator-level architecture request**, a **resolved implementation**, and generated **HLS C++**. It makes hardware choices such as precision, parallelism, processing elements (PEs), SIMD width, serialization, tiling, and pipeline requests inspectable before vendor synthesis.
 
+The new [RL hardware action-space branch](rl_environment/HARDWARE_ACTION_SPACE.md)
+provides source-backed, typed proposals for the compiler's eight
+`ArchitectureRequest` properties across bounded Conv/MatMul/Gemm graphs,
+plus a continuous requested clock. It is currently **source-only** and
+does not invent HLS rewards or replace the independently audited native Gym.
+
+An opt-in [HW-RL-02 one-case original-Vitis evaluator](rl_environment/HARDWARE_ACTION_SPACE.md)
+is being developed on the RL feature branch. It binds complete compiler
+hardware action states to a fixed numerical CSim cohort, explicit device
+resource caps and source-attested HLS synthesis reports. This is not
+yet a trained RL environment or independently verified native campaign.
+
 The research implementation also investigates bounded, typed source-event contracts for tensor-element production, consumption, last-reader memory reuse and source-order conformance. A separate, optional research environment explores compiler-guided architecture decisions. These are experimental interfaces, **not a finished general-purpose FPGA toolchain**.
 
 **Licensing and permissions:** This public repository has no operative source-code license published at present. GitHub visibility alone does not grant rights to copy, modify, redistribute or commercialize copyrighted code. See [Licensing and permissions](docs/LICENSE_DECISION.md).

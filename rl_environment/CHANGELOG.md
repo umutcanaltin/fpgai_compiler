@@ -1,3 +1,224 @@
+## 2026-11-05 — HW-RL-09 reusable scenario suite and reward ablation (source not yet native-validated)
+
+- Added opt-in \`dense_latency\` native HLS reward that scores **each qualified trial**; preserved the original \`best_improvement\` default and original −0.05 for audited infeasibility. Both require source- and report-attested original HLS cycles/clock/CSim/resource/timing evidence; no proxy latency allowed.
+- Campaign plan, Gym receipts, private checkpoint training provenance and independent replay carry the original reward contract. Paired evaluation refuses differing reward contracts by default, requiring explicit \`--allow-reward-mode-ablation\` to compare different treatments using HLS ns rather than incompatible scalar rewards.
+- Added \`fpgai-rl-hardware-suite\`: from an existing v1 task manifest containing train/validation/test, select source-compatible exact-model/within-family/graph-diverse/cross-family × fixed/task-fixed/clock-search scenarios. Report ineligible cells, preserve full original source split definitions, forbid structural heldout leakage by default and use create-only output manifests. The alternative bytes-only holdout is explicitly weaker.
+- Added a deterministic six-graph CNN/MatMul source-only example generator with disjoint train/validation/test graphs and shape-correct input arrays. Scenarios remain source-only until explicitly authorized native campaigns and independent audits.
+- Training on validation or test splits is now blocked. Trainable validation/test study plans require frozen checkpoints; no optimizer updates, hidden re-training, or automatically resumed native cases.
+- New CPU-only tests for reward equations, negative outcome integrity, Gym reward plumbing, scenario outputs, holdout leakage and example reproducibility. Prior native experiments remain pinned to their older revisions; current source needs workstation tests and new source-specific native acceptance.
+
+## 2026-11-05 — HW-RL-06 explicit generalization/clock regime setup (unverified)
+
+- Same-network and ONNX graph-diverse general-network plans; two/three-way source-only preflight.
+- Global fixed, varying task-fixed, and continuous clock-search policies share compiler source actions and original native audit.
+- Fixed-clock action mask and discrete-only GNN/REINFORCE/PPO likelihood (no Beta clock-gradients), fixed-clock drift rejected before Vitis.
+- Campaign and independent audit record/check regime contracts; auditable heldout comparison rejects mismatched protocol conditions.
+- Added CPU-only six-way matrix, ONNX shape-fingerprint, clock-constraint and policy-gradient regression tests. No vendor calls/results claimed for this source.
+
+## 2026-11-05 — HW-RL module organization (new revision unverified)
+
+- Moved eight large hardware RL modules into existing responsibility packages: `agents/`, `environments/`, `infrastructure/`, `experiments/`, `evaluation/`. Root `hardware_*.py` entries remain as exact module aliases to retain import/monkeypatch identity and CLI entry points.
+- Added CPU-only package-layout regression tests, including both canonical and compatibility `python -m ... --help` paths.
+- Verified *before refactoring*, on `f8ffe2d`: 2,086 CPU tests passed (3 skipped); actor-critic, REINFORCE, PPO, and random each completed 2 original Vitis calls and a 2/2 independent replay audit. Qualified counts 1, 0, 0, and 1 respectively. No transfer, learning superiority, or board-measured performance claim.
+- Source revision changed for refactor. Fresh tests/native cases are required and original source-pinned results remain immutable.
+
+## 2026-11-05 — HW-RL-05H source-novel admission and receipt repair (pending local gate)
+
+- Fixed campaign provenance: the exact pre-step `HardwareEdit` is captured before `Gym.step()` replaces the action catalog. Independent replay can now match the actual proposed compiler edit, rather than accidentally recording the next state's edit.
+- Added `GymHardwareNativeEnv.preview_action()`, the same source-only, no-Vitis/no-case check used by native `step()`. It refuses masked, no-op, already-visited and invalid complete source/clock states before native budget is spent.
+- The campaign retries bounded source-only novelty rejections for stochastic learning and random baseline. Frozen deterministic GNN evaluation uses the model's own score-ranked alternative action/conditional clock, not hidden random sampling; records rejected proposals per accepted original trial. Exhaustion fails closed, preserving cases.
+- Added CPU regressions for source preflight purity, bounded retries, deterministic frozen fallback and pre-step source-action receipts. **No local or native test results are claimed yet.** The latest source patch preserves rejected proposal tapes and includes their original log probabilities in the actor-critic/REINFORCE score, while PPO recomputes the *entire* original source-rejection/acceptance trace likelihood on each epoch. Rejected draws receive no invented native reward.
+- Automatic crash-safe campaign resume, extra classical search methods and multi-seed native results remain unimplemented.
+
+## 2026-11-05 — HW-RL-05 private Adam/RNG snapshots and stronger audit
+
+- Added source-revision-pinned, create-only `hardware_checkpoint.py`
+  with exact GNN state, Adam moment tensors and CPU torch RNG in
+  `npz` (no pickle). Validator checks model/method/parameter order,
+  seed, optimizer group, PyTorch version, SHA and original metadata.
+- Integrated training-state output at completed original-native
+  training episode boundaries, separate from evaluation-only
+  checkpoint exports. **No resumed native campaign execution is
+  authorized or implemented**; optimizer state alone cannot prove
+  continuity of original HLS cases or budgets.
+- Original `hardware_campaign --audit` now recreates the exact
+  pre-step source-action catalog/index and checks original immutable
+  case paths, beside model/source/reward/CSim/E3 validation.
+- Added CPU checkpoint roundtrip, tamper/wrong-algorithm tests and
+  outside-repository installed CLI regressions. New local tests and
+  real native campaigns still pending.
+
+## 2026-11-05 — HW-RL-05 read-only heldout pairs
+
+- Added `hardware_compare.py`: compares two independently replayed,
+  complete, frozen validation/test native campaigns only if source SHA,
+  task split/schedule/cohorts, seed, hardware caps and licensed-call
+  budgets match exactly. Retains both-feasible, baseline-only,
+  candidate-only and neither-feasible classes. Latency ratios exist
+  only for both-qualified native pairs; no fabricated zeros/infinities.
+- Added create-only descriptive comparison CSV/JSON and CPU negative
+  tests for mismatched splits, schedule, revisions, invalid/censored
+  ns and output overwrite attempts.
+- Hardened scientific export so direct shape-only `paired_summary`
+  fixtures cannot claim `INDEPENDENT_NATIVE_CASES_AUDITED`.
+- This is **source-only/unverified** until local CPU gate and actual
+  original two-study audit; no experimental superiority claim.
+
+## 2026-11-05 — HW-RL-05 multi-network auditable algorithms
+
+- Added one shared GNN policy interface for genuine one-step actor-critic,
+  original-HLS-audited episodic REINFORCE with value baseline and
+  clipped PPO with multiple real on-policy optimizer epochs, plus
+  independent-RNG random baseline. No fake vendor feedback.
+- Added create-only `hardware_campaign` experiment driver with explicit
+  complete budget, disjoint model-fingerprint train/val/test manifest,
+  per-episode original-Vitis execution, per-trial and per-episode raw
+  journals, evaluation-only tensor checkpoints, read-only source/task/
+  report/reward replay and no physical-Fmax claims.
+- Added focused no-Vitis unit tests for budgets, disjoint network
+  fingerprints, no-pretrained-eval gate, algorithm audit guard and
+  synthetic-only campaign plumbing.
+- Registered `fpgai-rl-hardware-campaign` installed CLI. Default is
+  source-only; native requires a fresh `--output-root`,
+  `--execute-native` and exact `--max-total-vitis-calls`.
+- Documented a falsifiable, prospective second-paper protocol with
+  prior-work differentiation and explicit missing gates. **All new
+  HW-RL-05 code and tests still need workstation verification.**
+  No real multi-network learning results are claimed.
+
+## 2026-11-05 — HW-RL-04 native smoke and diagnostic visibility
+
+- User's first real shared-GNN/Vitis one-step smoke returned one audited
+  native call and gradient update, but the sampled 6.55 ns / operator-5
+  tile (1,4,27) design was infeasible and earned -0.05. Exact original
+  rejection gates must be read from the immutable local episode record.
+- Forward source-attested gate failures, CSim/numeric values, raw cycles,
+  HLS timing, resource consumption and caps in future agent CLI outputs.
+  Qualified latency stays null for rejected cases; no fake Fmax or
+  secondary native execution is introduced.
+- Report `private_weights_saved` accurately. The smoke did not specify
+  a checkpoint, so its one gradient update did not persist.
+- Added CPU regression for passthrough of an infeasible source audit.
+  The new GitHub patch has not yet been workstation-tested.
+
+## 2026-11-05 — HW-RL-04 optional PyTorch installation diagnosis
+
+- Workstation confirmed 2,033 passing / 18 skipped full CPU tests, but
+  the GNN CLI stopped because `pip install --no-deps -e .` had not
+  installed the `rl` extra's PyTorch requirement.
+- Fail before model loading or native execution with the precise
+  `python -m pip install -e '.[rl,onnx]'` remediation and preserve
+  the import failure when a torch wheel is broken.
+- Added dependency-path regressions that do not skip when PyTorch is
+  absent, and documented workstation install and source-only preview.
+  No vendor qualification or GNN learning is claimed from this patch.
+
+## 2026-11-05 — HW-RL-04 shared GNN bridge for full compiler hardware Gym
+
+- User verified HW-RL-03: 75 focused passing, one skipped; full CPU
+  2,032 passing, 17 skipped; source preview 160 legal actions.
+  Original Vitis 15 ns clock-only Gym step qualified at 646 worst cycles,
+  9,690 ns HLS latency, +0.105 ns scheduling margin and −0.005 reward.
+  Native case and prior 14 ns/10 ns observations remain immutable.
+- Added exact operator-target node indices plus a 30-step, masked
+  genuinely observed native-feedback history to `hardware_gym`.
+- Added one shared graph policy using existing `gym_agent.MessagePass`
+  with context-conditioned discrete compiler action mask, continuous
+  Beta clock, trial-history attention, critic and feasibility auxiliary.
+- Added policy update gate: original matching live Gym state/action/reward
+  plus a fresh read-only audit of the original case. Missing or
+  forged vendor evidence cannot earn updates via an ordinary dict.
+- Added `fpgai-rl-hardware-agent` read-only untrained action preview
+  and opt-in **single** original-Vitis source-audited gradient step.
+  No large native campaign or pretrained checkpoint is created.
+- Added CPU source/mask/gradient/metadata/checkpoint and installed
+  entrypoint tests. **New HW-RL-04 code and tests not yet executed on
+  the user workstation**; no trained transfer or speedup is claimed.
+
+## 2026-11-04 — HW-RL-03 actual native-qualification Gym interface
+
+- User confirmed 14.00 ns mixed CNN original Vitis HLS case qualified:
+  CSim passed, 646 worst cycles, 9,044 ns estimated HLS latency, 10.213 ns
+  estimated target path vs 10.220 ns effective budget, 0.007 ns margin.
+  Independent audit reproduced E3 and provenance without a new Vitis call.
+  The earlier 10 ns case remains unqualified; nothing was overwritten.
+- Introduced a separate `GymHardwareNativeEnv` with bounded
+  tensor/operator graph nodes and edges, explicit source-mask and
+  action-field features, and a learned floating clock output quantized
+  only for original-Vitis report compatibility (0.01 ns).
+- An authorized native Gym step invokes the existing one-shot
+  `execute_native_case`, independently re-audits its original
+  source/numeric/resource/timing receipts and uses the established
+  latency-only reward. All original vendor source cases remain separate
+  from episode-level step records.
+- Added a read-only preview and one-step opt-in
+  `fpgai-rl-hardware-gym` CLI and CPU-only mock-lifecycle tests.
+  **The new HW-RL-03 code and first native Gym step have not yet
+  been tested on the user's workstation.**
+- No existing historical Gym/agent/reward/curriculum code, old Vitis
+  cases or GitHub Actions changed; no trained policy or physical Fmax
+  claim is made.
+
+## 2026-11-04 — fix strict native receipt comparison after JSON round-trip
+
+- User ran HW-RL-02 locally: the focused suite reported **3 failed, 54 passed, 1 skipped**; the full suite **3 failed, 2,000 passed, 22 skipped**. All failures were the same strict action receipt comparison, before any original Vitis qualification.
+- Root cause: `dataclasses.asdict(ArchitectureRequest)` preserves `tile` as a Python tuple, while the saved `hardware_action.json` represents it as a JSON array. Comparing JSON-loaded data directly to an unnormalized Python plan rejected legitimate immutable source cases.
+- `planned_case` now canonicalizes its exact full content to JSON-native values before either saving or auditing. The audit still compares the **complete** action record and separately verifies source, testbench, part, clock, numerical tolerance, CSim, E3 and native evidence.
+- Added regressions for baseline and non-empty Conv tiling round-trips, plus tampering with the nested architecture tile value. No vendor execution or old case mutation.
+- This revision is committed separately on the RL feature branch and **requires new workstation pytest verification** before any original Vitis case.
+
+## 2026-11-04 — HW-RL-02 original native HLS evaluation adapter
+
+- The user's installed `fpgai-rl-hardware-space --help` succeeded from
+  `/tmp`, and source-only CLI returned a real typed graph for eight
+  ONNX operators with two Conv nodes, MatMul, Gemm, and supported scalars.
+- Added a separate `compile_state` reuse of the original compiler's
+  resolver, Model IR refinement and HLS emitter; source-only receipts
+  and historical RL APIs preserve semantics.
+- Added `rl_environment.hardware_native` with bounded source-only
+  preparation, full-state and numerical-cohort source digests,
+  explicit one-case original Vitis HLS execution, immutable case
+  folders and independently replayed E2/CSim and E3/CSynth qualification.
+- Explicit uncertainty and a 0.01-ns native period requirement protect
+  existing Vitis 2023.2 XML target attribution; source clock remains
+  continuous to 0.001 ns.
+- Unknown/missing measurements are never imputed. No new rewards,
+  training policy, native physical timing or board evidence claimed.
+- Added source-only fail-closed tests and installed CLI subprocess smoke;
+  new tests and first licensed Vitis run must execute on the user's PC.
+
+## 2026-11-04 — repair installed RL CLI package discovery
+
+- The user verified HW-RL-01 source functionality: **30 focused tests passed**
+  and **1,982 full passed / 21 skipped** on the local workstation.
+- Their installed `fpgai-rl-hardware-space` raised
+  `ModuleNotFoundError: No module named 'rl_environment'` because
+  setuptools only discovered packages under `src/`. Fixed by explicitly
+  mapping both package roots and finding `fpgai_research*` and
+  `rl_environment*` with proper subpackages.
+- Added regression tests for setuptools package discovery and real
+  console/Python imports **from outside the checkout with no
+  PYTHONPATH**. No source copy, script-level sys.path hack, vendor calls,
+  changes to native RL tasks, agent weights, rewards or experiments.
+- The new package correction and tests are pending reinstall and
+  workstation validation.
+
+## 2026-11-04 — hardware knob source interface on separate RL feature branch
+
+- Explicitly reopened RL interface development after the earlier
+  compiler-first freeze, without restarting any frozen original native study.
+- Added `rl_environment.hardware_space`: all eight *currently implemented*
+  `ArchitectureRequest` categories, globally synchronized numeric format,
+  per-operator Conv/MatMul/Gemm mapping and tiling, continuous 2–32 ns
+  requested clock, immutable full candidate SHA and original compiler E0/E1
+  source checks. The policy cannot select fake memory/AXI/CDC/physical knobs.
+- Added deterministic bounded candidate menu and source action mask,
+  variable-size weight-private graph observation, and an explicit source-only
+  planning environment. No HLS latency, physical feasibility or training
+  reward is invented; Gym `step` stays disabled pending audited real Vitis.
+- Added source-only unit/integration tests and `fpgai-rl-hardware-space`
+  read-only ONNX CLI. **Workstation tests and native HW-RL-02 are pending**.
+
 ## 2026-11-01 — native L0 imported compiler source-binding guard
 
 - Diagnosed discrepancy: CPU test suite 734 passed, but first `gym_curriculum --stage L0 --smoke` stopped before native Vitis with `write_vitis_package() unexpected keyword clock_uncertainty_ns` even though checked-out `src/fpgai_research/toolchains/vitis_hls/package.py` already supports that parameter. Likely non-editable/stale installed package shadowing source during `python -m`; CPU pytest inserts repo src into its own imports.
