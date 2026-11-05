@@ -1,3 +1,25 @@
+## HW-RL-06 — network and clock regime factorization (2026-11-05; source only)
+
+**Implemented on RL feature branch; workstation tests/new source-native audits pending.**
+The study runner now allows `--network-regime same|general|auto` and
+`--clock-regime fixed|task_fixed|search`. The six explicitly labeled
+combinations share one original Vitis Gym and strict compiler source checks.
+General means two or more genuinely distinct ONNX computational-graph/shape
+fingerprints (not just different weights). The `auto` default exists only
+for backward compatibility, and does not establish structural generalization.
+Fixed modes remove clock-only options and clock Beta latent/gradient, and
+task-fixed mode conditions on per-task unchanged timing targets. The campaign
+and independent replay keep regime metadata. The pre-existing native and CPU
+results are pinned to older source commits; do not report new-source results
+until user workstation verification succeeds. See
+[environment regimes](docs/HARDWARE_REGIMES.md) and
+`tests/test_rl_hardware_regimes.py`.
+
+**Required gates:** CPU compile/package/targeted/full tests, six source-only
+plans, each method's actual native budget authorization, original HLS evidence,
+independent replay, distinct graph-family heldout experiments, and matched
+multi-seed baselines. No automatic interrupted-training resume exists.
+
 ## HW-RL-05H — source identity and novelty safety (source committed, CPU gate pending)
 
 - [x] Capture the exact pre-step source action in the immutable trial journal (do not use post-step `offers`).

@@ -202,3 +202,21 @@ def test_fixed_clock_must_match_source_initial_state(tmp_path):
             execute_native=False,
         )
     assert not (tmp_path / "no_vendor").exists()
+
+
+def test_regime_cli_flags_plan_source_only_without_vendor(tmp_path, capsys):
+    path = _manifest(tmp_path)
+    root = tmp_path / "must_never_be_created_by_plan"
+    assert campaign.main([
+        "--tasks", str(path), "--network-regime", "same",
+        "--clock-regime", "fixed", "--method", "actor_critic",
+        "--episodes", "1", "--calls-per-episode", "2",
+        "--output-root", str(root),
+    ]) == 0
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["source_only_plan"] is True
+    assert plan["native_execution_authorized"] is False
+    assert plan["network_regime"] == "same"
+    assert plan["clock_regime"] == "fixed"
+    assert plan["clock_action_bounds_ns"] == [14.0, 14.0]
+    assert not root.exists()
