@@ -1,3 +1,5 @@
+> **HW-RL-05H source admission/provenance patch (5 November 2026, unverified):** Native campaign records now bind the real *pre-step* source edit, fixing an original-action replay error. A shared pure Gym preflight refuses repeated/no-op complete hardware states before Vitis. Stochastic trainers/random controls can retry at most 64 source-only proposals, while frozen deterministic GNN selection ranks alternative legal source actions with architecture-conditioned mean clocks. The accepted-trial JSON records rejected proposal counts, which are **not** hardware calls. The source and new regression tests need workstation validation. No interrupted campaign resume or multi-network native learning result is claimed. See [SPRINTS.md](SPRINTS.md).
+
 > **HW-RL-05 update:** The new `hardware_compare.py` can independently
 > re-audit two matching complete frozen heldout original-HLS campaigns
 > before creating censored-aware paired comparison files. The separate
