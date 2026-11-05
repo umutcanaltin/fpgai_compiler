@@ -69,3 +69,41 @@ def test_reward_requires_actual_audited_positive_feasible_latency():
             mode="best_improvement", previous_best_ns=None,
             updated_best_ns=None, qualified=1, evaluated_latency_ns=None,
         )
+
+
+
+def test_hw09_standalone_gym_preview_accepts_dense_fixed_profile(
+        tmp_path, capsys):
+    """Smoke fixed-clock/reward CLI with zero original vendor calls."""
+    pytest.importorskip("onnx")
+    pytest.importorskip("gymnasium")
+    import json
+    import numpy as np
+    from examples.make_neural_network_onnx import save_model
+    from fpgai_research.frontend.onnx import load_onnx
+    from rl_environment.environments.hardware_gym import main
+
+    model_path = save_model("cnn_pool_dense", tmp_path / "preview.onnx")
+    model = load_onnx(str(model_path))
+    shape = model.tensor(model.inputs[0]).shape
+    sample_path = tmp_path / "samples.npy"
+    np.save(sample_path, np.zeros((2, *shape), np.float32), allow_pickle=False)
+    root = tmp_path / "no_native_cases"
+    assert main([
+        "--onnx", str(model_path), "--samples", str(sample_path),
+        "--part", "xc7z020clg400-1",
+        "--resource-caps", "53200", "106400", "220", "280", "0",
+        "--max-absolute-error", "0.1",
+        "--initial-clock-ns", "14.0", "--fixed-clock",
+        "--reward-mode", "dense_latency",
+        "--reward-reference-ns", "12000",
+        "--output-root", str(root),
+    ]) == 0
+    info = json.loads(capsys.readouterr().out)
+    assert info["status"] == "SOURCE_ACTION_PREVIEW_ONLY"
+    assert info["clock_regime"] == "fixed"
+    assert info["reward_mode"] == "dense_latency"
+    assert info["reward_reference_ns"] == 12000.
+    assert info["requested_clock_is_continuous"] is False
+    assert info["original_native_calls"] == 0
+    assert not root.exists()
