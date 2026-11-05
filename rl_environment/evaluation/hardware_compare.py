@@ -75,6 +75,8 @@ def _label(meta: dict) -> str:
         name += "_trainedclock_" + meta["checkpoint_training_clock_regime"]
     if meta.get("checkpoint_training_reward_mode") in ("best_improvement", "dense_latency"):
         name += "_trainedreward_" + meta["checkpoint_training_reward_mode"]
+    if meta.get("reward_mode") in ("best_improvement", "dense_latency"):
+        name += "_score_" + meta["reward_mode"]
     return name
 
 

@@ -159,6 +159,8 @@ def test_hw09_paired_reward_mode_ablation_is_explicit_and_hls_metric_only():
     )
     assert report["reward_profile_ablation"] is True
     assert report["reward_mode_ablation_explicitly_authorized"] is True
+    assert report["baseline"] == "ppo_score_best_improvement"
+    assert report["candidate"] == "ppo_score_dense_latency"
     assert report["paired_significance_claim"] is False
     assert rows[0]["candidate_over_baseline_latency_ratio"] == 8400. / 9500.
     assert rows[1]["candidate_over_baseline_latency_ratio"] is None

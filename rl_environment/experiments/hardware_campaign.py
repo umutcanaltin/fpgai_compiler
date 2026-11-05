@@ -595,6 +595,8 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
     )
     if any(field not in metadata for field in regime_fields):
         raise ValueError("New-source native campaign lacks original regime contract")
+    if "reward_mode" not in metadata or "reward_reference_ns" not in metadata:
+        raise ValueError("New-source native campaign lacks original reward contract")
     contract = hardware_reward_contract(
         mode=metadata.get("reward_mode", "best_improvement"),
         reference_ns=metadata.get("reward_reference_ns", DEFAULT_HARDWARE_REFERENCE_NS),
@@ -698,8 +700,8 @@ def audit_campaign(*, root: str | Path, tasks, allow_incomplete: bool = False):
             independent = audit_native_case(case, state, samples)
             if (receipt["original_case_audit"] != independent
                     or receipt["reward"] != trial["reward"]
-                    or receipt.get("reward_mode", "best_improvement") != contract["reward_mode"]
-                    or receipt.get("reward_reference_ns", DEFAULT_HARDWARE_REFERENCE_NS) != contract["reward_reference_ns"]
+                    or receipt.get("reward_mode") != contract["reward_mode"]
+                    or receipt.get("reward_reference_ns") != contract["reward_reference_ns"]
                     or receipt["action_index"] != trial["source_action_index"]
                     or receipt["requested_clock_ns"] != trial["requested_clock_ns"]
                     or receipt["state_sha256"] != trial["native_state_sha256"]
