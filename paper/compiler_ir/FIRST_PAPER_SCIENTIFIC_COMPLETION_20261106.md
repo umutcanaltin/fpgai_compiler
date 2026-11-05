@@ -8,7 +8,7 @@
 
 | Question | Prespecified comparison | Acceptable conclusion |
 |---|---|---|
-| What additional guarantee does the mapping contract provide? | Identical graph, Phi, and event traces under (a) value readiness/lifetime only and (b) value plus declared Phi issue order | The extra predicate rejects selected value-safe, architecture-order-invalid traces while retaining positive controls. This is an internal ablation, not an external compiler benchmark. |
+| What additional guarantee does the mapping contract provide? | Identical graph, Phi, and event traces under (a) readiness, lifetime and Phi owner coordinates without exact READ issue order, and (b) the same predicates plus declared Phi READ issue order | The extra predicate rejects selected value-safe, architecture-order-invalid traces while retaining positive controls. This is an internal ablation, not an external compiler benchmark. |
 | Is the abstract contract observed in generated C++? | SHA-pinned emitted operations, real load/store instrumentation, selected faults that preserve the printed source address witness | Detect selected actual-access faults; distinguish 192 memory-operation mutants from 24 arithmetic mutants; separately measure how many preserve the final numerical output. |
 | When does source reuse affect HLS memory? | Identical graph/clock/precision/architecture, controlled allocation and storage materialization, paired E3 reports | Measure qualified HLS BRAM18K deltas and report unknowns. Correlate with source-attested static RTL, but do not equate source RTL module names with physical RAM instances. |
 | Is there an actual hardware benefit? | Clean-DRC placed/routed matched arms with identical constraints | Report absolute BRAM, DSP, LUT, FF, WNS, numerical error and latency. Warned or timing-failed runs are not qualified. |
@@ -32,7 +32,7 @@
 
 Implementation: src/fpgai_research/experiments/cst_paper_contract_ablation.py
 
-Uses the predeclared 24-profile, 216-trace source population already defined for the held-out fanout experiment. Holds the source trace fixed while adding/removing the operator-local Phi issue-order predicate. It does NOT simulate an independent competitor, final-output checker or physical FPGA.
+Uses the predeclared 24-profile, 216-trace source population already defined for the held-out fanout experiment. Holds the source trace fixed while adding/removing only the operator-local Phi READ issue-order predicate; the baseline retains Phi owner-coordinate checks. It does NOT simulate an independent competitor, final-output checker or physical FPGA.
 
 Run in a separate clean first-paper checkout:
 
