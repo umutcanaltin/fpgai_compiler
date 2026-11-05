@@ -162,8 +162,19 @@ if nn is not None:
                 task.expand(n, -1),
                 past.expand(n, -1),
             ), dim=-1)
-            params = torch.nn.functional.softplus(self.clock_head(joint)) + 1.01
-            predicted_clock = (params[:, :1] / params.sum(-1, keepdim=True))
+            bounds = np.asarray(obs["clock_bounds_ns"], dtype=np.float32)
+            if bounds.shape != (2,) or not bool(np.isfinite(bounds).all()):
+                raise ValueError("Nonfinite or invalid hardware clock bounds")
+            if float(bounds[0]) == float(bounds[1]):
+                # Fixed-clock ablation must not leak clock-head gradients
+                # through the auxiliary feasibility-conditioned actor.
+                predicted_clock = torch.full(
+                    (joint.shape[0], 1), .5, dtype=joint.dtype,
+                    device=joint.device,
+                )
+            else:
+                params = torch.nn.functional.softplus(self.clock_head(joint)) + 1.01
+                predicted_clock = (params[:, :1] / params.sum(-1, keepdim=True))
             # Feasibility auxiliary influences *selection only*, and learns
             # exclusively from audited E3 labels after real vendor steps.
             feasibility_logits = self.feasibility_head(
@@ -320,23 +331,29 @@ class HardwareGraphTrainer:
             chosen = dist.sample()
             base_logprob = dist.log_prob(chosen)
             entropy = dist.entropy()
-            params = torch.nn.functional.softplus(
-                self.policy.clock_head(contexts[chosen])
-            ) + 1.01
-            beta = Beta(params[0], params[1])
-            # The raw continuous latent sample remains in the score-
-            # function tape. Normalizing to a 0.01ns Vitis period is a
-            # deterministic transform of that latent action.
-            latent = beta.sample().clamp(1e-6, 1.-1e-6)
             low, high = [float(x) for x in obs["clock_bounds_ns"]]
-            clock = normalize_clock_period_ns(
-                low + (high-low)*float(latent.item()), decimals=2
-            )
-            fraction = torch.tensor([(clock-low)/(high-low)],
-                                    dtype=torch.float32)
-            clock_lp = beta.log_prob(latent)
-            entropy = entropy + beta.entropy()
-            log_probability = base_logprob + clock_lp
+            if high == low:
+                # Discrete-only fixed-clock policy; do not sample a dummy Beta
+                # latent or include its log-probability in a gradient tape.
+                clock = normalize_clock_period_ns(low, decimals=2)
+                fraction = torch.tensor([.5], dtype=torch.float32)
+                latent = None
+                log_probability = base_logprob
+            else:
+                params = torch.nn.functional.softplus(
+                    self.policy.clock_head(contexts[chosen])
+                ) + 1.01
+                beta = Beta(params[0], params[1])
+                # The raw continuous latent is preserved for source-based
+                # PPO replay. Native clock periods are canonical to .01ns.
+                latent = beta.sample().clamp(1e-6, 1.-1e-6)
+                clock = normalize_clock_period_ns(
+                    low + (high-low)*float(latent.item()), decimals=2
+                )
+                fraction = torch.tensor([(clock-low)/(high-low)],
+                                        dtype=torch.float32)
+                entropy = entropy + beta.entropy()
+                log_probability = base_logprob + beta.log_prob(latent)
             with torch.no_grad():
                 pred = float(torch.sigmoid(self.policy.feasibility_head(
                     torch.cat((contexts[chosen].detach(), fraction), dim=-1)
@@ -352,14 +369,17 @@ class HardwareGraphTrainer:
             return (int(chosen.item()), clock), tape
         with torch.no_grad():
             chosen = int(logits.argmax().item())
-            params = torch.nn.functional.softplus(
-                self.policy.clock_head(contexts[chosen])
-            ) + 1.01
             low, high = [float(x) for x in obs["clock_bounds_ns"]]
-            fraction = float((params[0]/params.sum()).item())
-            clock = normalize_clock_period_ns(
-                low + (high-low)*fraction, decimals=2
-            )
+            if high == low:
+                clock = normalize_clock_period_ns(low, decimals=2)
+            else:
+                params = torch.nn.functional.softplus(
+                    self.policy.clock_head(contexts[chosen])
+                ) + 1.01
+                fraction = float((params[0]/params.sum()).item())
+                clock = normalize_clock_period_ns(
+                    low + (high-low)*fraction, decimals=2
+                )
         return (chosen, clock), None
 
     def ranked_frozen_actions(self, obs: dict) -> tuple[tuple[int, float], ...]:
@@ -378,13 +398,16 @@ class HardwareGraphTrainer:
             low, high = [float(x) for x in obs["clock_bounds_ns"]]
             result = []
             for index in ranked:
-                params = torch.nn.functional.softplus(
-                    self.policy.clock_head(contexts[index])
-                ) + 1.01
-                fraction = float((params[0] / params.sum()).item())
-                clock = normalize_clock_period_ns(
-                    low + (high - low) * fraction, decimals=2
-                )
+                if high == low:
+                    clock = normalize_clock_period_ns(low, decimals=2)
+                else:
+                    params = torch.nn.functional.softplus(
+                        self.policy.clock_head(contexts[index])
+                    ) + 1.01
+                    fraction = float((params[0] / params.sum()).item())
+                    clock = normalize_clock_period_ns(
+                        low + (high - low) * fraction, decimals=2
+                    )
                 result.append((index, clock))
             return tuple(result)
 

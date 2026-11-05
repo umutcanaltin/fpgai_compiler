@@ -73,9 +73,13 @@ class HardwareEpisodicTrainer(HardwareGraphTrainer):
         if not isinstance(tape, HardwareActionTape):
             raise ValueError("A genuine sampled policy tape is required")
         if self.algorithm == "ppo" and (
-            tape.observation is None or tape.sampled_clock_fraction is None
+            tape.observation is None or (
+                tape.sampled_clock_fraction is None
+                and float(tape.observation["clock_bounds_ns"][0]) !=
+                    float(tape.observation["clock_bounds_ns"][1])
+            )
         ):
-            raise ValueError("PPO requires the genuine original sampled observation/clock")
+            raise ValueError("PPO requires a sampled clock in search-clock regimes")
         qualified = verify_original_hardware_step(
             tape, reward, info=info, env=env
         )
@@ -127,23 +131,29 @@ class HardwareEpisodicTrainer(HardwareGraphTrainer):
             trace_logprobs = []
             trace_entropies = []
             for attempt in trace:
-                if (attempt.observation is None
-                        or attempt.sampled_clock_fraction is None):
-                    raise ValueError("PPO admission trace lacks a sampled original policy action")
+                if attempt.observation is None:
+                    raise ValueError("PPO admission trace lacks its original observation")
+                low, high = (float(x) for x in attempt.observation["clock_bounds_ns"])
+                if low != high and attempt.sampled_clock_fraction is None:
+                    raise ValueError("PPO clock-search trace lacks sampled clock latent")
                 logits, value, contexts = self.policy(
                     attempt.observation, with_context=True
                 )
                 chosen = attempt.source_action_index
                 cat = Categorical(logits=logits)
-                params = torch.nn.functional.softplus(
-                    self.policy.clock_head(contexts[chosen])
-                ) + 1.01
-                beta = Beta(params[0], params[1])
-                trace_logprobs.append(
-                    cat.log_prob(torch.tensor(chosen))
-                    + beta.log_prob(attempt.sampled_clock_fraction)
-                )
-                trace_entropies.append(cat.entropy() + beta.entropy())
+                if low == high:
+                    trace_logprobs.append(cat.log_prob(torch.tensor(chosen)))
+                    trace_entropies.append(cat.entropy())
+                else:
+                    params = torch.nn.functional.softplus(
+                        self.policy.clock_head(contexts[chosen])
+                    ) + 1.01
+                    beta = Beta(params[0], params[1])
+                    trace_logprobs.append(
+                        cat.log_prob(torch.tensor(chosen))
+                        + beta.log_prob(attempt.sampled_clock_fraction)
+                    )
+                    trace_entropies.append(cat.entropy() + beta.entropy())
                 if attempt is accepted:
                     values.append(value)
                     feasibility_logits.append(self.policy.feasibility_head(

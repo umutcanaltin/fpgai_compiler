@@ -176,7 +176,8 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
                  initial_clock_ns: float = 14.0, max_parallel_units: int = 8,
                  vitis_executable: str = "vitis_hls",
                  timeout_seconds: int = 7200,
-                 execute_native: bool = False):
+                 execute_native: bool = False,
+                 fixed_clock_ns: float | None = None):
         if gym is None:
             raise RuntimeError("Install gymnasium>=1,<2 to use native hardware Gym")
         if type(execute_native) is not bool:
@@ -187,6 +188,12 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
             raise ValueError("Explicit vendor timeout must be 1..172800 seconds")
         if not isinstance(root, (str, Path)):
             raise ValueError("Explicit experiment root path required")
+        self.fixed_clock_ns = (
+            _clock(fixed_clock_ns) if fixed_clock_ns is not None else None
+        )
+        if (self.fixed_clock_ns is not None
+                and self.fixed_clock_ns != _clock(initial_clock_ns)):
+            raise ValueError("Fixed clock must equal the original initial clock")
         self.root = Path(root).expanduser()
         if self.root.is_symlink():
             raise ValueError("Experiment root cannot be a symlink")
@@ -222,9 +229,15 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
         self._episode_path = None
         self._episode_allocated = False
 
+        self.clock_action_bounds_ns = (
+            (self.fixed_clock_ns, self.fixed_clock_ns)
+            if self.fixed_clock_ns is not None
+            else (CLOCK_MIN_NS, CLOCK_MAX_NS)
+        )
         self.action_space = spaces.Tuple((
             spaces.Discrete(MAX_ACTIONS),
-            spaces.Box(low=CLOCK_MIN_NS, high=CLOCK_MAX_NS,
+            spaces.Box(low=self.clock_action_bounds_ns[0],
+                       high=self.clock_action_bounds_ns[1],
                        shape=(), dtype=np.float64),
         ))
         self.observation_space = spaces.Dict({
@@ -293,7 +306,8 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
         self._mask = np.zeros(MAX_ACTIONS, np.int8)
         action_features = np.zeros((MAX_ACTIONS, ACTION_FEATURES), np.float32)
         target_nodes = np.full(MAX_ACTIONS, -1, np.int32)
-        self._mask[0] = 1  # clock-only action; a genuine change is required.
+        # A fixed-clock experiment has no clock-only policy action.
+        self._mask[0] = int(self.fixed_clock_ns is None)
         action_features[0] = _features_for_action(None)
         for i, (candidate, valid) in enumerate(zip(candidates, source_mask), 1):
             self._mask[i] = int(valid)
@@ -362,7 +376,7 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
             "action_target_node": target_nodes,
             "history": history, "history_mask": history_mask,
             "global": np.asarray(vals, np.float32),
-            "clock_bounds_ns": np.asarray([CLOCK_MIN_NS, CLOCK_MAX_NS],
+            "clock_bounds_ns": np.asarray(self.clock_action_bounds_ns,
                                           dtype=np.float32),
         }
 
@@ -410,6 +424,8 @@ class GymHardwareNativeEnv(gym.Env if gym is not None else object):
         if not 0 <= idx < len(self.offers) or not self._mask[idx]:
             raise ValueError("Invalid/masked source architecture index")
         period = _clock(action[1])
+        if self.fixed_clock_ns is not None and period != self.fixed_clock_ns:
+            raise ValueError("Fixed-clock environment refuses requested clock changes")
         if not self.action_space.contains((idx, np.asarray(period, np.float64))):
             raise ValueError("Clock action outside Gym action-space bounds")
 
