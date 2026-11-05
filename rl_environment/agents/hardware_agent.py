@@ -567,6 +567,11 @@ def main(argv=None) -> int:
                         metavar="N", help="LUT FF DSP BRAM18K URAM")
     parser.add_argument("--max-absolute-error", type=float, required=True)
     parser.add_argument("--initial-clock-ns", type=float, default=14.)
+    parser.add_argument("--fixed-clock", action="store_true",
+                        help="Optimize architecture only at the fixed initial clock")
+    parser.add_argument("--reward-mode", choices=("best_improvement", "dense_latency"),
+                        default="best_improvement")
+    parser.add_argument("--reward-reference-ns", type=float, default=10000.)
     parser.add_argument("--max-parallel-units", type=int, default=8)
     parser.add_argument("--output-root", required=True)
     parser.add_argument("--seed", type=int, default=101)
@@ -594,6 +599,9 @@ def main(argv=None) -> int:
             resource_caps=tuple(args.resource_caps),
             max_absolute_error=args.max_absolute_error,
             initial_clock_ns=args.initial_clock_ns,
+            fixed_clock_ns=args.initial_clock_ns if args.fixed_clock else None,
+            reward_mode=args.reward_mode,
+            reward_reference_ns=args.reward_reference_ns,
             max_parallel_units=args.max_parallel_units,
             max_vitis_calls=1,
             execute_native=bool(args.execute_native),
@@ -616,6 +624,9 @@ def main(argv=None) -> int:
             "status": "SHARED_GNN_SOURCE_ONLY_PREVIEW",
             "seed": args.seed,
             "part": args.part,
+            "clock_regime": "fixed" if args.fixed_clock else "search",
+            "reward_mode": args.reward_mode,
+            "reward_reference_ns": args.reward_reference_ns,
             "initial_state_sha256": status["state_sha256"],
             "selected_source_action_index": action[0],
             "selected_source_action": asdict(chosen_edit) if chosen_edit else None,
@@ -656,6 +667,9 @@ def main(argv=None) -> int:
                     "native_case": info["native_case"],
                     "native_gym_root": str(Path(args.output_root).absolute()),
                     "training_mode": "one_step_original_vitis",
+                    "clock_regime": "fixed" if args.fixed_clock else "search",
+                    "reward_mode": args.reward_mode,
+                    "reward_reference_ns": args.reward_reference_ns,
                 })
                 out["private_checkpoint"] = str(Path(args.checkpoint).absolute())
         print(json.dumps(out, indent=2, sort_keys=True, allow_nan=False))

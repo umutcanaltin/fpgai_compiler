@@ -571,6 +571,11 @@ def main(argv=None) -> int:
                         metavar="N", help="LUT FF DSP BRAM18K URAM task budgets")
     parser.add_argument("--max-absolute-error", type=float, required=True)
     parser.add_argument("--initial-clock-ns", type=float, default=14.00)
+    parser.add_argument("--fixed-clock", action="store_true",
+                        help="Disable clock-only edits and train architecture choices at the initial target")
+    parser.add_argument("--reward-mode", choices=("best_improvement", "dense_latency"),
+                        default="best_improvement")
+    parser.add_argument("--reward-reference-ns", type=float, default=10000.)
     parser.add_argument("--action-clock-ns", type=float,
                         help="Policy-selected continuous requested clock for one native step")
     parser.add_argument("--action-index", type=int, default=0,
@@ -591,6 +596,9 @@ def main(argv=None) -> int:
             resource_caps=tuple(args.resource_caps),
             max_absolute_error=args.max_absolute_error,
             initial_clock_ns=args.initial_clock_ns,
+            fixed_clock_ns=args.initial_clock_ns if args.fixed_clock else None,
+            reward_mode=args.reward_mode,
+            reward_reference_ns=args.reward_reference_ns,
             max_parallel_units=args.max_parallel_units,
             execute_native=bool(args.execute_native), max_vitis_calls=1,
             vitis_executable=args.vitis, timeout_seconds=args.timeout,
@@ -614,6 +622,9 @@ def main(argv=None) -> int:
                 "schema": SCHEMA, "status": "SOURCE_ACTION_PREVIEW_ONLY",
                 "state_sha256": info["state_sha256"],
                 "original_native_calls": 0, "reward": None,
+                "clock_regime": "fixed" if args.fixed_clock else "search",
+                "reward_mode": args.reward_mode,
+                "reward_reference_ns": args.reward_reference_ns,
                 "operator_count": len(model.operators),
                 "graph_nodes": int(observation["node_mask"].sum()),
                 "graph_edges": int(observation["edge_mask"].sum()),
@@ -627,7 +638,7 @@ def main(argv=None) -> int:
                 ],
                 "native_vitis_calls": 0,
                 "training_started": False,
-                "requested_clock_is_continuous": True,
+                "requested_clock_is_continuous": not args.fixed_clock,
                 "native_clock_resolution_ns": .01,
                 "physical_board_inference_verified": False,
             }
