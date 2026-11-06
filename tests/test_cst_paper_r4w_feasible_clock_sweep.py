@@ -146,3 +146,80 @@ def test_missing_original_stage_or_invalid_clocks_fail_closed():
         sut._case("row_storage",18.0)
     with pytest.raises(ValueError,match="unsafe HDL"):
         sut._tcl("row_storage",16.0,["../hijack.v"])
+
+
+
+def _preserved_native_lock(study: Path, prepared: dict) -> None:
+    """Synthetic attempted-native lock: no vendor calls, no receipt rewriting."""
+    import json
+    lock=study/"r4w_one_time_native_attempt_lock.json"
+    lock.write_text(json.dumps({
+        "schema":sut.SCHEMA+"/one-time-vendor-attempt",
+        "source_revision":prepared["original_source_revision"],
+        "cases":sorted(prepared["predeclared_cases"]),
+        "never_retry":True,
+    },sort_keys=True)+"\n")
+
+
+def test_postrun_native_workdir_sidecars_allowed_only_under_original_lock(
+        tmp_path,monkeypatch):
+    opts,_=_fixture(tmp_path,monkeypatch)
+    out=tmp_path/"new_r4w"
+    prepared=sut.prepare(**opts,output=out)
+    src=out/"row_storage_period_16ns"/"vivado"/"rtl"
+    (src/".Xil").mkdir()
+    (src/".Xil"/"vivado-cache.txt").write_text("native sidecar\n")
+    (src/"vivado.jou").write_text("Vivado wrote this after cd rtl\n")
+    (src/"usage_statistics_webtalk.xml").write_text("<usage />\n")
+    original=opts["r4o_study"]/"row_storage"/"rtl"/"kernel.v"
+    old_original_sha=sut._sha(original)
+    old_canonical_sha=sut._sha(
+        out/"row_storage_period_16ns"/"fpgai_hls_project"/"solution1"/"syn"/"verilog"/"kernel.v")
+    # Source-only prepared inputs must reject unplanned extras.
+    with pytest.raises(ValueError,match="unexpected RTL/ROM"):
+        sut.audit_prepared(study=out,**opts)
+    _preserved_native_lock(out,prepared)
+    # Once the one-time native run has been attempted, generated sidecars
+    # may exist, while original input file hashes remain unchanged.
+    assert sut.audit_prepared(study=out,**opts)==prepared
+    assert sut._sha(original)==old_original_sha
+    assert sut._sha(
+        out/"row_storage_period_16ns"/"fpgai_hls_project"/"solution1"/"syn"/"verilog"/"kernel.v")==old_canonical_sha
+
+
+def test_new_hdl_or_rom_in_postrun_workdir_still_rejected(tmp_path,monkeypatch):
+    opts,_=_fixture(tmp_path,monkeypatch)
+    out=tmp_path/"new_r4w"
+    prepared=sut.prepare(**opts,output=out)
+    _preserved_native_lock(out,prepared)
+    folder=out/"full_storage_period_20ns"/"vivado"/"rtl"
+    for name in ("hijack.v","unknown.mem","timing_override.xdc","extra_module.xci"):
+        path=folder/name
+        path.write_text("not an original source file")
+        with pytest.raises(ValueError,match="new HDL/ROM/constraints"):
+            sut.audit_prepared(study=out,**opts)
+        path.unlink()
+
+
+def test_prepared_canonical_source_directory_never_admits_new_vendor_files(
+        tmp_path,monkeypatch):
+    opts,_=_fixture(tmp_path,monkeypatch)
+    out=tmp_path/"new_r4w"
+    prepared=sut.prepare(**opts,output=out)
+    _preserved_native_lock(out,prepared)
+    canonical=(out/"full_storage_period_24ns"/"fpgai_hls_project"/"solution1"/"syn"/"verilog")
+    (canonical/"vivado.jou").write_text("untrusted change to original canonical source root\n")
+    with pytest.raises(ValueError,match="unexpected RTL/ROM"):
+        sut.audit_prepared(study=out,**opts)
+
+
+def test_generated_symlink_does_not_bypass_postrun_source_provenance(
+        tmp_path,monkeypatch):
+    opts,_=_fixture(tmp_path,monkeypatch)
+    out=tmp_path/"new_r4w"
+    prepared=sut.prepare(**opts,output=out)
+    _preserved_native_lock(out,prepared)
+    folder=out/"row_storage_period_24ns"/"vivado"/"rtl"
+    (folder/"unknown-output.log").symlink_to(folder/"kernel.v")
+    with pytest.raises(ValueError,match="symlinked"):
+        sut.audit_prepared(study=out,**opts)
