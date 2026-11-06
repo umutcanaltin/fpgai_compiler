@@ -108,3 +108,26 @@ make research-r4x-feasible-latency
 | `Makefile` | `research-hls-vivado-review`, `research-r4w-audit`, `research-r4x-feasible-latency` and targeted source-only checks | New commands unverified locally |
 
 The existing source compiler, R4k emitters, frozen R4l/HLS source files, R4p original RTL/ROM and original vendor/clock reports remain unchanged. The PR is still draft. Any future DSP pipeline variant is a new source experiment and must be tracked file by file in the maintainer impact report.
+
+## Author original post-run checkpoint — 6 November 2026, 22:02 Europe/Amsterdam
+
+**Actual author workstation, no inferred completion.** After pulling branch revision `a0d4db117247f08b0c85849f3fbd5d8c0cdac34a`, the author ran 4 focused test modules: **40/40 tests passed in 0.73s**. The read-only original C1 E1 SHA-pinned analysis then completed on the previously executed immutable full 54-profile/108-GCC result (`build/paper_c1_e1_cpp_bridge_full_20261106_01`, old E1 manifest SHA `a79e700208e5d7cada93dd1f488809b6622f52cf6b14fa7b7d7b05a8d624d83e`). **Overall C1 original source-slot effects:** 54/54 positive, median **15.5** saved source slots, per-profile range **4–45**; median source-slot reduction **50.0%**, per-profile percent range **38.461538–55.555556%**; maximum final absolute numerical error **2.3781921365539915e-7**, maximum intermediate absolute error **2.408715820134688e-7**; original 54 distinct source designs sum **1999 disjoint units vs 1009 reused units** (990 total savings ACROSS separate models, **NOT** a single design or mapped BRAM). Each layout logged **6625 actual source address-access witnesses**. No new compiler/GCC/vendor calls occurred during analysis.
+
+**Original 6 reader/mapping source-only strata (9 profiles each):**
+
+| Reader count | Φ mapping | Median saved source slots | Median reduction % | Min/max saved slots |
+|---:|---|---:|---:|---|
+| 2 | scalar | 14 | 45.454545 | 4–17 |
+| 2 | mixed_phi | 12 | 50.000000 | 4–23 |
+| 3 | scalar | 14 | 50.000000 | 7–27 |
+| 3 | mixed_phi | 18 | 47.058824 | 8–33 |
+| 4 | scalar | 24 | 50.000000 | 8–45 |
+| 4 | mixed_phi | 32 | 50.000000 | 13–45 |
+
+**Original Vitis+Vivado read-only joint source audit succeeded:** After original source E1/E2/E3 qualification, same fixed original R4k/R4l source revision `776e3a7a4b599fd114718f6a03ab73e06be17f5c`, 12ns routed OOC original failed both timing and clean DRC. The source-attested after-Vitis stage was CSIM max absolute error **3.7956994241e-06** per arm; full/row HLS cycles **22954/22602**, estimated periods **9.857/9.500ns**, pure HLS latency proxy **226.257578/214.719 µs**. Original routed BRAM **7/4**, DSP **24/21**, LUT **1282/1710**, FF **883/1022**, routed WNS **−2.170/−3.718ns**, DRC counts **74/71**. Vitis and Vivado compiled observations are distinct stages; **strict E4 = NULL**, achieved physical/core/board latency = **UNKNOWN**.
+
+**New R4w one-time native feasibility pilot HAS EXECUTED:** A *new*, create-only 6-case Vivado 2023.2 study was prepared at `build/r4w_valid_clock_sweep_20261106_01` from immutable original R4o/R4k RTL/ROM source SHA. Six new native Vivado implementations were run, one full/row pair at each **16ns, 20ns, 24ns**, each process returned **exit=0**, native runner's printed `actual_new_vivado_calls=6`, `process_completed=true` in all six. No original R4p/R4u native attempts were replayed, no original source/report modified. **That is only vendor process completion, NOT routed WNS/DRC qualification.** Both subsequent original-data read-only `make research-r4w-audit` and `make research-r4x-feasible-latency` **FAILED BEFORE reading per-arm timing/DRC** with `ValueError: R4w unexpected RTL/ROM files under source root` inside `audit_prepared` at the postrun RTL directory inventory.
+
+**New audit-only fix, not yet workstation tested:** Vivado's generated Tcl explicitly `cd`'s into the new `vivado/rtl` working directory. The old `audit_prepared` accepted no additional post-run artifacts there; normal `.Xil` and journal/usage files therefore can block analysis despite intact original RTL/ROM SHA. `src/fpgai_research/experiments/cst_paper_r4w_feasible_clock_sweep.py` now permits **non-source sidecars only inside the native Vivado working directory after a valid immutable one-time native-attempt lock**, while preserving SHA-verification of the complete original staged RTL/ROM/Tcl and original full manifest. New HDL/ROM/constraints/IP files, symlinked entries, extra source files in canonical HLS RTL, missing original file, or invalid lock still fail. Added four targeted synthetic regression tests. The actual *names* of the author's generated sidecars have not been independently listed; this patch addresses the observed postrun class and needs the author's `pytest` and read-only audits to confirm.
+
+**Do NOT rerun Vivado or delete the R4w one-time attempt lock.** Only rerun the new tests, `make research-r4w-audit`, and `make research-r4x-feasible-latency` after pulling. If any postrun SHA/tool receipt or new Vivado DRC fails, report `UNKNOWN`/unqualified with the exact failing gate, preserve all six original new outputs and follow the separate storage×DSP-pipeline E2/E3/E4 study plan. No clock/time/board latency winner has been observed yet. GPU/GCC source slot percentages are not physical FPGA BRAM percentages.
