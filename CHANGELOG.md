@@ -1,3 +1,10 @@
+## 6 November 2026 — first actual author R4y test failures repaired (new code not yet retested)
+
+- The author pulled `9f04971`, ran new source-only R4y/R4x/R4w tests: **44 passed, 6 failed**. All six failures originated in R4y comparing its planned status with its distinct prepared status. `make research-r4y-plan` succeeded (four 24ns/1.5ns target sources); `make research-r4y-prepare` failed **before output creation** from an R4k-only `source_only_E1_verified` requirement missing from actual R4l native audit. The following audit predictably had no output directory. No new Vivado/HLS runs happened.
+- Fixed the two independently observed code bugs: R4y original provenance checks now use actual R4l native schema/E1/E2/E3/counts/SHA, preserving zero audit calls, and R4y audit accepts only the exact separately checked prepared-status transition while validating all other frozen plan values. Extra file and symlink checks remain fail-closed.
+- Updated R4y fixture to authentic R4l audit schema; added positive and negative schema, vendor-receipt, status, clock and fake-qualified E2 controls. **Pending the author's local regression rerun**; do not claim tests passed or 24ns packages were created.
+- No original evidence/attempt locks modified, no new native calls, no GitHub Actions, main unchanged.
+
 - R4y source manifest audit fix: JSON-normalize canonical tuple-valued source-slot metadata before comparison to saved JSON manifests; retain independent source SHA, exact package and all-file inventory checks. Added explicit round-trip regression; **new tests not yet author-workstation-verified**.
 ## 6 November 2026 — prospective R4y four-arm HLS source preparation, no native calls
 

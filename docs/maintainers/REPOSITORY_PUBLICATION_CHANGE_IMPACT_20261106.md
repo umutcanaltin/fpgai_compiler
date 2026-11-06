@@ -227,3 +227,18 @@ These are **read-only code inspection findings**, not original experiment observ
 No files deleted, moved or renamed; no previous HLS/RTL generator changed. Original original-source experiments and one-time locks untouched. Draft PR remains open and main unchanged. New 24ns native Vitis/Vivado work is UNIMPLEMENTED and original 47-pass tests predate these changes.
 
 **R4y serialization follow-up:** updated the new R4y source-only auditor to compare JSON-normalized canonical source metadata, because Python tuple source-slot maps become JSON lists on disk. This fixes a potential false-negative on unchanged manifests. Added a synthetic prepare→audit regression test and updated the R4y paper protocol. No other compiler semantics, original study roots, source hashes, vendor calls or test labels changed. New tests still need workstation execution.
+
+## 6 November 2026 — R4y actual author failure and repair file impacts
+
+User's first post-implementation local run: **44 passed, 6 failed**, all from legitimate prepared-status being compared to proposal-status in R4y read-only audit. New real source preparation then **failed before allocation** on a mistaken R4k-only `source_only_E1_verified` requirement applied to R4l `audit_native`. The subsequent new source audit had no directory to inspect; no source native results exist. Corrected only the R4y read-only source implementation and test fixtures; the older 47 passing tests were on pre-R4y code.
+
+| File | Operation | Connection and exactly what changed | Current verification |
+|---|---|---|---|
+| `src/fpgai_research/experiments/cst_paper_r4y_24ns_pipeline_source_prepare.py` | MODIFIED | Original preflight now uses **actual R4l native audit schema** (E1 matched, 2 arms, E2/E3 qualified counts, original staged SHA, no new/native audit calls) rather than absent R4k-only summary field; audit compares all frozen plan fields except intentional status transition, with separate exact prepared status check; validates model/solver source and package symlinks before reading. | **Pending local test**; no vendor calls. |
+| `tests/test_cst_paper_r4y_24ns_pipeline_source_prepare.py` | MODIFIED | Synthetic fixture mirrors real R4l response; adds positive real-schema source package round-trip and negative count/schema/receipt/clock/status/false-E2 controls, preserving existing source SHA and injected-file tests. | **Pending local test**; earlier 6 failures are expected to be addressed. |
+| `paper/compiler_ir/R4Y_24NS_FOUR_ARM_SOURCE_PREPARATION_20261106.md` | MODIFIED | Adds author-observed failures, exact cause and preflight repair, source-only rerun commands and evidence limitations. | Editorial grounded in uploaded terminal. |
+| `docs/RESEARCH_PUBLICATION_STATUS.md` | MODIFIED | Public-facing short status of failed first R4y preparation and pending fix verification; no premature 24ns native claim. | Editorial. |
+| `CHANGELOG.md` | MODIFIED | Chronological R4y repair checkpoint; records 44/6, original failed preparation, no old outputs changed. | Editorial. |
+| This repository impact ledger | MODIFIED | Keeps architecture and file history, calls & dependency map complete. | Editorial. |
+
+**No new file or folder additions/deletions/renames in this repair.** The existing R4y source output was NOT created by the author's attempt, and no original R4k/R4l/R4o/R4p/R4w source or vendor result/attempt lock was modified. Research PR stays draft, main untouched, no Actions.
