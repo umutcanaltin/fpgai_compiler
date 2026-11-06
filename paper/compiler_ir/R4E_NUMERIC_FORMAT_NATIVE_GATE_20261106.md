@@ -1,6 +1,6 @@
 # R4e — guarded native CSim/CSynth format-by-storage study
 
-**Implementation status (6 November 2026): source and no-vendor unit tests committed; not yet executed on the author's workstation. No new native R4e outcome is claimed.**
+**Workstation update (6 November 2026): 6/6 R4e targeted tests passed, one matched 32/6 native Vitis pair executed and BOTH arms passed E2/E3.** See [actual 32/6 E2/E3 resource tradeoff and R4f read-only review](R4E_32_6_WORKSTATION_HLS_RESULTS_AND_R4F_REVIEW_20261106.md). The other two R4d source-format pairs (new 16/6 and 32/8) remain NOT RUN natively. Existing Vitis case folders must not be reexecuted or overwritten.
 
 ## Recorded original workstation prerequisite
 
@@ -71,7 +71,7 @@ python -m fpgai_research.experiments.cst_r4e_numeric_format_native \
 
 Format index 0 is 16/6; index 1 is 32/6; index 2 is 32/8. All six arms remain in the denominator. A native arm is create-once: any prior invocation receipt, logs folder or HLS project makes rerun forbidden. The runner preflights EVERY selected arm before making the first vendor call. Interrupted original results must be preserved and read-only-audited, never deleted or silently retried.
 
-Do not start new 16/6 or 32/8 Vitis attempts until the 32/6 pilot is analyzed. A new 32/6 numerical pass would support a precision hypothesis but cannot isolate saturation, weight quantization, intermediate rounding, pointwise output identity, or another cause.
+**32/6 pilot observed:** both arms passed E2, both qualified E3; estimated BRAM18K 13→13 (tie), DSP 23→19, LUT 4990→4755, FF 1798→1647, worst cycles 22192→22602, estimated clock 10.302→9.500 ns. The numerical success supports a precision-related hypothesis but does not isolate rounding, saturation, or source-level numerical mechanism. Run the new R4f read-only audit before choosing further native runs; preserve existing 32/6 vendor receipts as original evidence.
 
 ## Next missing independent evidence
 
@@ -80,4 +80,4 @@ Do not start new 16/6 or 32/8 Vitis attempts until the 32/6 pilot is analyzed. A
 - Compare storage deltas within each fixed precision, not across widths.
 - Physical claims require new clean-DRC placed/routed matched Vivado evidence, not just source scratch savings or HLS estimates.
 
-**Paper remains major revision. No actual R4e E2/E3/E4 result has been asserted by this committed implementation.**
+**Paper remains major revision. One matched 32/6 R4e pair has source-attested E2/E3 evidence reported by the workstation, but no physical E4 result or BRAM saving is established. R4f code is new and not yet workstation-tested.**
