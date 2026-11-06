@@ -2,7 +2,7 @@
 # None of these targets invokes Vitis, Vivado, downloads models or publishes code.
 PYTHON ?= python
 
-.PHONY: help install-dev example example-cnn example-strided example-two-conv example-mlp test test-examples test-compiler test-gym release-check release-links release-preview-plan fpga-env-check fpga-prepare-hls fpga-inspect
+.PHONY: help install-dev example example-cnn example-strided example-two-conv example-mlp test test-examples test-compiler test-gym release-check release-links release-preview-plan fpga-env-check fpga-prepare-hls fpga-inspect research-inventory research-audit-tests research-c2-review
 
 help:
 	@echo "install-dev          Install editable compiler with ONNX and test extras"
@@ -15,6 +15,9 @@ help:
 	@echo "test-examples        Verify public ONNX and CNN examples"
 	@echo "test-compiler        Run focused source compiler regressions"
 	@echo "test-gym             Run separate frozen Gym tests (no vendor)"
+	@echo "research-inventory  Read-only tracked-file SHA and Python import/owner map"
+	@echo "research-audit-tests Run source inventory, hygiene and C2 read-only tests"
+	@echo "research-c2-review  Read-only original source-compiler cost comparison (no new calls)"
 	@echo "release-links        Check all public preview documentation links"
 	@echo "release-preview-plan Show nonpublishable public source allowlist"
 	@echo "release-check        Read-only owner/IP/license/history release preflight"
@@ -88,3 +91,14 @@ release-preview-plan:
 
 release-check:
 	$(PYTHON) scripts/check_open_source_readiness.py
+
+# Read-only, contributor-friendly research and publication checks.
+# These targets never create native results or invoke Vitis/Vivado.
+research-inventory:
+	$(PYTHON) scripts/audit_source_inventory.py
+
+research-audit-tests:
+	$(PYTHON) -m pytest -q tests/test_audit_source_inventory.py tests/test_repository_publication_hygiene.py tests/test_cst_paper_c2_original_readonly_analysis.py tests/test_public_docs_links.py tests/test_public_release_preview.py
+
+research-c2-review:
+	$(PYTHON) -m fpgai_research.experiments.cst_paper_c2_original_readonly_analysis --study build/paper_c2_fair_source_cost_20261106_01
