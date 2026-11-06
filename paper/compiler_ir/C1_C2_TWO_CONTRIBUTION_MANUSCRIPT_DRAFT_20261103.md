@@ -51,6 +51,15 @@ Likewise, source scratch allocation can be checked for a **fixed total order** b
 
 Existing R2f/R2h source compilers generate per-element fanout traces and actual C++ load/store address witnesses; R2r selected generated-source mutants test adversarial cases. R2q original source memory comparisons are sensitive to whether last-use is measured at committed values or at hypothetical first in-place MAC. Both accounting assumptions must be disclosed, including the zero-reduction result for the hypothetical first-MAC convention.
 
+**Bounded C1 original evidence table (different frozen cohorts, not pooled independent trials):**
+
+| Observation | Original evaluated population | Observed outcome | Claim boundary |
+|---|---:|---|---|
+| Independent fixed-source-order unit-slot exhaustive oracle | 5 small source cases | 5/5 agreement | Source-slot minimum under fixed order only |
+| Selected semantic mutations | 25 (five types × five cases) | 25/25 rejected | Only these prespecified negative controls |
+| Independently coded finite event interpreter vs production verifier | 133 trace variants, five source cases | 0/133 status disagreements | Both share admitted static model; no general proof |
+| Generated-source selected mutation study (separate R2r population) | 216 selected source mutations | 216/216 detected | Selected source mutations, not all possible incorrect C++ or RTL |
+
 **Workstation-verified R3e study (original source revision \`fc40369f9493d93cc78c4886ae2e32c5d1f64093\`):** exactly five tiny bounded source cases across 2–4 readers and a changed reader-PE control, with an *independent finite exhaustive minimum-slot oracle* and five targeted negative mutations per case: early consumer read, producer commit without its reduction, wrong `Phi` owner, source-safe but wrong `Phi` issue order, and source overwrite of a simultaneously live value. Original planned population: **5 source cases × 5 mutations = 25 mutation trials**, with no allowed post-hoc exclusions. A rejected mutation must report its expected semantic reason rather than any incidental compiler crash.
 
 ### 3.4 Explicit bounded operational soundness obligations
@@ -132,7 +141,7 @@ These results increase **compiler-internal confidence**; they do not establish s
 
 ### 6.2 Controlled storage ablation: HLS cycles versus routed resource trade-off
 
-A separate, frozen 32/6 numeric-format source experiment holds the source-level reader/issue schedule fixed while changing intermediate scratch materialization between `full_storage` and `row_storage`. Both R4k variants passed real host/GCC E1 conformance; the separately executed original R4l Vitis cases passed fixed-point CSim E2 and strict HLS synthesis E3. Their HLS worst-case cycles decreased **22,954→22,602** (−352, approximately −1.53%), and HLS BRAM18K estimates tied **13→13**; HLS-estimated DSP/LUT/FF were lower for row storage. A matching original Vivado OOC physical-routing pair subsequently reported:
+A separate, frozen 32/6 numeric-format source experiment holds the source-level reader/issue schedule fixed while changing intermediate scratch materialization between `full_storage` and `row_storage`. Both R4k variants passed real host/GCC E1 conformance; the separately executed original R4l Vitis cases passed fixed-point CSim E2 and strict HLS synthesis E3. Their HLS worst-case cycles decreased **22,954→22,602** (−352, approximately −1.53%), and HLS BRAM18K estimates tied **13→13**; HLS-estimated DSP/LUT/FF were lower for row storage. Their separately recorded **HLS-estimated clock periods** were **9.857ns versus 9.500ns**, not achieved physical periods. For clarity, the arithmetic `HLS worst cycles × 12ns requested period` gives **275.448µs versus 271.224µs** (a **4.224µs reduction**), but these are **derived design-time, E3-only nominal latency proxies**, not measured/physically feasible inference latency: both later Vivado implementations failed that same requested period. A matching original Vivado OOC physical-routing pair subsequently reported:
 
 | Original routed OOC result | Full storage | Row storage | Row − full |
 |---|---:|---:|---:|
