@@ -40,8 +40,10 @@ def audit_prepared(*, study: str | Path) -> dict:
         raise ValueError("R4b original R4a source study unavailable")
     summary_path = root / "summary.json"
     digest_path = root / "artifact_sha256.json"
-    summary = json.loads(_sha(summary_path) and summary_path.read_text())
-    inventory = json.loads(_sha(digest_path) and digest_path.read_text())
+    _sha(summary_path)
+    summary = json.loads(summary_path.read_text())
+    _sha(digest_path)
+    inventory = json.loads(digest_path.read_text())
     if not isinstance(inventory, dict):
         raise ValueError("R4b original SHA inventory missing")
     for name, expected in inventory.items():
@@ -261,7 +263,7 @@ def execute(
                 "E2_qualified": qualified["native_e2_accepted"],
                 "E3_qualified": qualified["native_e3_qualified"],
                 "status": qualified["status"],
-                "HLS_BRANDED_ONLY": True,
+                "HLS_ESTIMATES_ONLY": True,
                 "physical_E4": None,
             })
     return {
