@@ -42,15 +42,18 @@ def _tcl(*, rtl_names: list[str]) -> str:
                             for n in rtl_names):
         raise ValueError("R4o invalid Verilog filenames")
     file_lines = "\n".join(
-        f"read_verilog -sv {{rtl/{name}}}"
-        if name.endswith(".sv") else f"read_verilog {{rtl/{name}}}"
+        f"read_verilog -sv {{{name}}}"
+        if name.endswith(".sv") else f"read_verilog {{{name}}}"
         for name in rtl_names)
     return (
         "# R4o standalone FPGAI OOC Vivado 2023.2; original Vitis HDL copied.\n"
         "# This is not board-level/IO pin constrained implementation.\n"
         "set_param general.maxThreads 4\n"
-        "file mkdir reports\n"
-        "file mkdir outputs\n"
+        "set r4o_case [file normalize [file dirname [info script]]]\n"
+        "# Keep the original $readmemh/$readmemb payloads in the process CWD.\n"
+        "cd [file join $r4o_case rtl]\n"
+        "file mkdir [file join $r4o_case reports]\n"
+        "file mkdir [file join $r4o_case outputs]\n"
         f"{file_lines}\n"
         f"synth_design -top {TOP} -part {PART} -mode out_of_context\n"
         f"create_clock -name ap_clk -period {CLOCK_NS:.2f} "
@@ -59,11 +62,11 @@ def _tcl(*, rtl_names: list[str]) -> str:
         "opt_design\n"
         "place_design\n"
         "route_design\n"
-        "report_route_status -file reports/route_status.rpt\n"
-        "report_timing_summary -delay_type max -file reports/timing_summary.rpt\n"
-        "report_utilization -file reports/utilization.rpt\n"
-        "report_drc -file reports/drc.rpt\n"
-        "write_checkpoint -force outputs/routed.dcp\n"
+        "report_route_status -file [file join $r4o_case reports/route_status.rpt]\n"
+        "report_timing_summary -delay_type max -file [file join $r4o_case reports/timing_summary.rpt]\n"
+        "report_utilization -file [file join $r4o_case reports/utilization.rpt]\n"
+        "report_drc -file [file join $r4o_case reports/drc.rpt]\n"
+        "write_checkpoint -force [file join $r4o_case outputs/routed.dcp]\n"
         "puts {R4O_VIVADO_OOC_ROUTING_COMMANDS_COMPLETE_REPORTS_REQUIRE_AUDIT}\n"
     )
 
