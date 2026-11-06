@@ -201,6 +201,10 @@ At exact source revision **`637f2745721b32d6f5a7e02c4659b0623bc9eee7`**, the aut
 
 See [falsification-first original protocol and complete provenance](SCIENTIFIC_STRENGTHENING_C1_C2_PROTOCOL_20261106.md) and the [evidence-to-claim publication gate](FIRST_PAPER_EVIDENCE_CLAIMS_AND_SUBMISSION_LOCK_20261106.md).
 
+### 7.3 Pending direct generated-source C1 refinement (not measured)
+
+Earlier, source-pinned R2r results exercised actual emitted C++ and rejected **216/216** selected generated-source mutations, on a different six-graph bounded fanout cohort, with distinct independent shadow-memory and numeric/source checks. This E1 evidence is more implementation-grounded than Python event-predicate agreement but does not prove all-input behavioral refinement or a clock-aware RTL schedule. To directly connect the new 54-profile C1 study to emitted source, a separate two-layout-per-profile **actual GCC executable** protocol has been implemented, pairing each source event SHA with the author's immutable original E0 study. Its prospective 108 GCC runs have **NOT** been executed on the workstation at this source revision; do not promote the planned denominator or a successful preliminary synthetic test into observations. See [E0-to-E1 original source bridge protocol](C1_E0_E1_HELDOUT_CPP_BRIDGE_GATE_20261106.md).
+
 ## 8. Threats to validity
 
 **Semantic and specification validity.** Finite event admission proves transition invariants only under correctly enumerated supported static reductions and reader obligations. The separate interpreter shares the admitted model; 133 matching traces are not a formal proof of implementation completeness. Fixed-order scratch oracle minima are not global schedule-optimal FPGA storage. Actual generated C++ access refinement is tested only on bounded selected programs/mutations, and source correctness does not prove numerical agreement on every input or hardware memory-port legality.
