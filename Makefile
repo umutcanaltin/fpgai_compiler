@@ -84,7 +84,7 @@ test-gym:
 	$(PYTHON) -m pytest -q tests/test_online_post_hls_env.py tests/test_online_post_hls_audit.py tests/test_online_post_hls_report.py
 
 release-links:
-	$(PYTHON) scripts/check_public_docs.py --profile compiler
+	$(PYTHON) -m scripts.check_public_docs --profile compiler
 
 release-preview-plan:
 	$(PYTHON) scripts/prepare_public_preview.py --profile compiler --plan
