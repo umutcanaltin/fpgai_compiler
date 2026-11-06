@@ -59,19 +59,32 @@ def configurations(*, seeds=SEEDS, shapes_per_group=SHAPES_PER_GROUP):
             or type(shapes_per_group) is not int
             or not 1 <= shapes_per_group <= 3):
         raise ValueError("C1 heldout protocol seed or shape population invalid")
+    if len(seeds) * shapes_per_group > len(CANDIDATE_SHAPES):
+        raise ValueError("C1 heldout requested more distinct shapes than exist")
     cases = []
+    seen_static_profiles = set()
     for seed in seeds:
         shuffled = list(CANDIDATE_SHAPES)
         random.Random(seed).shuffle(shuffled)
         index = 0
         for readers in READER_COUNTS:
             for policy in POLICIES:
-                for _ in range(shapes_per_group):
+                selected = 0
+                while selected < shapes_per_group:
+                    if index >= len(shuffled):
+                        raise ValueError("C1 heldout exhausted unique static shapes")
                     shape = shuffled[index]
                     index += 1
+                    static_profile = (readers, shape, policy)
+                    if static_profile in seen_static_profiles:
+                        continue
                     if shape in SHAPES:
                         raise AssertionError("C1 source heldout shape leakage")
+                    seen_static_profiles.add(static_profile)
                     cases.append((seed, readers, *shape, policy))
+                    selected += 1
+    if len(seen_static_profiles) != len(cases):
+        raise AssertionError("C1 new static profiles must be distinct across seeds")
     return tuple(cases)
 
 
