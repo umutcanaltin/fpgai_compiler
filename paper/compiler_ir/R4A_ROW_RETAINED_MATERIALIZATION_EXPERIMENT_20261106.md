@@ -34,7 +34,9 @@ Predeclared profiles (readers, m, k, n, q, mapping):
 | 3 | (2,2,4,4) | Mixed | 8 | 4 | 4 |
 | 4 | (3,2,3,4) | Mixed | 9 | 3 | 6 |
 | 2 | (16,4,16,8) | Mixed | 256 | 16 | 240 |
-| 4 | (32,4,32,8) | Mixed | 1024 | 32 | 992 |
+| 4 | (16,4,16,4) | Mixed | 256 | 16 | 240 |
+
+**Protocol correction before original R4a execution (6 November 2026).** The initial planned 4-reader case used dimensions `(32,4,32,8)` and failed the 16-per-dimension admission bound in both the existing R2f model fixture and source contract. Only the test suite was run; this case never reached native HLS or an original R4a study. The proposed fifth case is now `(16,4,16,4)` with 256 full-H / 16 row-H source cells. We intentionally did **not** widen the established verification domain to 32 for the sake of a favorable size. A future >16 study requires a separately justified domain extension, guards and numerical qualification. Test coverage now checks the entire prospective cohort against the bound.
 
 Quick: first three cases; paper: all five cases. Each has full-H control and row-H intervention, with identical model, numeric input, weights and effective mappings. Both arms use the canonical source packaging layer. Prospective Vitis settings: part xck26-sfvc784-2LV-c, requested clock 12 ns, explicit uncertainty 1.5 ns, numeric CSim absolute tolerance 0.02. These are new prospective settings and are not pooled with old R2u (8 ns) or R2i (32 ns) experiments.
 
