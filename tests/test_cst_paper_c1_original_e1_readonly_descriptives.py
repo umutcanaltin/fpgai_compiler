@@ -191,6 +191,18 @@ def test_bad_e1_numeric_or_witness_fields_rejected(field,value,tmp_path):
         sut._profile(c)
 
 
+def test_cli_summary_only_hides_rows_without_changing_source_receipts(tmp_path,monkeypatch,capsys):
+    root,digest=synthetic_full_e1(tmp_path)
+    monkeypatch.setattr(sut,"ORIGINAL_MANIFEST_SHA256",digest)
+    sut.main(["--study",str(root),"--summary-only"])
+    summary=json.loads(capsys.readouterr().out)
+    assert summary["profiles"]==54
+    assert "per_profile" not in summary
+    assert len(summary["by_reader_and_mapping"])==6
+    assert summary["new_compiler_GCC_or_vendor_calls"]==0
+    assert sut._sha(root/"artifact_sha256.json")==digest
+
+
 def test_read_only_original_source_files_unchanged_after_analysis(tmp_path):
     root,digest=synthetic_full_e1(tmp_path)
     before={p.relative_to(root).as_posix():sha256(p.read_bytes()).hexdigest()
