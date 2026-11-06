@@ -16,6 +16,7 @@ include docs/NEUROSCIENTIST_QUICKSTART.md
 include docs/ARCHITECTURE.md
 include docs/SUPPORTED_FEATURES.md
 include docs/SCIENTIFIC_REPRODUCIBILITY.md
+include docs/RESEARCH_PUBLICATION_STATUS.md
 include docs/FAQ.md
 include docs/RELEASE_PREVIEW.md
 include docs/ROADMAP.md
