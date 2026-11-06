@@ -1,6 +1,6 @@
 # Timing-qualified matched hardware designs and real inference latency: R4w/R4x
 
-**6 November 2026 | New source-only protocol and guarded implementation. Not a new native result.** Scientific goal: compare real hardware behavior **only for valid designs**. Original after-Vitis/after-Vivado R4 observations are descriptive because both 12ns routed arms have negative WNS; no physical latency or throughput winner can be inferred from them. See [R4v stage table](R4V_VITIS_VIVADO_STAGE_PARETO_AND_REAL_LATENCY_GATE_20261106.md).
+**6 November 2026 | ORIGINAL SIX NEW VIVADO NATIVE PROCESSES NOW COMPLETED (exit 0); physical WNS/DRC audit still blocked and NONE has been declared timing-qualified.** The following preregistration remains as historical method; the timestamped author postrun checkpoint at the end of this document governs current results. Scientific goal: compare real hardware behavior **only for valid designs**. Original after-Vitis/after-Vivado R4 observations are descriptive because both 12ns routed arms have negative WNS; no physical latency or throughput winner can be inferred from them. See [R4v stage table](R4V_VITIS_VIVADO_STAGE_PARETO_AND_REAL_LATENCY_GATE_20261106.md).
 
 ## 1. Three different performance quantities MUST be separated
 
