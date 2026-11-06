@@ -59,23 +59,25 @@ def memory_source_signatures(source: str) -> dict:
     if not isinstance(source, str) or len(source) > 12 * 1024 * 1024:
         raise ValueError("R4h source text invalid or oversized")
     lines = []
+    truncated = False
     for index, line in enumerate(source.splitlines(), 1):
         if re.search(
             r"\b(?:module|parameter|localparam|reg|wire|logic)\b|"
             r"\breadmem[hb]\b|DataWidth|AddressWidth|DataDepth|ram_style|"
             r"\b(?:WIDTH|DEPTH|ADDR_WIDTH)\b", line, re.I
         ):
+            if len(lines) >= _MAX_SNIPPETS:
+                truncated = True
+                break
             lines.append({
                 "line": index,
                 "text": line.strip()[:200],
             })
-            if len(lines) >= _MAX_SNIPPETS:
-                break
     return {
         "literal_reg_array_candidates": literal_reg_arrays(source),
         "literal_reg_array_recognizer_complete": False,
         "candidate_source_lines": lines,
-        "source_line_snippets_truncated": len(lines) == _MAX_SNIPPETS,
+        "source_line_snippets_truncated": truncated,
         "interpretation": "LEXICAL_SOURCE_ONLY_SYMBOLIC_DIMENSIONS_UNRESOLVED",
     }
 
