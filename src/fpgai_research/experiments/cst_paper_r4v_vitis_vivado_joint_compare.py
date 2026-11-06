@@ -177,9 +177,10 @@ def compare(hls: dict, routed: dict) -> dict:
             deltas["vivado_routed_resources"][k] != actual_routed.get(k)
             for k in VIVADO_RESOURCE)):
         raise ValueError("R4v Vivado descriptive deltas disagree with signed original")
-    if (not _nonnegative(abs(routed.get("routed_WNS_delta_row_minus_full_ns",float("nan"))))
-            or abs(deltas["vivado_routed_wns_ns"]-
-                   routed["routed_WNS_delta_row_minus_full_ns"])>1e-6):
+    signed_delta = routed.get("routed_WNS_delta_row_minus_full_ns")
+    if (type(signed_delta) not in (int, float)
+            or not isfinite(signed_delta)
+            or abs(deltas["vivado_routed_wns_ns"]-signed_delta)>1e-6):
         raise ValueError("R4v signed original routed WNS delta disagrees")
     return {
         "schema":SCHEMA,
