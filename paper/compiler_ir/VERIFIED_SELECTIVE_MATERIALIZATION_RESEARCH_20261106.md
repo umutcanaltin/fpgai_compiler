@@ -83,6 +83,8 @@ A positive result requires a repeatable **qualified hardware** advantage on an i
 
 **Proposed distinctive claim to test, NOT assert now:** source-certificate-guided choice between materialization, forwarding and selective spill for heterogeneous operator-local Phi maps with real generated-source access witnesses, together with HLS/physical evidence of which choices survive lowering. Source memory minimization, static lifetime coloring, streaming, compositional typing and backend resource improvements are not new by themselves.
 
+**Implemented bounded first step (new experiment, not observed QoR):** [R4a row-retained materialization source/GCC protocol](R4A_ROW_RETAINED_MATERIALIZATION_EXPERIMENT_20261106.md). This new opt-in source path reuses canonical R2g arithmetic and holds each H producer row until all mapped fanout readers finish. It is NOT general zero-spill forwarding or proven physical BRAM savings. R4b provides an explicit guarded native Vitis E2/E3 qualification path. Both new host and native results remain unexecuted at the time of this document update.
+
 ## 7. Engineering integration and no-duplication rule
 
 Reuse the existing `src/fpgai_research/model_ir/` architecture/contract framework and `src/fpgai_research/codegen/hls/` canonical emitter. Do **not** create an alternate neural network compiler, second independent source AST, second set of HLS vendor toolchains, or separate ad hoc research-only architecture graph.
