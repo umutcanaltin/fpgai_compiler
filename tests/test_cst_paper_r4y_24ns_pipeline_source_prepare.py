@@ -15,13 +15,18 @@ from fpgai_research.experiments import (
 def _original_good():
     known = sut.r4k.plan()
     return {
+        "schema": sut.r4l.SCHEMA,
+        "paired_HLS_source_arms": 2,
+        "E2_qualified_arms": 2,
+        "E3_qualified_arms": 2,
+        "original_vendor_calls_during_audit": 0,
         "package_hashes": {
             "full_storage": {
                 "model.cpp": known["source_full_storage_sha256"]},
             "row_storage": {
                 "model.cpp": known["source_row_original_sha256"]},
         },
-        "source_only_E1_verified": True,
+        # Mirror actual R4l.audit_native: its R4k E1 flag is not exposed.
         "E1_matched_pair_accepted": True,
         "both_E2_qualified": True,
         "both_E3_qualified": True,
@@ -196,3 +201,49 @@ def test_source_manifest_roundtrip_tuples_are_not_an_evidence_failure(
     assert stored == json.loads(json.dumps(emitted[case].manifest))
     assert sut.audit(study=root, **originals)[
         "status"] == "SOURCE_ONLY_FOUR_ARM_PACKAGE_AUDITED_NOT_NATIVE"
+
+
+def test_real_r4l_audit_schema_without_r4k_source_only_key_passes(
+        originals, tmp_path):
+    # R4l.audit_native does not include the R4k summary-only E1 flag.
+    case = _original_good()
+    assert "source_only_E1_verified" not in case
+    assert sut._original(**originals)["schema"] == sut.r4l.SCHEMA
+    study = tmp_path / "schema_matched"
+    sut.prepare(output=study, **originals)
+    assert sut.audit(study=study, **originals)["matched_testbench_and_tcl"]
+
+
+@pytest.mark.parametrize("field,invalid", [
+    ("schema", "incorrect"),
+    ("paired_HLS_source_arms", 1),
+    ("E2_qualified_arms", 1),
+    ("E3_qualified_arms", 1),
+    ("original_vendor_calls_during_audit", 1),
+    ("new_vendor_calls_during_read_only_audit", 1),
+])
+def test_invalid_original_native_audit_metadata_fails_closed(
+        originals, tmp_path, monkeypatch, field, invalid):
+    old = {**_original_good(), field: invalid}
+    monkeypatch.setattr(sut.r4l, "audit_native", lambda **_: old)
+    destination = tmp_path / "absent_source"
+    with pytest.raises(ValueError, match="preflight"):
+        sut.prepare(output=destination, **originals)
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("field,value", [
+    ("status", "PROSPECTIVE_SOURCE_ONLY_NOT_EXECUTED"),
+    ("clock_period_ns", 20.0),
+    ("E2_CSim_qualified", True),
+])
+def test_prepared_lifecycle_and_science_fields_cannot_be_forged(
+        originals, tmp_path, field, value):
+    root = tmp_path / "forged_summary"
+    sut.prepare(output=root, **originals)
+    p = root / "summary.json"
+    data = json.loads(p.read_text())
+    data[field] = value
+    p.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="prepared source plan changed|provenance"):
+        sut.audit(study=root, **originals)

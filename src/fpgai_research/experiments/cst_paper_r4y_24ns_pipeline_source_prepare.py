@@ -155,11 +155,20 @@ def _original(*, r4k_study: str | Path,
               original_r4d: str | Path, original_r4a: str | Path) -> dict:
     audit = r4l.audit_native(study=r4k_study, original_r4d=original_r4d,
                             original_r4a=original_r4a)
-    if (audit.get("source_only_E1_verified") is not True
+    # r4l.audit_native returns its own flattened E1/E2/E3 audit schema.
+    # 'source_only_E1_verified' belongs to the *R4k prepared summary*;
+    # it is already checked independently by r4l.audit_prepared and is
+    # intentionally NOT a field of the r4l native audit response.
+    if (audit.get("schema") != r4l.SCHEMA
             or audit.get("E1_matched_pair_accepted") is not True
+            or audit.get("paired_HLS_source_arms") != 2
+            or audit.get("E2_qualified_arms") != 2
+            or audit.get("E3_qualified_arms") != 2
             or audit.get("both_E2_qualified") is not True
             or audit.get("both_E3_qualified") is not True
-            or audit.get("source_revision") is None
+            or not isinstance(audit.get("source_revision"), str)
+            or len(audit["source_revision"]) != 40
+            or audit.get("original_vendor_calls_during_audit") != 0
             or audit.get("new_vendor_calls_during_read_only_audit") != 0
             or audit.get("original_sources_modified") is not False):
         raise ValueError("R4y original frozen source/E2/E3 preflight rejected")
@@ -255,7 +264,13 @@ def audit(*, study: str | Path, r4k_study: str | Path,
                          original_r4a=original_r4a)
     expected = plan()
     summary = _read(root / "summary.json")
+    # plan() describes the unexecuted proposal; prepare() deliberately
+    # replaces its status with a distinct source-package receipt. This
+    # one permitted lifecycle transition must not hide changes to any
+    # scientific configuration, graph, target, hashes or null E2/E3/E4.
     for k, v in expected.items():
+        if k == "status":
+            continue
         if summary.get(k) != v:
             raise ValueError("R4y prepared source plan changed: " + k)
     if (summary.get("status") != "PREPARED_FOUR_SOURCE_ONLY_NEW_VITIS_PACKAGES"
@@ -274,14 +289,16 @@ def audit(*, study: str | Path, r4k_study: str | Path,
         if folder.is_symlink() or not folder.is_dir():
             raise ValueError("R4y source case folder missing/symlink")
         expected_files.update(f"{case}/{name}" for name in FILES)
-        a, b = folder / "source.cpp", folder / "vitis_source" / "model.cpp"
+        pkgdir = folder / "vitis_source"
+        if pkgdir.is_symlink() or not pkgdir.is_dir():
+            raise ValueError("R4y HLS package folder missing/symlink")
+        a, b = folder / "source.cpp", pkgdir / "model.cpp"
+        if a.is_symlink() or b.is_symlink() or not a.is_file() or not b.is_file():
+            raise ValueError("R4y model source files missing/symlink")
         if (_sha(a.read_bytes()) != expected["sources_sha256"][case]
                 or _sha(b.read_bytes()) != expected["sources_sha256"][case]
                 or a.read_text() != emission[case].cpp):
             raise ValueError("R4y source or package model drift")
-        pkgdir = folder / "vitis_source"
-        if pkgdir.is_symlink() or not pkgdir.is_dir():
-            raise ValueError("R4y HLS package folder missing/symlink")
         manifest = _read(folder / "source_manifest.json")
         package = _read(pkgdir / "manifest.json")
         # Canonical emitted metadata contains tuple source-slot witnesses.
