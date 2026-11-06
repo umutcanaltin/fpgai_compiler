@@ -22,6 +22,9 @@ import shutil
 from fpgai_research.experiments import cst_r4p_matched_vivado_ooc_native as r4p
 from fpgai_research.experiments import cst_r4o_matched_vivado_ooc_prepare as r4o
 from fpgai_research.toolchains.vivado.report import parse_vivado_reports
+from fpgai_research.toolchains.vivado.advisory_observation import (
+    classify_ooc_advisory_observation,
+)
 from fpgai_research.toolchains.vivado.runner import run_vivado
 
 SCHEMA = "fpgai-research/R4w-isolated-matched-routed-feasible-clock-probe/v1"
@@ -266,6 +269,8 @@ def _case_native(case_root: Path, cfg: dict) -> dict:
         "tool_invocation_attested":False,"routed_complete":False,
         "timing_met":False,"drc_clean":False,
         "strict_clean_OOC_qualified":False,
+        "advisory_only_timing_met_not_strict":False,
+        "advisory_observation_reason":None,
         "wns_ns":None,"drc_violations":None,
         "resources":{k:None for k in RESOURCE},
         "physical_core_latency_ns":None,
@@ -369,9 +374,24 @@ def _case_native(case_root: Path, cfg: dict) -> dict:
         and drc.get("board_deployment_qualified") is False
     )
     answer["strict_clean_OOC_qualified"]=bool(valid)
+    # Reuse the repo's EXISTING explicit DSP-advisory-only classifier.
+    # It never grants a clean DRC or board qualification. This explains
+    # the original DPIP/DPOP performance warnings without treating them
+    # as memory port safety violations or waiving any original evidence.
+    warning = classify_ooc_advisory_observation(
+        {"evidence":"E4-Vivado-implementation",
+         "csim_passed":True,  # Original R4l E2 qualified in _origins preflight.
+         "vivado_metrics":observed},
+        receipt)
+    answer["advisory_only_timing_met_not_strict"]=(
+        warning.get("eligible") is True)
+    answer["advisory_observation_reason"]=warning.get("reason")
     answer["status"]=(
         "QUALIFIED_TIMING_CLEAN_DRC_ROUTED_OOC_NOT_BOARD"
-        if valid else "NONQUALIFIED_TIMING_DRC_OR_RESOURCES")
+        if valid else
+        "TIMING_MET_RECOGNIZED_DSP_ADVISORIES_NOT_STRICT_OR_BOARD"
+        if answer["advisory_only_timing_met_not_strict"] else
+        "NONQUALIFIED_TIMING_DRC_OR_RESOURCES")
     return answer
 
 
@@ -407,6 +427,9 @@ def audit_native(*,study: str|Path,r4o_study: str|Path,
             "two_arms_same_period":True,
             "both_timing_met":a["timing_met"] and b["timing_met"],
             "both_clean_drc":a["drc_clean"] and b["drc_clean"],
+            "both_timing_met_with_narrow_known_DSP_advisories_not_strict":(
+                a["advisory_only_timing_met_not_strict"] and
+                b["advisory_only_timing_met_not_strict"]),
             "strict_physical_pair_qualified":bool(qualified),
             "source_mapped_bram_delta_row_minus_full": (
                 b["resources"]["bram"]-a["resources"]["bram"]
