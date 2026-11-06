@@ -8,6 +8,8 @@
 
 **Prospective better-hardware mechanism:** [Verified selective intermediate materialization protocol](VERIFIED_SELECTIVE_MATERIALIZATION_RESEARCH_20261106.md) defines a *new* materialize / forward / selectively spill compiler experiment. This is not an observed hardware improvement. It specifically addresses why earlier exact scratch allocation saved too little of the total generated mutable state to change HLS BRAM consistently.
 
+**Native R4b update (6 November):** [Original case-003 E2 failure report and read-only diagnostic command](R4B_NATIVE_CASE003_FAILED_CSIM_20261106.md). Both full-H and row-H Vitis 2023.2 processes exited 0 but failed E2 CSim; E3-qualified resource comparison is **unavailable**. Preserve the two original vendor runs and inspect their actual CSim metrics before choosing a numerical correction or running more native cases.
+
 ## Scientific hypotheses and the required contrasts
 
 | Question | Prespecified comparison | Acceptable conclusion |
