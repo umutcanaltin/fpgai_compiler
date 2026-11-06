@@ -72,7 +72,11 @@ def inspect_arm(pkg: Path, *, observation: dict) -> dict:
             or receipt.get("inputs_stable_during_execution") is not True):
         raise ValueError("R4g source-attested original vendor receipt invalid")
     rtl_root = pkg / "fpgai_hls_project" / "solution1" / "syn" / "verilog"
-    if rtl_root.is_symlink():
+    if any(part.is_symlink() for part in (
+            pkg / "fpgai_hls_project",
+            pkg / "fpgai_hls_project" / "solution1",
+            pkg / "fpgai_hls_project" / "solution1" / "syn",
+            rtl_root)):
         raise ValueError("R4g symlinked native RTL directory")
     if not rtl_root.is_dir():
         result["rtl_observation_status"] = "UNKNOWN_MISSING_GENERATED_RTL"
