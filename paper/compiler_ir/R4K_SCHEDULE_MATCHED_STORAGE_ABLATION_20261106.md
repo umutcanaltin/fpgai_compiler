@@ -1,6 +1,6 @@
 # R4j verified original three-site RTL evidence and R4k source-schedule-controlled storage experiment
 
-**6 November 2026 — R4j original corrected report WORKSTATION VERIFIED; R4k source and tests IMPLEMENTED but NOT YET workstation-tested.** These are distinct experiments. No original study or native HLS files may be altered.
+**6 November 2026 — R4j and R4k original E1 now WORKSTATION VERIFIED.** The author reported 40 focused tests passing, followed by a successfully completed new create-only R4k source-only E1 experiment with status `MATCHED_ROW_SOURCE_SCHEDULE_REAL_HOST_E1_ACCEPTED`, original source revision `776e3a7a4b599fd114718f6a03ab73e06be17f5c`, and zero native Vitis/Vivado calls. The [R4l source-pinned two-arm native protocol](R4L_SCHEDULE_MATCHED_STORAGE_NATIVE_GATE_20261106.md) is newly implemented but NOT yet workstation-tested or run through Vitis. These are distinct experiments. No original study or native HLS files may be altered.
 
 ## R4j original corrected evidence
 
@@ -74,3 +74,6 @@ python -m fpgai_research.experiments.cst_r4k_matched_row_schedule_storage \
 ~~~
 
 All commands are vendor-free; Python plan does not run GCC, while tests/study do run actual local GCC. **Do not rerun** either original 32/6 Vitis HLS case. Do not reuse an existing output folder. PR remains draft and paper remains **MAJOR REVISION / NOT SUBMISSION READY**.
+
+
+**R4k workstation follow-up:** the author executed the E1 study at `build/r4k_source_schedule_matched_storage_20261106_01` after 40 focused tests passed. It is original source-only evidence; the subsequent R4l native experiment has not yet generated measurements. Original R4k source and packages remain unchanged except for future explicitly authorized, source-pinned native vendor outputs in R4l.
