@@ -344,7 +344,7 @@ def main(argv=None):
             # Don't rerun with changed queries to fabricate a positive result.
             if not destination.exists() and not destination.is_symlink():
                 destination.mkdir(parents=True, exist_ok=False)
-            if not (destination / "report.json").exists():
+            if not (destination / "FAILED.json").exists():
                 (destination / "FAILED.json").write_text(json.dumps({
                     "schema": SCHEMA + "/failed-source-attempt",
                     "experiment_source_revision": revision,
