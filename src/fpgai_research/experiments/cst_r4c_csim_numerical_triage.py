@@ -32,7 +32,9 @@ def _valid_receipt(receipt: dict | None, *, samples: int, outputs: int) -> bool:
             or type(receipt.get("failures")) is not int
             or not 0 <= receipt["failures"] <= samples * outputs
             or type(receipt.get("passed")) is not bool
-            or not isinstance(receipt.get("source"), str)):
+            or (receipt["passed"] and receipt["failures"] != 0)
+            or not isinstance(receipt.get("source"), str)
+            or not receipt["source"]):
         return False
     for key in ("cosine", "rmse", "max_absolute_error"):
         value = receipt.get(key)
