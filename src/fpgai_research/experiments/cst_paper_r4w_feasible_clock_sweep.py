@@ -252,7 +252,7 @@ def audit_prepared(*, study: str|Path,r4o_study: str|Path,
                                       for p in folder.iterdir()):
                 raise ValueError("R4w unexpected RTL/ROM files under source root")
     if set(manifest)!=expected_manifest or any(
-            not _SHA.fullmatch(v) or _sha(root/n)!=v
+            not isinstance(v,str) or _SHA.fullmatch(v) is None or _sha(root/n)!=v
             for n,v in manifest.items()):
         raise ValueError("R4w pre-tool exact staged artifact SHA inventory mismatch")
     return receipt
@@ -314,14 +314,19 @@ def _case_native(case_root: Path, cfg: dict) -> dict:
             or not isfinite(receipt["duration_seconds"])
             or receipt["duration_seconds"]<0
             or any(
-                not _SHA.fullmatch(receipt.get(key,"")) or
-                not (logs/log).is_file() or
-                _sha(logs/log)!=receipt[key]
+                not isinstance(receipt.get(key),str)
+                or _SHA.fullmatch(receipt[key]) is None
+                or not (logs/log).is_file()
+                or (logs/log).is_symlink()
+                or _sha(logs/log)!=receipt[key]
                 for key,log in (("stdout_sha256","vivado.stdout.log"),
                                 ("stderr_sha256","vivado.stderr.log")))
             or not isinstance(fresh,dict)
             or not set(REQUIRED_REPORTS).issubset(fresh)
-            or any(not _SHA.fullmatch(fresh[name])
+            or any(not isinstance(fresh.get(name),str)
+                   or _SHA.fullmatch(fresh[name]) is None
+                   or not (reportdir/name).is_file()
+                   or (reportdir/name).is_symlink()
                    or _sha(reportdir/name)!=fresh[name]
                    for name in REQUIRED_REPORTS)):
         answer["status"]="UNQUALIFIED_UNATTESTED_VENDOR_RECEIPT"
