@@ -87,11 +87,11 @@ def test_accidental_within_row_alias_rejected_by_unit_slot_verifier():
     bad = dict(plan["source_slot_map"])
     spec = admit_fanout(arch)
     bad[(spec.h, 1)] = bad[(spec.h, 0)]
-    result = verify_allocation(
-        project_source_value_events(plan["source_events"]),
-        bad, unit_slots=plan["source_scratch_array_elements"],
-    )
-    assert result["status"] != "EXACT_SOURCE_SLOT_REPLAY_VERIFIED"
+    with pytest.raises(ValueError, match="OVERWRITE_LIVE_VALUE"):
+        verify_allocation(
+            project_source_value_events(plan["source_events"]),
+            bad, unit_slots=plan["source_scratch_array_elements"],
+        )
 
 
 def test_early_row_release_breaks_architecture_order_and_source_contract():
