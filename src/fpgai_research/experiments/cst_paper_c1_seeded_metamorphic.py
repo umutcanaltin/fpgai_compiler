@@ -296,7 +296,7 @@ def main(argv=None):
             # do not overwrite a success or another investigator's attempt.
             if not destination.exists() and not destination.is_symlink():
                 destination.mkdir(parents=True, exist_ok=False)
-            if not (destination / "report.json").exists():
+            if not (destination / "FAILED.json").exists():
                 failure = {
                     "schema": SCHEMA + "/failed-source-attempt",
                     "experiment_source_revision": revision,
