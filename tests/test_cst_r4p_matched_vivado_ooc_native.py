@@ -181,7 +181,9 @@ def test_native_executes_only_separate_cases_and_stops_on_first_failure(
     assert (root / "r4p_native_attempt.json").is_file()
     assert calls == [root / "full_storage" / "vivado"]
     assert not (root / "row_storage" / "vivado" / "logs").exists()
-    with pytest.raises(FileExistsError, match="already attempted"):
+    # The permanent, source-revision-pinned lock blocks every retry
+    # before per-arm partial-attempt checks are reached.
+    with pytest.raises(FileExistsError, match="original native attempt lock exists"):
         sut.execute(**args(prepared), execute_native=True,
                     confirm_ooc_native=True, executable=sys.executable)
 
