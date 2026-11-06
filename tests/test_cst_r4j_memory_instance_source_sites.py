@@ -374,6 +374,10 @@ def test_real_source_style_three_scratch_site_pipeline(tmp_path, monkeypatch):
     assert pair["status"] == "SOURCE_SCRATCH_SITES_PARSED_NOT_ELABORATED"
     assert pair["scratch_source_site_count_full"] == 3
     assert pair["scratch_source_site_count_row"] == 3
+    assert report["arms"][2]["source_site_default_tuple"] == {
+        "DataWidth": 32, "AddressWidth": 8, "AddressRange": 214}
+    assert report["arms"][3]["source_site_default_tuple"] == {
+        "DataWidth": 32, "AddressWidth": 8, "AddressRange": 134}
     assert pair["scratch_literal_source_site_depth_delta"] == -80
     assert len(pair["scratch_source_site_pairs"]) == 3
     assert pair["HLS_estimated_BRAM18K_delta"] == 0
