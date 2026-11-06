@@ -1,6 +1,6 @@
 # C1 held-out source-to-generated-C++ refinement: independent E1 gate
 
-**Scientific protocol, 6 November 2026. The original two-profile/four-execution generated-GCC smoke is now author-verified; the separate 54-profile/108-execution full E1 study is NOT YET RUN. The first paper remains MAJOR REVISION / NOT SUBMISSION READY.**
+**Scientific protocol and result status, 6 November 2026. Both the original two-profile/four-execution smoke and the separate original full 54-profile/108-execution generated-GCC E1 study are now AUTHOR-VERIFIED. The first paper remains MAJOR REVISION / NOT SUBMISSION READY: independent Allo/CODO novelty, routed timing/latency and rights/release gates remain open.**
 
 ## Workstation verification update (6 November 2026)
 
