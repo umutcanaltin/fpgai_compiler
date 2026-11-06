@@ -420,6 +420,13 @@ def audit_native(*, native_study: str | Path, r4t_study: str | Path,
         r4t_study=r4t_study, study=study, r4o_study=r4o_study,
         r4k_study=r4k_study, original_r4d=original_r4d,
         original_r4a=original_r4a)
+    # Original source+report+DRC hashes are requalified by r4s.inspect;
+    # this is read-only and done once for both arms, not per arm.
+    original_report_arms = r4s.inspect(
+        study=study, r4o_study=r4o_study, r4k_study=r4k_study,
+        original_r4d=original_r4d, original_r4a=original_r4a)["arms"]
+    if [a["arm"] for a in original_report_arms] != list(ARMS):
+        raise ValueError("R4u original signed DRC population changed")
     for arm in ARMS:
         case = root / arm
         detail = {
@@ -460,6 +467,11 @@ def audit_native(*, native_study: str | Path, r4t_study: str | Path,
             and isinstance(argv, list) and len(argv) == 6
             and argv[1:] == ["-mode", "batch", "-source", SCRIPT, "-notrace"]
             and receipt.get("executable") == argv[0]
+            and Path(argv[0]).is_absolute()
+            and type(receipt.get("started_utc")) is str
+            and bool(receipt["started_utc"])
+            and receipt.get("strict_physical_E4") is None
+            and receipt.get("board_qualified") is False
             and type(receipt.get("duration_seconds")) in (int, float)
             and isfinite(receipt["duration_seconds"])
             and receipt["duration_seconds"] >= 0
@@ -469,12 +481,16 @@ def audit_native(*, native_study: str | Path, r4t_study: str | Path,
             detail["status"] = "REJECTED_NATIVE_RECEIPT_OR_INPUT_PROVENANCE"
             observations.append(detail)
             continue
-        log_ok = all(
+        log_ok = (
+            not (case / "logs").is_symlink()
+            and (case / "logs").is_dir()
+            and all(
             _is_sha(receipt.get(field))
             and _digest(case / "logs" / name) == receipt[field]
             for field, name in (
                 ("stdout_sha256", "vivado.stdout.log"),
                 ("stderr_sha256", "vivado.stderr.log"),
+            )
             )
         )
         reports = case / "reports"
@@ -499,16 +515,15 @@ def audit_native(*, native_study: str | Path, r4t_study: str | Path,
             detail["parse_problem"] = str(exc)[:400]
             observations.append(detail)
             continue
+        # Rehash after text parsing, so a mid-inspection report edit is a
+        # hard error rather than a qualified new path report.
+        if any(_digest(reports / name, size_limit=MAX_TEXT_BYTES) != sha[name]
+               for name in REPORT_NAMES):
+            raise ValueError("R4u report SHA changed during read-only audit")
         original_wns = detail["original_routed_wns_ns"]
         consistent = isfinite(wns) and abs(wns - original_wns) <= 0.005
-        original_drc = orig["arms"][arm]["original_signed_drc_report_sha256"]
-        # DRC comparison is to original R4s original signed rule COUNTS, not
-        # to a hash-equality expectation across newly generated report files.
-        old_rules = (r4s.inspect(
-            study=study, r4o_study=r4o_study, r4k_study=r4k_study,
-            original_r4d=original_r4d,
-            original_r4a=original_r4a)["arms"])
-        old = next(x for x in old_rules if x["arm"] == arm)
+        # Compare new DRC counts with the *original signed* R4s rule counts.
+        old = next(x for x in original_report_arms if x["arm"] == arm)
         drc_same = (
             drc.get("summary_verified") is True
             and drc.get("violations") == old["original_drc_total_violations"]
