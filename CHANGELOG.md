@@ -1,3 +1,8 @@
+## 6 November 2026 — direct public documentation fix and stricter scientific novelty gate
+
+- Fixed the locally observed `make release-links` failure (`ModuleNotFoundError: No module named 'scripts'`) by making `scripts/check_public_docs.py` support both direct and module invocation, changing Makefile to `python -m scripts.check_public_docs`, and adding a direct-vs-module subprocess regression test. **New fix not yet workstation-tested.** The preceding user run verified 55 targeted tests and a clean 894-file/718-module static source inventory before the command stopped.
+- Found and explicitly incorporated Allo PLDI 2024 Section 5.2/Figure 6: its verifier already detects a producer/consumer FIFO access-order mismatch in two MatMul kernels. The paper no longer treats elementary source order verification as novel. Added falsifiable A–G semantic comparison protocol with exact external `SUPPORTED/UNKNOWN/SETUP_FAILED` distinctions and C2 lazy-cache/latency stop rules. **No new external Allo or native HLS experiment executed.**
+
 ## 6 November 2026 — scientific results and non-destructive public artifact cleanup
 
 - Original source-revision `637f2745721b32d6f5a7e02c4659b0623bc9eee7`: 72 targeted source tests passed, C1 seeded held-out 54 profiles/486 typed event variants/0 observed oracle disagreements, and C2 324 source-compiler method rows with matching source identities and 48 explicitly excluded setup compiler calls; immutable original SHA reports retained in ignored `build/`.
