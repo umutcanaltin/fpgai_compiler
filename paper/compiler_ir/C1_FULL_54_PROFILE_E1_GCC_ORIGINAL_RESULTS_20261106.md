@@ -34,6 +34,8 @@
 - `tests/test_cst_paper_c1_original_e1_readonly_descriptives.py` creates a synthetic complete 271-artifact/54-case test fixture, verifies a legitimate descriptive result and rejects manifest SHA drift, changed source C++, duplicated cases, non-positive savings, missing actual scratch-access witnesses and invalid numerical error fields. **Synthetic test fixtures are not original experiment results.**
 - The analyzer reports **per-profile source slot counts and savings/percentages**, median/range and aggregated source slots across distinct designs (explicitly **not one deployed design**), separate rows for 2/3/4 readers × scalar/mixed-Φ mapping, actual scratch witness counts, and maximum independent numerical errors. The stdout is read-only and no source/native compiles are made. It will not compute real BRAM, II, physical clock, inference latency or hardware power. All output metrics remain unknown until the author runs this exact SHA-pinned analysis.
 
+For compact terminal output, run `make research-c1-e1-review`, which uses `--summary-only` and preserves the overall result plus all six reader/Φ subgroups. Omit `--summary-only` on the module CLI to print every one of the 54 per-profile source-effect rows. Both modes are **read-only** and source-SHA-pinned; neither creates or changes an original report. The new display option and tests remain workstation-unverified until the author runs them.
+
 ## 4. Safe workstation command: NO new original experiment
 
 ```bash
