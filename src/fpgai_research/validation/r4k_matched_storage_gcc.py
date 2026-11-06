@@ -171,7 +171,7 @@ def verify_matched_gcc(arch, *, runtime_input,
         raise ValueError("R4k failed source lineage from row emitter")
     root = Path(trace_dir) if trace_dir is not None else None
     if root is not None and (not root.is_dir() or root.is_symlink()
-                             or any((root / arm).exists()
+                             or any((root / (arm + ".host_stdout.txt")).exists()
                                     for arm in ("full_storage", "row_storage"))):
         raise FileExistsError("R4k trace directory must preexist and be unused")
     arms = {
@@ -184,7 +184,8 @@ def verify_matched_gcc(arch, *, runtime_input,
         reports[arm] = _execute(
             arch, emission, runtime_input=x, plan=plan, original=reference,
             cxx=shutil.which(cxx), timeout_seconds=timeout_seconds,
-            trace_output=(root / arm if root is not None else None),
+            trace_output=(root / (arm + ".host_stdout.txt")
+                          if root is not None else None),
         )
     a, b = reports["full_storage"], reports["row_storage"]
     if (a["events"] != b["events"]
