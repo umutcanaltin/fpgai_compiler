@@ -1,12 +1,24 @@
 # C1 held-out source-to-generated-C++ refinement: independent E1 gate
 
-**Scientific protocol, 6 November 2026. Implemented after the author-verified original 54/486 E0 cohort. NEW HOST-GCC E1 RESULTS HAVE NOT YET BEEN RUN OR VERIFIED. The first paper remains MAJOR REVISION / NOT SUBMISSION READY.**
+**Scientific protocol, 6 November 2026. The original two-profile/four-execution generated-GCC smoke is now author-verified; the separate 54-profile/108-execution full E1 study is NOT YET RUN. The first paper remains MAJOR REVISION / NOT SUBMISSION READY.**
 
 ## Workstation verification update (6 November 2026)
 
 After source revision `d0b72b4a00309ff01f8f159d035390c43c35789c` was pulled on the author's machine, the author ran the exact targeted test suite including `tests/test_cst_paper_c1_heldout_cpp_bridge.py`. The terminal reported **55/55 tests passed in 2.55s, with no skipped tests**. That suite's fixture-based `test_real_gcc_scalar_and_mixed_phi_paired_source_e1_smoke` and emitted-source-tamper test actually call the host GNU g++ pathway with a **synthetically constructed 54-profile E0 report and test-monkeypatched original hash/source revision**. Passing those tests is evidence that the new source-to-GCC bridge test harness can compile and execute bounded scalar/mixed-Φ sources and audit their local outputs, not an independently signed original author dataset.
 
 **Original C1 E1 data remain NOT EXECUTED:** The subsequent `make release-links` failed with `ModuleNotFoundError: No module named 'scripts'` inside `scripts/check_public_docs.py` and the outer command used `set -e`; therefore the separately planned **author-original report-SHA-pinned** `build/paper_c1_e1_cpp_bridge_smoke_20261106_01` and 54-profile/108-run full study were NOT created or verified by that command. A dedicated CLI-path fix and regression test are now committed, but must be pulled/retested. **Do not promote fixture-based GCC tests to all 54 real original-source E1 qualification.**
+
+## Verified original C1 two-profile E1 GCC bridge smoke (6 November 2026)
+
+**The previously preregistered, original SHA-locked two-profile GCC smoke is now VERIFIED on the author's workstation.** Exact source revision: `5bc8e9c1ec749c1c3dcf09bf85bace91503ee0c7`. Original immutable C1 E0 source revision: `637f2745721b32d6f5a7e02c4659b0623bc9eee7`, original E0 report SHA `8fa3848fcb0993e44a83391f595861943d75e3f09b669bd93b1b27e0222f3978`. Output name `build/paper_c1_e1_cpp_bridge_smoke_20261106_01` was created once and then audited read-only. It reported:
+
+- `profiles=2`, one scalar and one mixed-`Phi` mapped source configuration, each with `disjoint` and `per_element_optimal` actual C++ emitted storage layouts.
+- `gcc_compilations=4`, `gcc_executions=4`, `no_vendor_calls=true`, `original_c1_event_hashes_matched=true`, and **positive source scratch-slot saving in 2/2 profiles** (`source_slot_savings_count=2`, ties 0). The stdout lacks exact slot counts, so no absolute savings or physical BRAM figures may be claimed.
+- Independent `--study` audit verified source revision `5bc8e9c1…`, four actual C++ compilations/executions, **11 source artifacts** and original evidence manifest SHA-256 `51e022a07e35ab4ee96aed25d4a7bb990d97d49b54e98a07d977a6ed0bce4435`; audit made zero vendor/compiler calls and reported `physical_compute_latency=null`, `board_qualified=false`.
+
+This is a real **E1 smoke observation**, not merely the earlier synthetic test-fixture GCC smoke. It demonstrates the existing source compiler / NumPy / scratch witness checks on two original C1-matched configurations, but the full new 54/108-GCC series remains **NOT EXECUTED**. Preserve the two-profile smoke and its SHA-backed receipt, even if later full-study output fails. Source-only scratch slot reduction is not Vivado mapped BRAM or any physical clock result. Full results, if they occur, must use an entirely separate create-only output `build/paper_c1_e1_cpp_bridge_full_20261106_01` with its own source revision and source-artifact SHA.
+
+See [C1 E1 original smoke and C2 original cost results](C1_E1_SMOKE_C2_SOURCE_COST_ORIGINAL_RESULTS_20261106.md).
 
 ## Why this study is scientifically necessary
 
