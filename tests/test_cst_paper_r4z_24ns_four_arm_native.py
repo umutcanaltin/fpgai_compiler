@@ -238,6 +238,12 @@ def test_read_only_hls_reports_separate_e2_e3_and_never_board_latency(
                and a["real_measured_latency_ns"] is None
                for a in output["observations"])
     assert len(output["same_clock_storage_pairs"]) == 2
+    assert output["four_arm_factorial_interaction"]["all_four_E3_qualified"]
+    assert output["four_arm_factorial_interaction"][
+        "pipeline_x_storage_interaction_HLS_cycles"] == 0
+    assert all(x["HLS_worst_cycles_delta_requested_minus_baseline"] == 0
+               and x["HLS_resource_delta_requested_minus_baseline"]["dsp"] == 0
+               for x in output["within_storage_pipeline_effects"])
     assert all(x["both_E3_HLS_qualified"]
                and x["HLS_cycle_product_ns_delta_NOT_measured"] == 0
                and x["measured_FPGA_latency_delta_ns"] is None
@@ -269,4 +275,48 @@ def test_unqualified_e2_never_promotes_e3_even_with_fake_synthesis(
     assert row["HLS_worst_cycles"] is None
     assert row["E3_requested_clock_cycle_product_ns_NOT_measured"] is None
     assert output["E3_qualified_cases"] == 0
+    assert output["four_arm_factorial_interaction"][
+        "pipeline_x_storage_interaction_HLS_cycles"] is None
+    assert all(p["HLS_worst_cycles_delta_requested_minus_baseline"] is None
+               for p in output["within_storage_pipeline_effects"])
     assert not output["same_clock_storage_pairs"][0]["both_E3_HLS_qualified"]
+
+
+def test_pipeline_factorial_effects_keep_negative_hls_causal_result(
+        cohort, tmp_path, monkeypatch):
+    dest, kw, summary = _prepared(tmp_path, cohort)
+    (dest / sut.LOCK).write_text(json.dumps(sut._lock_expected(summary)))
+    cycles = {
+        "full_storage__baseline": 100,
+        "full_storage__producer_mac_ii1_requested": 110,
+        "row_storage__baseline": 94,
+        "row_storage__producer_mac_ii1_requested": 105,
+    }
+    for case in sut.r4y.CASES:
+        (dest / case / "vitis_invocation.json").write_text("{}\n")
+    monkeypatch.setattr(sut, "summarize_case", lambda folder: {
+        "source_sha256": summary["source_sha256"][folder.split("/")[-1]],
+        "csim_receipt": {"failures": 0, "max_absolute_error": 0.003},
+        "metrics": {"ii_max": "3"},
+    })
+    def qualify(folder, expected, *, summary):
+        case = folder.name
+        return {
+            "status": "QUALIFIED_HLS_ESTIMATES_NOT_PHYSICAL",
+            "native_e2_accepted": True,
+            "native_e3_qualified": True,
+            "hls_worst_cycles": cycles[case],
+            "hls_report_sha256": "f" * 64,
+            "hls_estimated_clock_ns": 16.0,
+            "estimated_resources": {key: 4 for key in sut.RESOURCES},
+        }
+    monkeypatch.setattr(sut, "qualify_case", qualify)
+    out = sut.audit_native(study=dest, **kw)
+    assert [r["HLS_worst_cycles_delta_requested_minus_baseline"]
+            for r in out["within_storage_pipeline_effects"]] == [10, 11]
+    assert out["four_arm_factorial_interaction"][
+        "pipeline_x_storage_interaction_HLS_cycles"] == 1
+    assert out["four_arm_factorial_interaction"][
+        "pipeline_x_storage_interaction_HLS_clock_product_ns_NOT_measured"] == 24
+    assert out["observations"][0]["HLS_top_level_II_max_cycles"] == 3
+    assert all(r["real_measured_latency_ns"] is None for r in out["observations"])

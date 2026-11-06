@@ -254,6 +254,7 @@ def _observation(folder: Path, *, case: str, source_sha: str) -> dict:
             "status": "NOT_RUN_OR_INCOMPLETE_NATIVE_ATTEMPT",
             "E2_numerical_qualified": False, "E3_HLS_qualified": False,
             "CSim_max_absolute_error": None,
+            "CSim_failures": None,
             "HLS_worst_cycles": None, "HLS_top_level_II_max_cycles": None,
             "HLS_report_sha256": None, "HLS_estimated_clock_ns": None,
             "E3_requested_clock_cycle_product_ns_NOT_measured": None,
@@ -277,6 +278,8 @@ def _observation(folder: Path, *, case: str, source_sha: str) -> dict:
     if e3 and (type(cycles) is not int or cycles <= 0):
         raise ValueError("R4z accepted E3 result lacks positive worst cycles")
     ii = metrics.get("ii_max") if e3 else None
+    if type(ii) is str and ii.isdecimal():
+        ii = int(ii)
     if type(ii) is not int or ii <= 0:
         ii = None
     return {
@@ -284,8 +287,11 @@ def _observation(folder: Path, *, case: str, source_sha: str) -> dict:
         "status": qualified.get("status"),
         "E2_numerical_qualified": e2,
         "E3_HLS_qualified": bool(e3),
+        # Original fresh source-attested failure receipts are scientific
+        # observations too; never hide an observed error on E2 rejection.
         "CSim_max_absolute_error": (
-            csim.get("max_absolute_error") if e2 else None),
+            csim.get("max_absolute_error") if csim else None),
+        "CSim_failures": csim.get("failures") if csim else None,
         "HLS_worst_cycles": cycles,
         "HLS_top_level_II_max_cycles": ii,
         "HLS_report_sha256": (
@@ -339,6 +345,50 @@ def audit_native(*, study: str | Path, source_study: str | Path,
             "routed_E4_qualified": False,
             "measured_FPGA_latency_delta_ns": None,
         })
+    # Within-storage intervention effects preserve the factorial's other
+    # axis. Only E3-qualified source-attested arms enter quantitative HLS
+    # comparisons. Invalid/missing original observations stay NULL.
+    pipeline_effects = []
+    for storage in r4y.STORAGE:
+        base = next(x for x in arms if x["case"] == storage + "__baseline")
+        requested = next(x for x in arms
+                         if x["case"] == storage + "__producer_mac_ii1_requested")
+        pair_valid = base["E3_HLS_qualified"] and requested["E3_HLS_qualified"]
+        pipeline_effects.append({
+            "storage": storage, "both_E3_HLS_qualified": bool(pair_valid),
+            "HLS_worst_cycles_delta_requested_minus_baseline": (
+                requested["HLS_worst_cycles"] - base["HLS_worst_cycles"]
+                if pair_valid else None),
+            "HLS_clock_product_ns_delta_NOT_measured": (
+                requested["E3_requested_clock_cycle_product_ns_NOT_measured"] -
+                base["E3_requested_clock_cycle_product_ns_NOT_measured"]
+                if pair_valid else None),
+            "HLS_resource_delta_requested_minus_baseline": {
+                key: (requested["estimated_resources"][key] -
+                      base["estimated_resources"][key]
+                      if pair_valid and
+                      type(requested["estimated_resources"][key]) in (int, float)
+                      and type(base["estimated_resources"][key]) in (int, float)
+                      else None)
+                for key in RESOURCES
+            },
+            "verified_producer_loop_II_cycles": None,
+            "measured_FPGA_latency_delta_ns": None,
+        })
+    interaction_valid = all(x["both_E3_HLS_qualified"] for x in pipeline_effects)
+    full_effect, row_effect = pipeline_effects
+    interaction = {
+        "all_four_E3_qualified": bool(interaction_valid),
+        "pipeline_x_storage_interaction_HLS_cycles": (
+            row_effect["HLS_worst_cycles_delta_requested_minus_baseline"] -
+            full_effect["HLS_worst_cycles_delta_requested_minus_baseline"]
+            if interaction_valid else None),
+        "pipeline_x_storage_interaction_HLS_clock_product_ns_NOT_measured": (
+            row_effect["HLS_clock_product_ns_delta_NOT_measured"] -
+            full_effect["HLS_clock_product_ns_delta_NOT_measured"]
+            if interaction_valid else None),
+        "physical_interaction_latency_ns": None,
+    }
     return {
         "schema": SCHEMA,
         "status": ("FOUR_NATIVE_RECEIPTS_READ_ONLY_HLS_REVIEW"
@@ -351,6 +401,8 @@ def audit_native(*, study: str | Path, source_study: str | Path,
         "E3_qualified_cases": qualified_e3,
         "observations": arms,
         "same_clock_storage_pairs": pairs,
+        "within_storage_pipeline_effects": pipeline_effects,
+        "four_arm_factorial_interaction": interaction,
         "new_vendor_calls_during_audit": 0,
         "original_evidence_modified": False,
         "physical_E4": None,
