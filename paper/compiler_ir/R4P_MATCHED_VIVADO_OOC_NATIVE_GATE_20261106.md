@@ -124,3 +124,16 @@ The author then executed R4p `--prepare-output` **without any vendor execution**
 **Next gate remains vendor-FREE:** run R4p without `--execute-native` or `--audit-native`, passing this new `--study` and the same frozen R4o/R4k/R4d/R4a source locations. Require `status=DRY_RUN_NO_VENDOR_CALLS`, `planned_vivado_calls=2`, `actual_vivado_calls=0` and exact SHA source gate `ALL_R4L_R4O_R4P_SOURCE_BYTES_SHA_ATTESTED`. The user has not yet supplied a result from this dry-run or any native Vivado invocation. Do NOT label the native experiment as successful before actual source-pinned routing/timing/DRC reports exist.
 
 Explicit one-time Vivado execution may be considered only after this dry-run gate and a final input/script inspection; no original Vitis or original R4o sources may be modified. The permanent attempt lock is created by the first native execution attempt, **not** by source-only preparation or dry-run. In case of vendor failure, preserve the attempt lock and original partial outputs and conduct a read-only audit.
+
+## Original R4p read-only preflight VERIFIED — 6 November 2026
+
+The author pulled the research branch at `9ea35ca7232ace3a5009527ddd65de8f24e86201` and ran the **default vendor-free R4p dry-run** on the already prepared source-only study `build/r4p_matched_vivado_ooc_native_20261106_01`. The original stdout reported:
+
+- `status=DRY_RUN_NO_VENDOR_CALLS`, `source_gate=ALL_R4L_R4O_R4P_SOURCE_BYTES_SHA_ATTESTED`, `source_Vivado_inputs_sha_attested=true`.
+- `both_E2_E3_qualified_in_frozen_R4l=true`; `source_revision=776e3a7a4b599fd114718f6a03ab73e06be17f5c`.
+- `planned_vivado_calls=2`, `actual_vivado_calls=0`, `new_vendor_calls_during_audit=0`.
+- `physical_E4=null`, `board_qualified=false`.
+
+This confirms all source/RAM/Tcl artifact chains requalified at read-only preflight. It does **NOT** show any Vivado synthesis, route, real mapped utilization, routed slack, clean DRC, or physical E4 outcome. Both original R4l Vitis cases and all R4o/R4p source-only assets remain immutable.
+
+**Next valid action:** a separately explicit **single native execution attempt** using only `--study build/r4p_matched_vivado_ooc_native_20261106_01`, original read-only evidence roots, `--vivado /tools/Xilinx/Vivado/2023.2/bin/vivado`, and BOTH `--execute-native --confirm-ooc-native`. This permanently creates the source-revision-pinned native attempt lock before launching the first arm. The runner stops on a failed first arm and must never be restarted on this study; preserve failures as evidence. After any native attempt, run only the default `--audit-native` mode (no execution flags) to qualify real routed/DRC evidence. The dry-run itself consumed no one-time native attempt.
