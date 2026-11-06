@@ -308,6 +308,106 @@ def inspect_arm(study: Path, rtl: dict, defaults: dict) -> dict:
     return report
 
 
+def compare_scratch_source_sites(full: dict, row: dict) -> dict:
+    """Pair original scratch source DECLARATION sites by exact parent/name.
+
+    A source site is not an elaborated hardware instance. The scalar
+    depth delta is reported only if every paired site has a literal,
+    identical-within-arm tuple and both arms use the same word width
+    and address width. No physical memory quantity is inferred.
+    """
+    left = full.get("scratch_source_sites")
+    right = row.get("scratch_source_sites")
+    result = {
+        "status": "UNKNOWN_SCRATCH_INSTANCE_PARAMETER_SITES",
+        "scratch_source_site_count_full": len(left) if isinstance(left, list) else None,
+        "scratch_source_site_count_row": len(right) if isinstance(right, list) else None,
+        "scratch_source_site_pairs": None,
+        "scratch_literal_source_site_tuple_full": None,
+        "scratch_literal_source_site_tuple_row": None,
+        "scratch_site_parameter_modes": None,
+        "scratch_literal_source_site_depth_delta": None,
+        "elaborated_scratch_instance_depth_delta": None,
+        "physical_BRAM_delta": None,
+    }
+    if (full.get("status") != "SOURCE_INSTANCE_SITES_PARSED_WITHOUT_ELABORATION"
+            or row.get("status") != "SOURCE_INSTANCE_SITES_PARSED_WITHOUT_ELABORATION"
+            or not isinstance(left, list) or not isinstance(right, list)
+            or not left or not right):
+        return result
+
+    def indexed(sites):
+        keyed = {}
+        for site in sites:
+            if not isinstance(site, dict):
+                return None
+            key = (site.get("parent_module_type"),
+                   site.get("module_type"), site.get("instance"))
+            if (any(not isinstance(v, str) or not v for v in key)
+                    or key in keyed):
+                return None
+            keyed[key] = site
+        return keyed
+
+    a = indexed(left)
+    b = indexed(right)
+    if a is None or b is None or set(a) != set(b):
+        return result
+    observations = []
+    for key in sorted(a):
+        before = a[key].get("source_site_literal_parameter_tuple_if_supported")
+        after = b[key].get("source_site_literal_parameter_tuple_if_supported")
+        if (not isinstance(before, dict) or not isinstance(after, dict)
+                or set(before) != {"DataWidth", "AddressWidth", "AddressRange"}
+                or set(after) != {"DataWidth", "AddressWidth", "AddressRange"}
+                or any(type(item) is not int or item <= 0
+                       for item in (*before.values(), *after.values()))):
+            return result
+        observations.append({
+            "parent_module_type": key[0],
+            "module_type": key[1],
+            "instance": key[2],
+            "source_literal_parameters_full": before,
+            "source_literal_parameters_row": after,
+            "parameter_mode_full": a[key]["parameter_site_status"],
+            "parameter_mode_row": b[key]["parameter_site_status"],
+            "source_depth_delta_row_minus_full": (
+                after["AddressRange"] - before["AddressRange"]),
+            "elaborated_instance_count": None,
+            "physical_BRAM_delta": None,
+        })
+    result["scratch_source_site_pairs"] = observations
+    # Do NOT collapse heterogeneous site dimensions to a single summary
+    # or sum source capacities as if they were physical RAM instances.
+    full_tuples = [v["source_literal_parameters_full"] for v in observations]
+    row_tuples = [v["source_literal_parameters_row"] for v in observations]
+    uniform = (
+        all(item == full_tuples[0] for item in full_tuples)
+        and all(item == row_tuples[0] for item in row_tuples)
+        and full_tuples[0]["DataWidth"] == row_tuples[0]["DataWidth"]
+        and full_tuples[0]["AddressWidth"] == row_tuples[0]["AddressWidth"]
+    )
+    if not uniform:
+        result["status"] = "SOURCE_SCRATCH_SITES_PAIRED_HETEROGENEOUS_NOT_ELABORATED"
+        return result
+    result.update({
+        "status": "SOURCE_SCRATCH_SITES_PARSED_NOT_ELABORATED",
+        "scratch_literal_source_site_tuple_full": full_tuples[0],
+        "scratch_literal_source_site_tuple_row": row_tuples[0],
+        "scratch_site_parameter_modes": (
+            [observations[0]["parameter_mode_full"],
+             observations[0]["parameter_mode_row"]]
+            if all(item["parameter_mode_full"] ==
+                   observations[0]["parameter_mode_full"] and
+                   item["parameter_mode_row"] ==
+                   observations[0]["parameter_mode_row"]
+                   for item in observations) else None),
+        "scratch_literal_source_site_depth_delta": (
+            row_tuples[0]["AddressRange"] - full_tuples[0]["AddressRange"]),
+    })
+    return result
+
+
 def inspect(*, study: str | Path, original_study: str | Path) -> dict:
     # Independent pipelines: R4g verifies original native HDL/ROM receipts;
     # R4i verifies same original source module default declarations.
@@ -326,36 +426,12 @@ def inspect(*, study: str | Path, original_study: str | Path) -> dict:
         a = inspect_arm(Path(study), g["arms"][2*idx], i["arms"][2*idx])
         b = inspect_arm(Path(study), g["arms"][2*idx + 1], i["arms"][2*idx + 1])
         observations.extend((a, b))
-        known = (a["status"] == "SOURCE_INSTANCE_SITES_PARSED_WITHOUT_ELABORATION"
-                 and b["status"] == "SOURCE_INSTANCE_SITES_PARSED_WITHOUT_ELABORATION"
-                 and len(a["scratch_source_sites"] or []) == 1
-                 and len(b["scratch_source_sites"] or []) == 1)
-        left = a["scratch_source_sites"][0] if known else None
-        right = b["scratch_source_sites"][0] if known else None
+        paired = compare_scratch_source_sites(a, b)
         pair = {
             "format": list(fmt),
-            "status": ("SOURCE_SCRATCH_SITES_PARSED_NOT_ELABORATED" if known
-                       else "UNKNOWN_SCRATCH_INSTANCE_PARAMETER_SITES"),
             "HLS_estimated_BRAM18K_delta": g["pairs"][idx][
                 "HLS_estimated_BRAM18K_delta_row_minus_full"],
-            "scratch_literal_source_site_tuple_full": (
-                left["source_site_literal_parameter_tuple_if_supported"]
-                if known else None),
-            "scratch_literal_source_site_tuple_row": (
-                right["source_site_literal_parameter_tuple_if_supported"]
-                if known else None),
-            "scratch_site_parameter_modes": (
-                [left["parameter_site_status"], right["parameter_site_status"]]
-                if known else None),
-            "scratch_literal_source_site_depth_delta": (
-                right["source_site_literal_parameter_tuple_if_supported"]["AddressRange"]
-                - left["source_site_literal_parameter_tuple_if_supported"]["AddressRange"]
-                if known
-                and left["source_site_literal_parameter_tuple_if_supported"] is not None
-                and right["source_site_literal_parameter_tuple_if_supported"] is not None
-                else None),
-            "elaborated_scratch_instance_depth_delta": None,
-            "physical_BRAM_delta": None,
+            **paired,
         }
         pairs.append(pair)
     return {
@@ -370,6 +446,9 @@ def inspect(*, study: str | Path, original_study: str | Path) -> dict:
         "pairs": pairs,
         "scientific_limits": [
             "A source module instance declaration is NOT elaborated hardware.",
+            "Three original scratch source sites are not proof of three mapped RAM cells.",
+            "A per-site 80-entry reduction is not automatically a 240-element physical saving.",
+            "Pairing by source instance name does not establish generate scope multiplicity.",
             "Generate conditionals, hierarchical multiplicity and port connectivity are not resolved.",
             "Literal named parameter overrides may be visible, but defparams and symbolic/positional forms are UNKNOWN.",
             "No proof of mapped RAMB granularity or actual SRAM occupancy.",
