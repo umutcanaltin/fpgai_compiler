@@ -20,6 +20,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import subprocess
 
 from fpgai_research.codegen.hls.r2h_allocated_fanout_cpp import (
     emit_allocated_fanout_cpp,
@@ -197,6 +198,13 @@ def run(*, original_c1_study: str | Path, output: str | Path,
     expected = {_key(c[0], c[1], c[2:6], c[6]) for c in cases}
     if expected != set(cohort):
         raise ValueError("E1 candidate profiles differ from original C1 E0 cohort")
+    # A Git SHA is not a source attestation if tracked files are dirty.
+    tracked_drift = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=no"],
+        check=True, capture_output=True, text=True, timeout=10,
+    ).stdout.strip()
+    if tracked_drift:
+        raise RuntimeError("C1 E1 original requires a clean tracked Git checkout")
     revision = _git_revision()
     if re.fullmatch("[0-9a-f]{40}", revision) is None:
         raise ValueError("New C1 E1 experiment Git source revision unknown")
