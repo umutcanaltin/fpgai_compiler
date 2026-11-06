@@ -184,12 +184,15 @@ def _native_observation(pkg: Path, *, arm: str, source_sha: str) -> dict:
         "source_storage": arm,
         "source_cpp_sha256": source_sha,
     }, summary=summary)
-    e2 = qualified["native_e2_accepted"] is True
-    e3 = qualified["native_e3_qualified"] is True
+    receipt_present = (pkg / "vitis_invocation.json").is_file()
+    e2 = receipt_present and qualified["native_e2_accepted"] is True
+    # E3 requires a source-attested vendor invocation AND an accepted
+    # numerical oracle, regardless of what isolated tool flags say.
+    e3 = e2 and qualified["native_e3_qualified"] is True
     csim = summary.get("csim_receipt") or {}
     return {
         "arm": arm,
-        "native_invocation_file_present": (pkg / "vitis_invocation.json").is_file(),
+        "native_invocation_file_present": receipt_present,
         "E2_qualified": e2,
         "E3_qualified": e3,
         "status": qualified["status"],
