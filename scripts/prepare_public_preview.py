@@ -42,6 +42,7 @@ PUBLIC_FILES=frozenset({
     "docs/PYNQ_Z2_BOARD_DMA_PILOT.md",
     "scripts/check_open_source_readiness.py",
     "scripts/prepare_public_preview.py","scripts/check_public_docs.py",
+    "scripts/audit_source_inventory.py",
     "scripts/setup_amd_environment.sh",
     "scripts/check_amd_environment.py",
     "scripts/check_fpga_deployment.py",
