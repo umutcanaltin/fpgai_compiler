@@ -54,3 +54,11 @@ python -m fpgai_research.experiments.cst_r4t_routed_checkpoint_report_only_prepa
 The output is create-only. If it already exists, omit `--output` to run **read-only source preflight**. NEVER delete or overwrite any original R4p/R4o/R4k/R4d/R4a artifact, routed report or vendor attempt lock. **Do not run `report_only.tcl` yet**: the new report-only native execution/attestation gate must first be implemented and reviewed separately. No GitHub Actions or unrelated compiler feature edits.
 
 **First paper: MAJOR REVISION / NOT SUBMISSION READY.** The documented descriptive BRAM savings do not establish timing-qualified or deployable FPGA superiority.
+
+## Author-verified original R4t source-only outcome — 6 November 2026
+
+The author pulled the original research branch at `6adf4f14752651c2492fbe492aa55744b5ca1aa8`, ran **28/28 targeted R4t/R4s/R4r tests** (0.27s), and successfully created the separate immutable source-only R4t study `build/r4t_routed_checkpoint_report_only_prepare_20261106_01` with status `R4T_ISOLATED_CHECKPOINT_REPORT_ONLY_SOURCE_PREPARED`, original source revision `776e3a7a4b599fd114718f6a03ab73e06be17f5c`, exactly two checkpoint copies, **zero native Vivado calls**, and strict physical E4 NULL.
+
+Exact source-location- and content-pinned POST-HOC original checkpoint identities: `full_storage`, SHA-256 `dec6616bd7d01d582ed59445122b26f80eaafe23fd00c2e8082c3dd441936137`, 3,379,985 bytes, original WNS −2.170ns; `row_storage`, SHA-256 `1cf5feea9bd4903d51ded333a640cdeb4bd0997c257dc3ceea2514b3c7ddb486`, 3,430,541 bytes, original WNS −3.718ns. **Neither checkpoint SHA was in the original R4p execution-time vendor receipt.**
+
+The new [R4u isolated copied-checkpoint report-only native staging/execution/audit gate](R4U_COPIED_DCP_REPORT_ONLY_NATIVE_GATE_20261106.md) is committed but **NOT YET WORKSTATION-TESTED**. It requires the exact two verified R4t DCP SHA+size pairs, creates another independent new output root for posthoc report-only inspection, requires two explicit opt-in flags before any new Vivado process, and must not modify the original R4p or R4t files. **Never rerun the original R4p Vivado implementation.**
