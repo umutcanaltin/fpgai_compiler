@@ -1,6 +1,6 @@
 # R4a — first-paper row-retained materialization experiment
 
-**6 November 2026: IMPLEMENTED, NOT YET WORKSTATION-EXECUTED.** These are new prospective source studies. No original R2r/R2u/R2v/R2w/R2x receipts or RL branches have been changed.
+**6 November 2026 update:** The R4a source/GCC E1 studies have now been executed on the author's workstation. See [source result receipts](R4A_WORKSTATION_SOURCE_RESULTS_20261106.md): 26 targeted tests passed; quick 3/3 and full paper 5/5 matched GCC pairs completed at source revision `fe99d627a5a16ce75e5d4df4542bb0f0f93e6ab0`. New Vitis E2/E3 and Vivado E4 measurements remain **NOT RUN**. The original R2 studies and RL branches were not changed.
 
 ## Scientific question
 
