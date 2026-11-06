@@ -1,6 +1,6 @@
 # R4b — original case 003 native CSim failure (preserved negative result)
 
-**Evidence:** user's workstation terminal output, 6 November 2026. Source revision of R4a original `fe99d627a5a16ce75e5d4df4542bb0f0f93e6ab0`. Original raw files live under `build/r4a_row_retained_paper_20261106_01/case_003` on the user's workstation. We **have not inspected the raw vendor logs here**; we must not invent numerical failure counts, max errors or causes.
+**Evidence:** user's workstation terminal output, 6 November 2026. Source revision of R4a original `fe99d627a5a16ce75e5d4df4542bb0f0f93e6ab0`. Original raw files live under `build/r4a_row_retained_paper_20261106_01/case_003` on the user's workstation. The original user's later direct stdout extract supplies numerical metrics, recorded below. We have not independently read the full raw vendor log directory.
 
 ## What ran
 
@@ -14,6 +14,12 @@
 - Subsequent read-only audit: **two** native invocation receipts (both in case 003), **zero** E2-accepted or E3-qualified arms, **zero** qualified HLS pairs. Other four pairs were *not run*, not failures.
 
 **No BRAM18K, LUT, FF, DSP, cycle or physical FPGA comparison is scientifically qualified.** Vendor exit 0 is not numerical success. A failure in both arms does **not** isolate a row-retention regression.
+
+## Actual numerical outcome — user's follow-up stdout
+
+For **both** original arms, the independent selected-line extraction reported `precision_bits=16`, `integer_bits=6`, `numerical_tolerance=0.02`, `csim_passed=false`, 1 sample × 128 outputs, cosine `0.999989333846`, RMSE `0.0183012798956`, maximum absolute error `0.055395125`, and **28 failures**. `FPGAI_CSIM_STATUS=failed` appears in both original Vitis stdout extracts. Therefore 28/128 outputs (21.875%) exceeded the prespecified absolute acceptance threshold and the largest error was approximately 2.77× threshold. The metrics are identical **only in aggregate**; elementwise output identity and the specific root cause are not established.
+
+A new [read-only attested R4c numerical diagnosis](R4C_CSIM_NUMERICAL_TRIAGE_20261106.md) is implemented, with negative tests, without modifying original source, testbench, or threshold.
 
 ## Numerical hypothesis to test, not an asserted cause
 
