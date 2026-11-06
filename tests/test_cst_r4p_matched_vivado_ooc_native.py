@@ -373,3 +373,42 @@ def test_forged_or_tampered_native_receipt_does_not_qualify_e4(
             "bram"] is None
         assert result["arms"][1]["status"] == (
             "REJECTED_VENDOR_OR_SOURCE_PROVENANCE")
+
+
+
+def test_missing_original_native_attempt_lock_rejects_apparent_clean_reports(
+    prepared,
+):
+    source, root = prepared
+    orig = sut._original_r4o(**source)
+    for arm in sut.ARMS:
+        _write_mock_receipt(root / arm, source=orig["arms"][arm])
+    (root / "r4p_native_attempt.json").unlink()
+    report = sut.audit_native(**args(prepared))
+    assert report["one_time_original_attempt_lock_verified"] is False
+    assert report["both_strict_clean_DRC_OOC_E4"] is False
+    assert all(a["status"] ==
+               "REJECTED_NATIVE_RECEIPT_WITHOUT_ORIGINAL_ATTEMPT_LOCK"
+               for a in report["arms"])
+    assert report["strict_clean_DRC_resource_delta_row_minus_full"]["bram"] is None
+
+
+def test_preexisting_native_lock_prevents_execution_without_output_files(
+    prepared, monkeypatch,
+):
+    source, root = prepared
+    write(root / "r4p_native_attempt.json", json.dumps({
+        "schema": sut.SCHEMA + "/original-native-attempt-lock",
+        "source_revision": "f" * 40,
+        "arms": list(sut.ARMS),
+        "never_retry_original_case": True,
+    }))
+    monkeypatch.setattr(
+        sut, "run_vivado",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("Vivado must not be invoked")))
+    with pytest.raises(FileExistsError, match="attempt lock"):
+        sut.execute(**args(prepared), execute_native=True,
+                    confirm_ooc_native=True, executable=sys.executable)
+    assert not (root / "full_storage" / "vivado" / "logs").exists()
+    assert not (root / "row_storage" / "vivado" / "logs").exists()
