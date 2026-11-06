@@ -55,11 +55,13 @@ def row_retained_plan(arch) -> dict:
     if (len(producer) != producer_length
             or any(e.kind not in ("CONTRIBUTE", "COMMIT") or e.tensor != spec.h
                    for e in producer)
+            or not reader_phase
             or any(
-                (e.kind == "READ" and e.tensor == spec.h)
-                or (e.kind == "COMMIT" and e.tensor in spec.reader_values)
+                not ((e.kind == "READ" and e.tensor == spec.h)
+                     or (e.kind == "COMMIT"
+                         and e.tensor in spec.reader_values))
                 for e in reader_phase
-            ) is False):
+            )):
         raise ValueError("Unexpected canonical R2g source phases")
 
     rows = []
@@ -170,9 +172,15 @@ def emit_row_retained_fanout_cpp(arch) -> Emission:
         f"    for(int ordinal=row*{n*q};"
         f"ordinal<(row+1)*{n*q};++ordinal) {{",
     )
-    one(
-        f"  }}\n  for(int idx=0;idx<{m*q};++idx) {{",
+    # This marker appears before every merge and final ReLU loop.
+    # Change ONLY the first occurrence (the ordinal-loop boundary).
+    close_marker = f"  }}\n  for(int idx=0;idx<{m*q};++idx) {{"
+    if source.count(close_marker) != len(spec.add_ops) + 1:
+        raise ValueError("Canonical fanout merge-loop boundary changed")
+    source = source.replace(
+        close_marker,
         f"    }}\n  }}\n  for(int idx=0;idx<{m*q};++idx) {{",
+        1,
     )
 
     one(
