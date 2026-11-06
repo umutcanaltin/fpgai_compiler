@@ -73,9 +73,11 @@ def run(*, original_study: str | Path, output: str | Path) -> dict:
     original_evidence = audit_prepared(study=original_study)
     original_root = Path(original_study)
     source_summary = json.loads((original_root / "summary.json").read_text())
-    original_case = source_summary["rows"][CASE_INDEX]
     if (source_summary["configuration"]["profile"] != "paper"
-            or original_case["case"] != "case_003"
+            or len(source_summary["rows"]) <= CASE_INDEX):
+        raise ValueError("R4d requires original R4a paper case_003")
+    original_case = source_summary["rows"][CASE_INDEX]
+    if (original_case["case"] != "case_003"
             or original_case["graph"] != configuration["graph"]):
         raise ValueError("R4d requires original R4a paper case_003")
     for arm in ARMS:
