@@ -18,6 +18,23 @@
 **Interpretation:** This closes a meaningful empirical bridge between original model-level source trace certificates and actual GNU-C++-executed code for **the same 54 admitted static MatMul fanout profiles**. Both source layouts had matching functional/architecture/input identities; each case's source C++, observed stdout, original typed-event lineage and standalone summary entered the SHA audit. The test's actual GCC validator implements scratch address/last-use and intermediate/final numeric conformance checks to the independent NumPy reference; those are **bounded source-level observations**, not an all-input formal semantics proof.
 
 **Crucial causal/novelty qualification:** The contrast is `disjoint` versus an explicitly optimized **fixed-order `per_element_optimal`** source scratch allocator on deliberately constructed multi-reader fanout examples. This choice creates an *expected opportunity* to reduce slot counts. A sign-only **54/54** result is therefore a validated **implementation correctness and attainable source-allocation contrast**, not evidence that an optimization algorithm discovered an unforeseen improvement, not a comparison to the best independently optimized compiler/allocator, and not generalizable to arbitrary models. This is why the new per-profile independent original read-only analysis must report absolute/percentage effect sizes and the value, schedule and witness checks, including whether different reader mappings show materially distinct behavior. Only an equal-functionality external memory allocator/Allo comparator and/or qualified hardware resource study could support a stronger resource-superiority claim.
+## Original SHA-verified source effect sizes — now executed and quantified
+
+The author ran `make research-c1-e1-review` successfully at repository SHA `a0d4db117247f08b0c85849f3fbd5d8c0cdac34a` after **40/40 targeted tests passed**. The tool rechecked original E0 report SHA `8fa3848fcb0993e44a83391f595861943d75e3f09b669bd93b1b27e0222f3978` and immutable original E1 manifest SHA `a79e700208e5d7cada93dd1f488809b6622f52cf6b14fa7b7d7b05a8d624d83e`, **271 source artifacts**, 54 profiles and 108 genuine GCC executions; this was **read-only with zero new compiler/vendor calls**.
+
+**Across 54 distinct original fanout source programs:** median **15.5** source scratch unit slots saved; minimum **4**, maximum **45**; median **50%** per-profile source slot reduction (range **38.461538%–55.555556%**). The sum of distinct program capacities was **1,999 disjoint source units versus 1,009 reused units** (990 fewer in *aggregated distinct examples*, not the physical capacity of a single FPGA). Observed maximum final numerical absolute error **2.3781921365539915 × 10⁻⁷**, intermediate absolute error **2.408715820134688 × 10⁻⁷**. Both source layouts recorded **6,625 actual address witnesses**, preserving matched generated-source address observation counts.
+
+| Fanout readers | Φ mapping | 9 original profiles: median saved source slots | Median per-profile reduction | Min–max source slots saved |
+|---:|---|---:|---:|---|
+| 2 | scalar | 14 | 45.454545% | 4–17 |
+| 2 | mixed_phi | 12 | 50.000000% | 4–23 |
+| 3 | scalar | 14 | 50.000000% | 7–27 |
+| 3 | mixed_phi | 18 | 47.058824% | 8–33 |
+| 4 | scalar | 24 | 50.000000% | 8–45 |
+| 4 | mixed_phi | 32 | 50.000000% | 13–45 |
+
+**Interpretation:** The output is a validated *source-level* allocation contrast and compiler execution-refinement check, not a statistically independent FPGA performance estimate or memory component count. `per_element_optimal` is chosen expressly to reuse source slots, so the positive-saving sign should not be presented as a surprising optimization discovery. Neither grouped sample count nor 990 summed source slots establishes BRAM, physical inference latency, core II or power. The separately completed original R4l/Vivado hardware study has its own distinct graph and tool-stage evidence.
+
 ## 2. Scientific limitations and honest negative controls
 
 - **No cherry-picking**: 54/54 distinct predeclared C1 profiles completed across two source layouts. These are fixed-seed, synthetic family members under one topology, not 54 statistically independent applications. We retain the complete original population even if later extended test families produce counterexamples.
