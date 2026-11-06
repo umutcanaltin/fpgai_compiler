@@ -115,3 +115,29 @@ def test_audit_staged_preview_rejects_forged_approval(tmp_path):
     file.write_text(json.dumps(data))
     with pytest.raises(ValueError,match="Invalid staged preview"):
         sut.audit_source_links(root,"compiler")
+
+
+def test_direct_script_and_module_invocations_match_from_checkout():
+    """Regression: Makefile release-links used to fail with ModuleNotFoundError."""
+    import json
+    import subprocess
+    import sys
+    root = Path(__file__).resolve().parents[1]
+    commands = (
+        [sys.executable, "scripts/check_public_docs.py", "--profile", "compiler"],
+        [sys.executable, "-m", "scripts.check_public_docs", "--profile", "compiler"],
+    )
+    receipts = []
+    for command in commands:
+        result = subprocess.run(
+            command, cwd=root, capture_output=True, text=True,
+            timeout=25, check=False,
+        )
+        assert result.returncode == 0, (
+            f"Public docs entrypoint failed: {command}\n{result.stderr}\n{result.stdout}"
+        )
+        receipt = json.loads(result.stdout)
+        assert receipt["all_local_public_links_resolve"] is True
+        assert receipt["public_release_authorized"] is False
+        receipts.append(receipt)
+    assert receipts[0] == receipts[1]
