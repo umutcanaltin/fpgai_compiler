@@ -2,7 +2,7 @@
 # None of these targets invokes Vitis, Vivado, downloads models or publishes code.
 PYTHON ?= python
 
-.PHONY: help install-dev example example-cnn example-strided example-two-conv example-mlp test test-examples test-compiler test-gym release-check release-links release-preview-plan fpga-env-check fpga-prepare-hls fpga-inspect research-inventory research-audit-tests research-c2-review research-c1-e1-review
+.PHONY: help install-dev example example-cnn example-strided example-two-conv example-mlp test test-examples test-compiler test-gym release-check release-links release-preview-plan fpga-env-check fpga-prepare-hls fpga-inspect research-inventory research-audit-tests research-c2-review research-c1-e1-review research-hls-vivado-review research-r4w-audit research-r4x-feasible-latency
 
 help:
 	@echo "install-dev          Install editable compiler with ONNX and test extras"
@@ -19,6 +19,9 @@ help:
 	@echo "research-audit-tests Run source inventory, hygiene and C2 read-only tests"
 	@echo "research-c2-review  Read-only original source-compiler cost comparison (no new calls)"
 	@echo "research-c1-e1-review Read-only SHA-pinned original full 54-profile GCC E1 source-slot results"
+	@echo "research-hls-vivado-review Original Vitis HLS vs routed Vivado matched source Pareto (read-only)"
+	@echo "research-r4w-audit   New isolated 16/20/24ns routed-clock qualification (read-only)"
+	@echo "research-r4x-feasible-latency Joint timing+DRC-valid-only HLS-derived latency ns (read-only)"
 	@echo "release-links        Check all public preview documentation links"
 	@echo "release-preview-plan Show nonpublishable public source allowlist"
 	@echo "release-check        Read-only owner/IP/license/history release preflight"
@@ -99,7 +102,7 @@ research-inventory:
 	$(PYTHON) scripts/audit_source_inventory.py
 
 research-audit-tests:
-	$(PYTHON) -m pytest -q tests/test_audit_source_inventory.py tests/test_repository_publication_hygiene.py tests/test_cst_paper_c2_original_readonly_analysis.py tests/test_cst_paper_c1_original_e1_readonly_descriptives.py tests/test_public_docs_links.py tests/test_public_release_preview.py
+	$(PYTHON) -m pytest -q tests/test_audit_source_inventory.py tests/test_repository_publication_hygiene.py tests/test_cst_paper_c2_original_readonly_analysis.py tests/test_cst_paper_c1_original_e1_readonly_descriptives.py tests/test_cst_paper_r4v_vitis_vivado_joint_compare.py tests/test_cst_paper_r4w_feasible_clock_sweep.py tests/test_cst_paper_r4x_feasible_only_core_latency.py tests/test_public_docs_links.py tests/test_public_release_preview.py
 
 research-c2-review:
 	$(PYTHON) -m fpgai_research.experiments.cst_paper_c2_original_readonly_analysis --study build/paper_c2_fair_source_cost_20261106_01
@@ -107,3 +110,37 @@ research-c2-review:
 # Source-hash-pinned, NO new compilation or vendor calls. Never re-run the original GCC output.
 research-c1-e1-review:
 	$(PYTHON) -m fpgai_research.experiments.cst_paper_c1_original_e1_readonly_descriptives --study build/paper_c1_e1_cpp_bridge_full_20261106_01 --summary-only
+
+
+# All three targets READ existing author-original studies. They do not run GCC,
+# Vitis or Vivado, delete attempt locks, modify reports or re-run original studies.
+R4_SOURCE_ROOT = build/r4k_source_schedule_matched_storage_20261106_01
+R4_OOC_INPUTS = build/r4o_matched_vivado_ooc_prepare_20261106_01
+R4_ORIGINAL_NATIVE = build/r4p_matched_vivado_ooc_native_20261106_01
+R4_ORIGINAL_R4D = build/r4d_numeric_format_source_20261106_01
+R4_ORIGINAL_R4A = build/r4a_row_retained_paper_20261106_01
+R4_NEW_FEASIBILITY = build/r4w_valid_clock_sweep_20261106_01
+
+research-hls-vivado-review:
+	$(PYTHON) -m fpgai_research.experiments.cst_paper_r4v_vitis_vivado_joint_compare \
+	  --r4p-study $(R4_ORIGINAL_NATIVE) \
+	  --r4o-study $(R4_OOC_INPUTS) \
+	  --r4k-study $(R4_SOURCE_ROOT) \
+	  --original-r4d $(R4_ORIGINAL_R4D) \
+	  --original-r4a $(R4_ORIGINAL_R4A)
+
+research-r4w-audit:
+	$(PYTHON) -m fpgai_research.experiments.cst_paper_r4w_feasible_clock_sweep \
+	  --study $(R4_NEW_FEASIBILITY) --audit-native \
+	  --r4o-study $(R4_OOC_INPUTS) \
+	  --r4k-study $(R4_SOURCE_ROOT) \
+	  --original-r4d $(R4_ORIGINAL_R4D) \
+	  --original-r4a $(R4_ORIGINAL_R4A)
+
+research-r4x-feasible-latency:
+	$(PYTHON) -m fpgai_research.experiments.cst_paper_r4x_feasible_only_core_latency \
+	  --study $(R4_NEW_FEASIBILITY) \
+	  --r4o-study $(R4_OOC_INPUTS) \
+	  --r4k-study $(R4_SOURCE_ROOT) \
+	  --original-r4d $(R4_ORIGINAL_R4D) \
+	  --original-r4a $(R4_ORIGINAL_R4A)
