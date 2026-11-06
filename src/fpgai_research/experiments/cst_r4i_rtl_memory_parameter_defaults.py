@@ -150,7 +150,9 @@ def _rom_profiles(profiles: list[dict]) -> list[list[int]] | None:
     candidates = [p for p in profiles
                   if isinstance(p["module_type"], str)
                   and "_ROM_" in p["module_type"]]
-    if not candidates or any(
+    # The original R4g/R4h case has exactly three weight-ROM modules.
+    # Fewer/extra candidates are UNKNOWN, never promoted to a match.
+    if len(candidates) != 3 or any(
             p["status"] != "LITERAL_MODULE_DEFAULTS_ARRAY_TEMPLATE_ONLY"
             for p in candidates):
         return None
