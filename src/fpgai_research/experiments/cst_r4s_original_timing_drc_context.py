@@ -24,7 +24,6 @@ MAX_REPORT_BYTES = 16 * 1024 * 1024
 MAX_PATHS = 5
 MAX_CONTEXT_PER_RULE = 3
 MAX_TEXT = 260
-_IDENT = r"[A-Za-z0-9_.$\[\]\\/:-]{1,260}"
 _NUMBER = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)"
 _START = re.compile(r"^\s*(?:Startpoint|Source)\s*:\s*(.*?)\s*$", re.I)
 _END = re.compile(r"^\s*(?:Endpoint|Destination)\s*:\s*(.*?)\s*$", re.I)
@@ -33,7 +32,6 @@ _SLACK = re.compile(
     + _NUMBER + r")\s*ns\b", re.I)
 _GROUP = re.compile(r"^\s*Path\s+Group\s*:\s*(.*?)\s*$", re.I)
 _TYPE = re.compile(r"^\s*Path\s+Type\s*:\s*(.*?)\s*$", re.I)
-_RULE = re.compile(r"\b(?:DPIP|DPOP|RTSTAT)-\d+\b", re.I)
 
 
 def _text(original: Path, expected_sha: str) -> str:
