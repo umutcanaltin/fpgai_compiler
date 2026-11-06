@@ -236,9 +236,10 @@ def run(*, output: str | Path, profile: str = "quick") -> dict:
         "original_GCC_executions": 2*len(rows),
         "total_source_scratch_elements_saved":
             sum(row["source_scratch_elements_saved"] for row in rows),
-        "observed_HLS_E2_qualified": 0,
-        "observed_HLS_E3_qualified": 0,
-        "observed_physical_E4_qualified": 0,
+        "observed_HLS_E2_qualified": None,
+        "observed_HLS_E3_qualified": None,
+        "observed_physical_E4_qualified": None,
+        "native_observation_status": "NOT_RUN",
         "native_Vitis_calls": 0,
         "native_Vivado_calls": 0,
         "rows": rows,
