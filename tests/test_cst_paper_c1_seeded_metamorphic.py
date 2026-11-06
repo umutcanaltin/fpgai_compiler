@@ -17,6 +17,7 @@ def test_new_shapes_do_not_duplicate_prespecified_r3j_holdout():
     cases = sut.configurations(seeds=(111,222), shapes_per_group=2)
     assert len(cases) == 24
     assert len(set(cases)) == 24
+    assert len({(c[1], tuple(c[2:6]), c[-1]) for c in cases}) == 24
     assert all(tuple(c[2:6]) not in sut.SHAPES for c in cases)
     assert sut.configurations(seeds=(111,222), shapes_per_group=2) == cases
     assert sut.configurations(seeds=(111,333), shapes_per_group=2) != cases
