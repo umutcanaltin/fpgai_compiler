@@ -63,7 +63,8 @@ def test_quick_create_only_original_GCC_and_vitis_source_prep(
     assert result["original_GCC_compilations"] == 6
     assert result["native_Vitis_calls"] == 0
     assert result["native_Vivado_calls"] == 0
-    assert result["observed_HLS_E3_qualified"] == 0
+    assert result["observed_HLS_E3_qualified"] is None
+    assert result["native_observation_status"] == "NOT_RUN"
     assert len(result["rows"]) == 3
     assert all(row["source_scratch_elements_saved"] > 0
                for row in result["rows"])
