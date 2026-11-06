@@ -66,3 +66,25 @@ python -m fpgai_research.experiments.cst_r4l_schedule_matched_storage_native \
 ~~~
 
 **Status for publication:** R4k E1 accepted and source-verified; R4l new native tests and runs are **not yet executed on the author's workstation**. Until the E2 and E3 gates complete, the R4k storage-only hardware resource deltas are **UNKNOWN**, not zero or measured. E3 is HLS-estimated only, not placed/routed FPGA throughput or frequency. The first paper remains **MAJOR REVISION / NOT SUBMISSION READY**.
+
+## Verified R4l original Vitis evidence — 6 November 2026
+
+The author pulled the R4l branch at `a3cc5cafd8a53d8edab334bae888058a80db7ef0`, ran **35/35** focused R4l/R4k/R4j tests, and verified dry-run with exactly **two planned Vitis calls and zero calls made**. The read-only preflight confirmed original source revision `776e3a7a4b599fd114718f6a03ab73e06be17f5c`, R4a revision `fe99d627a5a16ce75e5d4df4542bb0f0f93e6ab0`, and R4d revision `abe6aa37e5c799f27312b7f3a17309c6122ed7cb`.
+
+The author subsequently explicitly executed **both NEW** R4k Vitis HLS 2023.2 source packages (`full_storage`, `row_storage`) ONCE. Both native processes exited zero, both E2 CSim gates passed **0/128 failures** (max absolute error `3.7956994241e-06`, RMSE `8.1167162467e-07`), and both were E3 HLS qualified. The independent read-only `--audit-native` confirmed the paired qualification and **zero native calls during audit**:
+
+| HLS-only metric (32/6) | `full_storage` | `row_storage` | row minus full |
+|---|---:|---:|---:|
+| Estimated BRAM18K | 13 | 13 | **0** |
+| Estimated DSP | 21 | 19 | **−2** |
+| Estimated LUT | 5,095 | 4,755 | **−340** |
+| Estimated FF | 2,120 | 1,647 | **−473** |
+| Estimated URAM | 0 | 0 | 0 |
+| HLS worst cycles | 22,954 | 22,602 | **−352** |
+| HLS estimated clock period (ns) | 9.857 | 9.500 | **−0.357** |
+
+The C++ source SHA-256 for the new full-storage arm is `03b0cc275ba27294d99adb14d597717d2a9035853b572b4dff6d7e6dcc4df98f`; its original CSynth XML SHA is `854d1ac848de0dd7e8edb4302108b9a7dceb7a982aab7902a8101b8ef1a6c703`. The row-storage arm's C++ SHA-256 is `aa0a7a2f684f3c0e6e64f6b4e3084c8f0dc93ae152318bd5339d9646b4894e9e`, and its CSynth XML SHA is `fe929aaa9db08990e5f7556d750d7d1eb7ef081c94b855424cccea38eb2644eb` (also the previously qualified R4e row-H RTL source case). The Tcl and CSim testbench digests are identical across the R4l source arms.
+
+**New observed conclusion:** When original source loop/reader issue order is held constant, choosing row-retained versus full scratch address allocation reduces HLS-estimated DSP, LUT and FF and improves estimated worst cycles/clock period for this one 32/6 matched fanout model. It does **not** reduce HLS-estimated BRAM count. This does **not** show equal HLS hardware schedules, a physical RAMB reduction, routed timing, real hardware frequency, power or generality across graph topologies. E4 remains `null`, not measured.
+
+**IMPORTANT: both R4l vendor calls are already complete. Do not execute R4l `--execute-native` again.** Only run read-only audits and source-attested new analyses. Preserve all original Vitis outputs, reports and invocation receipts. The recommended next study is a separate read-only three-point decomposition of the already completed R4e/R4l matched source cases; its HLS differences remain descriptive source-controlled contrasts, not a fully randomized factorial causal estimate.
