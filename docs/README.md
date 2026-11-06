@@ -24,6 +24,7 @@ Start with the [project overview](../README.md) or [Using FPGAI](USING_FPGAI.md)
 | Contributions | [Contributing](../CONTRIBUTING.md) |
 | Operator development | [Operator contribution](COMPILER_OPERATOR_CONTRIBUTION.md) |
 | Experimental reproducibility | [Scientific reproducibility](SCIENTIFIC_REPRODUCIBILITY.md) |
+| **First paper and release status** | [Research publication status](RESEARCH_PUBLICATION_STATUS.md) |
 | Planned work | [Roadmap](ROADMAP.md) |
 | Revision history | [Changelog](../CHANGELOG.md) |
 | Citations | [Citation](../CITATION.md) |
