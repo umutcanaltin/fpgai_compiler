@@ -201,6 +201,7 @@ def audit_prepared(*, study: str | Path, r4o_study: str | Path,
     receipt = _json(r4p / "summary.json")
     if (receipt.get("schema") != SCHEMA
             or receipt.get("status") != "R4P_NATIVE_CASES_PREPARED_NOT_EXECUTED"
+            or receipt.get("original_R4o_study") != str(Path(r4o_study))
             or receipt.get("original_R4o_schema") != original["schema"]
             or receipt.get("original_R4k_source_revision") !=
                 original["original_R4k_source_revision"]
@@ -245,6 +246,20 @@ def audit_prepared(*, study: str | Path, r4o_study: str | Path,
             if name in src["rom_sha256"] and (
                     _sha(r4p / arm / "vivado" / name) != digest):
                 raise ValueError("R4p runner local ROM asset changed")
+        for directory in (
+                r4p / arm / "fpgai_hls_project" / "solution1" / "syn" / "verilog",
+                r4p / arm / "vivado" / "rtl"):
+            if directory.is_symlink() or not directory.is_dir():
+                raise ValueError("R4p original RTL/ROM input folder missing or unsafe")
+            present = [
+                p for p in directory.iterdir()
+                if p.suffix.lower() in (".v", ".sv", ".dat", ".mem")
+                   or p.is_symlink()
+            ]
+            if (len(present) != len(expected_all)
+                    or {p.name for p in present} != set(expected_all)
+                    or any(p.is_symlink() or not p.is_file() for p in present)):
+                raise ValueError("R4p unexpected/unsafe original HDL or ROM input")
         if _sha(r4p / arm / "vivado" / "run_vivado.tcl") != _sha(
                 Path(r4o_study) / arm / "run_vivado.tcl"):
             raise ValueError("R4p original clock/part/ROM Tcl digest changed")
