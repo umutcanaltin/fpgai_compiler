@@ -128,10 +128,15 @@ def audit_prepared(*, study: str | Path, original_study: str | Path) -> dict:
                     or host.get("original_GCC_executions") != 1
                     or host.get("original_Vitis_calls") != 0):
                 raise ValueError("R4e source-pinned real GCC verification absent")
-            if (original_input is not None
-                    and host.get("runtime_input_sha256") != original_input):
+            # R2g and row-retained GCC validators have distinct historic
+            # receipt field names; normalize them without altering E1 data.
+            input_sha = host.get("runtime_input_sha256",
+                                 host.get("original_input_sha256"))
+            if (not isinstance(input_sha, str) or len(input_sha) != 64
+                    or (original_input is not None
+                        and input_sha != original_input)):
                 raise ValueError("R4e sampled inputs differ between formats")
-            original_input = host.get("runtime_input_sha256")
+            original_input = input_sha
             meta = _json(pkg / "manifest.json")
             if (meta.get("cpp_sha256") != source_sha
                     or meta.get("precision_bits") != bits
