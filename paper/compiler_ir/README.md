@@ -42,6 +42,8 @@ These are **separate, finite source studies**; they are not proof of correctness
 **Scientific novelty and rejection controls:** [Adversarial reviewer claim matrix](SCIENTIFIC_REVIEWER_ADVERSARIAL_CLAIM_MATRIX_20261106.md) distinguishes functional equality, declared source-order conformity, real emitted GCC correctness, source/physical performance, and executed exact external Allo/CODO equivalence. **This is a preregistration, not an observed study**. The paper must not claim to be the first schedule verifier or hide the C2 eager-vs-lazy non-superiority bound.
 
 
+**Verified new original C1 E1 and C2 CPU outcome (6 November 2026):** [Frozen original C2 six-condition source-cost results and C1 two-profile real GCC E1 smoke](C1_E1_SMOKE_C2_SOURCE_COST_ORIGINAL_RESULTS_20261106.md). Lazy beat eager in all 108 matched source CPU trials (198 vs 864 measured compiler calls), and the separately source-E0-pinned C1 smoke completed **4 genuine GCC compilations and executions** over 2 source profiles, both with positive source scratch slot saving and an 11-artifact SHA audit. The full 54-profile E1 trial remains **UNEXECUTED**; neither result provides physical FPGA clock/latency or external scientific novelty qualification.
+
 ## Archive policy
 
 Many other files in this directory are **dated research notebooks**: experiment protocols, preliminary hypotheses, sprint plans, physical forensics, read-only audit reports and superseded manuscript drafts. They are preserved to protect the original evidentiary record and source citations. Do not interpret a proposed experiment in those files as a completed result.
