@@ -29,6 +29,16 @@ from fpgai_research.toolchains.vivado.report import (
 
 SCHEMA = "fpgai-research/R4u-copied-DCP-one-time-report-only-native/v1"
 ARMS = r4t.ARMS
+# Original author's WORKSTATION-VERIFIED R4t posthoc checkpoint inventory.
+# This pins R4u to the exact original pair and refuses replacement DCPs.
+EXPECTED_ORIGINAL_DCP = {
+    "full_storage": (
+        "dec6616bd7d01d582ed59445122b26f80eaafe23fd00c2e8082c3dd441936137",
+        3379985),
+    "row_storage": (
+        "1cf5feea9bd4903d51ded333a640cdeb4bd0997c257dc3ceea2514b3c7ddb486",
+        3430541),
+}
 REPORT_NAMES = ("max_delay_paths.rpt", "timing_summary.rpt", "drc.rpt")
 SCRIPT = "report_only.tcl"
 CHECKPOINT = "input/routed.dcp"
@@ -94,6 +104,9 @@ def _original_r4t(*, r4t_study: str | Path, study: str | Path,
             raise ValueError("R4u original R4t source-only SHA changed")
     for arm in ARMS:
         item = original["arms"][arm]
+        if (item["posthoc_original_checkpoint_sha256"],
+            item["checkpoint_bytes"]) != EXPECTED_ORIGINAL_DCP[arm]:
+            raise ValueError("R4u original author-verified posthoc DCP SHA/size differs")
         if (_digest(root / arm / CHECKPOINT) !=
                 item["posthoc_original_checkpoint_sha256"]
                 or _digest(root / arm / SCRIPT) != sha256(
