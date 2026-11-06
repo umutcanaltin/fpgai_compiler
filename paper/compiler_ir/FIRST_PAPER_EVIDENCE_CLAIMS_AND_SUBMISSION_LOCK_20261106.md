@@ -77,22 +77,47 @@ This pass is **scientific/technical editorial consolidation**, not a new HLS/Viv
 | `paper/compiler_ir/R4R_SIGNED_OOC_TRADEOFF_LEDGER_20261106.md` | EXISTING source-pinned routed resource/timing data; no rerun, no paper-level E4 promotion. |
 | GitHub draft PR #2 | Reviewer-facing synopsis refocused on C1/C2 claims, evidence, performance limits and required independent competitor study; retains DRAFT and main untouched. |
 
-## Next highest-value original CPU-only evidence gate
+## Completed CPU-only issue-order predicate gate — frozen, do not rerun
 
-The *already implemented* `src/fpgai_research/experiments/cst_paper_contract_ablation.py` compares source-value/lifetime safety against that same checker WITH the `Phi` issue-order predicate on **the same 24-profile/216-trace R3j source population**. It is a **single, direct within-compiler causal predicate ablation**, not an external baseline or trained agent test. It is preregistered, contains independent negative controls, and **does not invoke Vitis/Vivado**. The author has since verified this bounded source predicate comparison with 43 passing focused tests and the original 216-trace source output; see the **verified original C1 issue-order predicate comparison** below. It remains derived from independently checked R3j predicate labels rather than two independent compiler variants.
+The `src/fpgai_research/experiments/cst_paper_contract_ablation.py` exporter **recombines existing, separately compiler/oracle-cross-checked R3j source-value safety and `Phi` issue-order predicate outcomes** on the same **24-profile/216-trace population**. This is an observed matched source-predicate comparison and negative-control validation, **not a newly compiled A/B compiler variant or independently causal performance experiment**. The original saved output exists and is frozen. It is preregistered, contains independent negative controls, and **does not invoke Vitis/Vivado**. The author has since verified this bounded source predicate comparison with 43 passing focused tests and the original 216-trace source output; see the **verified original C1 issue-order predicate comparison** below. It remains derived from independently checked R3j predicate labels rather than two independent compiler variants.
 
-Run only after locally verifying exact source branch and a **fresh** output name:
+**Do not execute the original `--output build/first_paper_contract_predicate_ablation_20261106_01` a second time or remove it.** The following is an optional **read-only independent CSV classification audit**; it neither runs the compiler/oracle nor regenerates the original source cases. Its checks are intentionally more specific than the author’s earlier SHA-and-denominator audit:
 
 ```bash
 cd ~/Desktop/github_projects/fpgai_compiler
-git pull --ff-only origin research/first-paper-source-memory-bridge-20261106
-python -m pytest -q tests/test_cst_paper_contract_ablation.py tests/test_cst_r3j_c1_heldout_semantics.py
-test ! -e build/first_paper_contract_predicate_ablation_20261106_01
-python -m fpgai_research.experiments.cst_paper_contract_ablation --output build/first_paper_contract_predicate_ablation_20261106_01
+python - <<'PY'
+from pathlib import Path
+from collections import Counter
+import csv, hashlib, json
+
+root = Path('build/first_paper_contract_predicate_ablation_20261106_01')
+summary = json.loads((root/'summary.json').read_text())
+hashes = json.loads((root/'derived_sha256.json').read_text())
+assert set(hashes) == {'summary.json','observations.csv'}
+for file, digest in hashes.items():
+    assert hashlib.sha256((root/file).read_bytes()).hexdigest() == digest, file
+assert summary['experiment_source_revision'] == '205364f5aea74170a5d4b0bb8bdaaf6a338d5e38'
+with (root/'observations.csv').open(newline='') as stream:
+    records = list(csv.DictReader(stream))
+assert len(records) == 216
+counts = Counter(r['mutation_class'] for r in records)
+assert len(counts) == 9 and set(counts.values()) == {24}, counts
+pair_counts = Counter((r['reader_count'],r['source_policy']) for r in records)
+assert len(pair_counts) == 6 and set(pair_counts.values()) == {36}, pair_counts
+accepted = lambda k: sum(r[k]=='True' for r in records)
+assert accepted('value_safety_only_accepts') == 48
+assert accepted('full_contract_accepts') == 24
+assert sum(r['value_safety_only_accepts']=='True' and r['declared_contract_valid']=='False' for r in records) == 24
+assert sum(r['full_contract_accepts']=='True' and r['declared_contract_valid']=='False' for r in records) == 0
+assert all(r['full_contract_accepts']!='True' or r['value_safety_only_accepts']=='True' for r in records)
+print(json.dumps({'original_revision': summary['experiment_source_revision'],
+  'traces': len(records), 'profiles': summary['source_graph_mapping_profiles'],
+  'by_class': dict(counts), 'value_only_accepted': 48,
+  'full_contract_accepted': 24, 'source_sha_consistent': True}, indent=2))
+PY
 ```
 
-Then independently inspect the new `summary.json`, `observations.csv`, and `derived_sha256.json` without regenerating the original source population, preserving the current source Git SHA and exact 216 denominator. Only after this independent audit should its measured ablation results be added to the paper. If the directory already exists, **do not delete/reuse** it; choose a new suffix or use read-only inspection. The second major next task is a separately pinned, scientifically fair Allo capability/equivalence comparison, not new FPGA QoR runs.
-
+**If this read-only audit has not yet been run, do not claim its new per-class checks are independently workstation-verified.** The existing author run already verifies the two file hashes and 216 denominator. The remaining high-priority science is the **independent pinned Allo semantic capability comparison** and **fair C2 direct-versus-mask compiler screening cost** rather than another run of this same fixed mutation catalog.
 ## Verified original C1 issue-order predicate comparison — 6 November 2026
 
 **AUTHOR WORKSTATION-VERIFIED:** The author pulled `research/first-paper-source-memory-bridge-20261106` at exact source revision `205364f5aea74170a5d4b0bb8bdaaf6a338d5e38` and ran **43/43** focused `tests/test_cst_paper_contract_ablation.py` and `tests/test_cst_r3j_c1_heldout_semantics.py` tests (0.74 s). The author executed the original create-only source study `build/first_paper_contract_predicate_ablation_20261106_01`, schema `fpgai-research/paper-source-contract-predicate-ablation/v1`, which reported **zero Vitis/Vivado calls**. A separate user-run Python consistency check read `summary.json`, `observations.csv` and `derived_sha256.json`, rehashed both exported files, checked **216 CSV records** and confirmed **24 profiles**, source revision `205364f5aea74170a5d4b0bb8bdaaf6a338d5e38`, **24 invalid issue-order controls accepted by the source-value-safety-only predicate**, and **0 accepted by the combined predicate**.
