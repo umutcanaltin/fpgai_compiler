@@ -68,6 +68,19 @@ The [finite semantics and proof sketch](C1_FINITE_EVENT_SEMANTICS_AND_PROOF_SKET
 
 The R3g differential checker implements the same bounded problem using a separately coded operational interpreter and forward-rank issue enumerator; **133/133 original tested trace variants agreed with the compiler (0 disagreements)**, with the author-reported source SHA and read-only receipt in [the frozen R3g/R3h checkpoint](R3G_R3H_ORIGINAL_C1_C2_WORKSTATION_RESULTS_20261104.md). This is finite observed agreement, **not** independent specification completeness because both interpreters share the admitted static model.
 
+### 3.5 Matched issue-order predicate necessity control
+
+To isolate the contribution of the operator-local `Phi` issue-order predicate from value readiness and scratch-lifetime safety, we evaluated **24 bounded static MatMul fanout configurations** (2–4 readers, four held-out static shapes, two operator-local mapping policies). Each had a canonical valid trace and eight prespecified adverse traces, giving **216 source trace variants**. Of the 192 deliberately invalid variants, **24** were source-value-safe yet violated the declared `Phi` source READ order; the other **168** violated source-value/ownership safety. Using the same traces and candidate policies:
+
+| Predicate-derived admission | Valid controls accepted (of 24) | Selected invalid controls accepted (of 192) | Total accepted (of 216) |
+|---|---:|---:|---:|
+| Value readiness, source ownership and scratch lifetime **without `Phi` issue-order check** | 24 | **24** | 48 |
+| Above plus **operator-local `Phi` READ issue-order check** | 24 | **0** | 24 |
+
+The author ran **43/43 focused source-only tests** and the original create-only ablation report, recording exact source revision `205364f5aea74170a5d4b0bb8bdaaf6a338d5e38`. Its 216-row CSV and summary file passed a separate SHA-256 inventory/denominator consistency check; **no Vitis/Vivado calls** were made. This observation demonstrates that a **value-safe trace need not conform to a chosen operator-local issue order** for the tested finite domain.
+
+**Design and causal inference:** The original R3j study evaluates `reference_event_oracle`, `verify_fanout_events` and `verify_fanout_issue` for every trace, rejecting disagreements between oracle and compiler predicates. The ablation exporter then **recombines these two existing independently checked verdicts**: baseline admission = `safe`; full admission = `safe AND phi_issue_conformant`. These are matched, explicitly selected negative controls and a **post-hoc predicate necessity comparison**, **not two independently executed compiler builds**, a randomized causal experiment, proof of correctness on arbitrary graphs, an external compiler baseline or any hardware performance measurement. The selected controls and acceptance assertions were fixed by source; the outcome should not be treated as an unbiased estimate of real-world error prevalence. [Source-pinned evidence and limitations](FIRST_PAPER_EVIDENCE_CLAIMS_AND_SUBMISSION_LOCK_20261106.md).
+
 ## 4. C2: policy-independent source search interface
 
 The R2n/R2o/R2p compiler decision interfaces unify two bounded source domains: sequential MatMul chains and 2–4-reader fanout. The graph observation includes typed operators/tensors, shapes, supported mapping probes and source domain metadata, without raw tensor constants or prior HLS reward. The policy may come from a person, enumeration, heuristic or future agent; the compiler does not inspect that policy's identity.
