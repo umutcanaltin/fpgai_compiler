@@ -2,7 +2,7 @@
 # None of these targets invokes Vitis, Vivado, downloads models or publishes code.
 PYTHON ?= python
 
-.PHONY: help install-dev example example-cnn example-strided example-two-conv example-mlp test test-examples test-compiler test-gym release-check release-links release-preview-plan fpga-env-check fpga-prepare-hls fpga-inspect research-inventory research-audit-tests research-c2-review research-c1-e1-review research-hls-vivado-review research-r4w-audit research-r4x-feasible-latency
+.PHONY: help install-dev example example-cnn example-strided example-two-conv example-mlp test test-examples test-compiler test-gym release-check release-links release-preview-plan fpga-env-check fpga-prepare-hls fpga-inspect research-inventory research-audit-tests research-c2-review research-c1-e1-review research-hls-vivado-review research-r4w-audit research-r4x-feasible-latency research-r4y-plan research-r4y-prepare research-r4y-audit
 
 help:
 	@echo "install-dev          Install editable compiler with ONNX and test extras"
@@ -22,6 +22,9 @@ help:
 	@echo "research-hls-vivado-review Original Vitis HLS vs routed Vivado matched source Pareto (read-only)"
 	@echo "research-r4w-audit   New isolated 16/20/24ns routed-clock qualification (read-only)"
 	@echo "research-r4x-feasible-latency Joint timing+DRC-valid-only HLS-derived latency ns (read-only)"
+	@echo "research-r4y-plan     Prospective isolated four-arm 24ns source plan (no tools)"
+	@echo "research-r4y-prepare  NEW create-only 24ns Vitis SOURCE packages (no vendor)"
+	@echo "research-r4y-audit    Read-only SHA verification of R4y packages"
 	@echo "release-links        Check all public preview documentation links"
 	@echo "release-preview-plan Show nonpublishable public source allowlist"
 	@echo "release-check        Read-only owner/IP/license/history release preflight"
@@ -102,7 +105,7 @@ research-inventory:
 	$(PYTHON) scripts/audit_source_inventory.py
 
 research-audit-tests:
-	$(PYTHON) -m pytest -q tests/test_audit_source_inventory.py tests/test_repository_publication_hygiene.py tests/test_cst_paper_c2_original_readonly_analysis.py tests/test_cst_paper_c1_original_e1_readonly_descriptives.py tests/test_cst_paper_r4v_vitis_vivado_joint_compare.py tests/test_cst_paper_r4w_feasible_clock_sweep.py tests/test_cst_paper_r4x_feasible_only_core_latency.py tests/test_public_docs_links.py tests/test_public_release_preview.py
+	$(PYTHON) -m pytest -q tests/test_audit_source_inventory.py tests/test_repository_publication_hygiene.py tests/test_cst_paper_c2_original_readonly_analysis.py tests/test_cst_paper_c1_original_e1_readonly_descriptives.py tests/test_cst_paper_r4v_vitis_vivado_joint_compare.py tests/test_cst_paper_r4w_feasible_clock_sweep.py tests/test_cst_paper_r4x_feasible_only_core_latency.py tests/test_cst_paper_r4y_24ns_pipeline_source_prepare.py tests/test_public_docs_links.py tests/test_public_release_preview.py
 
 research-c2-review:
 	$(PYTHON) -m fpgai_research.experiments.cst_paper_c2_original_readonly_analysis --study build/paper_c2_fair_source_cost_20261106_01
@@ -144,3 +147,27 @@ research-r4x-feasible-latency:
 	  --r4k-study $(R4_SOURCE_ROOT) \
 	  --original-r4d $(R4_ORIGINAL_R4D) \
 	  --original-r4a $(R4_ORIGINAL_R4A)
+
+# R4y source-only, distinct from old one-time R4k/R4l and R4w artifacts.
+# All commands are deliberately foreground. The new folder is create-only.
+R4Y_NEW_SOURCE = build/r4y_24ns_four_arm_sources_20261106_01
+
+.PHONY: research-r4y-plan research-r4y-prepare research-r4y-audit
+
+research-r4y-plan:
+	$(PYTHON) -m fpgai_research.experiments.cst_paper_r4y_24ns_pipeline_source_prepare --plan
+
+research-r4y-prepare:
+	$(PYTHON) -m fpgai_research.experiments.cst_paper_r4y_24ns_pipeline_source_prepare \
+	  --prepare-output $(R4Y_NEW_SOURCE) \
+	  --r4k-study $(R4_SOURCE_ROOT) \
+	  --original-r4d $(R4_ORIGINAL_R4D) \
+	  --original-r4a $(R4_ORIGINAL_R4A)
+
+research-r4y-audit:
+	$(PYTHON) -m fpgai_research.experiments.cst_paper_r4y_24ns_pipeline_source_prepare \
+	  --audit-study $(R4Y_NEW_SOURCE) \
+	  --r4k-study $(R4_SOURCE_ROOT) \
+	  --original-r4d $(R4_ORIGINAL_R4D) \
+	  --original-r4a $(R4_ORIGINAL_R4A)
+

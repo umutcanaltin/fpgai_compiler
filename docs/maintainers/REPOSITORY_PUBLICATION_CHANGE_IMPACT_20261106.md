@@ -211,3 +211,17 @@ git status --short
 The existing `cst_r4k_matched_row_schedule_storage.py` packages both emitted storage variants with the **original `r4a.CLOCK_NS` / `r4a.UNCERTAINTY_NS`**, and `cst_r4o_matched_vivado_ooc_prepare.py` fixes its historical OOC `CLOCK_NS=12.0`. `toolchains/vitis_hls/package.py` does support explicit package clock parameters, but no verified 24ns DSP-pipeline source generator exists yet. Existing row and full HLS source emitters certify source-event order/scratch edits, NOT hardware DSP pipeline behavior. Correct path is separate create-only 24ns source packages with a deliberate verified pipeline knob, new E2/E3 and fresh E4 receipts; never patch frozen R4k/R4o or infer HLS cycle compatibility from a relaxed Vivado clock.
 
 These are **read-only code inspection findings**, not original experiment observations. Only `paper/compiler_ir/R4W_VALID_HARDWARE_CLOCK_AND_LATENCY_PROTOCOL_20261106.md` and this maintainer ledger changed in this small follow-up; **no source, test, native output, or lock** was altered.
+
+## R4y source-only controlled 24ns hardware mechanism preparation — 6 November 2026
+
+| File | Operation | Ownership/connectivity | Local verification status |
+|---|---|---|---|
+| src/fpgai_research/experiments/cst_paper_r4y_24ns_pipeline_source_prepare.py | ADDED | Experimental pure plan, create-only prepare, SHA/provenance-locked audit. Imports existing canonical full/row emitters, R4k and R4l original source auditors, R4a input and Vitis package API. | Not yet author-run; no GCC/Vitis/Vivado. |
+| tests/test_cst_paper_r4y_24ns_pipeline_source_prepare.py | ADDED | Synthetic tests: 4-arm plan, exact pragma mutation, no-source-drift, original SHA mismatch, create-only, symlinks, source/testbench/clock tamper, no vendor calls. | Not yet author-run. |
+| paper/compiler_ir/R4Y_24NS_FOUR_ARM_SOURCE_PREPARATION_20261106.md | ADDED | Prospective method, exact four-arm source matrix, commands and E2/E3/E4 evidence limits. | Documentation. |
+| Makefile | MODIFIED | research-r4y-plan/prepare/audit and new regression inclusion in research-audit-tests; reuses canonical R4 source root variables. | Source-only, not yet author-run. |
+| paper/compiler_ir/R4W_VALID_HARDWARE_CLOCK_AND_LATENCY_PROTOCOL_20261106.md | MODIFIED | R4y cross-reference for source intervention, no older original run rewrites. | Documentation. |
+| CHANGELOG.md | MODIFIED | R4y source-only historical checkpoint and verification status. | Documentation. |
+| docs/maintainers/REPOSITORY_PUBLICATION_CHANGE_IMPACT_20261106.md | MODIFIED | This owner/connection/dependency audit for every changed path. | Documentation. |
+
+No files deleted, moved or renamed; no previous HLS/RTL generator changed. Original original-source experiments and one-time locks untouched. Draft PR remains open and main unchanged. New 24ns native Vitis/Vivado work is UNIMPLEMENTED and original 47-pass tests predate these changes.

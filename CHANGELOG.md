@@ -1,3 +1,10 @@
+## 6 November 2026 — prospective R4y four-arm HLS source preparation, no native calls
+
+- Author verified previous revision 42326c4 with **47/47** focused tests and read-only source-attested R4w/R4x, selecting 24ns post-hoc as conservative next experiment candidate; zero strict DRC-clean pairs and zero measured board latencies remain.
+- Added source-only R4y four-arm preparation: full/row storage × canonical/producer MAC inner-loop PIPELINE II=1 requested, 24ns fixed target, 1.5ns uncertainty, same graph/32,6 precision, matched numerical testbench and canonical source-event identity. The original R4l baseline SHA must match before creating any new study.
+- Added read-only source-package audit, create-only provenance, negative mutation/sidecar tests and Makefile plan/prepare/audit targets; detailed new protocol and file-level change map. Presence of a pragma is NOT evidence of achieved II, DSP pipelining or hardware speedup.
+- All new R4y tests and source packages remain **unrun on the author's workstation**. No GCC, Vitis, Vivado, original evidence mutation, GitHub Actions or main merge.
+
 ## 6 November 2026 — 24ns retrospective margin-based planning, not board qualification
 
 - The author pulled the previous R4x implementation at `066a57c` and verified **43/43** focused tests, full original R4w 16/20/24ns audit and R4x read-only comparison: exactly **two warning-only timing-met matched pairs**, strict clean-DRC E4 pairs **zero**. No new native calls were made by either audit.
