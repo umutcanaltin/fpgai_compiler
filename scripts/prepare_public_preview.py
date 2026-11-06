@@ -39,6 +39,7 @@ PUBLIC_FILES=frozenset({
     "docs/ACADEMIC_RESEARCH_LICENSE_PROPOSAL.md",
     "docs/WHO_CAN_USE_FPGAI.md",
     "docs/AMD_TOOLCHAIN_SETUP.md","docs/FPGA_DEPLOYMENT.md",
+    "docs/PYNQ_Z2_BOARD_DMA_PILOT.md",
     "scripts/check_open_source_readiness.py",
     "scripts/prepare_public_preview.py","scripts/check_public_docs.py",
     "scripts/setup_amd_environment.sh",
