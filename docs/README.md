@@ -24,6 +24,7 @@ Start with the [project overview](../README.md) or [Using FPGAI](USING_FPGAI.md)
 | Contributions | [Contributing](../CONTRIBUTING.md) |
 | Operator development | [Operator contribution](COMPILER_OPERATOR_CONTRIBUTION.md) |
 | Experimental reproducibility | [Scientific reproducibility](SCIENTIFIC_REPRODUCIBILITY.md) |
+| Repository source ownership and import map | [Tracked-source audit script](../scripts/audit_source_inventory.py) — run on a Git checkout, not a staged preview |
 | **First paper and release status** | [Research publication status](RESEARCH_PUBLICATION_STATUS.md) |
 | Planned work | [Roadmap](ROADMAP.md) |
 | Revision history | [Changelog](../CHANGELOG.md) |
