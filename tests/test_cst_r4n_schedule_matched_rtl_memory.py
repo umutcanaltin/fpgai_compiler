@@ -128,7 +128,7 @@ def test_both_new_original_rtl_source_memory_sites_and_bram_tie(fake_originals):
     assert data["physical_E4"] is None
     pair = data["pair"]
     assert pair["status"] == (
-        "SOURCE_ATTESTED_STATIC_RTL_MEMORY_PAIR_NOT_ELABORATED")
+        "SOURCE_ATTESTED_STATIC_RTL_SCRATCH_SITES_PAIRED_NOT_ELABORATED")
     assert pair["both_RTL_SHA_attested"] is True
     assert pair["HLS_estimated_BRAM18K_delta_row_minus_full"] == 0
     assert pair["ROM_content_sha_multiset_identical"] is True
@@ -224,6 +224,8 @@ def test_symbolic_source_override_fails_closed_but_rtl_stays_attested(
         "ATTESTED_STATIC_SOURCE_WITH_UNKNOWN_MEMORY_SITES")
     assert result["pair"]["both_RTL_SHA_attested"] is True
     assert result["pair"]["scratch_source_depth_delta_row_minus_full"] is None
+    assert result["pair"]["status"] == (
+        "UNKNOWN_INCOMPLETE_OR_UNSUPPORTED_RTL_MEMORY_SITES")
     assert result["pair"]["HLS_estimated_BRAM18K_delta_row_minus_full"] == 0
     assert result["pair"]["mapped_BRAM18K_delta"] is None
 
