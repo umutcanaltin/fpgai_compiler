@@ -242,3 +242,21 @@ User's first post-implementation local run: **44 passed, 6 failed**, all from le
 | This repository impact ledger | MODIFIED | Keeps architecture and file history, calls & dependency map complete. | Editorial. |
 
 **No new file or folder additions/deletions/renames in this repair.** The existing R4y source output was NOT created by the author's attempt, and no original R4k/R4l/R4o/R4p/R4w source or vendor result/attempt lock was modified. Research PR stays draft, main untouched, no Actions.
+
+## 7 November 2026 — R4z file-level change/dependency report
+
+**Verified earlier source checkpoint:** author passed 60 focused tests at `dde56d4`, independently prepared and audited 4 source-only R4y arms. R4z has not been vendor executed or author-tested. All original R4w locks, Vitis reports and study output remain unmodified.
+
+| Path | Change | Owner and dependency/connectivity | Verification / evidence |
+|---|---|---|---|
+| `src/fpgai_research/experiments/cst_paper_r4z_24ns_four_arm_native.py` | ADDED | New R4z study; calls `r4y.audit` to revalidate original SHA roots, stages four source packages, freezes 17 SHA entries, owns permanent one-time vendor attempt lock, optionally calls canonical `run_vitis`, and read-only `summarize_case` / `qualify_case`. Exports `prepare`, `audit_prepared`, `execute`, `audit_native`, CLI. | Source change not yet author-run. All default paths are vendor-free; native requires two flags. |
+| `tests/test_cst_paper_r4z_24ns_four_arm_native.py` | ADDED | No-vendor tests for source identity/tamper, original-root overlap, exact 17 files, no-autostart, lock before invocation, interrupted irreversible lock, E2/E3 fail-closed, physical null, matched timing and factorial comparisons. | Not yet author-run, synthetic only. |
+| `paper/compiler_ir/R4Z_24NS_NATIVE_E2_E3_FOUR_ARM_PROTOCOL_20261107.md` | ADDED | Main study protocol, author original source checkpoint, commands, scientific acceptance criteria and limitations. | Editorial. |
+| `Makefile` | MODIFIED | Registers R4z tests in research-audit-tests and ONLY tool-free `research-r4z-native-prepare`, `research-r4z-native-dry-run`, `research-r4z-native-audit`. | Not yet author-run. |
+| `paper/compiler_ir/R4Y_24NS_FOUR_ARM_SOURCE_PREPARATION_20261106.md` | MODIFIED | Completes R4y author source checkpoint and links successor R4z. | Editorial. |
+| `paper/compiler_ir/R4W_VALID_HARDWARE_CLOCK_AND_LATENCY_PROTOCOL_20261106.md` | MODIFIED | Updates original timing protocol with clearly separated R4z prospective native HLS gates. | Editorial. |
+| `docs/RESEARCH_PUBLICATION_STATUS.md` | MODIFIED | Original 60-passed source result and honest R4z pending status. | Editorial. |
+| `CHANGELOG.md` | MODIFIED | Chronology of author verified source-only stage versus new unverified R4z code. | Editorial. |
+| This maintainer impact ledger | MODIFIED | File ownership, interfaces, tests, original/output scope. | Editorial. |
+
+No existing native compiler/RTL/original study source files modified. No file deletions, moves, renames or GitHub Actions. No main merge. No native tool calls were made by these source commits. Next milestone is the author's local R4z focused regression, create-only native staging and no-vendor audit; real Vitis remains separately opt-in and must preserve adverse outcomes.

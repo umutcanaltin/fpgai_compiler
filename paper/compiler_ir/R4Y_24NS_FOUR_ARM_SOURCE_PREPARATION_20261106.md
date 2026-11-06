@@ -91,3 +91,9 @@ make research-r4y-audit
 ```
 
 Run these foreground steps in order and stop on any failure. Source preparation is fresh data creation only, with no GCC/Vitis/Vivado; audit verifies original SHA and common HLS source/testbench/clock receipt. Only then consider a separate create-once native E2/E3 study with real CSim/CSynth.
+
+### Author-verified R4y source checkpoint and successor R4z
+
+At branch revision `dde56d4`, the author verified **60 passing tests (48.71 s)** and successfully completed all R4y plan→prepare→read-only audit commands: four 24ns packages, source SHA inventory, shared CSim testbench and shared Vitis Tcl, zero new vendor calls. This resolves the earlier 6-fail attempt but **does not qualify E2/E3/E4 or physical latency**. The existing R4y study root is frozen; do not regenerate.
+
+The separate, NEW [R4z native HLS protocol](R4Z_24NS_NATIVE_E2_E3_FOUR_ARM_PROTOCOL_20261107.md) provides guarded create-only copies of these inputs, default tool-free dry-run, two-flag one-time vendor calls if later explicitly authorized, and read-only source/numerical/HLS reports. R4z source and tests are **pending local verification**; original R4w results remain immutable.

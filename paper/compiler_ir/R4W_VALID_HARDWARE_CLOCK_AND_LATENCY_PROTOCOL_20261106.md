@@ -212,3 +212,7 @@ The independent `src/fpgai_research/toolchains/vitis_hls/package.py` already acc
 ### R4y newly staged 24ns source-only factorial
 
 The new [R4y controlled four-arm source preparation](R4Y_24NS_FOUR_ARM_SOURCE_PREPARATION_20261106.md) uses the original canonical full/row emitters, source-SHA-verified original R4l input, a single 24ns HLS Tcl with 1.5ns uncertainty and an optional one-loop HLS PIPELINE II=1 *request*. It creates four fresh source packages only and does not start GCC, Vitis or Vivado. No actual DSP pipelining, HLS II, clean DRC, board clock or latency is implied. Run the NEW synthetic tests and independent source-only SHA audit locally before writing any new native runner. Original one-time attempts and R4w reports remain untouched.
+
+### R4y success and next prospective R4z (7 November 2026)
+
+The author completed **60/60 focused tests** and successfully prepared and source-SHA-audited all four R4y 24ns HLS packages, with **zero native calls**, preserving the original R4k revision `776e3a7`. The R4y packages are **source-only**, not E2/E3 or clean physical proof. [R4z](R4Z_24NS_NATIVE_E2_E3_FOUR_ARM_PROTOCOL_20261107.md) is a new guarded, independently isolated Vitis stage which cannot execute native tools without double explicit confirmation, and includes a dry-run, one-time lock and read-only per-arm E2/E3 and factorial analysis. New R4z tests/runs remain unverified. No R4w or original vendor rerun.

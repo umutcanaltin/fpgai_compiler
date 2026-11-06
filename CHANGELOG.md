@@ -1,3 +1,9 @@
+## 7 November 2026 — author verified R4y source cohort; new isolated R4z Vitis stage
+
+- The author passed **60/60** R4y/R4x/R4w tests in 48.71s at `dde56d4`, then successfully prepared and read-only audited four 24ns / 1.5ns R4y source packages. The original frozen source revision is `776e3a7`, all four source hashes match, common CSim testbench/Tcl hashes match and vendor calls are zero. This is E1/source-only evidence, not E2/E3/E4.
+- Added R4z source SHA-attested 24ns four-arm **fresh native** experiment preparation in a completely NEW create-only root; default dry-run, double-opt-in Vitis HLS execution with one-time lock created BEFORE any call, strict read-only source/E2/E3 audit using canonical parser/qualification, 2x2 matched HLS contrasts and adverse outcomes retained.
+- Added new zero-vendor regression tests, a prospective method/runbook and Makefile targets that ONLY stage, dry-run and audit (never execute Vitis). New R4z tests and real native experiments are **not yet author executed**. All measured physical/FPGA latency and producer-loop DSP register/II claims remain UNKNOWN; original R4w and main branch untouched, no Actions.
+
 ## 6 November 2026 — first actual author R4y test failures repaired (new code not yet retested)
 
 - The author pulled `9f04971`, ran new source-only R4y/R4x/R4w tests: **44 passed, 6 failed**. All six failures originated in R4y comparing its planned status with its distinct prepared status. `make research-r4y-plan` succeeded (four 24ns/1.5ns target sources); `make research-r4y-prepare` failed **before output creation** from an R4k-only `source_only_E1_verified` requirement missing from actual R4l native audit. The following audit predictably had no output directory. No new Vivado/HLS runs happened.
