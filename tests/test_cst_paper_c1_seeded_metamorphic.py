@@ -95,3 +95,19 @@ def test_no_overwriting_original_receipts_and_sha_drift_rejected(tmp_path):
     (out/"report.json").write_text((out/"report.json").read_text()+" ")
     with pytest.raises(ValueError,match="SHA drift"):
         sut.audit(out)
+
+
+def test_cli_saves_scientific_failure_receipt_without_rerunning(tmp_path, monkeypatch):
+    output = tmp_path / "failed_c1"
+    monkeypatch.setattr(sut, "_git_revision", lambda: "a" * 40)
+    monkeypatch.setattr(sut, "run", lambda **kw: (_ for _ in ()).throw(
+        AssertionError("synthetic counterexample, preserve this result")))
+    with pytest.raises(AssertionError, match="synthetic counterexample"):
+        sut.main(["--output", str(output), "--quick"])
+    receipt = json.loads((output / "FAILED.json").read_text())
+    assert receipt["experiment_source_revision"] == "a" * 40
+    assert receipt["quick_smoke_only"] is True
+    assert receipt["native_vivado_calls"] == 0
+    assert receipt["scientific_status"] == "FAILED_PRESERVE_COUNTEREXAMPLE"
+    with pytest.raises(FileExistsError):
+        sut.main(["--output", str(output), "--quick"])
