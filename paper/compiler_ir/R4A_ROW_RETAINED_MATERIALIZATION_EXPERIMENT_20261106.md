@@ -67,6 +67,27 @@ Only if focused tests and quick original source study pass:
 
 Every case writes both generated source files, both actual GCC stdout traces, independent numerical/source receipts, both canonical Vitis source/Tcl/testbench packages, SHA-256 artifact inventory and an explicit source-only report. No Vitis or Vivado jobs are launched. Failed studies retain FAILED.json and original partial outputs; use a NEW name after a source correction. Do not silently rerun an original create-only folder.
 
+## Guarded real Vitis HLS stage (ONLY after E1 source passes)
+
+The newly implemented src/fpgai_research/experiments/cst_r4b_row_retention_native.py is opt-in and reuses the existing native runner, report parser and strict timing/CSim qualifiers. It independently rechecks the full original R4a source, source-manifest, host receipts, Tcl, testbench and SHA artifact inventory first.
+
+Read-only source audit and DRY RUN of the new, separate R4a quick study (ZERO vendor calls):
+
+    python -m fpgai_research.experiments.cst_r4b_row_retention_native --study build/r4a_row_retained_quick_20261106_01 --audit-native
+    python -m fpgai_research.experiments.cst_r4b_row_retention_native --study build/r4a_row_retained_quick_20261106_01 --start-case 0 --max-cases 1
+
+After independently checking source test and audit receipts, a deliberately explicit single matched pair can be executed on the author's licensed Vitis workstation:
+
+    python -m fpgai_research.experiments.cst_r4b_row_retention_native --study build/r4a_row_retained_quick_20261106_01 --start-case 0 --max-cases 1 --execute-native --confirm-isolated-native --vitis-executable /tools/Xilinx/Vitis_HLS/2023.2/bin/vitis_hls
+
+This opt-in command makes two original Vitis calls, one per arm. It refuses any selected arm that has already been invoked or has any partial log/project folder. A process exit 0 does NOT mean that E2 and E3 qualified.
+
+Read-only raw Vitis attribution and complete paired qualification, including absent/failed pairs as UNKNOWN:
+
+    python -m fpgai_research.experiments.cst_r4b_row_retention_native --study build/r4a_row_retained_quick_20261106_01 --audit-native
+
+The full paper profile uses its own separate R4a source root and must not reuse the quick original output. Do not proceed to native execution while new source tests are failing. Preserve failed and partial original vendor attempts.
+
 ## Scientific acceptance criteria and limitations
 
 - Both GCC arms must compile and execute, pass all intermediate/final numerical checks, and preserve the originally specified per-reader Phi issue order.
