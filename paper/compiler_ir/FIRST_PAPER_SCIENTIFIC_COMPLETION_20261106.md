@@ -6,6 +6,8 @@
 
 **Status: MAJOR REVISION / NOT SUBMISSION READY.** New code and tests are proposed experiments, not observed results. Never overwrite or silently rerun source-pinned native observations.
 
+**Prospective better-hardware mechanism:** [Verified selective intermediate materialization protocol](VERIFIED_SELECTIVE_MATERIALIZATION_RESEARCH_20261106.md) defines a *new* materialize / forward / selectively spill compiler experiment. This is not an observed hardware improvement. It specifically addresses why earlier exact scratch allocation saved too little of the total generated mutable state to change HLS BRAM consistently.
+
 ## Scientific hypotheses and the required contrasts
 
 | Question | Prespecified comparison | Acceptable conclusion |
