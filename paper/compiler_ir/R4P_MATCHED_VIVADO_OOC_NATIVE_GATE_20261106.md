@@ -100,3 +100,11 @@ python -m fpgai_research.experiments.cst_r4p_matched_vivado_ooc_native \
 ~~~
 
 The output might be strict-clean E4, routed with nonclean DRC, or UNKNOWN depending on real Vivado evidence. No result should be claimed until that workstation audit has completed. **Paper remains MAJOR REVISION / NOT SUBMISSION READY; PR remains draft and no GitHub Actions are used.**
+
+## Additional R4p race/replay and vendor receipt controls
+
+**Original native attempt marker:** before the first Vivado call, R4p now atomically creates a permanent `r4p_native_attempt.json` file using create-exclusive semantics, recording the source revision, the two original arm names and a no-retry marker. It refuses native execution whenever this marker, any original invocation receipt, log directory, output/report directory, or journal already exists. It preserves this marker on tool failure, timeout or interrupted process. Re-run is NEVER automatic; a new, separately named study is required if a fresh experiment is scientifically justified. The read-only physical audit refuses to classify apparent native receipts without the original attempt marker.
+
+**Exact tool source/linkage:** read-only R4p audit verifies each original invocation's `argv`, resolved executable path, working directory, original Tcl SHA, immutable pre/post Tcl input hashes, start/duration witness, and exact original stdout/stderr SHA files, in addition to the generic Vivado receipt's source RTL/ROM and staged ROM integrity flags. It checks all fresh route/timing/utilization/DRC report hashes against the native receipt and refuses unsigned or stale files. The synthetic tests explicitly mutate cwd, argv, Tcl input hash, logs and the actual Tcl-consumed ROM while preserving old-looking receipts; such cases must not become E4.
+
+**Updated DRC terminology:** `ROUTED_NONCLEAN_DRC_PAIR` includes warning-, critical-warning- and error-bearing routed observations and is never strict clean-DRC E4. `drc_warning_only_routed_observation` is true only for a non-clean DRC with zero critical-warning/error counts. Strict clean DRC requires zero verified violations, separately from route completion, positive or nonnegative timing slack, and resource completeness.
