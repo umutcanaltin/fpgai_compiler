@@ -201,3 +201,18 @@ def test_existing_actual_compiler_runs_small_cpu_smoke():
     assert r["original_source_preflight_compiler_calls_excluded"] == 8
     calls = {x["method"]: x["source_compiler_calls"] for x in r["records"]}
     assert calls == {"direct": 1, "lazy": 1, "eager": 8}
+
+
+def test_cli_writes_create_only_negative_benchmark_receipt(tmp_path, monkeypatch):
+    path = tmp_path / "failed_c2"
+    monkeypatch.setattr(sut, "_git_revision", lambda: "b" * 40)
+    monkeypatch.setattr(sut, "run", lambda **kw: (_ for _ in ()).throw(
+        ValueError("synthetic counterexample, unmatched source state")))
+    with pytest.raises(ValueError, match="unmatched source state"):
+        sut.main(["--output", str(path), "--quick"])
+    receipt = json.loads((path / "FAILED.json").read_text())
+    assert receipt["experiment_source_revision"] == "b" * 40
+    assert receipt["native_vivado_calls"] == 0
+    assert receipt["scientific_status"] == "FAILED_PRESERVE_COUNTEREXAMPLE"
+    with pytest.raises(FileExistsError):
+        sut.main(["--output", str(path), "--quick"])
