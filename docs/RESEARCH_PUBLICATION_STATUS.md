@@ -31,6 +31,10 @@ Both original folders were created under the author's **local ignored** `build/`
 
 The separately original HLS-qualified matched storage experiment had 22,954 versus 22,602 estimated worst cycles and HLS-estimated periods 9.857ns versus 9.500ns. Multiplying yields approximate **E3-only HLS timing proxies** 226.258µs versus 214.719µs; a common **requested 12ns** gives 275.448µs versus 271.224µs. Neither is a measured physically achievable inference latency. The matching original Vivado OOC map reported BRAM tiles 7 versus 4, but worse LUT/FF and WNS **−2.170ns versus −3.718ns**; both failed timing and strict clean DRC. **Qualified physical compute latency, board end-to-end inference latency and throughput remain UNKNOWN.**
 
+## File and dependency map for future contributions
+
+Run `python scripts/audit_source_inventory.py --output build/source_inventory_20261106_01` **from an actual Git checkout** to produce a create-only `inventory.json` listing every tracked file's SHA, subsystem owner, static Python imports, direct importers and top-level definitions. Use `python scripts/audit_source_inventory.py` for a read-only summary. It is intentionally **not a dynamic call graph**: no detected importers does NOT mean a module is unused. Never delete an original research source path or duplicate an implementation based only on this static report. The file-level cleanup change map is maintained in `docs/maintainers/REPOSITORY_PUBLICATION_CHANGE_IMPACT_20261106.md`, which is intentionally omitted from the curated compiler preview.
+
 ## Release and repository hygiene rules
 
 - Use `.gitignore` for local experiment outputs (`build/`), caches, model data and vendor files. It affects *future untracked files only*; it does not remove already committed content or secrets from Git history.
