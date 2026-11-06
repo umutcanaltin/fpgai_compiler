@@ -1,0 +1,45 @@
+# Research artifact, reproducibility and publication status
+
+**Status: academic research prototype; the first compiler-IR paper is not submission-ready. This document does not authorize a license, public release or redistribution.** The GitHub repository may be publicly viewable, but **no operative source-code license has been published**. Rights to code, generated hardware source, datasets, third-party contributions and underlying institutional work must be confirmed separately; see [Licensing and permissions](LICENSE_DECISION.md), [source-distribution checklist](OPEN_SOURCE_RELEASE_CHECKLIST.md), and [release-preview workflow](RELEASE_PREVIEW.md).
+
+## Choose the right part of this repository
+
+| Goal | Canonical location | What it provides | What it does **not** prove |
+|---|---|---|---|
+| Use the compiler on a synthetic network | [README](../README.md), [Using FPGAI](USING_FPGAI.md) and [examples](../examples/README.md) | ONNX-to-HLS C++ generation and controlled host checks on admitted models | Board-ready bitstreams, timing closure or general-purpose ONNX support |
+| Inspect architecture/IR interfaces | [Architecture](ARCHITECTURE.md), [supported features](SUPPORTED_FEATURES.md), `src/fpgai_research/` | Typed hardware/source compiler components | Soundness for every imported operator/graph or all hardware-port constraints |
+| Examine the **first paper** | [C1/C2 manuscript](https://github.com/umutcanaltin/fpgai_compiler/blob/research/first-paper-source-memory-bridge-20261106/paper/compiler_ir/C1_C2_TWO_CONTRIBUTION_MANUSCRIPT_DRAFT_20261103.md) and [evidence/claim ledger](https://github.com/umutcanaltin/fpgai_compiler/blob/research/first-paper-source-memory-bridge-20261106/paper/compiler_ir/FIRST_PAPER_EVIDENCE_CLAIMS_AND_SUBMISSION_LOCK_20261106.md) | Original finite source-contract and action-interface experiments, limits and source-attested native summaries | Full formal proof, independent superiority against other compilers or timing-qualified physical latency |
+| Explore independently staged research protocols | `src/fpgai_research/experiments/`, `paper/compiler_ir/`, and [scientific reproducibility](SCIENTIFIC_REPRODUCIBILITY.md) | Frozen original source revisions, auditable scripts and failure records | That every historical script was executed or that its proposed numbers are observed |
+| Investigate learning-based hardware search | `rl_environment/`, separate RL documentation | Separate policy, Gym and native-HLS research | A trained RL benefit from the first compiler paper's C2 interface |
+
+**Directory rule:** `src/fpgai_research/model_ir/` owns Model IR/typed contracts; `src/fpgai_research/architecture/` owns mapping/limits; `src/fpgai_research/compiler/` and `codegen/` own emitted HLS source; `src/fpgai_research/toolchains/` owns native orchestration; `src/fpgai_research/experiments/` owns independent research scripts; `paper/compiler_ir/` owns archival original observations, study protocols and the active manuscript. `docs/` is the entry point for users rather than an additional research ledger. Avoid copying or renaming frozen experiment scripts just for cosmetic consistency.
+
+## Latest finite source evidence — 6 November 2026
+
+The author executed new original studies on source revision `637f2745721b32d6f5a7e02c4659b0623bc9eee7`. Focused regression **72/72 tests passed in 2.28s** (not a full-suite claim).
+
+| Original study | Actual observation | Original saved source-report SHA-256 | Interpretation |
+|---|---|---|---|
+| C1 seeded held-out metamorphic | 54 distinct static source profiles, **486** typed source traces, **0** independent oracle disagreements | `8fa3848fcb0993e44a83391f595861943d75e3f09b669bd93b1b27e0222f3978` | In-domain finite event/issue checker agreement; not generated C++/RTL equivalence |
+| C2 fair source compiler cost | **324** matched measured method rows, **48** explicitly excluded setup source transitions, all compared source results matched | `be2adaa4acf30196a2ccb17114f2caa0af3e6679dc2685872e27cb086ca86ec1` | Saved CPU source-checking cost data, not search-speed improvement or hardware latency |
+
+Both original folders were created under the author's **local ignored** `build/` directory and passed separate SHA-based read-only audits. The files are **not in the source checkout** and must not be fabricated, overwritten, committed accidentally or silently reconstructed under the same original identity. To reproduce the protocol from source, an investigator needs to create a **new** study under a different output name and record their own Git SHA/environment. New runs are replications, not the author's original result.
+
+**Source-only C2 postrun descriptive analysis:** From the original author's local checkout, run `python -m fpgai_research.experiments.cst_paper_c2_original_readonly_analysis --study build/paper_c2_fair_source_cost_20261106_01`. This new analysis first compares the whole original report with the author's independently observed SHA-256, validates all 324 fixed paired trials and then reports direct/lazy/eager median CPU wall time, source transition counts, and paired win/loss counts. It cannot launch native tools, rewrite the original or discover unexecuted timings. It is a **new unverified analyzer** until locally tested and run.
+
+## Performance evidence: physical latency is not HLS cycles
+
+The separately original HLS-qualified matched storage experiment had 22,954 versus 22,602 estimated worst cycles and HLS-estimated periods 9.857ns versus 9.500ns. Multiplying yields approximate **E3-only HLS timing proxies** 226.258µs versus 214.719µs; a common **requested 12ns** gives 275.448µs versus 271.224µs. Neither is a measured physically achievable inference latency. The matching original Vivado OOC map reported BRAM tiles 7 versus 4, but worse LUT/FF and WNS **−2.170ns versus −3.718ns**; both failed timing and strict clean DRC. **Qualified physical compute latency, board end-to-end inference latency and throughput remain UNKNOWN.**
+
+## Release and repository hygiene rules
+
+- Use `.gitignore` for local experiment outputs (`build/`), caches, model data and vendor files. It affects *future untracked files only*; it does not remove already committed content or secrets from Git history.
+- Source-only tests, `python scripts/check_public_docs.py --profile compiler`, `python scripts/prepare_public_preview.py --plan --profile compiler`, and `python scripts/check_open_source_readiness.py` are separate checks. A compiler-only source preview is an **allowlisted, nonpublishable** output and deliberately omits the historical `paper/` tree and `rl_environment/`.
+- A scholarly paper artifact needs **a separately rights-reviewed, reproducible source/protocol package** including exactly the cited study scripts and public synthetic inputs. The ordinary compiler `sdist` excludes research notebooks; do not call it a complete first-paper reproduction artifact.
+- Scan **all Git refs/history**, verify copyright and employer/university rights, third-party license provenance, personal-data/credential and binary-data absence, and pass clean-room installation/tests. No cleanup commit proves this has occurred.
+- **Never delete or rewrite original study evidence**, fixed source SHA receipts, permanent native attempt locks, original routed checkpoints or source runs. Retired docs remain in historical research archives; link canonical entry points from the README rather than relocating original files.
+- Do not enable GitHub Actions or perform automatic Vitis/Vivado calls, merge draft PRs, publish to PyPI, change visibility, or invent a license as part of documentation cleanup.
+
+## Most important remaining scientific gaps
+
+The first paper still needs an independently executed, matched [Allo](https://github.com/cornell-zhang/allo) capability/equivalence comparison, a rigorous connection from typed source events to independently observed generated-executable behavior, and an honest interpretation of C2's cost versus the lazy cache. The newly completed C1 study broadens coverage **within the same supported MatMul fanout family**. More tests are not automatically novel research. See the active manuscript and evidence-to-claim ledger for current publication blockers.
