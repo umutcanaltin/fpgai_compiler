@@ -69,7 +69,10 @@ def _method(state, actions, indices: tuple[int, ...], method: str):
     started = perf_counter_ns()
     if method == "eager":
         catalog = build_catalog(state, actions)
-        calls = len(actions)
+        # Use the compiled catalog's own recorded transition count.
+        calls = catalog.compiler_transitions
+        if calls != len(actions):
+            raise ValueError("Eager source catalog call-count receipt incorrect")
     for index in indices:
         if method == "direct":
             decision = unified_transition(state, actions[index])
@@ -140,12 +143,15 @@ def evaluate(name: str, width: int, *, request_counts=DEFAULT_REQUESTS,
             for seed in seeds:
                 indices = _stream(certified, kind=stream_name,
                                   count=count, seed=seed)
-                # Reproducible balanced order mitigates systematic first-run
-                # position but does not replace CPU isolation or process repeats.
+                # A deterministic balanced Latin rotation: for full
+                # (111,222,333) each method appears once in each timing
+                # position, preventing a systematic eager-first bias.
                 order = list(METHODS)
-                random.Random(seed + count * 1009 +
-                              width * 251 + len(name) * 29 +
+                random.Random(count * 1009 + width * 251 +
+                              len(name) * 29 +
                               len(stream_name) * 41).shuffle(order)
+                shift = list(seeds).index(seed) % len(METHODS)
+                order = order[shift:] + order[:shift]
                 measured = {}
                 for method in order:
                     measured[method] = _method(state, actions, indices, method)
@@ -241,7 +247,8 @@ def summarize(studies: list[dict], *, seeds, requests, streams) -> dict:
             "Eager precompilation is compared with an equally valid lazy cache",
             "CPU wall measurements are platform/order sensitive, not timing proof",
             "No search quality, multi-state search, learning or FPGA advantage",
-            "Repeats are counterbalanced benchmark trials, not independent models",
+            "Full default three-seed runs use balanced method timing order; quick mode does not",
+            "Repeated requests are counterbalanced trials, not independent models",
         ],
     }
 
