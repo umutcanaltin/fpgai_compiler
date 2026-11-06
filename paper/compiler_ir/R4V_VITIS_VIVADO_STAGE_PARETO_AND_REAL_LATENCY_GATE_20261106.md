@@ -1,6 +1,6 @@
 # Hardware-stage comparison: matched storage after Vitis HLS and after Vivado
 
-**6 November 2026; current scientific paper evidence.** This report reconciles **already-executed original, SHA-locked** R4k/R4l Vitis CSIM/CSynth results with separately executed original R4p/R4q/R4r Vivado OOC routed results. This is NOT the same population as the recent 54-profile C1 E1 GCC study. **No new vendor runs were performed by writing this report or analyzer.**
+**6 November 2026; original matched Vitis HLS + Vivado 12ns evidence now independently SHA-verified on the author's workstation (read-only), after 40/40 targeted tests passed.** This report reconciles **already-executed original, SHA-locked** R4k/R4l Vitis CSIM/CSynth results with separately executed original R4p/R4q/R4r Vivado OOC routed results. This is NOT the same population as the recent 54-profile C1 E1 GCC study. **No new vendor runs were performed by writing this report or analyzer.**
 
 ## Actual controlled comparison and evidence tiers
 
