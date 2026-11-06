@@ -62,3 +62,33 @@ Do not create R4v/R4w/... simply because a parser returns UNKNOWN; do not rerun 
 - ST-Flow (PACT 2026): https://doi.org/10.1145/3838684.3846865 and https://github.com/UCLA-VAST/ST-Flow . It supports spatial/temporal hybrid dataflow and resource-reuse-aware exploration.
 
 All external comparisons here are **source/literature reconnaissance**; they do not replace an executed equivalent workload with matched numeric correctness and optimization/target constraints.
+
+## Scientific finalization change-impact report — 6 November 2026
+
+This pass is **scientific/technical editorial consolidation**, not a new HLS/Vivado experiment or a change in compiler semantics. The connected GitHub research branch was inspected; all source-era numeric values in the manuscript were linked to existing original evidence protocols. Independent workstation runtime verification of the *new manuscript* (and any original source ablation) has not yet been performed. **Do not confuse GitHub content commits with new original experimental measurements.**
+
+| File changed in this focused editorial pass | Role, dependency and impact |
+|---|---|
+| `paper/compiler_ir/C1_C2_TWO_CONTRIBUTION_MANUSCRIPT_DRAFT_20261103.md` | PRIMARY paper: revised abstract, bounded C1 source table, C2 original mask/call-cost table, E0–E4 measurement model, separate 32/6 HLS/routed resource and latency evidence, honest Allo/CODO/ST-Flow overlap, detailed validity threats and rejection of unqualified E4 claims. Former generated-source and C2 results unchanged. |
+| `paper/compiler_ir/FIRST_PAPER_EVIDENCE_CLAIMS_AND_SUBMISSION_LOCK_20261106.md` | NEW CANONICAL evidence/claim traceability and stop rules; indexes source-provenance receipts, C1/C2 coverage, E3/E4 result typing and precise P0 blockers. Does not create experiments. |
+| `paper/compiler_ir/README.md` | Entry point now routes readers to the active manuscript and canonical evidence/claim gate; stops treating historical R4 sprint files as the paper. |
+| `paper/compiler_ir/SUBMISSION_DECISION_GATE_20261103.md` | Adds a current-status banner redirecting from the preserved earlier decision snapshot to the active submission lock. Original historical text retained. |
+| `paper/compiler_ir/FIRST_PAPER_SCIENTIFIC_COMPLETION_20261106.md` | EXISTING historical experiment ledger/source for verified R3/R4 status and latency constraints, read as evidence; no original measurements overwritten in this editorial pass. |
+| `paper/compiler_ir/R4R_SIGNED_OOC_TRADEOFF_LEDGER_20261106.md` | EXISTING source-pinned routed resource/timing data; no rerun, no paper-level E4 promotion. |
+| GitHub draft PR #2 | Reviewer-facing synopsis refocused on C1/C2 claims, evidence, performance limits and required independent competitor study; retains DRAFT and main untouched. |
+
+## Next highest-value original CPU-only evidence gate
+
+The *already implemented* `src/fpgai_research/experiments/cst_paper_contract_ablation.py` compares source-value/lifetime safety against that same checker WITH the `Phi` issue-order predicate on **the same 24-profile/216-trace R3j source population**. It is a **single, direct within-compiler causal predicate ablation**, not an external baseline or trained agent test. It is preregistered, contains independent negative controls, and **does not invoke Vitis/Vivado**. The original experiment has **not yet been author workstation-verified for publication**, and its expected 48/24 accepted outcomes remain predictions from code/fixtures until the original run and SHA audit are obtained.
+
+Run only after locally verifying exact source branch and a **fresh** output name:
+
+```bash
+cd ~/Desktop/github_projects/fpgai_compiler
+git pull --ff-only origin research/first-paper-source-memory-bridge-20261106
+python -m pytest -q tests/test_cst_paper_contract_ablation.py tests/test_cst_r3j_c1_heldout_semantics.py
+test ! -e build/first_paper_contract_predicate_ablation_20261106_01
+python -m fpgai_research.experiments.cst_paper_contract_ablation --output build/first_paper_contract_predicate_ablation_20261106_01
+```
+
+Then independently inspect the new `summary.json`, `observations.csv`, and `derived_sha256.json` without regenerating the original source population, preserving the current source Git SHA and exact 216 denominator. Only after this independent audit should its measured ablation results be added to the paper. If the directory already exists, **do not delete/reuse** it; choose a new suffix or use read-only inspection. The second major next task is a separately pinned, scientifically fair Allo capability/equivalence comparison, not new FPGA QoR runs.
