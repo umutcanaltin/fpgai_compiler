@@ -27,7 +27,7 @@ The original R4k paired HLS source was constructed with the **same source functi
 
 **The apparent contradiction is the scientific outcome:** source/HLS row retention reduces some costs and HLS estimated latency, and Vivado maps fewer BRAM/DSP resources, but **mapped LUT, FF and timing slack worsen**. No claim that the row implementation is faster on FPGA is justified. Do not compare Vitis estimated BRAM 13 with Vivado mapped BRAM 4 as a percent improvement across stages: they are different tool-stage estimates/representations and only *within-stage matched-arm* contrasts are meaningful.
 
-## 1. New source-only integrated audit, NOT YET WORKSTATION-TESTED
+## 1. Source-only integrated audit — 40-test workstation check and original SHA-attested R4v review PASSED
 
 `src/fpgai_research/experiments/cst_paper_r4v_vitis_vivado_joint_compare.py` reuses the original `r4l.audit_native()` qualified Vitis E1/E2/E3 source reports and `r4r.summarize(r4q.inspect(...))` signed R4p routed/source forensic evidence. It fails closed if **both** Vitis arms are not CSIM/CSynth qualified, HLS source SHA or original revision differs, either routed report loses original SHA/DRC/WNS attestation, any stage resource is absent, or an arm/paired delta is inconsistent. It outputs a single machine-readable Vitis-vs-Vivado source-stage report, including source SHA, HLS cycles/clock and resources, derived **E3-only** latency proxy, routed BRAM/DSP/LUT/FF/URAM, WNS, DRC, blocking conditions and explicit `strict_physical_E4:null`/`board_qualified:false`. No program compilation or vendor tool runs occur in analysis.
 
