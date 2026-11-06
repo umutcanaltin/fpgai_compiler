@@ -178,6 +178,7 @@ def test_native_executes_only_separate_cases_and_stops_on_first_failure(
     assert result["status"] == (
         "R4P_NATIVE_ATTEMPT_FAILED_PRESERVE_ALL_OUTPUTS")
     assert result["native_vendor_calls_executed"] == 1
+    assert (root / "r4p_native_attempt.json").is_file()
     assert calls == [root / "full_storage" / "vivado"]
     assert not (root / "row_storage" / "vivado" / "logs").exists()
     with pytest.raises(FileExistsError, match="already attempted"):
@@ -190,6 +191,14 @@ def _write_mock_receipt(case, *, source, wns=0.25,
                         fully_routed=True):
     """Synthetic report only: not a real vendor invocation."""
     native = case / "vivado"
+    lock = case.parent / "r4p_native_attempt.json"
+    if not lock.exists():
+        write(lock, json.dumps({
+            "schema": sut.SCHEMA + "/original-native-attempt-lock",
+            "source_revision": "f" * 40,
+            "arms": list(sut.ARMS),
+            "never_retry_original_case": True,
+        }))
     reports = native / "reports"
     reports.mkdir(exist_ok=True)
     write(reports / "route_status.rpt", (
