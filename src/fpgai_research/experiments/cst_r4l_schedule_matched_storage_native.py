@@ -288,13 +288,17 @@ def execute(*, study: str | Path, original_r4d: str | Path,
     result = []
     for arm in r4k.ARMS:
         folder = root / arm / "vitis_source"
+        invocation = run_vitis(
+            folder, executable=exe, timeout_seconds=timeout_seconds)
+        # Qualify the completed source-pinned vendor artifacts, never an
+        # empty pre-run directory; process success is not E2/E3 acceptance.
+        observation = _native_observation(
+            folder, arm=arm,
+            source_sha=meta["package_hashes"][arm]["model.cpp"])
         result.append({
-            **_native_observation(
-                folder, arm=arm,
-                source_sha=meta["package_hashes"][arm]["model.cpp"]),
-            "new_vendor_invocation": run_vitis(
-                folder, executable=exe,
-                timeout_seconds=timeout_seconds).get("completed_successfully"),
+            **observation,
+            "tool_process_completed_successfully": (
+                invocation.get("completed_successfully") is True),
         })
     return {
         **meta,
