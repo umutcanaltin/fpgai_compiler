@@ -26,6 +26,7 @@ This repository is publicly viewable but currently has no operative source-code 
 - [ ] Check private paths, internal URLs, identifiable author/student emails,
       sensitive hosts, hardcoded local home paths, material from NDAs, and
       unpublished research claims in every public document and example.
+- [ ] Inspect **the actual wheel and sdist contents**, not only `MANIFEST.in` or the curated source preview. The `src/fpgai_research/experiments/` package contains numerous historical study implementations; decide in a rights-reviewed, dependency-tested step whether they belong in a compiler-only distribution or a separate scholarly artifact. Do not prune them until static/dynamic imports, CLI entry points, reproducibility requirements and package install tests establish no regressions.
 - [ ] Run a clean virtualenv installation, targeted and complete tests,
       static/safety checks, reproducible non-native smoke examples,
       and verify no GitHub CI starts licensed HLS tools automatically.
