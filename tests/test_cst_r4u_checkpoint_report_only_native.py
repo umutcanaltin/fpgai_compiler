@@ -322,8 +322,11 @@ def test_missing_new_report_or_unsigned_log_never_qualifies(prepared):
     case = prepared[1] / "row_storage"
     path = case / "reports" / "max_delay_paths.rpt"
     path.write_text("modified after synthetic tool invocation\n")
-    with pytest.raises(ValueError, match="SHA"):
-        sut.audit_native(**kwargs(prepared))
+    result = sut.audit_native(**kwargs(prepared))
+    assert result["reported_complete_path_arms"] == 1
+    assert result["arms"][1]["status"] == (
+        "REJECTED_NEW_REPORT_OR_LOG_HASH_DRIFT")
+    assert result["strict_physical_E4"] is None
 
 
 def test_no_native_receipts_does_not_create_paths(prepared):
