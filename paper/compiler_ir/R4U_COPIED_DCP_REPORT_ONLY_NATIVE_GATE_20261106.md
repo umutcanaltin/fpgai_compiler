@@ -76,3 +76,11 @@ python -m fpgai_research.experiments.cst_r4u_checkpoint_report_only_native \
 ## Scientific status
 
 Original R4p/r4q/r4r descriptive mapped BRAM tiles **7→4** and DSP **24→21**; LUTs **1282→1710**, FF **883→1022**, and WNS **−2.170→−3.718ns**. Both original designs fail the requested 12ns clock and have unclean DRC; R4p strict `physical_E4=null` remains final. Detailed critical path root cause is still UNKNOWN. First paper remains **MAJOR REVISION / NOT SUBMISSION READY**. Draft PR only; `main` unchanged, no GitHub Actions.
+
+## R4u source-only gates AUTHOR VERIFIED — 6 November 2026
+
+The author pulled research head `5a46f5ebff6294c0ea1ab12a5f7f863768ab811b`, successfully ran `compileall` on the new R4u code and tests, then ran the focused **R4u/R4t/R4s workstation regression: 28/28 passed in 0.36s**. The author then created the independent new source-only R4u study `build/r4u_copied_dcp_report_only_native_20261106_01`: `status=R4U_ISOLATED_REPORT_ONLY_NATIVE_INPUTS_PREPARED`, `paired_report_only_cases=2`, `actual_native_vivado_calls=0`, `strict_physical_E4=null` and board qualification false. The SHA-256 identities of copied full/row routed checkpoints matched the exact original R4t post-hoc pinned pair.
+
+The author subsequently ran the independent **vendor-free default dry-run**, which returned `status=R4U_DRY_RUN_NO_VENDOR_CALLS`, `source_gate=R4P_R4S_R4T_R4U_POSTHOC_COPIED_DCP_SHA_ATTESTED`, `planned_report_only_calls=2`, `actual_vendor_calls=0`, and `actual_vendor_calls_during_audit=0`. The original source revision remains `776e3a7a4b599fd114718f6a03ab73e06be17f5c`, original checkpoint provenance remains `POST_HOC_SHA_NOT_EXECUTION_TIME_SIGNED`, and strict physical E4 stays NULL. The permanent R4u one-time execution lock has **not yet been created** by preparation or dry-run.
+
+Both source-only gates have therefore PASSED on the author's workstation. The **next optional action** is an explicit, **ONE-TIME** Vivado report-only run on the NEW R4u copied checkpoints with both `--execute-native` and `--confirm-report-only-native`, followed by a separately invoked **read-only `--audit-native`**. Do not repeat the execution if it fails or times out; preserve all original native outputs and the permanent attempt lock. No real R4u Vivado process, detailed path report, board run or new E4 result has yet been observed.
