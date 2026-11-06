@@ -270,3 +270,64 @@ def test_one_arm_advisory_without_timing_met_partner_stays_null():
     assert out["advisory_only_paired_clocks_NOT_strict"]==0
     assert out["comparisons_including_failures"][1][
         "advisory_only_HLS_cycle_period_sensitivity_ns_NOT_latency"] is None
+
+
+def test_posthoc_clock_selection_picks_24ns_margin_but_never_promotes_e4():
+    hls,sweep=_fake()
+    _mark_advisory_pair(sweep,20.0)
+    _mark_advisory_pair(sweep,24.0)
+    sweep["cases"][sut.r4w._case("full_storage",24.0)]["wns_ns"]=1.249
+    sweep["cases"][sut.r4w._case("row_storage",24.0)]["wns_ns"]=2.555
+    original=deepcopy((hls,sweep))
+    out=sut.qualify(hls,sweep)
+    assert (hls,sweep)==original
+    plan=out["prospective_clock_planning_NOT_physical_qualification"]
+    assert plan["minimum_pair_routed_wns_policy_ns"]==1.0
+    assert plan["selected_requested_clock_period_ns"]==24.0
+    assert plan["selected_minimum_pair_routed_wns_ns"]==1.249
+    assert plan["selected_pair_only_advisory_not_strict"]
+    assert not plan["selected_pair_strict_clean_OOC_qualified"]
+    assert not plan["physical_or_board_safety_guaranteed"]
+    assert plan["hold_timing_verified"] is None
+    assert plan["all_timing_paths_constrained_verified"] is None
+    assert plan["posthoc_exploratory_choice_not_original_preregistration"]
+    assert out["qualified_paired_clocks"]==0
+    assert out["fastest_predeclared_joint_qualified_clock_ns"] is None
+    assert out["verified_board_core_latency_ns"] is None
+    options=plan["candidates"]
+    assert len(options)==2
+    assert options[0]["requested_clock_period_ns"]==20.0
+    assert options[0]["minimum_pair_routed_wns_ns"]==0.433
+    assert not options[0]["passes_exploratory_margin"]
+    assert options[1]["passes_exploratory_margin"]
+
+
+def test_clock_selection_wont_claim_safe_clock_when_no_margin_passes():
+    hls,sweep=_fake()
+    _mark_advisory_pair(sweep,20.0)
+    plan=sut.qualify(hls,sweep)[
+        "prospective_clock_planning_NOT_physical_qualification"]
+    assert plan["selected_requested_clock_period_ns"] is None
+    assert len(plan["candidates"])==1
+    assert not plan["physical_or_board_safety_guaranteed"]
+
+
+def test_no_timable_pairs_no_clock_selection():
+    hls,sweep=_fake()
+    plan=sut.qualify(hls,sweep)[
+        "prospective_clock_planning_NOT_physical_qualification"]
+    assert plan["candidates"]==[]
+    assert plan["selected_requested_clock_period_ns"] is None
+
+
+def test_24ns_equal_clock_must_preserve_sole_advisory_classification():
+    hls,sweep=_fake()
+    _mark_advisory_pair(sweep,24.0)
+    sweep["cases"][sut.r4w._case("full_storage",24.0)]["wns_ns"]=1.249
+    sweep["cases"][sut.r4w._case("row_storage",24.0)]["wns_ns"]=2.555
+    out=sut.qualify(hls,sweep)
+    assert out["qualified_paired_clocks"]==0
+    assert out["prospective_clock_planning_NOT_physical_qualification"][
+        "selected_requested_clock_period_ns"]==24.0
+    assert all(row["real_measured_end_to_end_board_latency_ns"] is None
+               for row in out["comparisons_including_failures"])

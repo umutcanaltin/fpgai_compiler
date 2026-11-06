@@ -21,6 +21,9 @@ from fpgai_research.experiments import cst_r4l_schedule_matched_storage_native a
 
 SCHEMA="fpgai-research/R4x-feasible-only-paired-clock-HLS-core-latency-estimate/v1"
 ARMS=("full_storage","row_storage")
+# Explicit engineering planning margin, NOT a Vivado/board safety guarantee.
+# Chosen after observing the six original native runs: exploratory only.
+EXPLORATORY_MIN_ROUTED_WNS_NS=1.0
 
 
 def qualify(hls: dict, physical: dict) -> dict:
@@ -181,6 +184,51 @@ def qualify(hls: dict, physical: dict) -> dict:
     fastest=min(
         (c for c in comparisons if c["qualified_both_arms"]),
         key=lambda c:c["clock_period_ns"],default=None)
+
+    # Deliberately SEPARATE post-hoc engineering clock selection from the
+    # preregistered strict physical comparison and latency calculations.
+    # Only signed R4w timing-met matched pairs are candidates. A 1ns WNS
+    # margin is an exploratory selection policy, NOT a validated guarantee
+    # against clock jitter, hold failures, unconstrained paths or PVT spread.
+    timing_met_options=[]
+    for c in comparisons:
+        if not (c["qualified_both_arms"] or c["advisory_only_pair_not_strict"]):
+            continue
+        wns=(c["full_arm_routed_wns_ns"],c["row_arm_routed_wns_ns"])
+        if any(type(v) not in (float,int) or not isfinite(v) or v<0
+               for v in wns):
+            raise ValueError("R4x clock planning requires attested nonnegative WNS")
+        timing_met_options.append({
+            "requested_clock_period_ns":c["clock_period_ns"],
+            "minimum_pair_routed_wns_ns":round(min(wns),6),
+            "strict_clean_OOC_qualified":c["qualified_both_arms"],
+            "advisory_only_not_strict":c["advisory_only_pair_not_strict"],
+            "passes_exploratory_margin":min(wns)>=EXPLORATORY_MIN_ROUTED_WNS_NS,
+        })
+    selected=min((c for c in timing_met_options
+                  if c["passes_exploratory_margin"]),
+                 key=lambda c:c["requested_clock_period_ns"],default=None)
+    planning_clock={
+        "status":"POSTHOC_ENGINEERING_CANDIDATE_NOT_SAFE_HARDWARE_CLOCK",
+        "selection_policy":"FASTEST_MATCHED_TIMING_MET_CLOCK_WITH_1NS_WNS_PLANNING_MARGIN",
+        "minimum_pair_routed_wns_policy_ns":EXPLORATORY_MIN_ROUTED_WNS_NS,
+        "source_of_candidate_results":"ORIGINAL_SOURCE_ATTESTED_R4W_SIX_CASE_AUDIT",
+        "candidates":timing_met_options,
+        "selected_requested_clock_period_ns":(
+            selected["requested_clock_period_ns"] if selected else None),
+        "selected_minimum_pair_routed_wns_ns":(
+            selected["minimum_pair_routed_wns_ns"] if selected else None),
+        "selected_pair_strict_clean_OOC_qualified":(
+            selected["strict_clean_OOC_qualified"] if selected else False),
+        "selected_pair_only_advisory_not_strict":(
+            selected["advisory_only_not_strict"] if selected else False),
+        "hold_timing_verified":None,
+        "all_timing_paths_constrained_verified":None,
+        "board_clock_and_input_output_timing_verified":False,
+        "physical_or_board_safety_guaranteed":False,
+        "posthoc_exploratory_choice_not_original_preregistration":True,
+        "prospective_new_source_experiment_required":True,
+    }
     return {
         "schema":SCHEMA,
         "status":(
@@ -189,6 +237,7 @@ def qualify(hls: dict, physical: dict) -> dict:
             "NO_JOINTLY_QUALIFIED_PAIR_NO_HARDWARE_LATENCY_COMPARISON"),
         "original_source_revision":hls["source_revision"],
         "predeclared_clock_candidates":list(r4w.PERIODS_NS),
+        "prospective_clock_planning_NOT_physical_qualification":planning_clock,
         "qualified_paired_clocks":accepted,
         "advisory_only_paired_clocks_NOT_strict":sum(
             c["advisory_only_pair_not_strict"] for c in comparisons),
@@ -212,6 +261,8 @@ def qualify(hls: dict, physical: dict) -> dict:
             "OOC clock feasibility does not establish complete board bitstream validation",
             "Advisory-only clock sensitivity is E3 cycles times requested period, NOT clean DRC E4, measured FPGA inference latency, or a DRC waiver",
             "Even a qualified clock/slot contrast is one graph, precision, part and placement result",
+            "The 1ns WNS planning margin is a post-hoc engineering heuristic, not a proven safe clock or predeclared statistical inference",
+            "Hold slack, unconstrained endpoints, OOC clock coverage and system integration require separate independent reports",
         ],
     }
 
