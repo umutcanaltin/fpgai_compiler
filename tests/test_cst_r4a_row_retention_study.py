@@ -96,3 +96,14 @@ def test_report_wont_impute_hardware_from_source_data():
 def test_out_of_scope_32_element_dimension_rejected_without_widening_contract():
     with pytest.raises(ValueError, match="2..4-reader small fanout"):
         sut._case((4, (32, 4, 32, 8), "mixed"))
+
+
+def test_invalid_future_benchmark_refused_before_creating_original_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        sut, "CASES", sut.CASES + ((4, (32, 4, 32, 8), "mixed"),),
+    )
+    monkeypatch.setattr(sut, "_git_revision", lambda: "a" * 40)
+    dest = tmp_path / "must_not_exist"
+    with pytest.raises(ValueError, match="bounded R2f contract"):
+        sut.run(output=dest, profile="paper")
+    assert not dest.exists()
