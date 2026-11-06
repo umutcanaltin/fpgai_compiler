@@ -1,3 +1,10 @@
+## 6 November 2026 — scientific results and non-destructive public artifact cleanup
+
+- Original source-revision `637f2745721b32d6f5a7e02c4659b0623bc9eee7`: 72 targeted source tests passed, C1 seeded held-out 54 profiles/486 typed event variants/0 observed oracle disagreements, and C2 324 source-compiler method rows with matching source identities and 48 explicitly excluded setup compiler calls; immutable original SHA reports retained in ignored `build/`.
+- Introduced SHA-pinned **read-only** C2 postrun CPU cost analysis; per-method CPU timing conclusions remain unverified until the author's original analysis run. Physical FPGA latency remains UNKNOWN for the earlier failed-clock routed pair.
+- Added `.gitignore`, public-safe GitHub issue/PR templates (NO GitHub Actions), a research publication/reproducibility guide, and publication-hygiene regression tests. Repaired public preview/source-distribution file inclusion for the separately linked PYNQ-Z2 pilot guide, which remains BOARD_NOT_QUALIFIED.
+- All 880 tracked-file baseline names on the original branch were inspected at its fixed 6-Nov source SHA. Existing source modules, full historical R3/R4 evidence, research manuscripts, RL work and original results were **not deleted, moved or retroactively rewritten**. Publicly viewable source remains **unlicensed for redistribution** pending institutional/third-party rights, full Git-history safety review and explicit release approval.
+- Research manuscript and original evidence/claims ledger updated without claiming external compiler novelty or finished paper submission. This cleanup is committed on the research branch, not merged into `main`. New hygiene and analysis tests still require workstation execution.
 ## PYNQ-Z2 source-backed PS/DDR read-only audit — feature branch
 
 - User-run second Vivado full-board implementation generated .bit/.hwh,
