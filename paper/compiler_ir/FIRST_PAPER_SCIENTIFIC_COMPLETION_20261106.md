@@ -58,6 +58,8 @@ Reuses the existing read-only R2x source/XML/Verilog SHA audits, joins all 64 sa
 
 The original 32-case study must remain UNMODIFIED. The new cross-stage contingency has not yet been executed on the workstation and no Vitis/Vivado calls are made by this analysis.
 
+**New implemented source intervention:** [R4a row-retained intermediate materialization study](R4A_ROW_RETAINED_MATERIALIZATION_EXPERIMENT_20261106.md) with guarded R4b native Vitis qualification. Its implementation changes the GLOBAL source event order, preserves per-operator Phi read order, and reuses a single H row across producer rows. This is experimental E0/E1 source code and Vitis source preparation only until workstation outputs and fresh report SHA receipts are checked. Do not report HLS or physical BRAM improvements from code existence.
+
 ## Validation before merging or publication use
 
 Use a separate clean clone so the original RL environment/branch is untouched:
