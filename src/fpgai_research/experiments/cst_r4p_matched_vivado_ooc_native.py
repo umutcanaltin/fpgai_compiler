@@ -300,15 +300,22 @@ def execute(*, study: str | Path, r4o_study: str | Path,
             native, executable=binary, timeout_seconds=timeout_seconds,
             allow_verified_readmem_post_absence=False)
         # Even a 0 exit code does not establish route/timing/E4.
+        success = outcome.get("completed_successfully") is True
         observations.append({
             "arm": arm,
-            "tool_process_completed_successfully":
-                outcome.get("completed_successfully") is True,
+            "tool_process_completed_successfully": success,
             "native_receipt_path": str(native / "vivado_invocation.json"),
         })
+        if not success:
+            # Preserve the partial/failed case and leave the second arm
+            # untouched. Never resume automatically after a vendor error.
+            break
     return {
         **meta,
-        "status": "R4P_NATIVE_ATTEMPTS_RECORDED_AUDIT_REQUIRED",
+        "status": (
+            "R4P_NATIVE_ATTEMPT_FAILED_PRESERVE_ALL_OUTPUTS"
+            if len(observations) != 2 else
+            "R4P_NATIVE_ATTEMPTS_RECORDED_AUDIT_REQUIRED"),
         "native_vendor_calls_executed": len(observations),
         "observations": observations,
         "physical_E4": None,
@@ -415,10 +422,13 @@ def _arm_observation(case: Path, *, source: dict) -> dict:
     record.update({
         "status": (
             "SOURCE_ATTRIBUTED_CLEAN_DRC_ROUTED_OOC_ONLY" if strict
-            else "SOURCE_ATTRIBUTED_ROUTED_DRC_WARNING_OBSERVATION_ONLY"),
+            else "SOURCE_ATTRIBUTED_ROUTED_NONCLEAN_DRC_OBSERVATION_ONLY"),
         "native_routed_observation_valid": True,
         "strict_clean_DRC_E4": strict,
-        "drc_warning_only_routed_observation": not strict,
+        "drc_warning_only_routed_observation": (
+            not strict and drc.get("critical_warnings") == 0),
+        "drc_errors_or_critical_warnings_present": (
+            drc.get("critical_warnings", 0) > 0),
         "routed_wns_ns": physical["timing"]["wns_ns"],
         "routed_utilization": {
             k: resources.get(k) for k in _RESOURCE
@@ -459,7 +469,7 @@ def audit_native(*, study: str | Path, r4o_study: str | Path,
     return {
         **meta,
         "status": ("STRICT_CLEAN_DRC_BOTH_OOC_ROUTED" if strict
-                   else "ROUTED_WARNING_ONLY_PAIR" if descriptive
+                   else "ROUTED_NONCLEAN_DRC_PAIR" if descriptive
                    else "UNKNOWN_INCOMPLETE_OR_FAILED_PHYSICAL_PAIR"),
         "arms": arms,
         "original_native_invocation_receipts_present": sum(
@@ -483,7 +493,7 @@ def audit_native(*, study: str | Path, r4o_study: str | Path,
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--study", required=True)
+    parser.add_argument("--study", help="Prepared R4p study (not needed with --prepare-output)")
     parser.add_argument("--r4o-study", required=True)
     parser.add_argument("--r4k-study", required=True)
     parser.add_argument("--original-r4d", required=True)
@@ -495,6 +505,8 @@ def main(argv=None):
     parser.add_argument("--vivado", default="vivado")
     parser.add_argument("--timeout-seconds", type=int, default=14400)
     args = parser.parse_args(argv)
+    if not args.prepare_output and not args.study:
+        parser.error("--study is required for dry-run, execution or native audit")
     opts = dict(
         r4o_study=args.r4o_study, r4k_study=args.r4k_study,
         original_r4d=args.original_r4d, original_r4a=args.original_r4a)
