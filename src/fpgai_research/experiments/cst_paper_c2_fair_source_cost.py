@@ -329,14 +329,34 @@ def main(argv=None):
     if args.study:
         result = audit(args.study)
     else:
+        destination = Path(args.output)
+        if destination.exists() or destination.is_symlink():
+            raise FileExistsError("C2 cost output exists: original study immutable")
+        revision = _git_revision()
         opts = ({"cohorts": COHORTS[:1], "seeds": (111,),
                  "request_counts": (1, 4), "streams": STREAMS}
                 if args.quick else {})
-        result = run(**opts)
-        create_only(result, output=args.output,
-                    source_revision=_git_revision())
+        try:
+            result = run(**opts)
+            create_only(result, output=destination, source_revision=revision)
+        except Exception as exc:
+            # A negative or incomplete original CPU experiment is evidence.
+            # Don't rerun with changed queries to fabricate a positive result.
+            if not destination.exists() and not destination.is_symlink():
+                destination.mkdir(parents=True, exist_ok=False)
+            if not (destination / "report.json").exists():
+                (destination / "FAILED.json").write_text(json.dumps({
+                    "schema": SCHEMA + "/failed-source-attempt",
+                    "experiment_source_revision": revision,
+                    "quick_smoke_only": args.quick,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:4000],
+                    "native_vitis_calls": 0, "native_vivado_calls": 0,
+                    "scientific_status": "FAILED_PRESERVE_COUNTEREXAMPLE",
+                }, indent=2, sort_keys=True) + "\n")
+            raise
         result = {
-            "schema": SCHEMA, "source_revision": _git_revision(),
+            "schema": SCHEMA, "source_revision": revision,
             "measured_cases": result["measured_cases"],
             "all_compiled_source_results_matched":
                 result["all_compiled_source_results_matched"],
