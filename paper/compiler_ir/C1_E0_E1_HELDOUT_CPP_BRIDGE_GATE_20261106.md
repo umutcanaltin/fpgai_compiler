@@ -2,6 +2,12 @@
 
 **Scientific protocol, 6 November 2026. Implemented after the author-verified original 54/486 E0 cohort. NEW HOST-GCC E1 RESULTS HAVE NOT YET BEEN RUN OR VERIFIED. The first paper remains MAJOR REVISION / NOT SUBMISSION READY.**
 
+## Workstation verification update (6 November 2026)
+
+After source revision `d0b72b4a00309ff01f8f159d035390c43c35789c` was pulled on the author's machine, the author ran the exact targeted test suite including `tests/test_cst_paper_c1_heldout_cpp_bridge.py`. The terminal reported **55/55 tests passed in 2.55s, with no skipped tests**. That suite's fixture-based `test_real_gcc_scalar_and_mixed_phi_paired_source_e1_smoke` and emitted-source-tamper test actually call the host GNU g++ pathway with a **synthetically constructed 54-profile E0 report and test-monkeypatched original hash/source revision**. Passing those tests is evidence that the new source-to-GCC bridge test harness can compile and execute bounded scalar/mixed-Φ sources and audit their local outputs, not an independently signed original author dataset.
+
+**Original C1 E1 data remain NOT EXECUTED:** The subsequent `make release-links` failed with `ModuleNotFoundError: No module named 'scripts'` inside `scripts/check_public_docs.py` and the outer command used `set -e`; therefore the separately planned **author-original report-SHA-pinned** `build/paper_c1_e1_cpp_bridge_smoke_20261106_01` and 54-profile/108-run full study were NOT created or verified by that command. A dedicated CLI-path fix and regression test are now committed, but must be pulled/retested. **Do not promote fixture-based GCC tests to all 54 real original-source E1 qualification.**
+
 ## Why this study is scientifically necessary
 
 The original author's **54 bounded profiles / 486 source-event trace tests** (report SHA-256 `8fa3848fcb0993e44a83391f595861943d75e3f09b669bd93b1b27e0222f3978`, source revision `637f2745721b32d6f5a7e02c4659b0623bc9eee7`) established finite model-level agreement between independent event interpreters. That **did not execute generated C++** and could be a checked abstract contract with no implementation refinement. Earlier, separate R2h/R2r work *has* executed emitted fanout C++ and detected 216 original generated-source mutations on different selected graph populations; [R2r evidence](R2R_EMITTED_SOURCE_SHADOW_MUTATION_PROTOCOL_20261103.md). The new controlled bridge explicitly joins the **original 54 held-out C1 profiles** to actual emitted C++ without reimplementing the validator or changing either original source study.
