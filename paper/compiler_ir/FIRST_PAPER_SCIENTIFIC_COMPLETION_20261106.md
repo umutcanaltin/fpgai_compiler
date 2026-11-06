@@ -8,7 +8,7 @@
 
 **Prospective better-hardware mechanism:** [Verified selective intermediate materialization protocol](VERIFIED_SELECTIVE_MATERIALIZATION_RESEARCH_20261106.md) defines a *new* materialize / forward / selectively spill compiler experiment. This is not an observed hardware improvement. It specifically addresses why earlier exact scratch allocation saved too little of the total generated mutable state to change HLS BRAM consistently.
 
-**Native R4b update (6 November):** [Original case-003 E2 failure report and read-only diagnostic command](R4B_NATIVE_CASE003_FAILED_CSIM_20261106.md). Both full-H and row-H Vitis 2023.2 processes exited 0 but failed E2 CSim; E3-qualified resource comparison is **unavailable**. Preserve the two original vendor runs and inspect their actual CSim metrics before choosing a numerical correction or running more native cases.
+**Native R4b update (6 November):** [Original case-003 E2 failure report and read-only diagnostic command](R4B_NATIVE_CASE003_FAILED_CSIM_20261106.md). Both full-H and row-H Vitis 2023.2 processes exited 0 but failed E2 CSim; E3-qualified resource comparison is **unavailable**. Preserve the two original vendor runs. The user's subsequent selected stdout extract reports identical aggregate CSim results (28/128 failed outputs per arm, maximum error 0.055395125 against tolerance 0.02); see the new [R4c read-only numerical triage protocol](R4C_CSIM_NUMERICAL_TRIAGE_20261106.md). No numerical correction or extra native case has been established.
 
 ## Scientific hypotheses and the required contrasts
 
@@ -60,7 +60,7 @@ Reuses the existing read-only R2x source/XML/Verilog SHA audits, joins all 64 sa
 
 The original 32-case study must remain UNMODIFIED. The new cross-stage contingency has not yet been executed on the workstation and no Vitis/Vivado calls are made by this analysis.
 
-**New implemented source intervention:** [R4a row-retained intermediate materialization study](R4A_ROW_RETAINED_MATERIALIZATION_EXPERIMENT_20261106.md) with guarded R4b native Vitis qualification. Its implementation changes the GLOBAL source event order, preserves per-operator Phi read order, and reuses a single H row across producer rows. **The R4a E1 workstation run is now observed:** 26 passing targeted tests, quick 3/3 and full 5/5 matched GCC pairs at source `fe99d627...`; see [workstation results](R4A_WORKSTATION_SOURCE_RESULTS_20261106.md). Source outputs still require read-only local SHA audit before final manuscript use. **No new Vitis E2/E3 or physical E4 result exists.** Do not report hardware improvement from source-only savings.
+**New implemented source intervention:** [R4a row-retained intermediate materialization study](R4A_ROW_RETAINED_MATERIALIZATION_EXPERIMENT_20261106.md) with guarded R4b native Vitis qualification. Its implementation changes the GLOBAL source event order, preserves per-operator Phi read order, and reuses a single H row across producer rows. **The R4a E1 workstation run is now observed:** 26 passing targeted tests, quick 3/3 and full 5/5 matched GCC pairs at source `fe99d627...`; see [workstation results](R4A_WORKSTATION_SOURCE_RESULTS_20261106.md). Source outputs still require read-only local SHA audit before final manuscript use. **One R4b native pair was attempted; both arms failed E2 CSim, and no new qualified E3 or physical E4 result exists.** Do not report hardware improvement from source-only savings.
 
 ## Validation before merging or publication use
 
