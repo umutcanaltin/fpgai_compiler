@@ -2,7 +2,9 @@
 
 **Scientific protocol and result status, 6 November 2026. Both the original two-profile/four-execution smoke and the separate original full 54-profile/108-execution generated-GCC E1 study are now AUTHOR-VERIFIED. The first paper remains MAJOR REVISION / NOT SUBMISSION READY: independent Allo/CODO novelty, routed timing/latency and rights/release gates remain open.**
 
-## Workstation verification update (6 November 2026)
+## Historical pre-fix workstation checkpoint (superseded by the full E1 result)
+
+**Archive interpretation:** The next two paragraphs describe the older original `d0b72b4…` shell session where the release-links CLI prevented the *then-planned* source run. That CLI was subsequently fixed; the two-profile original smoke and the separate full 54-profile original E1 experiment have both since completed. Their claims of `NOT EXECUTED` apply **only to that earlier session**, not the current research status. The complete full original result is [C1 E1 full 54-profile GCC evidence](C1_FULL_54_PROFILE_E1_GCC_ORIGINAL_RESULTS_20261106.md).
 
 After source revision `d0b72b4a00309ff01f8f159d035390c43c35789c` was pulled on the author's machine, the author ran the exact targeted test suite including `tests/test_cst_paper_c1_heldout_cpp_bridge.py`. The terminal reported **55/55 tests passed in 2.55s, with no skipped tests**. That suite's fixture-based `test_real_gcc_scalar_and_mixed_phi_paired_source_e1_smoke` and emitted-source-tamper test actually call the host GNU g++ pathway with a **synthetically constructed 54-profile E0 report and test-monkeypatched original hash/source revision**. Passing those tests is evidence that the new source-to-GCC bridge test harness can compile and execute bounded scalar/mixed-Φ sources and audit their local outputs, not an independently signed original author dataset.
 
