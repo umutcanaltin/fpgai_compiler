@@ -58,7 +58,7 @@ This command launches **zero Vitis, zero Vivado** calls. A passing source study 
 
 ## What must be done next (R4e native mechanism experiment)
 
-After locally auditing source hashes, test results and original E2 failure receipts, implement a **separate guarded opt-in native runner**, with independently SHA-attested and create-once Vitis invocations for each of the six new packages. The R4b runner is deliberately specialized for the original R4a five-case population and must not be silently reused as though R4d had the same schema.
+A [separate R4e guarded native runner](R4E_NUMERIC_FORMAT_NATIVE_GATE_20261106.md) is now IMPLEMENTED on the research branch, with read-only SHA audits and create-once Vitis invocation checks for the six new source packages. It has **not yet been workstation-tested or run against native Vitis**. The R4b runner remains specialized for the original R4a cohort and is not reused under a fabricated schema.
 
 Require actual per-output mismatches and per-intermediate quantized/reference values, saturation checks and a causal explanation before asserting *why* 16/6 failed. Vitis HLS synthesis/resources may qualify only after both E2 passes and full timing constraints. A failed case still belongs in the denominator and missing cases stay UNKNOWN.
 
