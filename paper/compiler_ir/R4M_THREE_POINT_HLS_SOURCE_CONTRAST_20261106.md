@@ -1,6 +1,6 @@
 # R4m: source-pinned three-point HLS path ledger — 6 November 2026
 
-**Scientific status:** All R4e/R4l HLS figures below come from the author's original executed, source-hash-attested Vitis HLS 2023.2 studies. R4m is NEW read-only analysis code and tests committed to the research branch; **R4m itself has NOT yet been verified on the workstation**. The original R4l pair has already been executed; never repeat either native run.
+**Scientific status:** All R4e/R4l HLS figures below come from the author's original executed, source-hash-attested Vitis HLS 2023.2 studies. **R4m was verified on the author's workstation**: 28/28 targeted tests passed, and the original SHA-pinned three-point read-only study completed successfully with `SOURCE_PINNED_THREE_POINT_HLS_DESCRIPTIVE_LEDGER`, `additive_path_identity_verified=true` and `exact_original_row_reproduction_at_E3=true`. It created a separate report at `build/r4m_three_point_HLS_ledger_20261106_01`; no Vitis/Vivado calls occurred. The full three-format R4d denominator remains explicit: only one 32/6 pair is E3 qualified. The original R4l pair has already been executed; never repeat either native run.
 
 ## Scientific motivation
 
@@ -61,7 +61,7 @@ python -m fpgai_research.experiments.cst_r4m_three_point_source_contrast \
   --output build/r4m_three_point_HLS_ledger_20261106_01
 ~~~
 
-Never run `cst_r4l_schedule_matched_storage_native --execute-native` again on the original study; both original packages are already complete. If the optional R4m output path exists, omit `--output` and inspect stdout rather than overwrite. **R4m local tests and analysis are still pending**; the table's numbers are supported by R4e and the user's R4l original log, not by any new R4m execution.
+Never run `cst_r4l_schedule_matched_storage_native --execute-native` again on the original study; both original packages are already complete. If the optional R4m output path exists, omit `--output` and inspect stdout rather than overwrite. **R4m local tests and read-only analysis have now passed**; the table's numbers are supported by R4e and the user's R4l original log, not by any new R4m execution.
 
 ## Remaining paper gates
 
