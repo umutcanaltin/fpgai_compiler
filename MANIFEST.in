@@ -27,6 +27,7 @@ include docs/ACADEMIC_RESEARCH_LICENSE_PROPOSAL.md
 include docs/WHO_CAN_USE_FPGAI.md
 include docs/AMD_TOOLCHAIN_SETUP.md
 include docs/FPGA_DEPLOYMENT.md
+include docs/PYNQ_Z2_BOARD_DMA_PILOT.md
 include scripts/setup_amd_environment.sh
 include scripts/check_amd_environment.py
 include scripts/check_fpga_deployment.py
