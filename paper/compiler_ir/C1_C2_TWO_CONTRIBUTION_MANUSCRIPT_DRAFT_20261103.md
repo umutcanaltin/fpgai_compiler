@@ -80,6 +80,16 @@ All arms use the *same candidates and the same compiler*. Report qualified, unkn
 
 **R3f — workstation-verified variable-size coverage:** six additional source graph cohorts: MatMul chains of depths 2, 3 and 4, and fanout of degrees 2, 3 and 4. Exactly **eight predeclared actions per graph (48 total)** undergo compiler-based mask and direct replay, with invalid/no-op controls. This evaluates action classification and graph-size variation, not trained-agent sample efficiency. The author's workstation passed **42/42 focused and 1,705/1,705 full Python tests**, then generated and independently audited R3d/R3e/R3f create-only original source reports on revision \`fc40369f9493d93cc78c4886ae2e32c5d1f64093\`. R3f classified **21/48 certified, 24/48 rejected, 3/48 UNKNOWN_E0**, with the complete denominator preserved; R3e recorded **5/5 independent finite slot-oracle agreements and 25/25 targeted mutant rejections**. R3g and R3h were subsequently tested on the author's workstation at source revision `3309076814714e61906363e21e3d50b932519f9d`: **64/64 focused, 1,751/1,751 full regressions**, 133 trace variants with 0 independent semantic-oracle disagreements, and 48 compiled-once catalog actions with 0 extra selected-source compiler invocations. All were independently re-audited as saved original receipts.
 
+### 4.2.1 Original C2 mask population and cost
+
+| Predeclared source observation | Certified E0 | Rejected | Unknown E0 | Compiler source transitions |
+|---|---:|---:|---:|---:|
+| R3d, six complete designs | 3 | 2 | 1 | 6 classified actions |
+| R3f, six graphs × eight candidates | 21 | 24 | 3 | 48 classified actions |
+| R3h, selection from precompiled R3f-size catalogs | Only previously certified states eligible | Not selected | Not selected | **48** upfront catalog transitions; **0 additional** transitions to select a cached certified state |
+
+R3d, R3f and R3h were **distinct original source experiments** and their rows are not additive independent samples. The three-valued mask faithfully exposes the compiler's bounded transition classification, but its full-catalog CPU cost is not zero; an agent that wants only one candidate could call the compiler directly with lower total checking work. No unmeasured search speedup or training advantage is inferred.
+
 ### 4.3 Compiled-once source-certificate consumption
 
 The new C2 `CompiledActionCatalog` preserves each **original, typed, source-verified next state** after the ordinary compiler has evaluated its candidate. A later proposer may select an E0-certified in-process catalog entry without a second source compiler run, while a rejected or E0-unknown candidate is never silently promoted. The R3h controlled study tests this property on the same six R3f graph families and eight actions each. This is **an API/call-count ablation**, not optimized exploration: producing a catalog of eight candidates still requires eight compiler transitions and may be more expensive than submitting one blind candidate. The R3h author-run original campaign verified **48 candidate source transitions across six graphs** and **zero additional transitions to select an already certified cached state**. It is an API-level implementation result; mask construction still requires all 48 source transitions in that cohort. Original read-only audit receipt and source revision are in [the frozen checkpoint](R3G_R3H_ORIGINAL_C1_C2_WORKSTATION_RESULTS_20261104.md).
@@ -146,6 +156,16 @@ The initial pinned Allo artifact review has since confirmed `reuse_at`, `partiti
 **Allo (PLDI 2024)** already provides bottom-up type-safe composition of compute, memory, communication and datatype customizations; its public `allo/verify.py` includes schedule/source verification using PAST. **StreamTensor (MICRO 2025)** introduces stream-layout tensor types for fusion, buffer allocation and memory optimization. **Filament (PLDI 2023)** encodes hardware timing/structural constraints with timeline types. **CODO (ISCA 2026)** checks FPGA dataflow violations and optimizes communication/scheduling. **ST-Flow (PACT 2026)** compiles spatial-temporal dataflow. Their substantial overlapping contributions rule out generic claims of the *first typed compositional FPGA IR*, *first temporal source checker* or *first optimization-ready graph*. Public references and pinned revision audit are recorded in [the independent prior-art reconnaissance](C1_C2_PINNED_PRIOR_ART_RECONNAISSANCE_20261103.md).
 
 The still-unresolved novelty claim is **a concrete, testable combination of bounded operator-local source issue semantics, multi-reader last-use scratch safety and an exactly same-compiler three-valued action interface**. Establish that distinction through executed, pinned competitor artifacts with matching positive and negative source designs and explicit semantics. Do not infer absence of a rival feature merely from a short abstract or one file.
+
+### 7.1 Prior-art comparison with measured and unknown dimensions
+
+| Related system | Established overlapping capability | What our current evidence supports (and does not) |
+|---|---|---|
+| Allo (PLDI 2024) | Composable compute, memory, communication and datatype schedule customization, plus source/schedule equivalence checks | FPGAI checks its **particular bounded multi-reader value-release and operator issue-order relation**; a directly executed semantically matched Allo positive/negative comparison has **not** been completed, so difference/absence in Allo is UNKNOWN |
+| CODO (ISCA 2026) | Fine- and coarse-grained dataflow violation checking, data-movement optimization, scheduling and published latency comparisons | A bounded event/ownership contract plus policy-neutral action mask is the *proposed* focus, not a demonstrated faster accelerator or a claim to invent dataflow violation checking |
+| ST-Flow (PACT 2026) | Spatial/temporal/hybrid dataflow compilation and resource reuse with explicit design-space exploration | FPGAI has only bounded static source actions and mixed HLS/routed observations; cross-compiler resource/latency superiority is not shown |
+
+This classification draws on the authors' public papers and pinned source reconnaissance, not a matched executable capability experiment. To claim a truly **novel semantic obligation**, define the exact trace/reuse counterexample and show that the same workload and property can be represented and tested (or document a concrete expressivity limitation) in the pinned competitor artifact. Missing imports, tool setup failures or unsupported API forms are **not** evidence of a competitor's incorrect verification.
 
 ## 8. Threats to validity
 
