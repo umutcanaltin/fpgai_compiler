@@ -1,5 +1,7 @@
 # R3i: Isolated pinned Allo equivalence-capability comparison
 
+> **6 November 2026 source-location clarification:** This protocol belongs to the active `fpgai_compiler` GitHub research branch. The older working-directory examples that referenced the separate `fpgai_research` checkout have been updated. An external Allo comparison must run in its own isolated Python/MLIR environment; the current protocol and synthetic tests do **not** establish equivalent semantic capability or justify publication priority. Status remains **NOT EXECUTED** until author logs and original SHA receipts are verified.
+
 **Status 4 November 2026: NOT EXECUTED.** The author has only run `--protocol` and verified that `external_artifact_executed=false`. This document describes an optional future **source-artifact experiment in a different Python/LLVM environment**. It does not mark the paper submission-ready or claim that Allo lacks any FPGAI contract.
 
 ## Exact external source, scope and prerequisite
@@ -12,7 +14,7 @@
 
 ## Installation isolation and source pinning
 
-Do **not** modify the validated `~/Desktop/github_projects/fpgai_research/.venv`. Choose a separate external-artifact workspace. Obtain the Allo source and submodules using normal Git in that workspace, then pin and record the exact source:
+Do **not** modify the validated `~/Desktop/github_projects/fpgai_compiler/.venv`. Choose a separate external-artifact workspace. Obtain the Allo source and submodules using normal Git in that workspace, then pin and record the exact source:
 
 ```bash
 mkdir -p ~/Desktop/external_compiler_artifacts
@@ -30,17 +32,17 @@ The scientific driver refuses a different Allo source revision, a dirty checked-
 
 ## Safe preflight and isolated execution
 
-From the original research repo, checking the protocol requires **no** external compiler:
+From the active `fpgai_compiler` research checkout, checking the protocol requires **no** external compiler:
 
 ```bash
-cd ~/Desktop/github_projects/fpgai_research
+cd ~/Desktop/github_projects/fpgai_compiler
 python -m fpgai_research.experiments.cst_r3i_external_allo_capability --protocol
 ```
 
 Inside the verified external Python environment (where `import allo` resolves to the pinned checkout), expose **only the Python source tree** of the existing compiler research package, then opt in:
 
 ```bash
-export FPGAI_RESEARCH_ROOT=~/Desktop/github_projects/fpgai_research
+export FPGAI_RESEARCH_ROOT=~/Desktop/github_projects/fpgai_compiler
 export PYTHONPATH="$FPGAI_RESEARCH_ROOT/src"
 cd "$FPGAI_RESEARCH_ROOT"
 python -m fpgai_research.experiments.cst_r3i_external_allo_capability \
