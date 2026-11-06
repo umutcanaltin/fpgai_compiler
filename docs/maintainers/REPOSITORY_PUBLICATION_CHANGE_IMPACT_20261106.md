@@ -191,3 +191,17 @@ git status --short
 | This maintainer impact file | Tracks every changed path, imports, evidence relationships and tests. | Editorial. |
 
 **Added/removed/renamed paths:** none. **Original R4k/R4l/R4o/R4p/R4u/R4w original study outputs and locks modified:** none. **New GitHub Actions:** none. **Main branch:** untouched. **Outstanding:** independent local source tests, zero-DRC feasible matched designs, measured RTL/board core cycles/II, board DMA timings, 2×2 DSP pipeline study if performance claims pursued, external novelty comparison and rights approvals.
+
+## 6 November 2026 — conservative-clock planning amendment
+
+| Changed path | Owner/interface and connectivity | Verification / outstanding gate |
+|---|---|---|
+| `src/fpgai_research/experiments/cst_paper_r4x_feasible_only_core_latency.py` | Extends existing original R4l+R4w SHA-attested read-only `qualify()` JSON with `prospective_clock_planning_NOT_physical_qualification`: minimum paired WNS≥1.0ns and fastest surviving candidate, 24ns. Existing primary strict E4/board null outputs and native calls unchanged. | New heuristic is **post-hoc**, not safety proof. New source-only code not yet author-run. |
+| `tests/test_cst_paper_r4x_feasible_only_core_latency.py` | New synthetic regression cases for matched margin, 24ns selection, absent eligible cases, no clean-DRC promotion; reuses existing fixtures. | Tests not yet author-workstation-run. Prior verified **43 tests** belong to earlier revision `066a57c`. |
+| `paper/compiler_ir/R4W_VALID_HARDWARE_CLOCK_AND_LATENCY_PROTOCOL_20261106.md` | Extends first-paper method with independent future all-path/hold/DRC/bitstream validation and prospective 2×2 24ns source experiment/3-graph generalization. | Preregistration proposal only, no new Vitis/Vivado results. |
+| `paper/compiler_ir/C1_C2_TWO_CONTRIBUTION_MANUSCRIPT_DRAFT_20261103.md` | Active manuscript adds clearly distinct post-hoc clock choice, physical failure gates and keeps C1/C2 novelty central. | Editorial only, draft not submission ready. |
+| `docs/RESEARCH_PUBLICATION_STATUS.md` | Public-scoped research status explains 24ns clock selection and constraints. | No release approval. |
+| `CHANGELOG.md` | New source/planning and original author 43-pass checkpoint. | Documentation. |
+| This change-impact ledger | Tracks all paths, callers and unrun tests; no duplicate experiment implementation. | Updated this commit. |
+
+**Added, deleted, renamed, moved:** none. **Original source/ROM/vendor reports/attempt locks modified:** none. **New GitHub Actions, native executions or main merge:** none. **Further gates:** full source-only regression, signed hold/constraint reports, documented DRC severity, new 2×2 controlled source variations, separate physical/board measured latency and external C1/C2 novelty evaluation.

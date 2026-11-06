@@ -1,3 +1,10 @@
+## 6 November 2026 — 24ns retrospective margin-based planning, not board qualification
+
+- The author pulled the previous R4x implementation at `066a57c` and verified **43/43** focused tests, full original R4w 16/20/24ns audit and R4x read-only comparison: exactly **two warning-only timing-met matched pairs**, strict clean-DRC E4 pairs **zero**. No new native calls were made by either audit.
+- Added a deterministic **post-hoc** read-only clock-planning policy (minimum paired WNS >=1.0ns) on existing source-attested R4w observations: select **24ns** (full/row routed WNS **1.249/2.555ns**, min **1.249ns**), not 20ns (min **0.433ns**). Explicit JSON states **NOT physically safe or board qualified**, hold timing/all-path constraint coverage unknown, no achieved Fmax/real latency claims.
+- Strengthened prospective experimental protocol: matched source/precision/part, new four-arm storage×DSP pipeline HLS source and numerical checks at 24ns, preserved source and routed reports, independent hold/constraint/DRC inspections, staged ≥3 graphs/physical configurations if a hardware-general claim is pursued, and board measured cycles/II/DMA latency only after qualification. The main manuscript still prioritizes original C1/C2 source semantics and independent novelty gates.
+- No new Vitis/Vivado attempts, no original evidence mutation, no GitHub Actions, no merge. New source/test edits are **pending local author tests**.
+
 ## 6 November 2026 — verified six-clock audit and non-promoting advisory sensitivity
 
 - The author pulled revision `5bbea74`, passed **32/32** focused R4w/R4x/R4v tests and independently audited the six already executed source/RTL/ROM-attested Vivado routes. Full/row WNS pairs: **+0.241/−0.975ns** at 16ns, **+0.433/+0.538ns** at 20ns, **+1.249/+2.555ns** at 24ns. The earlier generated-sidecar audit blockage is resolved. Nonzero recognized DRC findings **74/71** prevent every strict clean-DRC matched pair; core and board latency remain unknown.
