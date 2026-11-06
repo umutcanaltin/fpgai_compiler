@@ -269,7 +269,11 @@ def main(argv=None) -> None:
                         help="Print overall and six subgroup statistics, omit "
                              "54 per-profile rows from stdout; original data untouched")
     args = parser.parse_args(argv)
-    report = analyze(args.study)
+    # Pass the pinned digest explicitly. analyze()'s default argument is
+    # bound at function definition, which would otherwise bypass synthetic
+    # CLI fixture overrides in tests. Production still uses our fixed
+    # author-verified manifest constant, not a user-supplied checksum.
+    report = analyze(args.study, pinned_manifest_sha256=ORIGINAL_MANIFEST_SHA256)
     if args.summary_only:
         report = {k: v for k, v in report.items() if k != "per_profile"}
     print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
