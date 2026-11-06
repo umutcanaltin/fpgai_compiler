@@ -1,0 +1,64 @@
+# First compiler paper — evidence-to-claim audit and submission lock
+
+**6 November 2026. Canonical next-action plan.** This document is the scientific audit of the **active** [two-contribution C1/C2 manuscript](C1_C2_TWO_CONTRIBUTION_MANUSCRIPT_DRAFT_20261103.md), not a new experiment series. The long [rolling manuscript](MANUSCRIPT_DRAFT.md) is ARCHIVAL and must not silently overwrite the C1/C2 argument. Research branch `research/first-paper-source-memory-bridge-20261106`, draft PR #2; no GitHub Actions, no unapproved Vivado/Vitis runs, and no original study mutation. **Decision: MAJOR REVISION / NOT SUBMISSION READY.**
+
+## Research thesis and scoped claims
+
+**C1, primary:** A bounded typed Model IR can tie independent operator-local architecture choices (`Phi`) to source-visible tensor-element contribution, commit, multi-reader consumption, last-use scratch release, actual emitted source identity, and issue order, and can reject selected invalid traces under explicit finite-model assumptions. **Not** arbitrary-graph formal soundness, RTL equivalence or cycle-accurate hardware semantics.
+
+**C2, primary:** The same ordinary compiler exposes policy-independent complete-design transitions, a weight-private typed graph view, and three-valued (`CERTIFIED_E0 / REJECTED / UNKNOWN_E0`) source legality. Cached certified transitions may be selected without recompilation **after** a compiler-built candidate catalog. **Not** zero-cost masks, trained RL gains, increased exploration efficiency, or hardware QoR guarantees.
+
+**Supporting evidence:** Actual full-network HLS source/CSim/CSynth and a later, separate same-schedule storage contrast show that architectural choices have nontrivial, often adverse resource–performance consequences. HLS cycles are not physical runtime; requested periods are not achieved periods. The R4 physical cohort is descriptive post-route mapping only; neither matched design is E4 timing+clean-DRC qualified. This hardware result must stay secondary to C1/C2.
+
+## Evidence-to-claim matrix (do not mix cohort denominators)
+
+| Claim ID | Allowable paper statement | Original, independent evidence basis | Scientific limitation / confidence |
+|---|---|---|---|
+| C1-A | On the admitted bounded event population, producer completeness, committed availability, last-reader slot safety and issue-order checks reject specifically targeted invalid traces | [R3d/R3e/R3f original workstation study](R3D_R3E_R3F_ORIGINAL_C1_C2_WORKSTATION_RESULTS_20261104.md); R3e **5/5** fixed-order exhaustive slot-oracle cases, **25/25** selected adverse mutants rejected; [bounded operational sketch](C1_FINITE_EVENT_SEMANTICS_AND_PROOF_SKETCH_20261104.md) | Conditional finite transition invariant; static `Use`/`Terms` obligations are assumptions; no mechanized general theorem or physical memory-port proof |
+| C1-B | A second bounded interpreter agreed with source verifier classifications on tested traces | [R3g original and source-pinned read-only audit](R3G_R3H_ORIGINAL_C1_C2_WORKSTATION_RESULTS_20261104.md): **133 traces**, **0 observed disagreements**, five static source cases | Shared admitted static model; these are not 133 statistically independent workloads or cross-language RTL equivalence |
+| C1-C | Generated C++ selected adversarial source modifications are detected, and source-memory advantages depend on explicit storage/accounting model | [R2r/R2q original results recorded in active manuscript](C1_C2_TWO_CONTRIBUTION_MANUSCRIPT_DRAFT_20261103.md): **216/216 selected** mutants detected; **18/27** `Phi` contrasts reduced source scratch under committed-value accounting, **9** ties; hypothetical first-MAC in-place accounting loses the observed advantage | Selected mutation families only; generated address witnesses do not establish all actual memory accesses, and hypothetical in-place model is not emitted source |
+| C2-A | Three-valued source decisions preserve certified, rejected and UNKNOWN cases | [R3d/R3f originals](R3D_R3E_R3F_ORIGINAL_C1_C2_WORKSTATION_RESULTS_20261104.md): R3d **3/2/1 of 6**; R3f **21 certified / 24 rejected / 3 unknown of 48**, six graph families | E0 source legality is not E2/E3/E4 timing/resource feasibility; limited bounded graph sizes |
+| C2-B | Precomputed compiler-certified complete-design states can be selected without a second compiler transition | [R3h original](R3G_R3H_ORIGINAL_C1_C2_WORKSTATION_RESULTS_20261104.md): **48** compiler calls to enumerate **48** candidates, **0 additional** calls to consume cached certified selection | No proof that generating the entire mask is cheaper than compiling a single direct proposal; no RL improvement or sample-efficiency evidence |
+| NATIVE-A | Complete CNN–dense HLS cohort contains negative hardware results | [Active manuscript, original R3c export](C1_C2_TWO_CONTRIBUTION_MANUSCRIPT_DRAFT_20261103.md): **6/6** numerical E2, **4/6** strict E3, **2/3** matched E3 pairs; cycles **624→911**, **2365→5436**, both qualified BRAM estimates tied; two source-attested clock-failed arms | These CNN results do **not** show that C1 contracts are proved for arbitrary CNN graphs; E3 is HLS-estimated only |
+| NATIVE-B | In one 32/6 same-source-issue-schedule R4k/R4l controlled pair, HLS and routed mapping favor different resource axes | [R4l original E2/E3](R4L_SCHEDULE_MATCHED_STORAGE_NATIVE_GATE_20261106.md): E2 passed both, E3 HLS BRAM estimate **13→13**, HLS cycles **22,954→22,602** (−352); [R4r source-attested post-route report](R4R_SIGNED_OOC_TRADEOFF_LEDGER_20261106.md): BRAM tiles **7→4**, DSP **24→21**, LUT **1282→1710**, FF **883→1022**, WNS **−2.170→−3.718ns** at requested 12ns; DRC warnings **74→71** | Both route, but both **FAIL** clock and strict clean DRC, so **neither strict E4-qualified**; source matched issue order does not prove identical hardware scheduling; no measured physical latency or board throughput; one graph/precision |
+| NATIVE-C | Reopening the copied routed checkpoints reproduces source-attested WNS and DRC counts | [R4u native gate](R4U_COPIED_DCP_REPORT_ONLY_NATIVE_GATE_20261106.md): report-only 24s/23s exit 0, original WNS/DRC match, valid report hashes, **0 complete detailed path witnesses through current lexical parser** | Checkpoint SHA was pinned **post-hoc**, not at original vendor execution; zero parser-extracted witnesses does not prove absence of paths; not a physical re-qualification |
+| PRIOR-ART | Our precise proposed semantic–decision combination is a hypothesis of distinctiveness, not a verified first | [Pinned independent source inspection](C1_C2_PINNED_PRIOR_ART_RECONNAISSANCE_20261103.md) and official/published descriptions of Allo, CODO and ST-Flow | No executed matched Allo capability/equivalence experiment; no priority, exclusive verification or competitor throughput claim |
+
+Evidence is from distinct original revision-pinned populations. Do not add R3d/R3f/R3g counts to imply a pooled accuracy estimator, or treat copied report-only Vivado calls as new synthesis runs. Some status text in older notebooks predates later verified results; the original receipts, this ledger and the current active manuscript govern publication wording.
+
+## Performance and latency evidence contract
+
+**Report all of:** (a) cycles to first complete result and any initiation interval, (b) source- and tool-attested HLS-estimated cycle and schedule/clock feasibility, (c) requested physical period and routed WNS/DRC, (d) timing-closed feasible period on a comparable implemented netlist when available, (e) compute latency only if compatible cycles and feasible period exist, (f) throughput, and (g) board end-to-end latency including DMA/DDR/buffering/CDC when measured.
+
+Under a compatible qualified fixed-clock implementation, `compute_latency_ns = cycles_per_inference × feasible_period_ns`, with first-output latency and initiation interval not conflated; throughput may differ from inverse first-output latency. For the R4 pair **there is no qualified feasible period**: both WNS values are negative, so **physical compute latency, achieved Fmax, real throughput and board latency are UNKNOWN**. In particular, multiplying source-attested E3 cycles by the **failed** 12ns requested clock does not produce an observed physical inference latency. An apparent BRAM reduction must be described alongside LUT/FF/timing costs, not as a Pareto-optimal or superior design.
+
+## Publication blockers — smallest necessary closure, not new hardware sprint letters
+
+| Priority | Falsifiable gate | Current decision | No-guess acceptance condition |
+|---|---|---|---|
+| **P0** | Distinctiveness relative to Allo's real source verification and overlapping CODO/ST-Flow semantic capabilities | **BLOCKED** | Executed independent pinned competitor positive/negative capability cases OR remove every exclusive/relative claim and justify concrete novel semantics without claiming superiority; expert prior-art review needed |
+| **P0** | C1 bounded proof obligations and generated-source refinement | **PARTIAL** | State all finite domain assumptions; independently audit emitted value access/issue traces, producer/reader set completeness and counterexamples. If emitted source refinement is not independently shown, limit claims to model-level/event-source conformance |
+| **P0** | C2 meaningful interface utility beyond tautological mask agreement | **PARTIAL** | Report same-candidate direct-vs-mask screening CPU cost, all compiler invocations and unknown outcomes; study ablation with equal budgets. If cost experiments are not run, explicitly narrow to deterministic API and cache selection only |
+| **P1** | Held-out C1/C2 reproducibility | **VERIFY SOURCE STATUS** | Preserve original R3j/R3k receipt-revision/test/run gates and classify verified vs merely prepared; do not infer execution from an implementation or README statement alone. No native vendor calls required |
+| **P1** | Model and graph generality | **BOUNDED** | Provide evidence for the exact supported MatMul chain/fanout domain, or a directly executed same-checker mixed-operator control. Otherwise remove general CNN contract claims |
+| **P1** | Manuscript tables, uncertainty, ablation, and reproducibility | **PARTIAL** | Publish current C1/C2 tables with exact denominators and SHA/revision index, resource/latency classification; review external baselines, artifact license/IP and original data release permissions |
+| **P2** | Further routed timing-path forensics, another R4 native run or hardware latency benchmark | **DEFER** | Only if a specific main-paper claim requires it, with preregistered independent study; original R4p/R4u native attempts must NEVER be rerun |
+
+## Explicit stop rules
+
+Do not create R4v/R4w/... simply because a parser returns UNKNOWN; do not rerun any completed Vitis/Vivado study. Do not train new RL agents in the compiler paper, promise hardware speedup, substitute HLS target time for measured latency, claim free action-mask construction, or imply formal proof for general graphs. **Publication-ready is not equivalent to a passing Python test suite.**
+
+## Immediate editorial sequence
+
+1. Revise **only the active C1/C2 manuscript** abstract, E0–E4 method/results, C2 cost statement, adverse R4 results and latency-UNKNOWN policy, then reviewer-style threats and conclusion.
+2. Complete source-only read-only audit of actual R3j/R3k/R3l original receipts and contract-ablation study A before inserting new numeric results. Never run optional vendor tools as part of this editorial process.
+3. Choose and execute the **minimal** independently pinned Allo semantic/verification contrast, or narrow novelty claim accordingly. Keep the competitor's genuine capabilities fully acknowledged.
+4. Obtain independent paper review, licensing/IP release decision, reproducibility snapshot and final author validation; then decide submission venue. Until then **NOT SUBMISSION READY**.
+
+## External sources for the related-work audit
+
+- Allo (PLDI 2024), official paper/program: https://doi.org/10.1145/3656401 and https://github.com/cornell-zhang/allo . Its compositional schedule/source verification must be acknowledged.
+- CODO (ISCA 2026): https://doi.org/10.1109/ISCA66397.2026.00018 and https://github.com/sjtu-zhao-lab/codo-artifact . It addresses dataflow violation detection, data movement and scheduling, with published latency comparisons.
+- ST-Flow (PACT 2026): https://doi.org/10.1145/3838684.3846865 and https://github.com/UCLA-VAST/ST-Flow . It supports spatial/temporal hybrid dataflow and resource-reuse-aware exploration.
+
+All external comparisons here are **source/literature reconnaissance**; they do not replace an executed equivalent workload with matched numeric correctness and optimization/target constraints.
