@@ -34,6 +34,7 @@ include scripts/check_fpga_deployment.py
 include scripts/check_open_source_readiness.py
 include scripts/prepare_public_preview.py
 include scripts/check_public_docs.py
+include scripts/audit_source_inventory.py
 recursive-include src *.py
 
 # Deliberately NOT bundled: private/native study outputs, historical paper
