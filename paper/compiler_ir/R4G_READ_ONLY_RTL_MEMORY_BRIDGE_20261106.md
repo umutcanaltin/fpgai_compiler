@@ -1,6 +1,6 @@
 # R4g — read-only 32/6 HLS RTL memory structure bridge
 
-**Status (6 November 2026): code and source-only tests IMPLEMENTED on the existing research branch, NOT yet executed on the author's workstation.** No new native Vitis, Vivado or FPGA measurements are claimed.
+**Workstation status (6 November 2026): 20 focused R4g/R4f/R2x tests passed and the original 32/6 RTL analysis completed, with zero new vendor calls.** Results: 25 versus 24 generated RTL files, 28 versus 26 reachable module types, five memory-related module types and eight candidate memory instances in BOTH arms, one scratch module type each, three original weight ROM assets per arm, and HLS BRAM18K 13 versus 13. The scratch RAM module source SHA differs between arms while accumulator RAM module and the three ROM payloads are content-identical. The [new R4h source crosswalk](R4H_HLS_MEMORY_SOURCE_CROSSWALK_20261106.md) is committed but not yet workstation-tested. This does NOT qualify physical memory utilization.
 
 ## Starting point: original observed R4e/R4f data
 
