@@ -265,9 +265,14 @@ def main(argv=None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--study", required=True,
                         help="Immutable author-original full 54-profile E1 root")
+    parser.add_argument("--summary-only", action="store_true",
+                        help="Print overall and six subgroup statistics, omit "
+                             "54 per-profile rows from stdout; original data untouched")
     args = parser.parse_args(argv)
-    print(json.dumps(analyze(args.study), indent=2, sort_keys=True,
-                     allow_nan=False))
+    report = analyze(args.study)
+    if args.summary_only:
+        report = {k: v for k, v in report.items() if k != "per_profile"}
+    print(json.dumps(report, indent=2, sort_keys=True, allow_nan=False))
 
 
 if __name__ == "__main__":
