@@ -349,9 +349,46 @@ def _arm_observation(case: Path, *, source: dict) -> dict:
         return record
     receipt = _json(receipt_path)
     canonical = {**source["rtl_sha256"], **source["rom_sha256"]}
+    # Validate the exact vendor invocation, working directory and logs,
+    # not only a process-success Boolean in a JSON file. The generic
+    # runner writes these witnesses after each real vendor attempt.
+    script_sha = _sha(native / "run_vivado.tcl")
+    argv = receipt.get("argv")
+    exe = receipt.get("executable")
+    expected_flags = ["-mode", "batch", "-source",
+                      "run_vivado.tcl", "-notrace"]
+    invoke_ok = (
+        type(exe) is str and bool(exe)
+        and type(argv) is list and len(argv) == 6
+        and type(argv[0]) is str and bool(argv[0])
+        and argv[1:] == expected_flags
+        and Path(argv[0]).resolve() == Path(exe).resolve()
+        and receipt.get("cwd") == str(native.resolve())
+        and receipt.get("input_hashes_before_execution") ==
+            {"tcl": script_sha}
+        and receipt.get("input_hashes_after_execution") ==
+            {"tcl": script_sha}
+        and type(receipt.get("started_utc")) is str
+        and bool(receipt["started_utc"])
+        and type(receipt.get("duration_seconds")) in (int, float)
+        and isfinite(receipt["duration_seconds"])
+        and receipt["duration_seconds"] >= 0
+    )
+    logs_ok = all(
+        type(receipt.get(key)) is str
+        and _SHA_PATTERN.fullmatch(receipt[key]) is not None
+        and (native / "logs" / name).is_file()
+        and _sha(native / "logs" / name) == receipt[key]
+        for key, name in (
+            ("stdout_sha256", "vivado.stdout.log"),
+            ("stderr_sha256", "vivado.stderr.log"),
+        )
+    )
     # run_tool receipts are authoritative for original source and local
     # ROM integrity only if the exact expected hashes are present.
     valid = (
+        invoke_ok and logs_ok
+        and
         receipt.get("schema") == "fpgai-research/vendor-invocation/v1"
         and receipt.get("tool") == "vivado"
         and receipt.get("completed_successfully") is True
@@ -362,7 +399,7 @@ def _arm_observation(case: Path, *, source: dict) -> dict:
         and receipt.get("staged_rom_inputs_stable_during_execution") is True
         and receipt.get("rtl_input_sha256") == source["rtl_sha256"]
         and receipt.get("rom_input_sha256") == source["rom_sha256"]
-        and receipt.get("script_sha256") == _sha(native / "run_vivado.tcl")
+        and receipt.get("script_sha256") == script_sha
         and receipt.get("staged_rom_input_integrity_before", {}).get(
             "matches_original_roms") is True
         and receipt.get("staged_rom_input_integrity_after", {}).get(
