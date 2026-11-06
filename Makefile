@@ -106,4 +106,4 @@ research-c2-review:
 
 # Source-hash-pinned, NO new compilation or vendor calls. Never re-run the original GCC output.
 research-c1-e1-review:
-	$(PYTHON) -m fpgai_research.experiments.cst_paper_c1_original_e1_readonly_descriptives --study build/paper_c1_e1_cpp_bridge_full_20261106_01
+	$(PYTHON) -m fpgai_research.experiments.cst_paper_c1_original_e1_readonly_descriptives --study build/paper_c1_e1_cpp_bridge_full_20261106_01 --summary-only
