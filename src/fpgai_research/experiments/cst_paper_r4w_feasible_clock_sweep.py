@@ -289,6 +289,8 @@ def _case_native(case_root: Path, cfg: dict) -> dict:
     logs=native/"logs"
     if (receipt.get("schema")!="fpgai-research/vendor-invocation/v1"
             or receipt.get("tool")!="vivado"
+            or not isinstance(receipt.get("tool_version_output"),str)
+            or "2023.2" not in receipt["tool_version_output"]
             or type(exe) is not str or not exe
             or type(argv) is not list or len(argv)!=6
             or argv[1:]!=expected
