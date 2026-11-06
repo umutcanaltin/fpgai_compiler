@@ -275,7 +275,10 @@ def compare_arms(full: dict, row: dict) -> dict:
         },
     )
     result.update({
-        "status": "SOURCE_ATTESTED_STATIC_RTL_MEMORY_PAIR_NOT_ELABORATED",
+        "status": (
+            "SOURCE_ATTESTED_STATIC_RTL_SCRATCH_SITES_PAIRED_NOT_ELABORATED"
+            if pair["status"] == "SOURCE_SCRATCH_SITES_PARSED_NOT_ELABORATED"
+            else "SOURCE_ATTESTED_STATIC_RTL_SCRATCH_COMPARISON_UNKNOWN"),
         "both_RTL_SHA_attested": True,
         "ROM_content_sha_multiset_identical": (
             full["original_ROM_content_sha256_multiset"] ==
