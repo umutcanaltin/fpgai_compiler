@@ -205,3 +205,9 @@ git status --short
 | This change-impact ledger | Tracks all paths, callers and unrun tests; no duplicate experiment implementation. | Updated this commit. |
 
 **Added, deleted, renamed, moved:** none. **Original source/ROM/vendor reports/attempt locks modified:** none. **New GitHub Actions, native executions or main merge:** none. **Further gates:** full source-only regression, signed hold/constraint reports, documented DRC severity, new 2×2 controlled source variations, separate physical/board measured latency and external C1/C2 novelty evaluation.
+
+### R4k/R4o source generator dependency audit
+
+The existing `cst_r4k_matched_row_schedule_storage.py` packages both emitted storage variants with the **original `r4a.CLOCK_NS` / `r4a.UNCERTAINTY_NS`**, and `cst_r4o_matched_vivado_ooc_prepare.py` fixes its historical OOC `CLOCK_NS=12.0`. `toolchains/vitis_hls/package.py` does support explicit package clock parameters, but no verified 24ns DSP-pipeline source generator exists yet. Existing row and full HLS source emitters certify source-event order/scratch edits, NOT hardware DSP pipeline behavior. Correct path is separate create-only 24ns source packages with a deliberate verified pipeline knob, new E2/E3 and fresh E4 receipts; never patch frozen R4k/R4o or infer HLS cycle compatibility from a relaxed Vivado clock.
+
+These are **read-only code inspection findings**, not original experiment observations. Only `paper/compiler_ir/R4W_VALID_HARDWARE_CLOCK_AND_LATENCY_PROTOCOL_20261106.md` and this maintainer ledger changed in this small follow-up; **no source, test, native output, or lock** was altered.
