@@ -47,9 +47,14 @@ SMALL = (
 )
 MEDIUM = (
     (2, (16, 4, 16, 8), "mixed"),
-    (4, (32, 4, 32, 8), "mixed"),
+    (4, (16, 4, 16, 4), "mixed"),
 )
 CASES = SMALL + MEDIUM
+
+# IMPORTANT: the canonical R2f fixture and fanout contract admit each
+# static dimension only in [1, 16]. Expanding that domain requires
+# its own model/contract/verification study, not a silent benchmark edit.
+# The four-reader large case was corrected before any original R4a run.
 
 
 def _git_revision() -> str:
