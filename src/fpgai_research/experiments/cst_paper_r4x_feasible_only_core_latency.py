@@ -82,6 +82,43 @@ def qualify(hls: dict, physical: dict) -> dict:
         both=all(c.get("strict_clean_OOC_qualified") is True for c in candidate)
         if p.get("strict_physical_pair_qualified") is not both:
             raise ValueError("R4x native clock qualification and paired flag differ")
+        # Secondary diagnostic sensitivity: recognized DSP/route warnings do
+        # NOT provide clean-DRC E4 signoff, valid-design comparison, or
+        # physically measured latency. R4w owns source and report SHA checks.
+        advisory=all(c.get("advisory_only_timing_met_not_strict") is True
+                     for c in candidate)
+        flag=p.get("both_timing_met_with_narrow_known_DSP_advisories_not_strict",False)
+        if flag is not advisory:
+            raise ValueError("R4x advisory pair flag and audited cases disagree")
+        if advisory:
+            if (physical.get("native_attempt_lock_verified") is not True
+                    or p.get("both_timing_met") is not True
+                    or p.get("both_clean_drc") is not False
+                    or p.get("two_arms_same_period") is not True
+                    or both):
+                raise ValueError("R4x advisory diagnostic needs a locked matched pair")
+            for arm,c in zip(ARMS,candidate):
+                rs=c.get("resources")
+                if (c.get("arm")!=arm or c.get("period_ns")!=period
+                        or c.get("tool_invocation_attested") is not True
+                        or c.get("routed_complete") is not True
+                        or c.get("timing_met") is not True
+                        or c.get("drc_clean") is not False
+                        or c.get("strict_clean_OOC_qualified") is not False
+                        or c.get("status")!=
+                          "TIMING_MET_RECOGNIZED_DSP_ADVISORIES_NOT_STRICT_OR_BOARD"
+                        or c.get("advisory_observation_reason")!=
+                          "SOURCE_ATTESTED_ROUTED_TIMING_MET_WITH_RECOGNIZED_ADVISORIES"
+                        or c.get("board_qualified") is not False
+                        or type(c.get("drc_violations")) is not int
+                        or c["drc_violations"]<1
+                        or type(c.get("wns_ns")) not in (float,int)
+                        or not isfinite(c["wns_ns"]) or c["wns_ns"]<0
+                        or not isinstance(rs,dict)
+                        or any(type(rs.get(k)) not in (float,int)
+                               or not isfinite(rs[k]) or rs[k]<0
+                               for k in r4w.RESOURCE)):
+                    raise ValueError("R4x advisory diagnostic lacks attested timing/DRC/resources")
         # Never accept any one-arm routing/DRC result as a feasible pair.
         if both:
             for a,c in zip(ARMS,candidate):
@@ -105,7 +142,21 @@ def qualify(hls: dict, physical: dict) -> dict:
             a:round(cycles[a]*period,6) if both else None
             for a in ARMS
         }
+        # A conditional HLS cycle-count x requested-period SENSITIVITY,
+        # NOT accepted latency. Strict quantities remain null for warnings.
+        advisory_proxy=(
+            {arm:round(cycles[arm]*period,6) for arm in ARMS}
+            if advisory else None)
         comparisons.append({
+            "advisory_only_pair_not_strict":advisory,
+            "advisory_only_HLS_cycle_period_sensitivity_ns_NOT_latency":advisory_proxy,
+            "advisory_only_row_minus_full_sensitivity_ns":(
+                round(advisory_proxy["row_storage"]-
+                      advisory_proxy["full_storage"],6)
+                if advisory else None),
+            "advisory_only_routed_resources_descriptive":(
+                {arm:c["resources"] for arm,c in zip(ARMS,candidate)}
+                if advisory else None),
             "clock_period_ns":period,
             "qualified_both_arms":both,
             "full_arm_status":case_full.get("status"),
@@ -139,6 +190,8 @@ def qualify(hls: dict, physical: dict) -> dict:
         "original_source_revision":hls["source_revision"],
         "predeclared_clock_candidates":list(r4w.PERIODS_NS),
         "qualified_paired_clocks":accepted,
+        "advisory_only_paired_clocks_NOT_strict":sum(
+            c["advisory_only_pair_not_strict"] for c in comparisons),
         "original_HLS_worst_cycles_by_arm":cycles,
         "comparisons_including_failures":comparisons,
         "fastest_predeclared_joint_qualified_clock_ns":(
@@ -157,6 +210,7 @@ def qualify(hls: dict, physical: dict) -> dict:
             "cycles times feasible imposed clock is an E3-derived core schedule estimate, NOT measured latency",
             "Real core latency, initiation interval, end-to-end DMA time and board throughput are UNKNOWN",
             "OOC clock feasibility does not establish complete board bitstream validation",
+            "Advisory-only clock sensitivity is E3 cycles times requested period, NOT clean DRC E4, measured FPGA inference latency, or a DRC waiver",
             "Even a qualified clock/slot contrast is one graph, precision, part and placement result",
         ],
     }

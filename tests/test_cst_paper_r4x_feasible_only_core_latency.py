@@ -168,3 +168,105 @@ def test_run_uses_original_qualified_E3_and_new_native_audits(monkeypatch):
     assert len(seen)==2
     assert seen[0][1]["study"]=="/r4k"
     assert seen[1][1]["study"]=="/new"
+
+
+def _mark_advisory_pair(sweep,period):
+    """Synthetic warning-only fixtures, not actual vendor measurements."""
+    sweep["native_attempt_lock_verified"]=True
+    for arm in sut.ARMS:
+        case=sweep["cases"][sut.r4w._case(arm,period)]
+        case.update({
+            "status":"TIMING_MET_RECOGNIZED_DSP_ADVISORIES_NOT_STRICT_OR_BOARD",
+            "routed_complete":True,"timing_met":True,"drc_clean":False,
+            "strict_clean_OOC_qualified":False,
+            "advisory_only_timing_met_not_strict":True,
+            "advisory_observation_reason":
+                "SOURCE_ATTESTED_ROUTED_TIMING_MET_WITH_RECOGNIZED_ADVISORIES",
+            "wns_ns":0.433 if arm=="full_storage" else 0.538,
+            "drc_violations":74 if arm=="full_storage" else 71,
+        })
+    pair=next(p for p in sweep["paired_periods"]
+              if p["clock_period_ns"]==period)
+    pair.update({
+        "two_arms_same_period":True,"both_timing_met":True,
+        "both_clean_drc":False,
+        "both_timing_met_with_narrow_known_DSP_advisories_not_strict":True,
+        "strict_physical_pair_qualified":False,
+    })
+
+
+def test_advisory_only_20_24_ns_is_conditional_not_qualified_latency():
+    hls,sweep=_fake()
+    _mark_advisory_pair(sweep,20.0)
+    _mark_advisory_pair(sweep,24.0)
+    prior=deepcopy((hls,sweep))
+    out=sut.qualify(hls,sweep)
+    assert (hls,sweep)==prior
+    assert out["qualified_paired_clocks"]==0
+    assert out["advisory_only_paired_clocks_NOT_strict"]==2
+    assert out["fastest_predeclared_joint_qualified_clock_ns"] is None
+    assert out["status"]=="NO_JOINTLY_QUALIFIED_PAIR_NO_HARDWARE_LATENCY_COMPARISON"
+    rows=out["comparisons_including_failures"]
+    assert rows[0]["advisory_only_HLS_cycle_period_sensitivity_ns_NOT_latency"] is None
+    for period,row in ((20,rows[1]),(24,rows[2])):
+        assert row["advisory_only_pair_not_strict"]
+        assert row["advisory_only_HLS_cycle_period_sensitivity_ns_NOT_latency"]=={
+            "full_storage":22954*period,"row_storage":22602*period,
+        }
+        assert row["advisory_only_row_minus_full_sensitivity_ns"]==-352*period
+        assert row["advisory_only_routed_resources_descriptive"]["full_storage"]["bram"]==7
+        assert row["advisory_only_routed_resources_descriptive"]["row_storage"]["bram"]==4
+        assert row["qualified_both_arms"] is False
+        assert row["row_minus_full_core_latency_estimate_ns"] is None
+        assert row["real_measured_core_latency_ns"] is None
+        assert row["real_measured_end_to_end_board_latency_ns"] is None
+
+
+@pytest.mark.parametrize("fault",[
+    "lock","pair_flag","negative_wns","zero_drc","wrong_reason",
+    "missing_dsp","fake_clean","board","invalid_status",
+])
+def test_advisory_sensitivity_rejects_invalid_evidence(fault):
+    hls,sweep=_fake()
+    _mark_advisory_pair(sweep,20.0)
+    row=sweep["cases"][sut.r4w._case("row_storage",20.0)]
+    pair=sweep["paired_periods"][1]
+    if fault=="lock":
+        sweep["native_attempt_lock_verified"]=False
+    elif fault=="pair_flag":
+        pair["both_timing_met_with_narrow_known_DSP_advisories_not_strict"]=False
+    elif fault=="negative_wns":
+        row["wns_ns"]=-0.1
+    elif fault=="zero_drc":
+        row["drc_violations"]=0
+    elif fault=="wrong_reason":
+        row["advisory_observation_reason"]="UNKNOWN"
+    elif fault=="missing_dsp":
+        row["resources"]["dsp"]=None
+    elif fault=="fake_clean":
+        row["drc_clean"]=True
+    elif fault=="board":
+        row["board_qualified"]=True
+    elif fault=="invalid_status":
+        row["status"]="QUALIFIED_TIMING_CLEAN_DRC_ROUTED_OOC_NOT_BOARD"
+    with pytest.raises(ValueError,match="R4x advisory"):
+        sut.qualify(hls,sweep)
+
+
+def test_one_arm_advisory_without_timing_met_partner_stays_null():
+    hls,sweep=_fake()
+    _mark_advisory_pair(sweep,20.0)
+    row=sweep["cases"][sut.r4w._case("row_storage",20.0)]
+    row.update({
+        "status":"NONQUALIFIED_TIMING_DRC_OR_RESOURCES",
+        "timing_met":False,"wns_ns":-0.5,
+        "advisory_only_timing_met_not_strict":False,
+        "advisory_observation_reason":"TIMING_NOT_MET",
+    })
+    sweep["paired_periods"][1]["both_timing_met"]=False
+    sweep["paired_periods"][1][
+        "both_timing_met_with_narrow_known_DSP_advisories_not_strict"]=False
+    out=sut.qualify(hls,sweep)
+    assert out["advisory_only_paired_clocks_NOT_strict"]==0
+    assert out["comparisons_including_failures"][1][
+        "advisory_only_HLS_cycle_period_sensitivity_ns_NOT_latency"] is None
