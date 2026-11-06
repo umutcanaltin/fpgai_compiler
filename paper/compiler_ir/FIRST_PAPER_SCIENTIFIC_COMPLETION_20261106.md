@@ -88,3 +88,20 @@ Record the exact Git SHA and preserve raw outputs in new create-only directories
 7. Assemble a rights-cleared replication artifact and revise the manuscript using only attested outcomes; obtain independent scientific review and author approval.
 
 **First-paper submission remains blocked** until the verified distinctive mechanism and independent external comparison justify the claims. Completing an engineering sprint or writing a stronger abstract does not itself close this scientific gate.
+
+## Paper evaluation contract: latency, not only cycle count (6 November 2026)
+
+**Primary hardware research question:** Does the compiler expose meaningful, semantics-preserving resource/performance trade-offs (BRAM, DSP, LUT, FF, feasible timing, *actual compute latency*, throughput, and system latency) rather than merely lowering synthesis cycle counts or a single resource metric? Keep C1 semantic correctness and C2 structured decision validity as the central contributions. The R4 memory studies are supportive evidence, not the entire first paper.
+
+**Required measures, never interchangeable:**
+
+- `cycles`: measured or HLS-estimated cycles per fixed workload and input shape, with original tool, source, graph and scheduling assumptions and E-level qualification recorded. Cycles alone are NOT wall-clock performance.
+- `period_ns`: a **timing-qualified feasible physical clock period** on the same part with the same OOC constraints and implementation reporting protocol; do not substitute a nominal requested target for a failing routed timing result.
+- `compute_latency_ns = cycles_per_inference * feasible_period_ns` for a fixed-clock sequential measurement at that exact cycle definition; pipelined or data-dependent models must report first-output latency and initiation interval separately. Qualify the cycle count and feasible period under **compatible implementation semantics**; do not silently multiply HLS estimate cycles from one design by an unrelated routed clock bound from another.
+- `throughput`: at steady state, use actual results per second (or qualified initiation interval, batch size and frequency), not `1/first-output-latency` when overlap, parallelism or streaming exist.
+- `end_to_end_latency`: latency from accepted input to available output including DMA/DDR transfers, buffering, host-device and boundary synchronization/CDC where relevant. **OOC results do not measure board or system I/O latency**; keep this UNKNOWN until board-qualified measurement.
+- `WNS_ns`: routed worst negative slack indicates whether a requested timing constraint is met. It is **not a cycle count, measured clock period, achieved Fmax, or inference latency**. Negative WNS is a timing failure at the requested period. A rough `target - WNS` calculation is not qualified timing closure and must never be labeled achieved Fmax or measured latency.
+
+**Observed original 32/6 full/row comparison:** original source/ROM-and-report-attested Vivado OOC mapping reports BRAM **7→4**, DSP **24→21**, LUT **1282→1710**, FF **883→1022**, and routed WNS **−2.170→−3.718 ns** at **12ns requested clock**. Both are timing failing and DRC nonclean. These are descriptive physical mapping observations; **neither actual physical inference latency nor board end-to-end latency was measured or qualified**. Earlier HLS cycles and original HLS BRAM estimates cannot be turned into physical runtime using the failed 12ns target.
+
+**Paper decision criterion:** never call one configuration 'faster' or 'better overall' merely from BRAM savings, cycle reduction, WNS alone, or HLS estimates. Show a multiobjective Pareto comparison over (BRAM, DSP, LUT, FF, **feasible latency**, throughput, power where qualified), with correctness, hardware qualification, and constraints as explicit gates. Missing latency/throughput must remain `UNKNOWN`; report negative trade-offs as prominently as positive ones. A future clock-closure or latency experiment is only warranted if the paper-completion evidence audit shows it is necessary; do **not** automatically launch another R4 series.
