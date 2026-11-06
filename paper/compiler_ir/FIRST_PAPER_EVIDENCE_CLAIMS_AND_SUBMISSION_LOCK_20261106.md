@@ -144,7 +144,7 @@ PY
 
 **Novelty is not solved by adding tests.** Allo already has source/schedule equivalence and memory customizations; CODO checks dataflow violations and performance-aware resource use; ST-Flow provides spatial-temporal hardware mapping. The paper remains MAJOR REVISION until a matched supported external baseline has been executed and the precise residual contribution independently assessed. No new native Vitis/Vivado calls or training.
 
-## Next P0 source refinement gate — new E1 generated GCC bridge, NOT YET RUN
+## Next P0 source refinement gate — 2 original E1 GCC smoke profiles VERIFIED; full 54-profile bridge pending
 
 Existing generated C++/shadow-memory research is not being ignored: original separate R2r ran 6/6 GCC source baselines and rejected all 216/216 selected source C++ mutants under its bounded fanout model, but it did not cover the newer seeded C1 54-profile cohort or arbitrary RTL. A new source-locked `cst_paper_c1_heldout_cpp_bridge` experiment is implemented to connect all 54 original C1 E0 canonical event hashes to actual independent real-GCC execution of **disjoint** and **per_element_optimal** HLS C++ sources, with actual scratch address witnesses and intermediate/final NumPy numeric checks. It fails closed on E0 hash drift, stale original report digest, dirty tracked checkout, source/architecture identity mismatch and numerical/scratch access failures. If all profiles qualify, the matched denominator is **54 profiles × 2 source layouts = 108 actual GCC runs**. This is a NEW study, on a NEW source revision, not a rewriting of the original E0 result and not a hardware E4 measurement.
 
