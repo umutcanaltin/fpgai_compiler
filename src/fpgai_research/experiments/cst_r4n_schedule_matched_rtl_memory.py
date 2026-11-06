@@ -237,13 +237,20 @@ def inspect_arm(pkg: Path, native: dict) -> dict:
 def compare_arms(full: dict, row: dict) -> dict:
     if full.get("arm") != "full_storage" or row.get("arm") != "row_storage":
         raise ValueError("R4n storage pair order/membership invalid")
+    rtl_attested = all(
+        (o.get("rtl_source_receipt") or {}).get("status") ==
+            "ATTESTED_STATIC_TYPE_GRAPH_ONLY"
+        for o in (full, row))
     known = all(
         o["status"] == "ATTESTED_STATIC_SOURCE_AND_MEMORY_SITES_NOT_ELABORATED"
         for o in (full, row))
     result = {
         "status": "UNKNOWN_INCOMPLETE_OR_UNSUPPORTED_RTL_MEMORY_SITES",
-        "both_RTL_SHA_attested": known,
-        "ROM_content_sha_multiset_identical": None,
+        "both_RTL_SHA_attested": rtl_attested,
+        "ROM_content_sha_multiset_identical": (
+            full["original_ROM_content_sha256_multiset"] ==
+            row["original_ROM_content_sha256_multiset"]
+            if rtl_attested else None),
         "scratch_source_parameter_sites": None,
         "scratch_source_depth_delta_row_minus_full": None,
         "HLS_estimated_BRAM18K_delta_row_minus_full": (
