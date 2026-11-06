@@ -1,6 +1,6 @@
 # R4o source-pinned, schedule-matched Vivado OOC preparation — 6 November 2026
 
-**Status:** R4n original workstation evidence **VERIFIED**; R4o code/tests/physical package preparation **COMMITTED, NOT YET WORKSTATION-TESTED**. R4o does not run Vivado. Do not reexecute the already completed original R4l Vitis 2023.2 arms. Keep all R4a/R4d/R4k/R4l source+native results immutable.
+**Status:** R4n original workstation evidence **VERIFIED**; R4o code, tests and source-only OOC packages are **WORKSTATION VERIFIED**: 26/26 focused tests passed, and the author's new create-only `build/r4o_matched_vivado_ooc_prepare_20261106_01` study returned `SOURCE_ONLY_VIVADO_OOC_PREPARED_NOT_EXECUTED` with 24 original SHA-pinned RTL files and 3 ROM payloads per arm, identical target/clock/uncertainty and zero native Vivado calls. The [R4p native follow-on gate](R4P_MATCHED_VIVADO_OOC_NATIVE_GATE_20261106.md) is committed but NOT YET workstation-tested. R4o does not run Vivado. Do not reexecute the already completed original R4l Vitis 2023.2 arms. Keep all R4a/R4d/R4k/R4l source+native results immutable.
 
 ## Verified R4n source result motivating physical study
 
