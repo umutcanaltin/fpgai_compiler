@@ -163,6 +163,15 @@ def _original(*, r4k_study: str | Path,
             or audit.get("new_vendor_calls_during_read_only_audit") != 0
             or audit.get("original_sources_modified") is not False):
         raise ValueError("R4y original frozen source/E2/E3 preflight rejected")
+    originals = audit.get("package_hashes")
+    known = r4k.plan()
+    if (not isinstance(originals, dict)
+            or any(not isinstance(originals.get(storage), dict)
+                   or originals[storage].get("model.cpp") != known[key]
+                   for storage, key in (
+                       ("full_storage", "source_full_storage_sha256"),
+                       ("row_storage", "source_row_original_sha256")))):
+        raise ValueError("R4y frozen package source SHAs differ from canonical emitters")
     return audit
 
 
@@ -270,10 +279,15 @@ def audit(*, study: str | Path, r4k_study: str | Path,
                 or _sha(b.read_bytes()) != expected["sources_sha256"][case]
                 or a.read_text() != emission[case].cpp):
             raise ValueError("R4y source or package model drift")
+        pkgdir = folder / "vitis_source"
+        if pkgdir.is_symlink() or not pkgdir.is_dir():
+            raise ValueError("R4y HLS package folder missing/symlink")
         manifest = _read(folder / "source_manifest.json")
-        package = _read(folder / "vitis_source" / "manifest.json")
+        package = _read(pkgdir / "manifest.json")
         if (manifest != emission[case].manifest
                 or package.get("source_cpp_sha256") != expected["sources_sha256"][case]
+                or package.get("part") != PART
+                or package.get("numeric_format") not in (None, list(r4k.FORMAT))
                 or package.get("clock_ns") != CLOCK_NS
                 or package.get("explicit_clock_uncertainty_ns") != UNCERTAINTY_NS
                 or package.get("testbench_sha256") != summary["shared_testbench_sha256"]):

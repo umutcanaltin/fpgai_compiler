@@ -13,7 +13,14 @@ from fpgai_research.experiments import (
 
 
 def _original_good():
+    known = sut.r4k.plan()
     return {
+        "package_hashes": {
+            "full_storage": {
+                "model.cpp": known["source_full_storage_sha256"]},
+            "row_storage": {
+                "model.cpp": known["source_row_original_sha256"]},
+        },
         "source_only_E1_verified": True,
         "E1_matched_pair_accepted": True,
         "both_E2_qualified": True,
@@ -154,3 +161,25 @@ def test_plan_and_audit_only_never_call_vendor(originals, tmp_path, monkeypatch)
     sut.prepare(output=dest, **originals)
     assert sut.audit(study=dest, **originals)[
         "new_vendor_calls_during_audit"] == 0
+
+
+def test_original_source_revision_not_enough_if_cpp_sha_mismatches(
+        originals, tmp_path, monkeypatch):
+    wrong = _original_good()
+    wrong["package_hashes"]["row_storage"]["model.cpp"] = "0" * 64
+    monkeypatch.setattr(sut.r4l, "audit_native", lambda **_: wrong)
+    output = tmp_path / "should_not_exist"
+    with pytest.raises(ValueError, match="source SHAs"):
+        sut.prepare(output=output, **originals)
+    assert not output.exists()
+
+
+def test_symlinked_package_directory_rejected(originals, tmp_path):
+    output = tmp_path / "prepared"
+    sut.prepare(output=output, **originals)
+    pkg = output / "row_storage__baseline" / "vitis_source"
+    moved = output / "symlink_target"
+    pkg.rename(moved)
+    pkg.symlink_to(moved, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink"):
+        sut.audit(study=output, **originals)
