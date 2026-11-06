@@ -1,3 +1,9 @@
+## 6 November 2026 — verified six-clock audit and non-promoting advisory sensitivity
+
+- The author pulled revision `5bbea74`, passed **32/32** focused R4w/R4x/R4v tests and independently audited the six already executed source/RTL/ROM-attested Vivado routes. Full/row WNS pairs: **+0.241/−0.975ns** at 16ns, **+0.433/+0.538ns** at 20ns, **+1.249/+2.555ns** at 24ns. The earlier generated-sidecar audit blockage is resolved. Nonzero recognized DRC findings **74/71** prevent every strict clean-DRC matched pair; core and board latency remain unknown.
+- The existing R4x *strict* eligibility and measured-latency NULLs are unchanged. Extended its source-only JSON report with a separate, explicitly non-promoting **advisory-only HLS cycles × requested timing-met period** sensitivity and descriptive mapped resources, guarded by original attempt lock, timing/DRC/status and resource invariants. Added 20/24ns positive fixtures and tampered-source/DRC negative tests, not yet independently tested on the author's workstation.
+- Reconciled the active manuscript, public research status, R4w method and change-impact ledger with actual original author results. **No new vendor runs, no workflow, no original output mutations, no draft PR merge.**
+
 ## 6 November 2026 — original six Vivado runs, auditable source sidecar repair
 
 - Author original 54-profile E1 read-only analysis completed after **40/40 targeted tests passed**: **median 15.5 saved source scratch slots**, **50% median per-profile reduction**, per-profile savings 4–45 slots and 38.461538–55.555556%, maximum final/intermediate absolute numerical errors 2.3781921365539915e-7 / 2.408715820134688e-7, **271 original artifacts**; zero new compiler/GCC/vendor calls during the analysis. Aggregate 1999 vs 1009 source slots are across **distinct** generated programs, never a BRAM observation.

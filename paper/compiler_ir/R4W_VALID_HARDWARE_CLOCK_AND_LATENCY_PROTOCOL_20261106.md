@@ -1,6 +1,6 @@
 # Timing-qualified matched hardware designs and real inference latency: R4w/R4x
 
-**6 November 2026 | ORIGINAL SIX NEW VIVADO NATIVE PROCESSES NOW COMPLETED (exit 0); physical WNS/DRC audit still blocked and NONE has been declared timing-qualified.** The following preregistration remains as historical method; the timestamped author postrun checkpoint at the end of this document governs current results. Scientific goal: compare real hardware behavior **only for valid designs**. Original after-Vitis/after-Vivado R4 observations are descriptive because both 12ns routed arms have negative WNS; no physical latency or throughput winner can be inferred from them. See [R4v stage table](R4V_VITIS_VIVADO_STAGE_PARETO_AND_REAL_LATENCY_GATE_20261106.md).
+**6 November 2026 | All six new Vivado runs completed; author then passed 32 focused tests and verified all six source-attested WNS/DRC reports. ZERO jointly strict clean-DRC OOC pairs, ZERO measured board latency.** The following preregistration remains as historical method; the timestamped author postrun checkpoint at the end of this document governs current results. Scientific goal: compare real hardware behavior **only for valid designs**. Original after-Vitis/after-Vivado R4 observations are descriptive because both 12ns routed arms have negative WNS; no physical latency or throughput winner can be inferred from them. See [R4v stage table](R4V_VITIS_VIVADO_STAGE_PARETO_AND_REAL_LATENCY_GATE_20261106.md).
 
 ## 1. Three different performance quantities MUST be separated
 
@@ -131,3 +131,28 @@ The existing source compiler, R4k emitters, frozen R4l/HLS source files, R4p ori
 **New audit-only fix, not yet workstation tested:** Vivado's generated Tcl explicitly `cd`'s into the new `vivado/rtl` working directory. The old `audit_prepared` accepted no additional post-run artifacts there; normal `.Xil` and journal/usage files therefore can block analysis despite intact original RTL/ROM SHA. `src/fpgai_research/experiments/cst_paper_r4w_feasible_clock_sweep.py` now permits **non-source sidecars only inside the native Vivado working directory after a valid immutable one-time native-attempt lock**, while preserving SHA-verification of the complete original staged RTL/ROM/Tcl and original full manifest. New HDL/ROM/constraints/IP files, symlinked entries, extra source files in canonical HLS RTL, missing original file, or invalid lock still fail. Added four targeted synthetic regression tests. The actual *names* of the author's generated sidecars have not been independently listed; this patch addresses the observed postrun class and needs the author's `pytest` and read-only audits to confirm.
 
 **Do NOT rerun Vivado or delete the R4w one-time attempt lock.** Only rerun the new tests, `make research-r4w-audit`, and `make research-r4x-feasible-latency` after pulling. If any postrun SHA/tool receipt or new Vivado DRC fails, report `UNKNOWN`/unqualified with the exact failing gate, preserve all six original new outputs and follow the separate storage×DSP-pipeline E2/E3/E4 study plan. No clock/time/board latency winner has been observed yet. GPU/GCC source slot percentages are not physical FPGA BRAM percentages.
+
+## Post-run read-only scientific checkpoint — 6 November 2026
+
+The author pulled revision `5bbea74`, passed **32/32 focused** R4w/R4x/R4v regression tests, and ran `make research-r4w-audit` and `make research-r4x-feasible-latency`. The first confirmed **six routed source-attested cases** and the original permanent native attempt lock, with **no new vendor executions during audit**. The earlier non-design work-directory sidecar blocker is resolved.
+
+| Original requested clock | Full routed WNS | Row routed WNS | Both timing-met? | Strict clean-DRC pair? |
+|---|---:|---:|---|---|
+| 16 ns | +0.241 ns | −0.975 ns | No | No |
+| 20 ns | +0.433 ns | +0.538 ns | Yes | No |
+| 24 ns | +1.249 ns | +2.555 ns | Yes | No |
+
+Full storage has **74** and row storage **71** source-attested, recognized warning-only DRC findings per clock. The native classifier allows a separate observation label for these DSP-pipelining and no-routable-load advisories; it does **not** waive them. Strict pair count is **zero** and strict or actual hardware latency remains **NULL**.
+
+### Non-promoting advisory-only HLS schedule × requested clock sensitivity
+
+The new R4x analyzer reports a **separate, explicitly non-strict diagnostic** only when both arms meet routed timing at an identical predeclared clock and both match the existing narrow DSP advisory classifier, original native attempt lock, unmodified SHA-attested source/report evidence and valid resources. It does NOT relax the strict gate, claim actual RTL execution cycles, or calculate measured board latency. Original HLS worst-case cycle estimates are full **22,954**, row **22,602**.
+
+| Common timing-met clock with nonzero warning-only DRC | Full: HLS cycles × requested period | Row: HLS cycles × requested period | Row − full |
+|---|---:|---:|---:|
+| 20 ns | 459.080 µs | 452.040 µs | −7.040 µs |
+| 24 ns | 550.896 µs | 542.448 µs | −8.448 µs |
+
+These results are **arithmetical sensitivity estimates, NOT verified core/FPGA latency or hardware speedups**. The 16 ns case cannot be fairly paired because row storage fails timing. Routed descriptive resources are **full: BRAM 7 / DSP 24 / LUT 1283 / FF 883** and **row: BRAM 4 / DSP 21 / LUT 1709 / FF 1022**; reduced BRAM/DSP is accompanied by increased LUT/FF. No strict timing-and-clean-DRC Pareto winner has been established.
+
+**Next independent physical study, only if a hardware performance claim is essential:** preregister a NEW 2×2 full/row storage × original/DSP-pipelined source experiment, new source and vendor receipts, preserved original locks, E2 numerical oracle, E3 schedule and II measurements, E4 matched timing/DRC plus verified board core and DMA latency. Do not re-execute original R4w, alter original DCPs or infer board output time from WNS. The existing GitHub R4x extension and new synthetic tests remain pending the author's local execution; the earlier 32-pass result predates those changes.
