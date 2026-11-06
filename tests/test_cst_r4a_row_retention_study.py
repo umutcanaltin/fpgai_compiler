@@ -23,6 +23,13 @@ def test_prospective_population_and_vendor_free_plan():
     assert quick["native_vendor_calls"] == 0
     assert paper["HLS_package_only"] is True
     assert len(set((r, tuple(shape), p) for r, shape, p in sut.CASES)) == 5
+    # No prospective case may leave the currently certified R2f domain.
+    assert all(2 <= r <= 4 and all(1 <= d <= 16 for d in shape)
+               for r, shape, _ in sut.CASES)
+    assert sut.MEDIUM == (
+        (2, (16, 4, 16, 8), "mixed"),
+        (4, (16, 4, 16, 4), "mixed"),
+    )
     assert sut.PART == "xck26-sfvc784-2LV-c"
     assert sut.CLOCK_NS > sut.UNCERTAINTY_NS > 0
     with pytest.raises(ValueError):
@@ -84,3 +91,8 @@ def test_report_wont_impute_hardware_from_source_data():
     assert report["source_conformance"] == "E1_HOST_GCC_FLOAT32"
     assert report["HLS_package_only"] is True
     assert report["native_vendor_calls"] == 0
+
+
+def test_out_of_scope_32_element_dimension_rejected_without_widening_contract():
+    with pytest.raises(ValueError, match="2..4-reader small fanout"):
+        sut._case((4, (32, 4, 32, 8), "mixed"))
