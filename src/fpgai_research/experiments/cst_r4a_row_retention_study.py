@@ -73,10 +73,16 @@ def _git_revision() -> str:
     return rev
 
 
-def _case(config):
+def _case(config, *, precision_bits: int = 16, integer_bits: int = 6):
+    """Canonical R4a graph/mapping; optional format for NEW source-pinned studies.
+
+    Historical R4a callers retain the exact 16/6 behavior and source output.
+    The shared architecture resolver remains the authority on supported widths.
+    """
     readers, (m, k, n, q), policy = config
     model = sample_fanout(readers, m=m, k=k, n=n, q=q)
-    default = ArchitectureRequest()
+    default = ArchitectureRequest(
+        precision_bits=precision_bits, integer_bits=integer_bits)
     kwargs = {}
     if policy == "mixed":
         kwargs["reader0"] = replace(default, pes=2)
