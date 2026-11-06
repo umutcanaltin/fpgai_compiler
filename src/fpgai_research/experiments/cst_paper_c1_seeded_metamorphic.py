@@ -283,12 +283,35 @@ def main(argv=None):
     if args.study:
         result = audit(args.study)
     else:
+        destination = Path(args.output)
+        if destination.exists() or destination.is_symlink():
+            raise FileExistsError("C1 heldout output already exists; original immutable")
+        revision = _git_revision()
         kwargs = {"seeds": (111,), "shapes_per_group": 1} if args.quick else {}
-        report = run(**kwargs)
-        create_only(report, output=args.output,
-                    source_revision=_git_revision())
+        try:
+            report = run(**kwargs)
+            create_only(report, output=destination, source_revision=revision)
+        except Exception as exc:
+            # Record a failed science run; don't silently discard it and
+            # do not overwrite a success or another investigator's attempt.
+            if not destination.exists() and not destination.is_symlink():
+                destination.mkdir(parents=True, exist_ok=False)
+            if not (destination / "report.json").exists():
+                failure = {
+                    "schema": SCHEMA + "/failed-source-attempt",
+                    "experiment_source_revision": revision,
+                    "quick_smoke_only": args.quick,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:4000],
+                    "native_vivado_calls": 0,
+                    "native_vitis_calls": 0,
+                    "scientific_status": "FAILED_PRESERVE_COUNTEREXAMPLE",
+                }
+                (destination / "FAILED.json").write_text(
+                    json.dumps(failure, indent=2, sort_keys=True) + "\n")
+            raise
         result = {
-            "schema": SCHEMA, "source_revision": _git_revision(),
+            "schema": SCHEMA, "source_revision": revision,
             "profiles": report["profiles"], "traces": report["traces"],
             "oracle_disagreements": 0, "new_vendor_calls": 0,
             "hardware_latency": None, "output": args.output,
