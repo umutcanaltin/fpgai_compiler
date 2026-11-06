@@ -1,6 +1,6 @@
 # R4g workstation results and R4h static memory source crosswalk
 
-6 November 2026. **R4g and R4h observed on the author's workstation.** R4h passed 19 focused tests and completed one original 32/6 named source crosswalk with zero native calls. It found source-module parameter defaults for scratch (32×214 full H vs 32×134 row H), accumulator (32×256 both), and three matching weight ROMs. The new [R4i module-default dimension audit](R4I_ORIGINAL_RTL_MEMORY_PARAMETER_DEFAULTS_20261106.md) is committed but not yet workstation-tested. These default literals do NOT prove elaborated RAM depth or mapped physical BRAM. All original studies and native cases remain unchanged.
+6 November 2026. **R4g and R4h observed on the author's workstation.** R4h passed 19 focused tests and completed one original 32/6 named source crosswalk with zero native calls. It found source-module parameter defaults for scratch (32×214 full H vs 32×134 row H), accumulator (32×256 both), and three matching weight ROMs. The [R4i module-default dimension audit](R4I_ORIGINAL_RTL_MEMORY_PARAMETER_DEFAULTS_20261106.md) has now passed 24 workstation tests and reports 214→134 module defaults with no native calls. The [R4j instance source-site audit](R4J_ORIGINAL_RTL_MEMORY_INSTANCE_SOURCE_SITES_20261106.md) is now implemented but not yet workstation-tested. These default literals do NOT prove elaborated RAM depth or mapped physical BRAM. All original studies and native cases remain unchanged.
 
 ## R4g observed evidence, not a new vendor execution
 
