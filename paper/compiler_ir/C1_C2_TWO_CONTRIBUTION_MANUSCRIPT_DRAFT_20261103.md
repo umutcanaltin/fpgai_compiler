@@ -107,7 +107,7 @@ The new C2 `CompiledActionCatalog` preserves each **original, typed, source-veri
 
 Source and native original measurements use explicit Git source revisions, original generated-source SHA, input checks and independent audit receipts. R3d/R3e/R3f create only new output folders and never overwrite the earlier frozen studies. Proposed CPU experiments require a clean tracked source checkout. Host source validation, native HLS and physical placement/routing are separate phases.
 
-All campaigns preserve the exact denominators and every negative result. The planned R3e finite oracle is an independent brute-force reference for unit slots under fixed source order; it is not a foreign compiler baseline. The R3d manually specified six expected statuses are not an exhaustive independent semantic oracle. Future completion requires cross-artifact capability tests and a larger domain-specific action-space sweep to establish generalizability.
+All campaigns preserve the exact denominators and every negative result. The **workstation-verified R3e** finite oracle is an independent brute-force reference for unit slots under fixed source order; it is not a foreign compiler baseline. The R3d manually specified six expected statuses are not an exhaustive independent semantic oracle. Future completion requires cross-artifact capability tests and a larger domain-specific action-space sweep to establish generalizability.
 
 ### 5.1 Evidence tiers and meaningful latency
 
