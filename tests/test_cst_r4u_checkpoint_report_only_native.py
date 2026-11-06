@@ -61,6 +61,13 @@ def originals(tmp_path, monkeypatch):
             "original_drc_total_violations": count,
             "original_drc_rule_counts": rules,
         })
+    # Synthetic DCPs are NOT original author's posthoc checkpoint bytes.
+    # Override the production source pin only inside this test fixture.
+    monkeypatch.setattr(sut, "EXPECTED_ORIGINAL_DCP", {
+        arm: (value["posthoc_original_checkpoint_sha256"],
+              value["checkpoint_bytes"])
+        for arm, value in arm_meta.items()
+    })
     meta = {
         "schema": sut.r4t.SCHEMA,
         "status": "ORIGINAL_R4P_ROUTED_DCP_POSTHOC_PINNED_REPORT_ONLY_READY",
