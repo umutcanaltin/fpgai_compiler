@@ -73,6 +73,8 @@ def load_original_c1(study: str | Path) -> dict:
     digest = _sha(report)
     if digest != ORIGINAL_C1_REPORT_SHA256:
         raise ValueError("Original C1 E0 report SHA differs from author verification")
+    if manifest.is_symlink() or not manifest.is_file():
+        raise ValueError("Original C1 SHA inventory missing or symlinked")
     if json.loads(manifest.read_text()) != {"report.json": digest}:
         raise ValueError("Original C1 E0 SHA inventory does not match report")
     data = json.loads(report.read_text())
@@ -199,7 +201,8 @@ def run(*, original_c1_study: str | Path, output: str | Path,
     if re.fullmatch("[0-9a-f]{40}", revision) is None:
         raise ValueError("New C1 E1 experiment Git source revision unknown")
     if quick:
-        cases = cases[:2]
+        # Probe both scalar and independently mapped Phi source lowering.
+        cases = (cases[0], cases[3])
     dest.mkdir(parents=True, exist_ok=False)
     case_records = []
     try:
