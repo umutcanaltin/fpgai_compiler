@@ -11,7 +11,7 @@ latency, throughput, energy, formal verification, or randomized graph effects.
 from __future__ import annotations
 
 import argparse
-from collections import Counter, defaultdict
+from collections import Counter
 from hashlib import sha256
 import json
 from math import isfinite
