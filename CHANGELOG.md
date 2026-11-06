@@ -1,3 +1,4 @@
+- R4y source manifest audit fix: JSON-normalize canonical tuple-valued source-slot metadata before comparison to saved JSON manifests; retain independent source SHA, exact package and all-file inventory checks. Added explicit round-trip regression; **new tests not yet author-workstation-verified**.
 ## 6 November 2026 — prospective R4y four-arm HLS source preparation, no native calls
 
 - Author verified previous revision 42326c4 with **47/47** focused tests and read-only source-attested R4w/R4x, selecting 24ns post-hoc as conservative next experiment candidate; zero strict DRC-clean pairs and zero measured board latencies remain.

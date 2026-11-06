@@ -284,7 +284,11 @@ def audit(*, study: str | Path, r4k_study: str | Path,
             raise ValueError("R4y HLS package folder missing/symlink")
         manifest = _read(folder / "source_manifest.json")
         package = _read(pkgdir / "manifest.json")
-        if (manifest != emission[case].manifest
+        # Canonical emitted metadata contains tuple source-slot witnesses.
+        # JSON round-tripping legitimately represents those tuples as lists.
+        normalized_manifest = json.loads(json.dumps(
+            emission[case].manifest, sort_keys=True, allow_nan=False))
+        if (manifest != normalized_manifest
                 or package.get("source_cpp_sha256") != expected["sources_sha256"][case]
                 or package.get("part") != PART
                 or package.get("numeric_format") not in (None, list(r4k.FORMAT))

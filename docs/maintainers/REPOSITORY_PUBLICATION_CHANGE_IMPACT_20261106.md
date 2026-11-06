@@ -225,3 +225,5 @@ These are **read-only code inspection findings**, not original experiment observ
 | docs/maintainers/REPOSITORY_PUBLICATION_CHANGE_IMPACT_20261106.md | MODIFIED | This owner/connection/dependency audit for every changed path. | Documentation. |
 
 No files deleted, moved or renamed; no previous HLS/RTL generator changed. Original original-source experiments and one-time locks untouched. Draft PR remains open and main unchanged. New 24ns native Vitis/Vivado work is UNIMPLEMENTED and original 47-pass tests predate these changes.
+
+**R4y serialization follow-up:** updated the new R4y source-only auditor to compare JSON-normalized canonical source metadata, because Python tuple source-slot maps become JSON lists on disk. This fixes a potential false-negative on unchanged manifests. Added a synthetic prepare→audit regression test and updated the R4y paper protocol. No other compiler semantics, original study roots, source hashes, vendor calls or test labels changed. New tests still need workstation execution.

@@ -183,3 +183,16 @@ def test_symlinked_package_directory_rejected(originals, tmp_path):
     pkg.symlink_to(moved, target_is_directory=True)
     with pytest.raises(ValueError, match="symlink"):
         sut.audit(study=output, **originals)
+
+
+def test_source_manifest_roundtrip_tuples_are_not_an_evidence_failure(
+        originals, tmp_path):
+    """The canonical source-slot map contains tuples; stored JSON uses lists."""
+    root = tmp_path / "fresh_four_cases"
+    sut.prepare(output=root, **originals)
+    _, _, emitted = sut._emissions()
+    case = "row_storage__baseline"
+    stored = json.loads((root / case / "source_manifest.json").read_text())
+    assert stored == json.loads(json.dumps(emitted[case].manifest))
+    assert sut.audit(study=root, **originals)[
+        "status"] == "SOURCE_ONLY_FOUR_ARM_PACKAGE_AUDITED_NOT_NATIVE"
