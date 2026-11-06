@@ -116,6 +116,17 @@ def plan(*, profile: str) -> dict:
     if profile not in ("quick", "paper"):
         raise ValueError("R4a profile must be quick or paper")
     selected = SMALL if profile == "quick" else CASES
+    # Validate the WHOLE study BEFORE creating any original output folder.
+    # Historical R2f source fixtures and contract admit dimensions <=16;
+    # benchmark scaling must not silently widen this scientific domain.
+    if (not selected or len(set(selected)) != len(selected)
+            or any(type(readers) is not int or readers not in (2, 3, 4)
+                   or type(shape) is not tuple or len(shape) != 4
+                   or any(type(dim) is not int or not 1 <= dim <= 16
+                          for dim in shape)
+                   or policy not in ("scalar", "mixed")
+                   for readers, shape, policy in selected)):
+        raise ValueError("R4a prespecified study exceeds bounded R2f contract")
     return {
         "schema": SCHEMA,
         "profile": profile,
