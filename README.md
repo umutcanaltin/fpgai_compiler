@@ -44,6 +44,8 @@ fpgai-research build/toy.onnx \
 
 Requests that exceed the supported shape, attribute, architecture or target constraints should fail explicitly rather than silently substituting an unrelated implementation. For scope-specific controls see [architecture and CLI guide](docs/USING_FPGAI.md).
 
+**Research-paper and release status:** The first C1/C2 compiler paper has original bounded source-contract and source-action evidence, but remains under major scientific revision. The [research artifact and publication guide](docs/RESEARCH_PUBLICATION_STATUS.md) distinguishes the active manuscript from archival studies, records exact source/report identities for the latest verified C1/C2 experiments, and lists the institutional/licensing and independent-science gates still required before a source distribution. This repository is publicly viewable but **is not currently distributed under an operative source-code license**.
+
 ## One-command local HLS and Vivado workflow
 
 For supported ONNX networks, the [neuroscientist quickstart](docs/NEUROSCIENTIST_QUICKSTART.md) shows how to supply AMD installation paths and run compiler generation, numerical C simulation, HLS synthesis, and Vivado out-of-context routing through `fpgai-run`. Native execution always requires `--execute-native`; the command never invokes GitHub Actions or generates a board bitstream.
