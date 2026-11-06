@@ -212,9 +212,23 @@ def _write_mock_receipt(case, *, source, wns=0.25,
         kind = "Error" if critical else "Warning"
         drc += f"| NSTD-1 | {kind} | example | {drc_violations} |\n"
     write(reports / "drc.rpt", drc)
+    logs = native / "logs"
+    write(logs / "vivado.stdout.log", "SYNTHETIC VIVADO EXAMPLE ONLY\\n")
+    write(logs / "vivado.stderr.log", "")
+    script_sha = digest(native / "run_vivado.tcl")
     receipt = {
         "schema": "fpgai-research/vendor-invocation/v1",
         "tool": "vivado",
+        "executable": "/tools/mock/vivado",
+        "argv": ["/tools/mock/vivado", "-mode", "batch", "-source",
+                 "run_vivado.tcl", "-notrace"],
+        "cwd": str(native.resolve()),
+        "started_utc": "2026-11-06T12:00:00+00:00",
+        "duration_seconds": 3.0,
+        "input_hashes_before_execution": {"tcl": script_sha},
+        "input_hashes_after_execution": {"tcl": script_sha},
+        "stdout_sha256": digest(logs / "vivado.stdout.log"),
+        "stderr_sha256": digest(logs / "vivado.stderr.log"),
         "completed_successfully": True,
         "returncode": 0,
         "timed_out": False,
