@@ -288,8 +288,21 @@ def execute(*, study: str | Path, r4o_study: str | Path,
     if binary is None:
         raise FileNotFoundError("R4p Vivado executable missing")
     root = Path(study)
+    lock = root / "r4p_native_attempt.json"
+    if lock.exists() or lock.is_symlink():
+        raise FileExistsError("R4p original native attempt lock exists; do not rerun")
     if any(_attempted(root / arm) for arm in ARMS):
         raise FileExistsError("R4p original OOC source arm already attempted; preserve native evidence")
+    # Atomic exclusive create prevents overlapping invocations from
+    # concurrently passing a check-then-launch race. Never delete the
+    # attempt lock, even after failure or process interruption.
+    with lock.open("x", encoding="utf-8") as file:
+        file.write(json.dumps({
+            "schema": SCHEMA + "/original-native-attempt-lock",
+            "source_revision": meta["source_revision"],
+            "arms": list(ARMS),
+            "never_retry_original_case": True,
+        }, sort_keys=True, indent=2) + "\n")
     observations = []
     for arm in ARMS:
         case = root / arm
@@ -323,7 +336,8 @@ def execute(*, study: str | Path, r4o_study: str | Path,
     }
 
 
-def _arm_observation(case: Path, *, source: dict) -> dict:
+def _arm_observation(case: Path, *, source: dict,
+                     attempt_lock_verified: bool) -> dict:
     native = case / "vivado"
     receipt_path = native / "vivado_invocation.json"
     record = {
@@ -346,6 +360,9 @@ def _arm_observation(case: Path, *, source: dict) -> dict:
         "board_qualified": False,
     }
     if not receipt_path.is_file() or receipt_path.is_symlink():
+        return record
+    if not attempt_lock_verified:
+        record["status"] = "REJECTED_NATIVE_RECEIPT_WITHOUT_ORIGINAL_ATTEMPT_LOCK"
         return record
     receipt = _json(receipt_path)
     canonical = {**source["rtl_sha256"], **source["rom_sha256"]}
@@ -486,8 +503,18 @@ def audit_native(*, study: str | Path, r4o_study: str | Path,
         r4o_study=r4o_study, r4k_study=r4k_study,
         original_r4d=original_r4d, original_r4a=original_r4a)
     root = Path(study)
+    lock = root / "r4p_native_attempt.json"
+    locked = False
+    if lock.exists() or lock.is_symlink():
+        attempt = _json(lock)
+        locked = (
+            attempt.get("schema") == SCHEMA + "/original-native-attempt-lock"
+            and attempt.get("source_revision") == meta["source_revision"]
+            and attempt.get("arms") == list(ARMS)
+            and attempt.get("never_retry_original_case") is True)
     arms = [
-        _arm_observation(root / name, source=original["arms"][name])
+        _arm_observation(root / name, source=original["arms"][name],
+                         attempt_lock_verified=locked)
         for name in ARMS
     ]
     first, second = arms
@@ -511,6 +538,7 @@ def audit_native(*, study: str | Path, r4o_study: str | Path,
         "arms": arms,
         "original_native_invocation_receipts_present": sum(
             arm["vendor_invocation_present"] for arm in arms),
+        "one_time_original_attempt_lock_verified": locked,
         "both_source_attributed_routed_observations_valid": descriptive,
         "both_strict_clean_DRC_OOC_E4": strict,
         "descriptive_physical_resource_delta_row_minus_full": delta,
