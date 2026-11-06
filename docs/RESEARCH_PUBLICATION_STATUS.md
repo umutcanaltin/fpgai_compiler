@@ -48,6 +48,10 @@ Run `python scripts/audit_source_inventory.py --output build/source_inventory_20
 - **Never delete or rewrite original study evidence**, fixed source SHA receipts, permanent native attempt locks, original routed checkpoints or source runs. Retired docs remain in historical research archives; link canonical entry points from the README rather than relocating original files.
 - Do not enable GitHub Actions or perform automatic Vitis/Vivado calls, merge draft PRs, publish to PyPI, change visibility, or invent a license as part of documentation cleanup.
 
+## Stronger scientific novelty decision and rejected overclaims
+
+A prior-art check against Allo's original [PLDI 2024 paper](https://www.csl.cornell.edu/~zhiruz/pdfs/allo-pldi2024.pdf) (Section 5.2 / Figure 6) found a *published two-MatMul FIFO read/write-order mismatch caught by its equivalence verifier*. **This compiler paper cannot claim firstness of source stream-order or scheduling verification.** The [adversarial contract/baseline matrix](https://github.com/umutcanaltin/fpgai_compiler/blob/research/first-paper-source-memory-bridge-20261106/paper/compiler_ir/SCIENTIFIC_REVIEWER_ADVERSARIAL_CLAIM_MATRIX_20261106.md) tests whether the actual combined Φ-parametric multi-reader lifetime/scratch ownership/source-hash/output interface has a materially distinct capability **with executable evidence** and whether those mechanisms improve a realistic constrained design. If not, C1 must be reframed and C2 treated as supporting infrastructure. The baseline comparison has **not yet been executed**.
+
 ## Most important remaining scientific gaps
 
 The first paper still needs an independently executed, matched [Allo](https://github.com/cornell-zhang/allo) capability/equivalence comparison, a rigorous connection from typed source events to independently observed generated-executable behavior, and an honest interpretation of C2's cost versus the lazy cache. The newly completed C1 study broadens coverage **within the same supported MatMul fanout family**. More tests are not automatically novel research. See the active manuscript and evidence-to-claim ledger for current publication blockers.
