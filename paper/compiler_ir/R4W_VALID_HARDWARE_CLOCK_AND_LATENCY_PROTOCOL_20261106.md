@@ -1,0 +1,110 @@
+# Timing-qualified matched hardware designs and real inference latency: R4w/R4x
+
+**6 November 2026 | New source-only protocol and guarded implementation. Not a new native result.** Scientific goal: compare real hardware behavior **only for valid designs**. Original after-Vitis/after-Vivado R4 observations are descriptive because both 12ns routed arms have negative WNS; no physical latency or throughput winner can be inferred from them. See [R4v stage table](R4V_VITIS_VIVADO_STAGE_PARETO_AND_REAL_LATENCY_GATE_20261106.md).
+
+## 1. Three different performance quantities MUST be separated
+
+1. **HLS estimated compute latency** = `CSynth worst_latency_cycles × HLS estimated_clock_ns`. This is only an E3 estimate in time; cannot be compared to routed resource counts as if it were achieved hardware performance.
+2. **Estimated core response time at a jointly routing- and DRC-qualified clock** = `fixed_HLS_cycles × same feasible clock_period_ns`. This is a **source/RTL-schedule-based analytical proxy**, not a board measurement. It requires preserved exact compiled RTL/ROM and independently qualified HLS cycles, both implementations routed at the SAME clock and all mandatory constraints complete. In the new R4x report this value is **NULL unless both cases strictly pass** WNS>=0, full routing and zero DRC violations. It remains NULL for unmeasured physical deployment.
+3. **Actually measured implementation latency** must come from a verified board/RTL timing trace: accept input/start to final output-valid/ready in same clock domain; include any observable stalls and reset/warm-up semantics; `measured_core_latency_ns = observed_cycles × measured_board_clock_period_ns`. Report *end-to-end wall latency* separately from input DMA initiation through output DMA completion and required CPU synchronization. For sustained throughput, use actual measured II/transactions per second, not single-inference latency. Until board timing is captured, every measured latency/p95/II field remains `UNKNOWN`.
+
+The Vitis 2023.2 user guide reports top-level function latency (cycles and time) and II as different concepts. Pipelining can **increase** latency cycles while **improving** clock period or II; a winner cannot be selected using cycle count or WNS alone. Official references: https://docs.amd.com/r/2023.2-English/ug1399-vitis-hls/Pipelining-Paradigm and https://docs.amd.com/r/2023.2-English/ug1399-vitis-hls/syn.directive.pipeline.
+
+## 2. Mandatory pair acceptance rules
+
+- Same source and numerical graph, weights, correctness testbench, precision (`32/6` for this legacy pair), exact requested source Φ event order, arithmetic/RTL function and source part `xck26-sfvc784-2LV-c`; only full versus retained storage layout differs **within a comparison**. HLS source SHA/RTL/ROM/Tcl SHA and invocation logs must link each vendor stage. No generated HDL changed post hoc.
+- Every arm must pass E2 Vitis CSim against the independent oracle and E3 HLS source/cycles/resource qualifications. A fresh one-time Vivado OOC run must complete routing, pass a *shared* predeclared clock constraint with WNS>=0, and report all DSP/LUT/FF/BRAM/URAM, DRC rules/severities, critical paths and source SHA. Equal source clocks alone are not equal achieved internal timing unless constraints actually cover the relevant paths.
+- **Primary strict comparison** requires **zero DRC violations for both** as well as complete routing and WNS>=0. A separate **warning-only adjudication pathway is not implemented/authorized**; do not silently waive rules to make a failed original study pass. DSP pipelining warnings can be optimization recommendations rather than functional memory-port collisions, but exact Vivado DRC details must be reviewed, classified and documented before claiming physical validity.
+- If the original or newly staged route fails one arm, one DRC check, or source/ROM SHA, **exclude BOTH from the qualified pair**, preserve its report and include the failure in the denominator. The original R4p native attempt lock remains immutable.
+- When equal-clock pairs are valid, compare **latency in ns/µs**, resource vector, maximum setup slack, power only if measured with switching evidence, and HLS/RTL II if independently available. A clock-sweep result with no strict pairs is a scientifically valid negative feasibility finding but NOT a valid-design speedup experiment.
+- Neither OOC routing nor a clean DRC report establishes KV260 board bitstream readiness, external PS/DDR/DMA timing or real inference latency. Actual deployment is a separate qualification gate.
+
+## 3. Why initial Vivado DSP warnings matter (corrected diagnosis)
+
+The original 12ns R4 route/DRC totals were **74 vs 71**, chiefly `DPIP-2`, `DPOP-3`, `DPOP-4`, plus `RTSTAT-10`. These **DPIP/DPOP rules concern DSP48 input/output pipelining**, not RAM read/write port-collision correctness. The source experiment must **not** claim that these counts prove unsafe memory ports. Their performance significance and whether any additional warnings are dangerous need the exact original `drc.rpt` and `critical_paths.rpt` (not just aggregate counts). See examples of Vivado messages at https://discourse.grlib.community/t/multiple-warnings-for-noel-v-32-bit/483 . The original still has **negative WNS** in both arms and is not qualified at 12ns, independently of the warning classification.
+
+**A DSP pipeline is a new source/architecture intervention, not a trivial Vivado waiver.** If source performance is the main paper claim, preregister a **2 × 2 controlled factorial:** storage `full`/`row` × DSP-operator/loop pipeline `original`/`proposed`, with exactly the same graph/weights/precision, independent CSIM oracle, target part and timing policies. Use AMD Vitis HLS 2023.2's supported operator-latency and pipeline directives only after inspecting the exact `model.cpp` arithmetic variables, and report actual post-HLS II/cycles plus generated RTL/ROM hashes. Pipeline stages may add cycles yet improve routed clock, or may increase RAM pressure and fail. **Do not modify the frozen R4k/R4l/R4p originals** to create new pipeline variants.
+
+## 4. The first guarded feasibility probe — source-prepared, NOT executed
+
+**R4w** checks whether the exact previously SHA-attested R4k/R4l generated RTL can route at *predeclared slower clocks* **16, 20, 24 ns**, for both storage arms, six fresh native cases. Target, clock uncertainty (1.5ns), RTL, weights and timing policy are matched. 12ns originals are untouched; unlike changing an existing routed DCP, this **creates and routes distinct new implementations**. All candidate outcomes, failures and source/report hashes are retained. Three clocks × one nominal place/route configuration are **a feasibility pilot, not a variance/repeated-seed PPA study**.
+
+**If at least one clock has strict timing and DRC pass for both arms**, R4x reports a pairwise core-latency-in-ns **estimate** using the original E3 cycle counts at that identical period. If no clock qualifies, R4x explicitly reports `NO_JOINTLY_QUALIFIED_PAIR_NO_HARDWARE_LATENCY_COMPARISON`; this is the expected possibility given the original DSP pipelining warnings, not an error to hide. In that situation perform the 2×2 pipelining refactor as a *new* E2/E3/E4 study, not another isolated clock relaxation or DRC suppression.
+
+**Tool execution is never implicit.** R4w preparation copies and SHA-verifies original source; R4w native execution is separately double-opted-in, one-time, and preserves its attempt lock even if a vendor run fails. R4w audit and R4x comparison are read-only. These NEW files and their synthetic fixtures have **not yet run on the author's workstation**.
+
+### A. Local source-only tests and original-stage review
+
+```bash
+cd ~/Desktop/github_projects/fpgai_compiler
+git pull --ff-only origin research/first-paper-source-memory-bridge-20261106
+python -m pytest -q \
+  tests/test_cst_paper_c1_original_e1_readonly_descriptives.py \
+  tests/test_cst_paper_r4v_vitis_vivado_joint_compare.py \
+  tests/test_cst_paper_r4w_feasible_clock_sweep.py \
+  tests/test_cst_paper_r4x_feasible_only_core_latency.py
+make research-c1-e1-review
+make research-hls-vivado-review
+```
+
+### B. Prepare six new clock candidates WITHOUT launching Vivado
+
+```bash
+cd ~/Desktop/github_projects/fpgai_compiler
+OUT=build/r4w_valid_clock_sweep_20261106_01
+test ! -e "$OUT"
+python -m fpgai_research.experiments.cst_paper_r4w_feasible_clock_sweep \
+  --r4o-study build/r4o_matched_vivado_ooc_prepare_20261106_01 \
+  --r4k-study build/r4k_source_schedule_matched_storage_20261106_01 \
+  --original-r4d build/r4d_numeric_format_source_20261106_01 \
+  --original-r4a build/r4a_row_retained_paper_20261106_01 \
+  --prepare-output "$OUT"
+```
+
+### C. One-time actual native pilot, only after source-only tests/preflight
+
+**This command launches UP TO SIX NEW Vivado 2023.2 implementations and should be run only if you elect to spend compute on this pilot.** Existing completed R4p and R4u experiments will not be rerun. A process failure stops subsequent cases and permanently preserves the R4w attempt lock; never delete it to retry the same experimental attempt.
+
+```bash
+cd ~/Desktop/github_projects/fpgai_compiler
+python -m fpgai_research.experiments.cst_paper_r4w_feasible_clock_sweep \
+  --study build/r4w_valid_clock_sweep_20261106_01 \
+  --r4o-study build/r4o_matched_vivado_ooc_prepare_20261106_01 \
+  --r4k-study build/r4k_source_schedule_matched_storage_20261106_01 \
+  --original-r4d build/r4d_numeric_format_source_20261106_01 \
+  --original-r4a build/r4a_row_retained_paper_20261106_01 \
+  --vivado /tools/Xilinx/Vivado/2023.2/bin/vivado \
+  --execute-native --confirm-isolated-new-native
+```
+
+### D. Read-only postrun acceptance and valid-only latency estimator
+
+```bash
+make research-r4w-audit
+make research-r4x-feasible-latency
+```
+
+**Expected truth:** the R4x time number is `cycles × same feasible clock` *only* when both designs strictly qualify at a clock. It is still **not measured core/board latency**. For a peer-reviewed real latency claim, build actual board-qualified bitstreams and collect per-input hardware cycle counters/time stamps and host/DMA end-to-end latency as described below.
+
+## 5. Predeclared later actual board-latency benchmark (not yet implemented or run)
+
+- Target: the same KRIA KV260 board and supported PS/PL clocking/DDR/AXI/DMA contracts per design; include bitstream SHA, generated IP/RTL source SHA, clock report and validation of the actual measured clock. Do not represent OOC `xck26` resource data as a fully qualified board integration.
+- For each identical known-good input, instrument: **PL start accepted cycle**, **PL output committed/valid cycle**, first/last output transfer and host/DMA submit/receive monotonic timestamps. If the data path has buffering or an initial warm-up, record it separately and consistently. Check numerical outputs per sample.
+- Measure **single-inference core latency** as observed PL output minus accepted start in clock cycles and ns, **end-to-end latency** including PL+DMA+host synchronization, and **sustained II/throughput** for back-to-back inputs. They are different metrics and must be separate columns in the paper.
+- Predeclare ≥3 tool placement configurations and >=30 independent warmed input trials per qualified implementation and report median/p95 and all failures; report board/host load, warm/cold first-call overhead, sample distribution, input/output shape, source/evidence version and any CPU-side computation. No percentile or performance variance claims are made until actual traces exist.
+- Pareto objective: **minimize measured latency and resource/power budget while maintaining identical numerical accuracy and timing feasibility**; if no design dominates, show the resource/latency trade-off. Different physical clock points require explicit equal-clock comparisons or a separate 'best individually feasible' secondary comparison, not a mixture.
+
+## 6. Repository change impact and dependencies
+
+| File | Role | State |
+|---|---|---|
+| `src/fpgai_research/experiments/cst_paper_r4v_vitis_vivado_joint_compare.py` | Read-only join of original R4l source/E3 and R4p/R4q/R4r mapped Vivado reports | Implemented; new targeted tests not workstation-run |
+| `tests/test_cst_paper_r4v_vitis_vivado_joint_compare.py` | Source SHA/clock/resource negative controls, strict E4 null | New synthetic tests not run |
+| `src/fpgai_research/experiments/cst_paper_r4w_feasible_clock_sweep.py` | New create-only 6-case Vivado feasibility study, exact staged RTL/ROM signatures, one-time native opt-in and source/DRC/clock audit | Source code prepared; native vendor calls **zero so far** |
+| `tests/test_cst_paper_r4w_feasible_clock_sweep.py` | Synthetic original RTL+ROM verification, Tcl/clock drift, safe dry-run and native lock checks | New synthetic tests not run |
+| `src/fpgai_research/experiments/cst_paper_r4x_feasible_only_core_latency.py` | Rejects invalid pairs, compares ns estimates at common strictly feasible clocks only; real board time stays null | Source-only; new tests not run |
+| `tests/test_cst_paper_r4x_feasible_only_core_latency.py` | Validity gate, single-arm failure and exact time-proxy checks | New synthetic tests not run |
+| `paper/compiler_ir/R4W_VALID_HARDWARE_CLOCK_AND_LATENCY_PROTOCOL_20261106.md` | This protocol: exact source/native/real-latency distinction and commands | No original user vendor experiments run in this change |
+| `Makefile` | `research-hls-vivado-review`, `research-r4w-audit`, `research-r4x-feasible-latency` and targeted source-only checks | New commands unverified locally |
+
+The existing source compiler, R4k emitters, frozen R4l/HLS source files, R4p original RTL/ROM and original vendor/clock reports remain unchanged. The PR is still draft. Any future DSP pipeline variant is a new source experiment and must be tracked file by file in the maintainer impact report.
