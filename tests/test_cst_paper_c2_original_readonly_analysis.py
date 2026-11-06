@@ -98,7 +98,7 @@ def test_author_pinned_sha_fail_closed_if_wrong(tmp_path):
     lambda x: x["records"][0].update(source_compiler_calls=999),
     lambda x: x["records"][0].update(result_sha256="f"*64),
     lambda x: x["records"][0].update(request_indices=[8]),
-    lambda x: x["records"][0].update(native_vivado_calls=1),
+    lambda x: x.update(native_vivado_calls=1),
     lambda x: x.update(all_compiled_source_results_matched=False),
 ])
 def test_tampered_or_incomplete_original_data_rejected(tmp_path,mutator):
@@ -110,14 +110,8 @@ def test_tampered_or_incomplete_original_data_rejected(tmp_path,mutator):
     digest = sha256(path.read_bytes()).hexdigest()
     (root/"artifact_sha256.json").write_text(
         json.dumps({"report.json":digest}) + "\n")
-    if "native_vivado_calls" in data["records"][0]:
-        # This row-level field is not part of the original fixed schema;
-        # reject synthetic extra columns by requiring provenance to match.
-        with pytest.raises(ValueError):
-            sut.analyze(root,pinned_report_sha256=digest)
-    else:
-        with pytest.raises(ValueError):
-            sut.analyze(root,pinned_report_sha256=digest)
+    with pytest.raises(ValueError):
+        sut.analyze(root,pinned_report_sha256=digest)
 
 
 def test_original_file_mutation_fails_when_manifest_still_old(tmp_path):
