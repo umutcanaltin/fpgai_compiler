@@ -300,7 +300,10 @@ def inspect_arm(study: Path, rtl: dict, defaults: dict) -> dict:
         "acc_source_sites": acc,
         "source_site_default_tuple": (
             scratch[0]["source_module_default_tuple"]
-            if len(scratch) == 1 else None),
+            if scratch and scratch[0]["source_module_default_tuple"] is not None
+            and all(site["source_module_default_tuple"] ==
+                    scratch[0]["source_module_default_tuple"]
+                    for site in scratch) else None),
         "source_site_literal_parameter_tuples": (
             [s["source_site_literal_parameter_tuple_if_supported"] for s in scratch]
             if scratch else None),
