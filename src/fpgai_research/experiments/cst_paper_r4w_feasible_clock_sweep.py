@@ -184,6 +184,27 @@ def prepare(*, r4o_study: str|Path, r4k_study: str|Path,
         raise
 
 
+# Extension set for *new* workdir entries: do not admit extra inputs
+# as anonymous vendor outputs. Exact original inputs are SHA-attested.
+_DESIGN_INPUT_SUFFIXES=frozenset({
+    ".v",".sv",".vhd",".vhdl",".dat",".mem",".hex",".coe",
+    ".mif",".xdc",".tcl",".xci",".xcix",".edif",".edf",".dcp",
+})
+
+
+def _valid_native_attempt_lock(root: Path, prepared: dict) -> bool:
+    path=root/"r4w_one_time_native_attempt_lock.json"
+    if path.is_symlink() or not path.is_file():
+        return False
+    lock=_read(path)
+    return (
+        lock.get("schema")==SCHEMA+"/one-time-vendor-attempt"
+        and lock.get("source_revision")==prepared.get("original_source_revision")
+        and lock.get("cases")==sorted(prepared.get("predeclared_cases",{}))
+        and lock.get("never_retry") is True
+    )
+
+
 def audit_prepared(*, study: str|Path,r4o_study: str|Path,
                    r4k_study: str|Path,original_r4d: str|Path,
                    original_r4a: str|Path) -> dict:
@@ -245,15 +266,35 @@ def audit_prepared(*, study: str|Path,r4o_study: str|Path,
                                     sorted(original["rtl_sha256"]))
                 or _sha(target)!=case["tcl_sha256"]):
             raise ValueError("R4w Vivado script or clock constraint changed")
-        for folder in (
-            root/cid/"fpgai_hls_project"/"solution1"/"syn"/"verilog",
-            root/cid/"vivado"/"rtl"):
+        # Vivado's generated script changes the process cwd to vivado/rtl.
+        # Thus .Xil, vivado.jou, usage_statistics_webtalk.xml, etc. can be
+        # written there *after* a genuine native run. These are outputs,
+        # NOT original source assets. The immutable manifest and SHA still
+        # attest every staged HDL/ROM/Tcl input. Allow only non-design
+        # sidecars when a valid one-time attempt lock exists; this logic
+        # must also handle the source-preserving aftermath of a failed run.
+        native_attempted = _valid_native_attempt_lock(root, receipt)
+        folders=(
+            (root/cid/"fpgai_hls_project"/"solution1"/"syn"/"verilog",False),
+            (root/cid/"vivado"/"rtl",True),
+        )
+        for folder,is_native_workdir in folders:
             if folder.is_symlink() or not folder.is_dir():
                 raise ValueError("R4w staged original source folder missing")
-            present={p.name for p in folder.iterdir()}
-            if present!=set(rtl) or any(p.is_symlink() or not p.is_file()
-                                      for p in folder.iterdir()):
+            items=list(folder.iterdir())
+            present={p.name for p in items}
+            if not set(rtl).issubset(present):
+                raise ValueError("R4w staged HDL/ROM source set incomplete")
+            for p in items:
+                if p.is_symlink():
+                    raise ValueError("R4w symlinked source or vendor sidecar")
+            extra=[p for p in items if p.name not in rtl]
+            if extra and (not is_native_workdir or not native_attempted):
                 raise ValueError("R4w unexpected RTL/ROM files under source root")
+            if len(extra)>128 or any(
+                p.suffix.lower() in _DESIGN_INPUT_SUFFIXES for p in extra
+            ):
+                raise ValueError("R4w postrun new HDL/ROM/constraints not attested")
     if set(manifest)!=expected_manifest or any(
             not isinstance(v,str) or _SHA.fullmatch(v) is None or _sha(root/n)!=v
             for n,v in manifest.items()):
@@ -403,14 +444,7 @@ def audit_native(*,study: str|Path,r4o_study: str|Path,
     opts=locals().copy()
     meta=audit_prepared(**opts)
     root=Path(study)
-    lock=root/"r4w_one_time_native_attempt_lock.json"
-    locked=False
-    if lock.exists() and not lock.is_symlink():
-        l=_read(lock)
-        locked=(l.get("schema")==SCHEMA+"/one-time-vendor-attempt"
-                and l.get("source_revision")==meta["original_source_revision"]
-                and l.get("cases")==sorted(meta["predeclared_cases"])
-                and l.get("never_retry") is True)
+    locked=_valid_native_attempt_lock(root,meta)
     cases={
         cid:_case_native(root/cid,cfg)
         for cid,cfg in meta["predeclared_cases"].items()
