@@ -286,6 +286,8 @@ def test_mock_clean_routed_two_arm_pair_requires_source_receipts_and_drc(
     assert report["both_strict_clean_DRC_OOC_E4"]
     assert report["strict_clean_DRC_resource_delta_row_minus_full"]["bram"] == 0
     assert report["strict_clean_DRC_WNS_delta_ns"] == 0
+    assert report["physical_E4"] == (
+        "SOURCE_ATTRIBUTED_STRICT_CLEAN_DRC_ROUTED_OOC_PAIR_ONLY")
     assert report["board_qualified"] is False
     assert report["physical_achieved_board_Fmax"] is None
 
@@ -305,6 +307,7 @@ def test_mock_nonclean_drc_is_observation_not_strict_clean_e4(prepared):
     assert report["strict_clean_DRC_resource_delta_row_minus_full"]["bram"] is None
     assert report["arms"][1]["drc_errors_or_critical_warnings_present"] is True
     assert report["arms"][1]["drc_warning_only_routed_observation"] is False
+    assert report["physical_E4"] is None
 
 
 @pytest.mark.parametrize("bad", ["tampered_report", "incomplete_route",
