@@ -25,6 +25,7 @@ class FakeDecision:
 class FakeCatalog:
     def __init__(self, decisions):
         self.decisions = decisions
+        self.compiler_transitions = len(decisions)
 
     def mask(self):
         return tuple(d.e0_certified for d in self.decisions)
@@ -117,6 +118,16 @@ def test_single_query_eager_has_more_compile_calls_than_lazy(fake_source):
     assert r["original_source_preflight_compiler_calls_excluded"] == 8
     assert r["all_compiled_source_results_matched"] is True
     assert len(r["by_condition"]) == 3
+
+
+def test_full_three_seed_order_counterbalanced(fake_source):
+    report = sut.evaluate("chain_d2", 2, request_counts=(1,),
+                          seeds=(111, 222, 333),
+                          streams=("repeat_certified",))
+    by_method = {m: [] for m in sut.METHODS}
+    for row in report["records"]:
+        by_method[row["method"]].append(row["execution_order"])
+    assert all(sorted(v) == [0, 1, 2] for v in by_method.values())
 
 
 def test_randomized_order_does_not_change_requested_positives(fake_source):
