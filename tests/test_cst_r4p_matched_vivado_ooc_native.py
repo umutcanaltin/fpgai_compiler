@@ -324,3 +324,43 @@ def test_mock_incomplete_physical_reports_never_qualify(
     assert report["both_strict_clean_DRC_OOC_E4"] is False
     assert report["descriptive_physical_resource_delta_row_minus_full"]["bram"] is None
     assert report["physical_achieved_board_Fmax"] is None
+
+
+
+@pytest.mark.parametrize("tamper", [
+    "wrong_working_directory", "changed_argv", "wrong_tcl_input_sha",
+    "modified_stdout", "modified_rom_consumed",
+])
+def test_forged_or_tampered_native_receipt_does_not_qualify_e4(
+    prepared, tamper,
+):
+    source, root = prepared
+    orig = sut._original_r4o(**source)
+    for arm in sut.ARMS:
+        _write_mock_receipt(root / arm, source=orig["arms"][arm])
+    native = root / "row_storage" / "vivado"
+    p = native / "vivado_invocation.json"
+    receipt = json.loads(p.read_text())
+    if tamper == "wrong_working_directory":
+        receipt["cwd"] = "/tmp/other_case"
+    elif tamper == "changed_argv":
+        receipt["argv"] = ["/tools/mock/vivado", "-mode", "batch",
+                           "-source", "untracked.tcl", "-notrace"]
+    elif tamper == "wrong_tcl_input_sha":
+        receipt["input_hashes_before_execution"]["tcl"] = "0" * 64
+    elif tamper == "modified_stdout":
+        (native / "logs" / "vivado.stdout.log").write_text("altered original\n")
+    elif tamper == "modified_rom_consumed":
+        (native / "rtl" / "weight.dat").write_text("altered input ROM\n")
+    if tamper not in ("modified_stdout", "modified_rom_consumed"):
+        p.write_text(json.dumps(receipt))
+    if tamper == "modified_rom_consumed":
+        with pytest.raises(ValueError, match="SHA"):
+            sut.audit_native(**args(prepared))
+    else:
+        result = sut.audit_native(**args(prepared))
+        assert result["both_strict_clean_DRC_OOC_E4"] is False
+        assert result["descriptive_physical_resource_delta_row_minus_full"][
+            "bram"] is None
+        assert result["arms"][1]["status"] == (
+            "REJECTED_VENDOR_OR_SOURCE_PROVENANCE")
