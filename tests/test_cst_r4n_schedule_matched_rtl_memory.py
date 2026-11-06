@@ -248,15 +248,13 @@ def test_attested_source_root_symlink_rejected(fake_originals, tmp_path):
     (new, _, _), _, _ = fake_originals
     root = (new / "full_storage" / "vitis_source"
             / "fpgai_hls_project" / "solution1" / "syn" / "verilog")
+    path = root / "fpgai_model.v"
     extra = tmp_path / "external.v"
-    extra.write_text("module external();endmodule\n")
-    path = root / "link.v"
-    path.symlink_to(extra)
-    # A file added after attestation is not included in the signed SHA
-    # set. Real R4g prevents this via inventory_vitis_rtl; the R4n
-    # synthetic shim exercises only _signed_sources' explicit hash list.
+    extra.write_bytes(path.read_bytes())
     path.unlink()
-    assert _inspect(fake_originals)["pair"]["both_RTL_SHA_attested"] is True
+    path.symlink_to(extra)
+    with pytest.raises(ValueError, match="missing or symlinked"):
+        _inspect(fake_originals)
 
 
 def test_r4n_output_is_create_only_and_never_updates_originals(
