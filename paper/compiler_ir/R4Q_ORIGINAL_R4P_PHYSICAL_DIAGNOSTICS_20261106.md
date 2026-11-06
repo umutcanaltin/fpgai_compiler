@@ -54,3 +54,38 @@ python -m fpgai_research.experiments.cst_r4q_original_r4p_physical_diagnostics \
 R4q creates only the new report folder and a SHA inventory. If the output already exists, OMIT `--output` and inspect stdout read-only; never delete/recreate or overwrite an original study.
 
 **R4q implementation and new tests are COMMITTED but NOT YET WORKSTATION VERIFIED.** Once the original R4q output identifies the blocking conditions, amend the paper with verified WNS/utilization/DRC only. Any parser change must be reviewed against source excerpts and tested with actual formats; never infer physical advantage merely because both Vivado executables returned exit code zero. First paper remains **MAJOR REVISION / NOT SUBMISSION READY**, PR remains draft, `main` unchanged, and no GitHub Actions are used.
+
+## Original R4q workstation result — VERIFIED 6 November 2026
+
+The author pulled research branch at `475e42315156cad9f78e4da739e12b8c1b6fbbde`, ran **44/44 focused R4q/R4p/R4o/R4n tests** in 0.44 seconds, and executed the read-only original R4q diagnostic against `build/r4p_matched_vivado_ooc_native_20261106_01`. The output returned `SIGNED_ORIGINAL_R4P_POSTRUN_DIAGNOSTICS_NOT_E4`, two independently SHA-attested original vendor invocations and all eight SHA-attested original physical reports; **zero new Vitis/Vivado calls, no report edits**. The original R4p pair verdict remains `UNKNOWN_INCOMPLETE_OR_FAILED_PHYSICAL_PAIR`; original `physical_E4=null`.
+
+| Signed original routed OOC result | Full-storage | Row-storage | Row − full |
+|---|---:|---:|---:|
+| Vivado mapped BRAM tiles | **7** | **4** | **−3 (−42.9%)** |
+| Vivado DSP | **24** | **21** | **−3 (−12.5%)** |
+| Vivado LUT | **1,282** | **1,710** | **+428 (+33.4%)** |
+| Vivado FF | **883** | **1,022** | **+139 (+15.7%)** |
+| Vivado URAM | **0** | **0** | **0** |
+| Routed WNS at requested 12ns | **−2.170ns** | **−3.718ns** | **−1.548ns (worse)** |
+| DRC warnings (no critical errors) | **74** | **71** | **−3** |
+| Source-attested routing complete | YES | YES | both complete |
+| Timing_met | **FALSE** | **FALSE** | both fail requested clock |
+| Strict clean DRC E4 | **FALSE** | **FALSE** | no qualified pair |
+
+**Actual blocker is confirmed:** both original `blocked_conditions` arrays contain **`NEGATIVE_ROUTED_WNS`** and **`DRC_NONCLEAN`**. `unrecognized_or_missing_required_resources` is the EMPTY list for both arms; there is **NO utilization parser problem**. Original R4p's strict E4 gate was correctly conservative. Although all required routed utilization numbers are source- and report-attested, they **cannot** be promoted to timing-qualified clean-DRC E4.
+
+**DRC warning-class breakdown, as parsed from signed original reports:**
+
+| Rule | Full | Row | Delta |
+|---|---:|---:|---:|
+| `DPIP-2` (Warning) | 29 | 29 | 0 |
+| `DPOP-3` (Warning) | 20 | 20 | 0 |
+| `DPOP-4` (Warning) | 24 | 21 | −3 |
+| `RTSTAT-10` (Warning) | 1 | 1 | 0 |
+| **Total** | **74** | **71** | **−3** |
+
+The names are preserved exactly as emitted. This study has NOT independently established the design-specific implications of these warning categories. `critical_warnings=0`, `unconstrained_io=false`, and `board_deployment_qualified=false` in each report. No board qualification or route-qualified achieved clock is inferred from a negative WNS.
+
+**Scientific interpretation:** The SOURCE-controlled row-retained implementation is a real mapped OOC **BRAM/DSP versus LUT/FF/timing tradeoff** in this one numerical format/graph: physical BRAM tiles 7→4 and DSP 24→21, while LUT and FF increase and WNS deteriorates. This contrasts with the earlier Vitis HLS estimated BRAM18K **13→13 tie**, confirming HLS resource estimates need not match independently routed physical mapping. It is NOT a net proven improvement, not an E4-qualified frequency/area superiority claim, and not a general result. The two original native runs are immutable and MUST NOT be rerun.
+
+The separate [R4r descriptive source-attested routed tradeoff ledger](R4R_SIGNED_OOC_TRADEOFF_LEDGER_20261106.md) is the proposed follow-on to compute and independently check these resource, timing and warning counts while keeping E4 null.
