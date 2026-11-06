@@ -254,3 +254,128 @@ def test_run_is_create_only_and_original_source_immutable(
         for p in new.rglob("*.v")
     }
     assert before == after
+
+
+def _site(instance, *, depth, arm, mode="SOURCE_LITERAL_NAMED_OVERRIDES_ONLY",
+          parent="fpgai_model"):
+    return {
+        "instance": instance,
+        "module_type": SCRATCH,
+        "parent_module_type": parent,
+        "parameter_site_status": mode,
+        "source_site_literal_parameter_tuple_if_supported": (
+            None if depth is None else {
+                "DataWidth": 32, "AddressWidth": 8,
+                "AddressRange": depth,
+            }),
+        "effective_instance_parameter_tuple": None,
+        "elaborated_instances": None,
+        "physical_BRAM": None,
+    }
+
+
+def _three_sites(*, arm, depth):
+    return {
+        "arm": arm,
+        "status": "SOURCE_INSTANCE_SITES_PARSED_WITHOUT_ELABORATION",
+        "scratch_source_sites": [
+            _site(name, depth=depth, arm=arm)
+            for name in ("scratch_U", "scratch_1_U", "scratch_2_U")
+        ],
+    }
+
+
+def test_three_matching_original_scratch_sites_are_paired_without_elaboration():
+    full = _three_sites(arm="full_H", depth=214)
+    row = _three_sites(arm="row_H", depth=134)
+    row["scratch_source_sites"].reverse()  # original evidence order need not match
+    result = sut.compare_scratch_source_sites(full, row)
+    assert result["status"] == "SOURCE_SCRATCH_SITES_PARSED_NOT_ELABORATED"
+    assert result["scratch_source_site_count_full"] == 3
+    assert result["scratch_source_site_count_row"] == 3
+    assert len(result["scratch_source_site_pairs"]) == 3
+    assert {s["instance"] for s in result["scratch_source_site_pairs"]} == {
+        "scratch_U", "scratch_1_U", "scratch_2_U"}
+    assert all(s["source_depth_delta_row_minus_full"] == -80
+               for s in result["scratch_source_site_pairs"])
+    assert result["scratch_literal_source_site_depth_delta"] == -80
+    assert result["scratch_literal_source_site_tuple_full"] == {
+        "DataWidth": 32, "AddressWidth": 8, "AddressRange": 214}
+    assert result["scratch_literal_source_site_tuple_row"] == {
+        "DataWidth": 32, "AddressWidth": 8, "AddressRange": 134}
+    assert result["scratch_site_parameter_modes"] == [
+        "SOURCE_LITERAL_NAMED_OVERRIDES_ONLY",
+        "SOURCE_LITERAL_NAMED_OVERRIDES_ONLY"]
+    # Deliberately NO multiplication by source-site count as mapped capacity.
+    assert result["elaborated_scratch_instance_depth_delta"] is None
+    assert result["physical_BRAM_delta"] is None
+
+
+def test_missing_duplicate_or_unresolved_scratch_source_site_is_unknown():
+    full = _three_sites(arm="full_H", depth=214)
+    row = _three_sites(arm="row_H", depth=134)
+    row["scratch_source_sites"].pop()
+    r = sut.compare_scratch_source_sites(full, row)
+    assert r["status"] == "UNKNOWN_SCRATCH_INSTANCE_PARAMETER_SITES"
+    assert r["scratch_literal_source_site_depth_delta"] is None
+    row = _three_sites(arm="row_H", depth=134)
+    row["scratch_source_sites"][1]["instance"] = "scratch_U"  # duplicate
+    r = sut.compare_scratch_source_sites(full, row)
+    assert r["status"] == "UNKNOWN_SCRATCH_INSTANCE_PARAMETER_SITES"
+    row = _three_sites(arm="row_H", depth=134)
+    row["scratch_source_sites"][1][
+        "source_site_literal_parameter_tuple_if_supported"] = None
+    r = sut.compare_scratch_source_sites(full, row)
+    assert r["status"] == "UNKNOWN_SCRATCH_INSTANCE_PARAMETER_SITES"
+    assert r["scratch_source_site_pairs"] is None
+
+
+def test_heterogeneous_scratch_site_parameters_not_collapsed():
+    full = _three_sites(arm="full_H", depth=214)
+    row = _three_sites(arm="row_H", depth=134)
+    row["scratch_source_sites"][1][
+        "source_site_literal_parameter_tuple_if_supported"]["AddressRange"] = 96
+    result = sut.compare_scratch_source_sites(full, row)
+    assert result["status"] == (
+        "SOURCE_SCRATCH_SITES_PAIRED_HETEROGENEOUS_NOT_ELABORATED")
+    assert len(result["scratch_source_site_pairs"]) == 3
+    assert sorted(x["source_depth_delta_row_minus_full"]
+                  for x in result["scratch_source_site_pairs"]) == [-118, -80, -80]
+    assert result["scratch_literal_source_site_depth_delta"] is None
+    assert result["scratch_literal_source_site_tuple_row"] is None
+    assert result["physical_BRAM_delta"] is None
+
+
+def test_real_source_style_three_scratch_site_pipeline(tmp_path, monkeypatch):
+    new, old = _study(tmp_path, monkeypatch)
+    for arm in ("full_H", "row_H"):
+        file = (new / "format_32_06" / arm / "vitis_source"
+                / "fpgai_hls_project" / "solution1" / "syn"
+                / "verilog" / "fpgai_model.v")
+        source = file.read_text()
+        injection = (
+            f"{SCRATCH} scratch_1_U(.clk(clk));\n"
+            f"{SCRATCH} scratch_2_U(.clk(clk));\n")
+        source = source.replace(
+            f"{ACC} acc_U", injection + f"{ACC} acc_U")
+        file.write_text(source)
+    # Refresh synthetic hashes; the REAL R4j pipeline still SHA-checks
+    # all files before touching any native source.
+    prior = sut.r4g.inspect(study=new, original_study=old)
+    for k, arm in enumerate(("full_H", "row_H")):
+        file = (new / "format_32_06" / arm / "vitis_source"
+                / "fpgai_hls_project" / "solution1" / "syn"
+                / "verilog" / "fpgai_model.v")
+        prior["arms"][2 + k]["rtl_file_sha256"]["fpgai_model.v"] = (
+            sha256(file.read_bytes()).hexdigest())
+    monkeypatch.setattr(sut.r4g, "inspect", lambda **_: prior)
+    report = sut.inspect(study=new, original_study=old)
+    pair = report["pairs"][1]
+    assert pair["status"] == "SOURCE_SCRATCH_SITES_PARSED_NOT_ELABORATED"
+    assert pair["scratch_source_site_count_full"] == 3
+    assert pair["scratch_source_site_count_row"] == 3
+    assert pair["scratch_literal_source_site_depth_delta"] == -80
+    assert len(pair["scratch_source_site_pairs"]) == 3
+    assert pair["HLS_estimated_BRAM18K_delta"] == 0
+    assert pair["elaborated_scratch_instance_depth_delta"] is None
+    assert pair["physical_BRAM_delta"] is None
