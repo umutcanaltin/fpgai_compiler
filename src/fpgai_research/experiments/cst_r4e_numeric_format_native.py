@@ -51,8 +51,10 @@ def audit_prepared(*, study: str | Path, original_study: str | Path) -> dict:
     original_audit = audit_r4a(study=original_root)
     original = _json(original_root / "summary.json")
     original_case = original["rows"][r4d.CASE_INDEX]
-    source = _json(root / "summary.json") if _sha(root / "summary.json") else None
-    inventory = _json(root / "artifact_sha256.json") if _sha(root / "artifact_sha256.json") else None
+    _sha(root / "summary.json")
+    _sha(root / "artifact_sha256.json")
+    source = _json(root / "summary.json")
+    inventory = _json(root / "artifact_sha256.json")
     expected = r4d.plan()
     if (source.get("schema") != r4d.SCHEMA
             or source.get("configuration") != expected
