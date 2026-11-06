@@ -222,6 +222,14 @@ def audit_inputs(*, native_study: str | Path, r4t_study: str | Path,
             or summary.get("original_checkpoint_provenance") !=
                 "POST_HOC_SHA_NOT_EXECUTION_TIME_SIGNED"
             or summary.get("paired_report_only_cases") != 2
+            or summary.get("checkpoint_sha256") != {
+                arm: original["arms"][arm]["posthoc_original_checkpoint_sha256"]
+                for arm in ARMS
+            }
+            or summary.get("original_routed_wns_ns") != {
+                arm: original["arms"][arm]["original_routed_wns_ns"]
+                for arm in ARMS
+            }
             or summary.get("actual_native_vivado_calls") != 0
             or summary.get("strict_physical_E4") is not None
             or summary.get("board_qualified") is not False):
@@ -498,12 +506,12 @@ def audit_native(*, native_study: str | Path, r4t_study: str | Path,
             not (case / "logs").is_symlink()
             and (case / "logs").is_dir()
             and all(
-            _is_sha(receipt.get(field))
-            and _digest(case / "logs" / name) == receipt[field]
-            for field, name in (
-                ("stdout_sha256", "vivado.stdout.log"),
-                ("stderr_sha256", "vivado.stderr.log"),
-            )
+                _is_sha(receipt.get(field))
+                and _digest(case / "logs" / name) == receipt[field]
+                for field, name in (
+                    ("stdout_sha256", "vivado.stdout.log"),
+                    ("stderr_sha256", "vivado.stderr.log"),
+                )
             )
         )
         reports = case / "reports"
