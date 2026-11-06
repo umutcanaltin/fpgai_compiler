@@ -25,7 +25,11 @@ The accumulator source default is unchanged at 256×32 = 8192 bits. The three we
 
 Likewise the separate R4a source-level H-storage saving cited earlier (240 scalar cells) and the 80-entry HLS scratch-module-default reduction are **different measurements**; they must not be directly substituted or equated. Read-only R4h did not establish the elaboration/optimization relation between those quantities.
 
-## R4i newly implemented (not yet workstation-tested)
+## R4i workstation-tested; new R4j original-source site protocol
+
+**Update:** The author's workstation reported 24 focused R4i/R4h/R4g tests passing, then completed the create-only original R4i source-default report at build/r4i_rtl_memory_parameter_defaults_20261106_01. The original 32/6 output source-qualifies the 214 versus 134 scratch default depth, same 32-bit default width and 8-bit default address width, unchanged 256-word accumulator defaults, three matching ROM default profiles, and **zero HLS estimated BRAM18K reduction (13 vs 13)**. It launched zero vendor calls and modified no original evidence. A new [R4j original source memory-instance site audit](R4J_ORIGINAL_RTL_MEMORY_INSTANCE_SOURCE_SITES_20261106.md) is now implemented, but remains UNTESTED on the author's workstation.
+
+## Original R4i protocol (now verified on workstation)
 
 New code: src/fpgai_research/experiments/cst_r4i_rtl_memory_parameter_defaults.py
 
