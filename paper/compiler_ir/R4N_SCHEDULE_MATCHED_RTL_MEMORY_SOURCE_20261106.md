@@ -58,3 +58,28 @@ The output folder is create-only. If it exists, omit `--output` to inspect a rea
 A separate E4 study should use a new output root and independent SHA-attested original `full_storage` and `row_storage` R4l RTL **plus all original ROM data** to prepare matched Vivado out-of-context implementation. It must not modify the native Vitis projects. Collect actual synthesized/placed/route cell/resource counts, real timing slack and DRC, timing constraints, memory primitive mapping, bitstream/board assumptions, and explicit board qualification limits before claiming a physical FPGA improvement. The R4n source-only and R4m HLS-level results can motivate that experiment but cannot substitute for it.
 
 **First paper remains MAJOR REVISION / NOT SUBMISSION READY.**
+
+## Observed original R4n workstation audit (6 November 2026)
+
+The author pulled research revision `9b5f834c0fc6629061e4435919e061113bd36bca`, ran **27/27 focused R4n/R4m/R4l tests**, and completed the create-only read-only R4n study `build/r4n_schedule_matched_RTL_memory_20261106_01`. It read and SHA-attested both original R4l Vitis HLS RTL and ROM inventories without a single new vendor call or original file modification. R4n's paired status is **`SOURCE_ATTESTED_STATIC_RTL_SCRATCH_SITES_PAIRED_NOT_ELABORATED`**.
+
+| Actual Vitis-generated source evidence | R4l `full_storage` | R4l `row_storage` |
+|---|---:|---:|
+| RTL `.v/.sv` files | 24 | 24 |
+| ROM `.dat/.mem` payloads | 3 | 3 |
+| Reachable source memory module types | 5 | 5 |
+| Static memory-related source-site declarations | 8 | 8 |
+| Scratch source-site declarations | 3 | 3 |
+| Scratch `DataWidth` (source literal) | 32 | 32 |
+| Scratch `AddressWidth` (source literal) | 8 | 8 |
+| Scratch `AddressRange` (source literal, each site) | 214 | 134 |
+| Scratch source-declaration data-bit product *per site* | 6,848 | 4,288 |
+| Accumulator / counter source depth | 256 | 256 |
+| Weight-ROM source defaults / payload multisets | Identical | Identical |
+| HLS estimated BRAM18K | 13 | 13 |
+
+All three source scratch site names `scratch_U`, `scratch_1_U`, `scratch_2_U` carry supported **literal named parameter overrides**, each `214→134` entries, so the R4n site-level difference is **−80 entries**. Counting three matching declaration sites gives a numerical sum of **−240 entry-slots**; this is source-level accounting, **NOT** 240 freed physically mapped SRAM words. The native R4l full/row outputs have identical 3-ROM payload SHA multisets, and no change in reachable source module-type counts, memory module-type counts or memory source-site counts.
+
+Both native arms remain original E2/E3 qualified, and R4n explicitly returns `mapped_BRAM18K_delta = null`, `placed_routed_clock_delta = null`, `physical_E4 = null`. Thus this study strongly links the R4k storage reduction to actual HLS-generated **Verilog source declarations and literal instantiation parameters** while providing no evidence of mapped RAMB count, physical area, timing or Fmax. Static candidate primitive count zero means only this bounded source parser found none; it does **not** assert zero real RAMB cells after Vivado.
+
+The original R4n create-only report is immutable and should not be regenerated in place. Next gate: independent matched Vivado OOC physical preparation, using separate staged copies of SHA-attested RTL+ROM assets and unchanged source clocks/part, then strict routed timing/DRC qualification. No original Vitis native rerun.
