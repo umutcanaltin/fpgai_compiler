@@ -167,3 +167,27 @@ def test_original_source_preflight_then_two_create_only_packages(tmp_path, monke
         sut.run(original_r4d=study, original_r4a=old, output=target)
     assert sha256((p/"source.cpp").read_bytes()).hexdigest() == (
         config["source_row_original_sha256"])
+
+
+@pytest.mark.skipif(shutil.which("g++") is None, reason="Real GCC required")
+def test_actual_h_load_mutation_detected_even_when_trace_witness_unchanged(
+    monkeypatch,
+):
+    """A forged address witness alone is not sufficient for numerical safety."""
+    from fpgai_research.validation import r4k_matched_storage_gcc as validation
+    arch=r4a._case((2,(2,2,3,4),"scalar"),precision_bits=32,integer_bits=6)
+    actual=emit_full_storage_row_schedule_cpp(arch)
+    old="      data_t h_val=scratch[h_addr];"
+    assert actual.cpp.count(old) == 2
+    modified=actual.cpp.replace(
+        old, "      data_t h_val=scratch[(h_addr+1)%16];", 1)
+    forged=Emission(
+        modified,
+        {**actual.manifest,
+         "source_cpp_sha256":sha256(modified.encode()).hexdigest()},
+    )
+    monkeypatch.setattr(validation, "emit_full_storage_row_schedule_cpp",
+                        lambda _arch: forged)
+    x=np.asarray([[0.3,-0.5],[-0.7,1.1]],dtype=np.float32)
+    with pytest.raises(AssertionError, match="numerical mismatch"):
+        validation.verify_matched_gcc(arch,runtime_input=x)
