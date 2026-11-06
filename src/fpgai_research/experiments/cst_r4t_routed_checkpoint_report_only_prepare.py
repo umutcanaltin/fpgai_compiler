@@ -150,8 +150,11 @@ def prepare(*, study: str | Path, r4o_study: str | Path,
             shutil.copyfile(source, checkpoint, follow_symlinks=False)
             if (_sha(checkpoint) != (
                     original["posthoc_original_checkpoint_sha256"],
-                    original["checkpoint_bytes"])):
-                raise ValueError("R4t copied checkpoint SHA/size mismatch")
+                    original["checkpoint_bytes"])
+                    or _sha(source) != (
+                        original["posthoc_original_checkpoint_sha256"],
+                        original["checkpoint_bytes"])):
+                raise ValueError("R4t original/copied checkpoint SHA or size changed")
             script = _script()
             (case / "report_only.tcl").write_text(script)
         result = {
