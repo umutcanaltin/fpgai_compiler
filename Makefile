@@ -2,7 +2,7 @@
 # None of these targets invokes Vitis, Vivado, downloads models or publishes code.
 PYTHON ?= python
 
-.PHONY: help install-dev example example-cnn example-strided example-two-conv example-mlp test test-examples test-compiler test-gym release-check release-links release-preview-plan fpga-env-check fpga-prepare-hls fpga-inspect research-inventory research-audit-tests research-c2-review
+.PHONY: help install-dev example example-cnn example-strided example-two-conv example-mlp test test-examples test-compiler test-gym release-check release-links release-preview-plan fpga-env-check fpga-prepare-hls fpga-inspect research-inventory research-audit-tests research-c2-review research-c1-e1-review
 
 help:
 	@echo "install-dev          Install editable compiler with ONNX and test extras"
@@ -18,6 +18,7 @@ help:
 	@echo "research-inventory  Read-only tracked-file SHA and Python import/owner map"
 	@echo "research-audit-tests Run source inventory, hygiene and C2 read-only tests"
 	@echo "research-c2-review  Read-only original source-compiler cost comparison (no new calls)"
+	@echo "research-c1-e1-review Read-only SHA-pinned original full 54-profile GCC E1 source-slot results"
 	@echo "release-links        Check all public preview documentation links"
 	@echo "release-preview-plan Show nonpublishable public source allowlist"
 	@echo "release-check        Read-only owner/IP/license/history release preflight"
@@ -98,7 +99,11 @@ research-inventory:
 	$(PYTHON) scripts/audit_source_inventory.py
 
 research-audit-tests:
-	$(PYTHON) -m pytest -q tests/test_audit_source_inventory.py tests/test_repository_publication_hygiene.py tests/test_cst_paper_c2_original_readonly_analysis.py tests/test_public_docs_links.py tests/test_public_release_preview.py
+	$(PYTHON) -m pytest -q tests/test_audit_source_inventory.py tests/test_repository_publication_hygiene.py tests/test_cst_paper_c2_original_readonly_analysis.py tests/test_cst_paper_c1_original_e1_readonly_descriptives.py tests/test_public_docs_links.py tests/test_public_release_preview.py
 
 research-c2-review:
 	$(PYTHON) -m fpgai_research.experiments.cst_paper_c2_original_readonly_analysis --study build/paper_c2_fair_source_cost_20261106_01
+
+# Source-hash-pinned, NO new compilation or vendor calls. Never re-run the original GCC output.
+research-c1-e1-review:
+	$(PYTHON) -m fpgai_research.experiments.cst_paper_c1_original_e1_readonly_descriptives --study build/paper_c1_e1_cpp_bridge_full_20261106_01
