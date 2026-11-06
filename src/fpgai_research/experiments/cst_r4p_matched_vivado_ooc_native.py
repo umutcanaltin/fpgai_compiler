@@ -366,7 +366,8 @@ def _arm_observation(case: Path, *, source: dict,
         "drc_warning_only_routed_observation": False,
         "routed_wns_ns": None,
         "routed_utilization": {k: None for k in _RESOURCE},
-        "Drc": None,
+        "DRC": None,
+        "physical_E4": None,
         "source_R4l_HLS_estimated_BRAM18K": source["HLS_estimated_BRAM18K"],
         "source_cpp_sha256": source["source_cpp_sha256"],
         "original_RTL_file_count": len(source["rtl_sha256"]),
@@ -502,7 +503,10 @@ def _arm_observation(case: Path, *, source: dict,
         "routed_utilization": {
             k: resources.get(k) for k in _RESOURCE
         },
-        "Drc": drc,
+        "DRC": drc,
+        "physical_E4": (
+            "SOURCE_ATTRIBUTED_STRICT_CLEAN_DRC_ROUTED_OOC_ONLY"
+            if strict else None),
         "board_qualified": False,
     })
     return record
@@ -561,6 +565,9 @@ def audit_native(*, study: str | Path, r4o_study: str | Path,
             delta if strict else {key: None for key in _RESOURCE},
         "descriptive_WNS_delta_row_minus_full_ns": wn,
         "strict_clean_DRC_WNS_delta_ns": wn if strict else None,
+        "physical_E4": (
+            "SOURCE_ATTRIBUTED_STRICT_CLEAN_DRC_ROUTED_OOC_PAIR_ONLY"
+            if strict else None),
         "HLS_estimated_BRAM18K_tie": (
             first["source_R4l_HLS_estimated_BRAM18K"]
             == second["source_R4l_HLS_estimated_BRAM18K"]),
