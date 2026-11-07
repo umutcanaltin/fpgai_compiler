@@ -260,3 +260,14 @@ User's first post-implementation local run: **44 passed, 6 failed**, all from le
 | This maintainer impact ledger | MODIFIED | File ownership, interfaces, tests, original/output scope. | Editorial. |
 
 No existing native compiler/RTL/original study source files modified. No file deletions, moves, renames or GitHub Actions. No main merge. No native tool calls were made by these source commits. Next milestone is the author's local R4z focused regression, create-only native staging and no-vendor audit; real Vitis remains separately opt-in and must preserve adverse outcomes.
+
+## 7 November 2026 — Overleaf scientific manuscript edit and file impact
+
+| Path | Operation | Function and dependency | Verification |
+|---|---|---|---|
+| `paper/compiler_ir/FPGAI_EXECUTABLE_SOURCE_CONTRACTS_MANUSCRIPT_20261107.tex` | ADDED | Standalone ~103 kB article LaTeX. Literature from existing manuscript, fixed source-contract methods, original SHA-audited C1 GCC 54-profile/108-run effect sizes, original C2 direct/lazy/eager 108 paired source-CPU workloads, adverse HLS/physical routed reports, and strictly planned 24 ns storage × producer-pipeline factorial, external semantic comparator, tested-clock frontier and board latency. No new empirical outputs. | Compiled twice locally with pdfLaTeX in article fallback: **21 pages, no unresolved citations or refs**, 64 unique labels, no missing bibliography keys. Rendered multipage preview inspected. |
+| `paper/compiler_ir/README.md` | MODIFIED | Adds discoverable manuscript pointer, publication/evidence boundary and Overleaf instructions. | Editorial. |
+| This maintainer ledger | MODIFIED | File addition, dependencies, author-facing access; no generated hardware outputs touched. | Editorial. |
+| `CHANGELOG.md` | MODIFIED | Manuscript editorial milestone, source-only science clarification and claim limitations. | Editorial. |
+
+**No original experiment, tool runner, original LaTeX text, native attempt lock, branch base, licensing file or GitHub Action was altered.** All R4z actual native hardware observations remain not executed; R4y remains the last author-verified source-only experiment. Same draft research PR; main remains unchanged. The GitHub-hosted source is an alternate to a direct `main.tex` download for the author. This edit does not issue rights or reuse permission.

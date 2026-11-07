@@ -53,3 +53,7 @@ Many other files in this directory are **dated research notebooks**: experiment 
 Public-facing examples, contributions and programmatic interfaces belong in `docs/`, `examples/` and `CONTRIBUTING.md`, not in new research-sprint notes. Internal work logs and private native receipts must not be included in public source distributions. [Release preview](../../docs/RELEASE_PREVIEW.md) uses an allowlist that excludes `paper/` entirely.
 
 **Rights-cleared licensed redistribution remains blocked.** The repository may already be publicly viewable, but this work did not change visibility or grant a license. History/rights review and a definitive release decision remain mandatory.
+
+## Overleaf manuscript source (7 November 2026)
+
+The standalone [scientific LaTeX manuscript](FPGAI_EXECUTABLE_SOURCE_CONTRACTS_MANUSCRIPT_20261107.tex) is a directly compileable source file for Overleaf (`main.tex`). It keeps the existing bounded source semantics, the independently executed 54-profile GCC and C2 CPU-cost results, the adverse HLS and routed-clock findings, and a prospective validation program in scientifically appropriate sections. It contains no Morfics affiliation or email, uses a qualitative abstract without numbers, and consolidates the previous engineering-report sections. The original manuscript, protocol ledgers, original experiment outputs, and draft PR remain unchanged. **This is an editorial manuscript update, not new hardware evidence or a submission-ready acceptance claim.**

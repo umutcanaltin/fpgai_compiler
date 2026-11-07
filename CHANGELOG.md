@@ -1,3 +1,11 @@
+## 7 November 2026 — scientific Overleaf article source, source evidence preserved
+
+- Added a directly compileable `paper/compiler_ir/FPGAI_EXECUTABLE_SOURCE_CONTRACTS_MANUSCRIPT_20261107.tex` for Overleaf, retaining Radboud-only affiliation and removing Morfics identity.
+- Reframed the article around executable finite source obligations rather than engineering sprint/status narratives; qualitative number-free abstract, consolidated theory, fewer subsections and no enumerated scientific questions.
+- Added independently verified C1 54-profile GCC source slot distributions and honest negative C2 lazy-versus-eager CPU cost controls, with HLS and routed pilot outcomes reported under separate evidence criteria.
+- Recast proposed Allo/other-system comparison, new 24ns source-matched storage × MAC-pipeline HLS experiment, routing setup/hold/DRC, frequency frontier and on-board core/AXI/DMA timing as prospective falsifiable tests, not completed results.
+- PDFLaTeX article fallback builds to 21 pages with all cross-references and bibliography keys resolved; no native tool calls or original evidence writes. Original author manuscript revision remains preserved.
+
 ## 7 November 2026 — author verified R4y source cohort; new isolated R4z Vitis stage
 
 - The author passed **60/60** R4y/R4x/R4w tests in 48.71s at `dde56d4`, then successfully prepared and read-only audited four 24ns / 1.5ns R4y source packages. The original frozen source revision is `776e3a7`, all four source hashes match, common CSim testbench/Tcl hashes match and vendor calls are zero. This is E1/source-only evidence, not E2/E3/E4.
