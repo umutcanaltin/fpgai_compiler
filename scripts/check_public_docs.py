@@ -13,7 +13,15 @@ import re
 from pathlib import PurePosixPath, Path
 from urllib.parse import unquote, urlsplit
 
-from scripts.prepare_public_preview import plan, allowed, SCHEMA as PREVIEW_SCHEMA
+# Support BOTH the published documented direct invocation
+#   python scripts/check_public_docs.py --profile compiler
+# and the module invocation used by tests and contributor tooling
+#   python -m scripts.check_public_docs --profile compiler.
+# Direct execution puts scripts/ rather than the checkout root on sys.path.
+if __package__ in (None, ""):
+    from prepare_public_preview import plan, allowed, SCHEMA as PREVIEW_SCHEMA
+else:
+    from scripts.prepare_public_preview import plan, allowed, SCHEMA as PREVIEW_SCHEMA
 
 SCHEMA="fpgai-research/public-docs-link-audit/v1"
 LINK_RE=re.compile(r"\[[^\]]+\]\(([^\s)]+)(?:\s+[^)]*)?\)")

@@ -1,3 +1,4 @@
+> **6 November 2026 cleanup checkpoint:** The active first-paper research branch now protects future local evidence with `.gitignore`, provides issue/PR templates without Actions, and includes linked public user guidance in a curated preview. The original C1/C2 author-run source reports remain local, immutable and SHA-pinned. **No source license, institutional approval, full-history security scan or completed clean-room release test is asserted.** A compiler-only `sdist` intentionally excludes `paper/` experiment notebooks; a peer-reviewed research artifact will need an independently rights-approved, reproducible source/protocol release rather than merely copying the ordinary Python package. The current GitHub repository is already publicly viewable, which is not permission for redistribution or proof that Git history is clean.
 # Source-distribution readiness checklist
 
 This repository is publicly viewable but currently has no operative source-code license. A separately licensed source distribution requires review of institutional, contributor and third-party rights. This checklist does not grant permissions.
@@ -25,6 +26,7 @@ This repository is publicly viewable but currently has no operative source-code 
 - [ ] Check private paths, internal URLs, identifiable author/student emails,
       sensitive hosts, hardcoded local home paths, material from NDAs, and
       unpublished research claims in every public document and example.
+- [ ] Inspect **the actual wheel and sdist contents**, not only `MANIFEST.in` or the curated source preview. The `src/fpgai_research/experiments/` package contains numerous historical study implementations; decide in a rights-reviewed, dependency-tested step whether they belong in a compiler-only distribution or a separate scholarly artifact. Do not prune them until static/dynamic imports, CLI entry points, reproducibility requirements and package install tests establish no regressions.
 - [ ] Run a clean virtualenv installation, targeted and complete tests,
       static/safety checks, reproducible non-native smoke examples,
       and verify no GitHub CI starts licensed HLS tools automatically.

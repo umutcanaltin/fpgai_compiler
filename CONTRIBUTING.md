@@ -4,6 +4,20 @@ Thank you for improving FPGAI. The most useful contributions are small, independ
 
 **Important:** This repository is publicly viewable but currently has **no operative source-code license**. Before contributing, the maintainer must confirm the proposed contribution can be accepted and redistributed under an eventual authorized license. Repository access alone grants no permission to publish, redistribute, or reuse its contents.
 
+## Discover the code owner before adding another module
+
+This repository contains a **large, original source-pinned research history**; finding a similarly named experimental module does not mean it is redundant. Before creating, renaming, moving or deleting any Python file, inspect the repository structure and the existing functional/architecture/compilation contracts:
+
+```bash
+make research-inventory
+python scripts/audit_source_inventory.py --output build/source_inventory_contributor_01
+```
+
+The second command makes a **new, ignored, create-only** `inventory.json` mapping each tracked file to its content SHA, subsystem owner, top-level definitions, static internal imports and direct importers. The first command is read-only and reports counts. The map does **not** model dynamic imports, CLI entry points, runtime registration or behavioral equivalence. A file with no static importers is **not** evidence that it is safe to delete. [Research artifact and current publication scope](docs/RESEARCH_PUBLICATION_STATUS.md).
+
+Every pull request must include a **changed-file impact report**: added/changed/deleted/moved path, its responsibility and callers/imports, semantic/API effects, original study source/receipt effects, tests actually executed and failures that remain. Use the GitHub PR template. This is especially mandatory for `model_ir`, `codegen`, `toolchains`, experiment modules and publication protocols. Preserve existing signed original native evidence and source experiment outputs: never rewrite or rerun them under the same source/output name.
+
+Before proposing a public release, run `make research-audit-tests`, `make release-links`, `make release-preview-plan` and `make release-check`. These commands perform **technical checks only**; they cannot grant licensing, verify complete Git-history safety or authorize redistribution. There are **no GitHub Actions**; maintainers run tests explicitly. New host GCC source experiments are not Vitis/Vivado executions and require a separate original experiment receipt.
 ## Before starting
 
 Read the [project README](README.md), [compiler architecture](docs/ARCHITECTURE.md), [supported features](docs/SUPPORTED_FEATURES.md), [licensing and permissions](docs/LICENSE_DECISION.md), and [release constraints](docs/OPEN_SOURCE_RELEASE_CHECKLIST.md). Check for an existing issue or related implementation first. For operator extensions, follow [the operator guide](docs/COMPILER_OPERATOR_CONTRIBUTION.md).

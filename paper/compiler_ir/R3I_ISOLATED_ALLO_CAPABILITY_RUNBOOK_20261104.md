@@ -1,5 +1,7 @@
 # R3i: Isolated pinned Allo equivalence-capability comparison
 
+> **6 November 2026 source-location clarification:** This protocol belongs to the active `fpgai_compiler` GitHub research branch. The older working-directory examples that referenced the separate `fpgai_research` checkout have been updated. An external Allo comparison must run in its own isolated Python/MLIR environment; the current protocol and synthetic tests do **not** establish equivalent semantic capability or justify publication priority. Status remains **NOT EXECUTED** until author logs and original SHA receipts are verified.
+
 **Status 4 November 2026: NOT EXECUTED.** The author has only run `--protocol` and verified that `external_artifact_executed=false`. This document describes an optional future **source-artifact experiment in a different Python/LLVM environment**. It does not mark the paper submission-ready or claim that Allo lacks any FPGAI contract.
 
 ## Exact external source, scope and prerequisite
@@ -12,7 +14,7 @@
 
 ## Installation isolation and source pinning
 
-Do **not** modify the validated `~/Desktop/github_projects/fpgai_research/.venv`. Choose a separate external-artifact workspace. Obtain the Allo source and submodules using normal Git in that workspace, then pin and record the exact source:
+Do **not** modify the validated `~/Desktop/github_projects/fpgai_compiler/.venv`. Choose a separate external-artifact workspace. Obtain the Allo source and submodules using normal Git in that workspace, then pin and record the exact source:
 
 ```bash
 mkdir -p ~/Desktop/external_compiler_artifacts
@@ -30,17 +32,17 @@ The scientific driver refuses a different Allo source revision, a dirty checked-
 
 ## Safe preflight and isolated execution
 
-From the original research repo, checking the protocol requires **no** external compiler:
+From the active `fpgai_compiler` research checkout, checking the protocol requires **no** external compiler:
 
 ```bash
-cd ~/Desktop/github_projects/fpgai_research
+cd ~/Desktop/github_projects/fpgai_compiler
 python -m fpgai_research.experiments.cst_r3i_external_allo_capability --protocol
 ```
 
 Inside the verified external Python environment (where `import allo` resolves to the pinned checkout), expose **only the Python source tree** of the existing compiler research package, then opt in:
 
 ```bash
-export FPGAI_RESEARCH_ROOT=~/Desktop/github_projects/fpgai_research
+export FPGAI_RESEARCH_ROOT=~/Desktop/github_projects/fpgai_compiler
 export PYTHONPATH="$FPGAI_RESEARCH_ROOT/src"
 cd "$FPGAI_RESEARCH_ROOT"
 python -m fpgai_research.experiments.cst_r3i_external_allo_capability \
@@ -50,6 +52,12 @@ python -m fpgai_research.experiments.cst_r3i_external_allo_capability \
 ```
 
 **Stop and inspect errors** if the experiment reports `ERROR_NOT_A_NEGATIVE_CAPABILITY_RESULT`, a missing PAST binding, a version mismatch, or an unsupported transformation. An error is not equivalent to `EXECUTED_FALSE`. Do not rerun into an existing create-only output folder.
+
+## Adversarial update from Allo's published FIFO counterexample (6 November 2026)
+
+**Established external capability, not conjecture:** Allo (PLDI 2024, Section 5.2 / Figure 6) already displays *two MatMul kernels connected by a stream FIFO* where a source/sink reader access-order mismatch is detected by `allo.verify`. The official documented equivalence tutorial additionally compares semantically equal reordered/buffered GEMM schedules and rejects an overwritten-reduction mutant. Sources: https://www.csl.cornell.edu/~zhiruz/pdfs/allo-pldi2024.pdf and https://cornell-zhang.github.io/allo/gallery/dive_05_verifier.html. A valid first-paper distinction **cannot** be merely detecting producer–consumer stream order or preserving functional equivalence. Our still-unexecuted R3i isolated experiment is a narrower three-probe baseline; it must not be presented as a general source-order comparator or evidence that Allo lacks any issue-order validation.
+
+**New, separately preregistered required capability dimensions:** functionally equivalent safe reordered readers; published FIFO producer/consumer order mismatch; premature reader/commit and live scratch overwrite; explicitly declared alternative `Phi` schedule; exact bounded per-value/per-reader last use and physical scratch address alias witness; and source-pinned tri-state action validity. These require a new external study source revision, supported Allo representations and independent expert assessment. Categorize `SUPPORTED_VERIFIED`, `SUPPORTED_REJECTED`, `UNSUPPORTED_REPRESENTATION`, `TOOL_SETUP_FAILURE`, `INCONCLUSIVE`; do not force an unsupported graph into a fake failure or rewrite the historical R3i result. [Exact adversarial reviewer matrix](SCIENTIFIC_REVIEWER_ADVERSARIAL_CLAIM_MATRIX_20261106.md).
 
 ## Prespecified comparisons
 
