@@ -1,3 +1,10 @@
+## 9 November 2026 — graph-wide MatMul Phi source issue-order check
+
+- Extended the existing independent Phi reference with a bounded graph-wide closed-form MatMul source READ order and spatial-owner check, separate from memory/value safety.
+- Integrated the check into the graph source certificate; a value-safe reordering can now be rejected when it violates the declared MatMul source issue order.
+- Added focused source-only regressions for mixed mappings, swapped reads, simulated common-mode source-generator errors, and strict input/budget validation.
+- Locally checked Python syntax and independently compared the reference's ordering to 8,100 synthetic source-loop configurations. Repository pytest and all native vendor executions were **not** run; no frozen results were changed. See maintainer change-impact ledger.
+
 ## 7 November 2026 — scientific Overleaf article source, source evidence preserved
 
 - Added a directly compileable `paper/compiler_ir/FPGAI_EXECUTABLE_SOURCE_CONTRACTS_MANUSCRIPT_20261107.tex` for Overleaf, retaining Radboud-only affiliation and removing Morfics identity.
