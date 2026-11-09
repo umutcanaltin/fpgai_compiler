@@ -1,3 +1,9 @@
+## 10 November 2026 — fix public compiler-preview documentation link
+
+- Corrected the single invalid relative link in the historical 6 November C1/C2 changelog entry: the linked source evidence remains under the intentionally excluded `paper/compiler_ir/` directory, so its reference now uses the existing public GitHub research-branch URL rather than a relative local preview path.
+- This resolves the **same root cause** reported by the author's 10 November local full suite: **2 failed, 2,351 passed, 3 skipped**. Both failures are documentation-link assertions, not compiler runtime errors. No test is asserted passing until the author reruns it.
+- The public link checker, internal source evidence, scientific results, licensing limitations, and exclusion of paper notebooks from the release preview are unchanged.
+
 ## 9 November 2026 — graph-wide MatMul Phi source issue-order check
 
 - Extended the existing independent Phi reference with a bounded graph-wide closed-form MatMul source READ order and spatial-owner check, separate from memory/value safety.
@@ -74,7 +80,7 @@
 - The author pulled source revision `5bc8e9c1ec749c1c3dcf09bf85bace91503ee0c7`, passed 30 targeted source/public tests (1.60 s), and verified all 168 public relative links (31 Markdown files, zero unresolved). The public-source preview selected 472/895 tracked files and still reported **no legal publication clearance**.
 - The existing immutable C2 source benchmark (`637f274...`, original report SHA `be2adaa4acf30196a2ccb17114f2caa0af3e6679dc2685872e27cb086ca86ec1`) was analyzed read-only across 108 paired workloads / 324 measured method rows: **lazy caching faster than eager full catalogs in 108/108** paired CPU trials, with total original measured source calls **lazy 198 / eager 864 / direct 1,476**, plus 48 excluded known-certified eligibility preflight calls. No new source compiler or vendor calls were made during the analysis. The paper now reports full six-condition median CPU ms data and does **not** claim eager source screening is cheaper than lazy.
 - The author executed a separate original two-profile matched C1 E0→generated-C++ E1 smoke at `5bc8e9c1…`: **4 actual g++ compilations and executions**, exact original E0 canonical events matched, and positive source slot savings in **2/2** original profiles. The read-only audit checked **11 files** with manifest SHA `51e022a07e35ab4ee96aed25d4a7bb990d97d49b54e98a07d977a6ed0bce4435`; 54-profile/108-GCC full original study remains **not yet executed**. No FPGA latency/BRAM claims.
-- Added [source-pinned verified C2 cost and C1 E1 smoke interpretation](paper/compiler_ir/C1_E1_SMOKE_C2_SOURCE_COST_ORIGINAL_RESULTS_20261106.md) and updated manuscript, evidence-to-claim ledger, E1 protocol, scientific strengthening plan and public research status. This is scientific evidence accounting and publication hygiene, not a new product compiler implementation.
+- Added [source-pinned verified C2 cost and C1 E1 smoke interpretation](https://github.com/umutcanaltin/fpgai_compiler/blob/research/first-paper-source-memory-bridge-20261106/paper/compiler_ir/C1_E1_SMOKE_C2_SOURCE_COST_ORIGINAL_RESULTS_20261106.md) and updated manuscript, evidence-to-claim ledger, E1 protocol, scientific strengthening plan and public research status. This is scientific evidence accounting and publication hygiene, not a new product compiler implementation.
 
 ## 6 November 2026 — direct public documentation fix and stricter scientific novelty gate
 

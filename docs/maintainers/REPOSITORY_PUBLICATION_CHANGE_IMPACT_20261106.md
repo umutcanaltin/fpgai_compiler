@@ -286,3 +286,15 @@ A source-only, prospective checker was added to the **existing** independent Phi
 | `docs/RESEARCH_PUBLICATION_STATUS.md` | MODIFIED, current research source-validation status and explicit non-evidence note | No new native artifacts or original results | Editorial |
 
 **Research boundaries:** This is a compiler-source contract strengthening, not a new empirical paper result or an independent full semantic specification; graph admission remains shared. No GitHub Actions, Vitis, Vivado, native cases, original source receipts, or draft PR merge. Existing source-revision-pinned experimental claims are unchanged. The full targeted and full repository test suites remain **not executed** by this connected-GitHub-only change.
+
+
+## 10 November 2026 — public Markdown link regression repaired
+
+**Reported original user verification:** On the research branch, `python -m pytest -q` completed with **2,351 passed, 3 skipped and 2 failed**. The failures were `tests/test_public_docs_links.py::test_direct_script_and_module_invocations_match_from_checkout` and `tests/test_repository_publication_hygiene.py::test_compiler_preview_markdown_links_resolve_without_internal_paper_files`. Both independently reported the identical single unresolved link `CHANGELOG.md:77` pointing to `paper/compiler_ir/C1_E1_SMOKE_C2_SOURCE_COST_ORIGINAL_RESULTS_20261106.md`, which is excluded from the compiler-only source preview by policy.
+
+| Path | Change and purpose | Dependencies and impact | Verification |
+|---|---|---|---|
+| `CHANGELOG.md` | MODIFIED: turned its one historical internal-paper relative Markdown link into an absolute GitHub link targeting the same research-branch file. Added chronology documenting the author's observed failure. | Public compiler preview can resolve every **local** Markdown reference while paper artifacts remain excluded. No change to the linked source evidence or its permission status. | Confirmed the invalid relative target was unique, GitHub repository contains the linked paper file, and the existing checker intentionally excludes `https://` URLs from local-path assertions. Full pytest still awaits author rerun. |
+| `docs/maintainers/REPOSITORY_PUBLICATION_CHANGE_IMPACT_20261106.md` | MODIFIED: records source and test impact without modifying any original study. | Documentation tracking only; no compiler modules, APIs, result receipts, native attempt locks or GitHub Actions changed. | Static inspection of current checker and user failure log. |
+
+The fix **does not weaken** `scripts/check_public_docs.py`, alter `scripts/prepare_public_preview.py`, add a new release-file exception, grant a software license or authorize release. Both original failing tests remain in the suite.
