@@ -56,6 +56,11 @@ def test_original_source_executes_generalized_fanout_with_independent_phi(kind,r
         assert host["accepted"]
         receipt=trace_graph_cpp(arch,src)
         assert receipt["status"]=="EXECUTED_GRAPH_BOUNDARIES_VERIFIED"
+        assert receipt["independent_phi_issue_status"]=="VERIFIED_E0"
+        assert receipt["independent_phi_issue_checked_reads"]==cert["independent_phi_issue_checked_reads"]
+        assert receipt["independent_phi_issue_checked_operators"]==cert["independent_phi_issue_checked_operators"]
+        assert receipt["independent_phi_issue_signature_sha256"]==cert["independent_phi_issue_signature_sha256"]
+        assert src.manifest["independent_phi_issue_signature_sha256"]==cert["independent_phi_issue_signature_sha256"]
         assert receipt["source_event_sha256"]==cert["source_event_sha256"]
         assert receipt["last_use_sha256"]==cert["last_use_sha256"]
         assert receipt["native_vitis_calls"]==0
@@ -140,3 +145,13 @@ def test_real_cpp_mutant_is_not_a_qualified_source_refinement():
                                    "cpp_sha256":sha256(wrong_address.encode()).hexdigest()})
     with pytest.raises(AssertionError,match="SOURCE_GRAPH_REDUCTION_READ_MISMATCH"):
         trace_graph_cpp(arch,mutated)
+
+@pytest.mark.skipif(shutil.which("g++") is None,reason="GCC required")
+def test_executed_cpp_rejects_forged_independent_phi_issue_manifest():
+    arch=mapped(sample_graph("nested",m=2,n=3))
+    source=emit_graph_hls(arch)
+    assert source.manifest["independent_phi_issue_status"]=="VERIFIED_E0"
+    altered=Emission(source.cpp,{**source.manifest,
+        "independent_phi_issue_signature_sha256":"0"*64})
+    with pytest.raises(AssertionError,match="SOURCE_GRAPH_INDEPENDENT_PHI_ISSUE_RECEIPT_MISMATCH"):
+        trace_graph_cpp(arch,altered)

@@ -46,6 +46,7 @@ def test_graph_phi_independent_ranks_accept_generated_source(kind, mixed):
     certified = graph.graph_contract(arch, graph.graph_disjoint_offsets(arch))
     assert certified["independent_phi_issue_status"] == "VERIFIED_E0"
     assert certified["independent_phi_issue_checked_reads"] == result["checked_reads"]
+    assert certified["independent_phi_issue_signature_sha256"] == result["observed_issue_signature_sha256"]
 
 
 def test_value_safe_reordered_matmul_reads_violate_phi_source_order():

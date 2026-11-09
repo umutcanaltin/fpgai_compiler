@@ -169,6 +169,22 @@ def trace_graph_cpp(arch,emission,*,max_events:int=100_000,
                min(len(events),len(actual)))
         raise AssertionError("SOURCE_GRAPH_EVENT_MISMATCH "+str(i)+
                              f": expected={events[i:i+1]} observed={tuple(actual)[i:i+1]}")
+    # Validate independently ranked source READs against actual GCC events,
+    # then bind their digest and coverage to the generated source manifest.
+    from fpgai_research.model_ir.independent_phi_issue_reference import (
+        validate_graph_phi_issue_conformance,
+    )
+    issue = validate_graph_phi_issue_conformance(
+        arch, tuple(actual), max_reads=max_events)
+    if issue["status"] == "REJECTED":
+        raise AssertionError(
+            "SOURCE_GRAPH_INDEPENDENT_PHI_ISSUE_REJECTED " +
+            str(issue["operator"]) + " " + str(issue["first_read_index"]))
+    if (issue["status"] != manifest.get("independent_phi_issue_status")
+            or issue["checked_reads"] != manifest.get("independent_phi_issue_checked_reads")
+            or issue["checked_operators"] != manifest.get("independent_phi_issue_checked_operators")
+            or issue["observed_issue_signature_sha256"] != manifest.get("independent_phi_issue_signature_sha256")):
+        raise AssertionError("SOURCE_GRAPH_INDEPENDENT_PHI_ISSUE_RECEIPT_MISMATCH")
     replay=verify_graph_events(
         arch,manifest["offsets"],tuple(actual),max_events=max_events)
     from fpgai_research.validation.graph_access_oracle import (
@@ -200,6 +216,10 @@ def trace_graph_cpp(arch,emission,*,max_events:int=100_000,
         "independent_access_reads":independent["read_obligations"],
         "edge_witness_sha256":witness["source_witness_sha256"],
         "edge_witnesses":witness["edges"],
+        "independent_phi_issue_status":issue["status"],
+        "independent_phi_issue_checked_reads":issue["checked_reads"],
+        "independent_phi_issue_checked_operators":issue["checked_operators"],
+        "independent_phi_issue_signature_sha256":issue["observed_issue_signature_sha256"],
         "source_array_elements":replay["source_array_elements"],
         "commits":replay["commits"],"reads":replay["reads"],
         "multi_reader_values":replay["multi_reader_values"],

@@ -298,3 +298,17 @@ A source-only, prospective checker was added to the **existing** independent Phi
 | `docs/maintainers/REPOSITORY_PUBLICATION_CHANGE_IMPACT_20261106.md` | MODIFIED: records source and test impact without modifying any original study. | Documentation tracking only; no compiler modules, APIs, result receipts, native attempt locks or GitHub Actions changed. | Static inspection of current checker and user failure log. |
 
 The fix **does not weaken** `scripts/check_public_docs.py`, alter `scripts/prepare_public_preview.py`, add a new release-file exception, grant a software license or authorize release. Both original failing tests remain in the suite.
+
+## 10 November 2026 — actual GCC Phi issue-proof manifest binding and feature audit
+
+| Path | Operation / owner and effect | Verification / evidence boundary |
+|---|---|---|
+| `src/fpgai_research/model_ir/graph_phi_contract.py` | MODIFIED: graph bounded source certificate now returns independently calculated MatMul READ order signature. | Existing model admission unchanged; requires local tests |
+| `src/fpgai_research/codegen/hls/graph_phi.py` | MODIFIED: includes issue status, checked reads/operators and signature in emitted C++ manifest. | Generated HLS source only; no vendor calls |
+| `src/fpgai_research/validation/cpp_graph_phi_trace.py` | MODIFIED: recomputes independent source-order digest from observed GCC execution and fails closed if receipt coverage or SHA mismatches. | Host C++ evidence only, not cycle-/port-level proof; GCC tests pending |
+| `tests/test_cst_graph_phi_source.py` and `tests/test_cst_graph_phi_independent_issue.py` | MODIFIED: assert full certificate/manifest/executed source signature agreement and forgery rejection. | Tests authored, not yet locally executed |
+| `Makefile` | MODIFIED: `research-audit-tests` includes the two graph Phi source/GCC modules. | Remains explicit source-only command |
+| `paper/compiler_ir/FEATURE_TO_IMPLEMENTATION_PUBLICATION_AUDIT_20261110.md` | ADDED: real feature coverage, bounded limitations, tests and scientific/legal gates. | Documentation only, not results |
+| `paper/compiler_ir/README.md`, `CHANGELOG.md`, `docs/RESEARCH_PUBLICATION_STATUS.md`, this impact record | MODIFIED: implementation pointers, test status and release limits. | Documentation only |
+
+The author previously reported 2,351 passed / 2 documentation failures / 3 skipped, then 13/13 fixed documentation tests and 168 resolved links. Those checks do NOT qualify this new source commit. No original R3/R4 outputs, attempt locks, actions, source results, GitHub Actions, distribution visibility or operative license were changed. Local verification required: `python -m pytest -q tests/test_cst_graph_phi_independent_issue.py tests/test_cst_graph_phi_source.py tests/test_cst_graph_edge_witness.py`; then `python -m pytest -q` and `make release-links`. No claim of full publication readiness or physical speedup.

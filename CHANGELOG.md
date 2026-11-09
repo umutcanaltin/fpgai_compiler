@@ -1,3 +1,10 @@
+## 10 November 2026 — source manifest binds independent Phi evidence to executed C++
+
+- Added independent bounded MatMul consumer READ-order signature and coverage to the emitted graph C++ manifest, and validated those fields against observed GCC source events.
+- Extended source-only GCC regressions with a falsified manifest receipt and broadened the explicit source research audit target.
+- Added a claim-to-implementation release audit separating implemented bounded source features from partial physical and publication requirements.
+- These are committed source changes awaiting fresh author tests. The prior 2,351-pass full run and subsequent 13-pass documentation check predate this code; no vendor studies were rerun.
+
 ## 10 November 2026 — fix public compiler-preview documentation link
 
 - Corrected the single invalid relative link in the historical 6 November C1/C2 changelog entry: the linked source evidence remains under the intentionally excluded `paper/compiler_ir/` directory, so its reference now uses the existing public GitHub research-branch URL rather than a relative local preview path.

@@ -331,6 +331,7 @@ def graph_contract(arch,offsets,*,max_events:int=100_000):
     result["independent_phi_issue_status"] = issue["status"]
     result["independent_phi_issue_checked_reads"] = issue["checked_reads"]
     result["independent_phi_issue_checked_operators"] = issue["checked_operators"]
+    result["independent_phi_issue_signature_sha256"] = issue["observed_issue_signature_sha256"]
     result["operator_phi_iterations"]={name:len(seq)
                                       for name,seq in iterations.items()}
     result["operator_phi_sha256"]={name:_hash(seq)
