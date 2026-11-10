@@ -49,6 +49,12 @@ def test_original_nchw_dag_source_numeric_and_all_conv_load_owners(kind,height,w
     assert cert["status"]=="VERIFIED_E0"
     assert independent["status"]=="VERIFIED_INDEPENDENT_NCHW_ACCESS_E0"
     assert cert["reads"]==independent["reads"]
+    assert independent["phi_owner_validation"]=="VERIFIED_INDEPENDENT_CONV_OWNER_E0"
+    assert independent["phi_owner_checked_conv_reads"]>0
+    assert len(independent["phi_owner_multiset_sha256"])==64
+    assert cert["independent_conv_phi_owner_status"]=="VERIFIED_INDEPENDENT_CONV_OWNER_E0"
+    assert cert["independent_conv_phi_owner_multiset_sha256"]==independent["phi_owner_multiset_sha256"]
+    assert cert["independent_conv_phi_owner_checked_reads"]==independent["phi_owner_checked_conv_reads"]
     assert len(nchw_edge_witnesses(arch,offsets))>=len(model.operators)
     safe={**offsets,"out":offsets["h"]}
     assert verify_nchw_graph(arch,safe,events)["status"]=="VERIFIED_E0"
@@ -65,6 +71,9 @@ def test_original_nchw_dag_source_numeric_and_all_conv_load_owners(kind,height,w
     trace=trace_nchw_conv_sources(arch,emitted)
     assert trace["status"]=="ACTUAL_CONV_SOURCE_READS_VERIFIED_E1"
     assert trace["actual_conv_reader_taps"]>0
+    assert trace["independent_conv_phi_owner_status"]=="VERIFIED_INDEPENDENT_CONV_OWNER_E0"
+    assert trace["independent_conv_phi_owner_checked_reads"]>0
+    assert trace["independent_conv_phi_owner_multiset_sha256"]==independent["phi_owner_multiset_sha256"]
     assert trace["source_covered_conv_operators"]>=1
     assert trace["native_vitis_calls"]==0
 
@@ -142,3 +151,105 @@ def test_mutating_actual_nchw_source_index_is_detected():
         trace_nchw_conv_sources(arch,edited)
     with pytest.raises(ValueError,match="opt-in"):
         trace_nchw_conv_sources(arch,emit_hls(lower(arch)))
+
+
+@pytest.mark.parametrize("kind,channels", [
+    ("branch_concat",2), ("branch_concat",4),
+    ("pool_fork",2), ("pool_fork",3), ("broadcast_fork",4),
+])
+def test_independent_conv_phi_ownership_rejects_value_safe_mutations(
+        kind,channels):
+    arch=mapped(nchw_case(kind,channels=channels))
+    events=nchw_graph_events(arch)
+    baseline=independent_nchw_access(arch,events)
+    assert baseline["status"]=="VERIFIED_INDEPENDENT_NCHW_ACCESS_E0"
+    assert baseline["phi_owner_checked_conv_reads"]>0
+    assert baseline["oracle_independent_of_resolver_coordinate"] is True
+    index=next(i for i,event in enumerate(events)
+               if event.kind=="READ" and event.phi_owner is not None)
+    event=events[index]
+    bad=replace(event,phi_owner=(
+        event.phi_owner[0],event.phi_owner[1]+1,
+        event.phi_owner[2],event.phi_owner[3]))
+    mutated=events[:index]+(bad,)+events[index+1:]
+    # Input tensor, source element, reduction and consumer stay unchanged:
+    # the independent NumPy index multiset itself is still satisfied.
+    observed_access=[(e.tensor,e.element,e.consumer,e.output_element,
+                      e.input_port,e.reduction_k)
+                     for e in mutated if e.kind=="READ"]
+    original_access=[(e.tensor,e.element,e.consumer,e.output_element,
+                      e.input_port,e.reduction_k)
+                     for e in events if e.kind=="READ"]
+    assert observed_access==original_access
+    rejection=independent_nchw_access(arch,mutated)
+    assert rejection["status"]=="REJECTED_INDEPENDENT_NCHW_ACCESS"
+    assert rejection["reason"]=="INDEPENDENT_CONV_PHI_OWNER_MISMATCH"
+    assert rejection["first_unexpected_owner"] is not None
+
+
+def test_independent_conv_owner_detects_common_mode_resolver_error(monkeypatch):
+    from fpgai_research.model_ir import nchw_graph_contract as graph_module
+    from fpgai_research.architecture.resolver import coordinate as original_coordinate
+    arch=mapped(nchw_case("branch_concat",channels=4))
+    offsets=disjoint_nchw_offsets(arch)
+    source_events=nchw_graph_events(arch)
+    assert independent_nchw_access(
+        arch,source_events)["status"]=="VERIFIED_INDEPENDENT_NCHW_ACCESS_E0"
+
+    def corrupted_coordinate(point,index):
+        result=original_coordinate(point,index)
+        if point.kind!="Conv":
+            return result
+        # Simulate one incorrect shared mapper used by BOTH the generator
+        # and its non-independent E0 replay verifier. The mutated owner is
+        # still within the declared PE set, but is the WRONG owner.
+        return {**result,"pe":(result["pe"]+1)%point.effective.pes}
+
+    monkeypatch.setattr(graph_module,"coordinate",corrupted_coordinate)
+    common_mode_events=graph_module.nchw_graph_events(arch)
+    assert common_mode_events!=source_events
+    assert graph_module.verify_nchw_graph(
+        arch,offsets,common_mode_events)["status"]=="VERIFIED_E0"
+    independent=independent_nchw_access(arch,common_mode_events)
+    assert independent["reason"]=="INDEPENDENT_CONV_PHI_OWNER_MISMATCH"
+    with pytest.raises(ValueError,match="NCHW_INDEPENDENT_ACCESS_OR_PHI_INVALID"):
+        graph_module.nchw_graph_contract(arch,offsets)
+
+
+def test_independent_conv_owner_has_no_misleading_hardware_claim():
+    arch=mapped(nchw_case("pool_fork"))
+    report=independent_nchw_access(arch,nchw_graph_events(arch))
+    assert report["original_vitis_calls"]==0
+    assert report["phi_owner_checked_conv_reads"]>0
+    assert any("No physical PE" in item for item in report["limitations"])
+
+
+@pytest.mark.parametrize("kind",["branch_concat","pool_fork","broadcast_fork"])
+def test_nchw_output_commit_requires_all_modeled_produced_input_reads(kind):
+    arch=mapped(nchw_case(kind),parallel=False)
+    events=nchw_graph_events(arch)
+    # The last Relu reads the completed previous tensor element. Moving its
+    # output COMMIT before that READ keeps the multiset and readiness intact,
+    # but makes the source operation causally impossible.
+    first=next(i for i,e in enumerate(events)
+               if e.kind=="READ" and e.consumer=="last"
+               and e.output_element==0)
+    commiti=next(i for i,e in enumerate(events)
+                 if e.kind=="COMMIT" and e.tensor=="out" and e.element==0)
+    assert first<commiti
+    shuffled=list(events)
+    earlier=shuffled.pop(commiti)
+    shuffled.insert(first,earlier)
+    moved=tuple(shuffled)
+    expected_access=independent_nchw_access(arch,events)
+    actual_access=independent_nchw_access(arch,moved)
+    assert expected_access["status"]=="VERIFIED_INDEPENDENT_NCHW_ACCESS_E0"
+    assert actual_access["status"]=="VERIFIED_INDEPENDENT_NCHW_ACCESS_E0"
+    assert actual_access["access_multiset_sha256"]==expected_access["access_multiset_sha256"]
+    result=verify_nchw_graph(arch,disjoint_nchw_offsets(arch),moved)
+    assert result["status"]=="REJECTED"
+    assert result["reason"]=="COMMIT_BEFORE_MODELED_INPUT_READS"
+    assert result["counterexample"]["observed_reads"]<result["counterexample"]["required_reads"]
+    original=verify_nchw_graph(arch,disjoint_nchw_offsets(arch),events)
+    assert original["status"]=="VERIFIED_E0"
+    assert original["modeled_produced_input_read_obligations"]>0

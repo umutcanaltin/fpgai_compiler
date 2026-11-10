@@ -2,8 +2,10 @@
 
 Expected source element/port/reduction identities come from NumPy-padded
 sliding windows, broadcasts and concatenated identity grids, not from the
-production NCHW compiler access helper. Logical multiset only; no Phi
-ownership or GCC temporal correctness is claimed here.
+production NCHW compiler access helper. Logical multiset plus an independently calculated Conv output/channel/reduction
+Phi ownership reference. Does not import resolver.coordinate or the E0
+source-event generator. Source loop timing, scalar ownership, hardware cycles
+and actual bank/port correctness remain outside this E0 oracle.
 """
 from __future__ import annotations
 from collections import Counter
@@ -13,6 +15,31 @@ import json
 import numpy as np
 
 
+def _independent_conv_owner(point, out_channel:int, input_channel:int):
+    """Closed-form Conv Phi owner, independently of the resolver and emitter."""
+    if point.kind!="Conv" or len(point.iteration_shape)!=7:
+        raise ValueError("Independent owner oracle expects resolved Conv")
+    a=point.effective
+    shape=point.iteration_shape
+    if (min(a.parallelism,a.pes,a.simd,a.serialization)<1 or
+            (a.tile and len(a.tile)!=7)):
+        raise ValueError("Nonpositive or malformed Conv source mapping")
+    if not (0<=out_channel<shape[1] and 0<=input_channel<shape[4]):
+        raise ValueError("Conv source channel index out of range")
+    tile_out=a.tile[1] if a.tile else shape[1]
+    tile_reduce=a.tile[4] if a.tile else shape[4]
+    if min(tile_out,tile_reduce)<1:
+        raise ValueError("Invalid source Conv tile extent")
+    local_output=out_channel%tile_out
+    lanes_per_group=a.parallelism*a.pes
+    return (
+        (local_output//a.pes)%a.parallelism,
+        local_output%a.pes,
+        (input_channel%tile_reduce)%a.simd,
+        (local_output//lanes_per_group)%a.serialization,
+    )
+
+
 def independent_nchw_access(arch,events,*,max_events:int=100_000):
     model=arch.functional
     model.validate()
@@ -20,7 +47,9 @@ def independent_nchw_access(arch,events,*,max_events:int=100_000):
         raise ValueError("Finite source-access oracle budget exceeded")
     produced={x.outputs[0] for x in model.operators}
     expected=Counter()
-    for op in model.operators:
+    expected_owner=Counter()
+    conv_names={op.name for op in model.operators if op.kind=="Conv"}
+    for ordinal,op in enumerate(model.operators):
         outshape=model.tensor(op.outputs[0]).shape
         if len(outshape)!=4:
             raise ValueError("Oracle requires NCHW intermediates")
@@ -49,7 +78,10 @@ def independent_nchw_access(arch,events,*,max_events:int=100_000):
                             source=int(windows[n,ic,oy,ox,ky,kx])
                             if source!=-1:
                                 red=(ic*sw[2]+ky)*sw[3]+kx
-                                expected[(name,source,op.name,outidx,0,red)]+=1
+                                key=(name,source,op.name,outidx,0,red)
+                                expected[key]+=1
+                                expected_owner[(*key,_independent_conv_owner(
+                                    arch.points[ordinal],oc,ic))]+=1
         elif op.kind=="Relu":
             name=op.inputs[0]
             if name in produced:
@@ -108,11 +140,30 @@ def independent_nchw_access(arch,events,*,max_events:int=100_000):
         unexpected=actual-expected
         return {"schema":"fpgai-research/independent-NCHW-graph-read-oracle/v1",
                 "status":"REJECTED_INDEPENDENT_NCHW_ACCESS",
+                "reason":"NCHW_SOURCE_ACCESS_MISMATCH",
                 "expected_reads":sum(expected.values()),
                 "actual_reads":sum(actual.values()),
                 "first_missing":next(iter(sorted(missing)),None),
                 "first_unexpected":next(iter(sorted(unexpected)),None),
                 "original_vitis_calls":0}
+    observed_owner=Counter(
+        (x.tensor,x.element,x.consumer,x.output_element,x.input_port,
+         x.reduction_k,x.phi_owner)
+        for x in events if x.kind=="READ" and x.consumer in conv_names)
+    if observed_owner!=expected_owner:
+        missing=expected_owner-observed_owner
+        unexpected=observed_owner-expected_owner
+        return {"schema":"fpgai-research/independent-NCHW-graph-read-oracle/v1",
+                "status":"REJECTED_INDEPENDENT_NCHW_ACCESS",
+                "reason":"INDEPENDENT_CONV_PHI_OWNER_MISMATCH",
+                "expected_conv_owner_reads":sum(expected_owner.values()),
+                "observed_conv_owner_reads":sum(observed_owner.values()),
+                "first_missing_owner":next(iter(missing),None),
+                "first_unexpected_owner":next(iter(unexpected),None),
+                "original_vitis_calls":0}
+    owner_rows=sorted((list(key),count) for key,count in expected_owner.items())
+    owner_digest=sha256(json.dumps(owner_rows,sort_keys=True,
+                 separators=(",",":"),allow_nan=False).encode()).hexdigest()
     rows=sorted((list(k),v) for k,v in expected.items())
     signature=sha256(json.dumps(rows,sort_keys=True,
                separators=(",",":")).encode()).hexdigest()
@@ -120,5 +171,14 @@ def independent_nchw_access(arch,events,*,max_events:int=100_000):
             "status":"VERIFIED_INDEPENDENT_NCHW_ACCESS_E0",
             "reads":sum(expected.values()),
             "access_multiset_sha256":signature,
+            "phi_owner_checked_conv_reads":sum(expected_owner.values()),
+            "phi_owner_multiset_sha256":owner_digest,
+            "phi_owner_validation":"VERIFIED_INDEPENDENT_CONV_OWNER_E0",
+            "oracle_independent_of_resolver_coordinate":True,
             "original_vitis_calls":0,
-            "evidence":"E0-NumPy-slide-window-broadcast-concat-pool-identity-grid-only"}
+            "evidence":"E0-NumPy-access-and-closed-form-Conv-owner-only",
+            "limitations":[
+                "Independent logical Conv owner, not source-issue cycle order",
+                "Other scalar, pooling and concatenation owners not verified",
+                "No physical PE, memory bank, HLS or RTL qualification",
+            ]}

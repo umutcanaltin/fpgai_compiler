@@ -1,3 +1,11 @@
+## 10 November 2026 — independent Conv Phi owner and causal source-commit contracts
+
+- Extended the existing independent NCHW NumPy access oracle to **independently calculate Conv PE, replica, SIMD-lane and output fold ownership** using effective operator-local Phi and channel/reduction tiling. It does not invoke `resolver.coordinate`, the E0 event generator or the C++ emitter. This detects mapping errors even when source generation and its usual replay checker share the same erroneous coordinate function.
+- The bounded NCHW graph certificate now requires the independent value-access *and* Conv-owner multisets and retains their SHA-256 identities and checked reads; the GCC-executed Conv source attestation reports the same independently calculated owner checks.
+- Strengthened source event verification: **an output COMMIT cannot precede any of its modeled produced-input READ obligations**, even if all global value-read and last-use checks would otherwise accept the same source-event multiset. External input Conv taps remain outside the E0 source trace.
+- Added valid mapped NCHW graph tests, wrong-owner mutants, common-mode coordinate corruption, and read-set-preserving early-commit mutants for branch/concat, pool/fork and broadcast/fork topologies. Included the existing NCHW test module in `make research-audit-tests`.
+- The code and newly changed tests have been **committed pending author workstation execution**. This is prospective C1 source-contract coverage only, not a new original C1/C2 empirical result, proof for arbitrary graphs, timing-clean Vivado observation, board runtime, or licensed publication. No native tool, GitHub Action, frozen experiment, public license, or `main` merge.
+
 ## 10 November 2026 — built wheel contents and installed compiler CLI verified
 
 - Author verified on `2078a6b`: 19/19 wheel verifier unit tests passed; wheel build, exact archive audit, installation into a second isolated Python 3.12 venv and installed CLI source-generation smoke **all passed** (`WHEEL_CONTENTS_AND_INSTALLED_CLI_VERIFIED`).

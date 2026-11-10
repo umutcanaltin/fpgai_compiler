@@ -113,7 +113,8 @@ def trace_nchw_conv_sources(arch,emission,*,cxx="g++",timeout_seconds=90):
                 if not(e.kind=="READ" and e.consumer in conv_consumer_names))
     independent=independent_nchw_access(arch,other+tuple(actual_conv_events))
     if independent["status"]!="VERIFIED_INDEPENDENT_NCHW_ACCESS_E0":
-        raise AssertionError("INDEPENDENT_NUMPY_REJECTS_ORIGINAL_CONV_LOAD")
+        raise AssertionError("INDEPENDENT_NUMPY_OR_CONV_PHI_REJECTS_ORIGINAL_LOAD "+
+                             independent.get("reason","UNKNOWN"))
     return {"schema":"fpgai-research/NCHW-general-DAG-GCC-Conv-load-attestation-E1/v1",
             "status":"ACTUAL_CONV_SOURCE_READS_VERIFIED_E1",
             "source_cpp_sha256":manifest["cpp_sha256"],
@@ -121,9 +122,13 @@ def trace_nchw_conv_sources(arch,emission,*,cxx="g++",timeout_seconds=90):
             "source_covered_conv_operators":len({x[0] for x in observed}),
             "observed_conv_trace_sha256":sha256(executed.stdout.encode()).hexdigest(),
             "independent_source_map_sha256":independent["access_multiset_sha256"],
+            "independent_conv_phi_owner_status":independent["phi_owner_validation"],
+            "independent_conv_phi_owner_checked_reads":independent["phi_owner_checked_conv_reads"],
+            "independent_conv_phi_owner_multiset_sha256":independent["phi_owner_multiset_sha256"],
             "native_vitis_calls":0,
             "limitations":[
                 "Only Conv intermediate input reads are observed from real GCC source",
+                "PE/SIMD/fold owners independently recalculated at E0, not measured physical hardware lanes",
                 "Other scalar/Concat/Pool READ and all COMMITs remain E0 modeled",
                 "Source scratch reuse is NOT materialized in the canonical HLS emitter",
                 "No RTL, original Vitis fixed-point/CSynth, physical port/clock claim",

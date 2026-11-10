@@ -390,3 +390,19 @@ This is author's local stdout observed in conversation, now recorded in the sour
 | This impact ledger | MODIFIED: full path/change rationale and source-revision provenance | No compiler code, tests, native tools, workflow or API changed |
 
 `main` unchanged, research PR stays draft, GitHub Actions unused, original studies untouched. This commit only records observed local verification and should not be mistaken for a new full-suite regression.
+
+## 10 November 2026 — broaden bounded C1 NCHW semantic checks (file/dependency audit)
+
+| Path | Action and ownership | Impact / required verification |
+|---|---|---|
+| `src/fpgai_research/validation/nchw_access_oracle.py` | MODIFIED existing independent NumPy graph-access reference; adds pure arithmetic owner rule for Conv output tile/channel, PE, replica, SIMD reduction lane and serialization fold | References resolved point data and independently produced NumPy index arrays; **does not** import `resolver.coordinate` or the canonical source-event generator. Returns independent owner multiset hash/population and rejects shared coordinate bugs. Test after source revision pull. |
+| `src/fpgai_research/model_ir/nchw_graph_contract.py` | MODIFIED existing graph E0 verifier/certificate; checks modeled intermediate-input READ completeness *before* COMMIT, then requires independent E0 NumPy read/owner oracle | Preserves event schema and existing lifetime/alias rejection. Lazy independent validation import avoids a circular runtime dependency. Adds bounded source receipt fields; no new physical storage implementation. |
+| `src/fpgai_research/validation/cpp_nchw_conv_graph_trace.py` | MODIFIED GCC-observed Conv source-tap attestation to require independent source/owner oracle verdict and expose exact owner digest/count | Source trace and original C++ hash still required; checks actual Conv intermediate reads, **not** all scalar READ/COMMITs or hardware schedule. GCC test execution is pending. |
+| `tests/test_cst_nchw_graph_contract.py` | MODIFIED existing canonical NCHW regression file, not a duplicate test owner | Adds mapped positive/negative owner reference, five mapping-variant corrupt-owner cases, shared common-mode coordinate mutation and three early-COMMIT source-order mutants. Tests are authored, **not yet executed** by connected-GitHub editing. |
+| `Makefile` | MODIFIED source-only `research-audit-tests` target to include existing NCHW regression module | Run locally; may invoke real host GCC but never proprietary Vitis/Vivado. |
+| `CHANGELOG.md`, `docs/RESEARCH_PUBLICATION_STATUS.md`, `docs/SUPPORTED_FEATURES.md`, `paper/compiler_ir/FEATURE_TO_IMPLEMENTATION_PUBLICATION_AUDIT_20261110.md` | MODIFIED engineering/research capability and evidence documentation | New source behavior must not be conflated with earlier author's 2,354-pass source tests, 65 clean-room curated tests or verified wheel of an older source revision. |
+| This maintainer impact document | MODIFIED change dependency and scientific limitations ledger | Historical entries preserved rather than rewritten. |
+
+**File linkage and debugging:** `nchw_graph_contract.nchw_graph_events` -> `verify_nchw_graph` -> independent `validation.nchw_access_oracle.independent_nchw_access`; the actual GCC `cpp_nchw_conv_graph_trace.trace_nchw_conv_sources` -> same independent oracle for observed Conv reads. If a logical value-address/owner mismatch appears, inspect the independent NumPy mapping, the canonical `_source_reads`, the local output/reduction tile formula, and the emitted Conv trace printer before touching recorded research artifacts.
+
+**Evidence and branch guardrails:** Original R3/R4 studies, frozen SHA receipts, board native runs and release-preview artifacts unchanged; no new external Allo execution, no Vitis/Vivado, no GitHub Actions, no `main` merge and no approved LICENSE. Full local pytest is a necessary next gate but does not alone establish manuscript submission readiness.
