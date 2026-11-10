@@ -1,3 +1,12 @@
+
+## 10 November 2026 — 65 curated isolated source-preview tests verified; wheel artifact audit added
+
+- The author ran `tests/test_verify_preview_test_suite.py`: **5/5 passed in 0.38s** on `4e82046667126ae2b8c6ce7d133480669ed1fc25`.
+- The installed-preview workspace was independently rechecked against the original **478-file** staging manifest (`5d95008e19806471184f11071d439621e9e9efac451442ac391d3845e4823c39`): **65 curated tests passed, 0 skipped, 1 Git-checkout-only test explicitly deselected** across the 9 included preview test modules. The original preview remained unchanged and no native vendor commands were run.
+- `make release-links`: **168/168** local links resolved across **31 Markdown files**. No external IP, license or full-history security clearance was performed.
+- Added opt-in `scripts/verify_compiler_wheel.py` for the next technical gate: build a wheel from the already tested isolated preview COPY, verify its exact Python module population and archive safety, install the wheel in a **new** venv, and compile a synthetic ONNX model via the wheel-installed CLI. Added synthetic fail-closed archive tests.
+- This new wheel script and tests have **not** been run on the author's workstation. The original 2,354-pass full development test belongs to its earlier source revision. Package build may require network access; no distribution/upload/publishing is performed.
+
 ## 10 November 2026 — isolated preview installed-source smoke verified; curated copy tests added
 
 - Author-run `tests/test_verify_compiler_preview.py`: **4 passed in 0.05 s** on `ab9947f`. Installed-package smoke verified a fresh Python 3.12 virtual environment, installed CLI toy MatMul HLS source, independent-mapped CNN HLS source with actual GCC intermediate-value checks, exact source hashes and **0 native vendor invocations**.

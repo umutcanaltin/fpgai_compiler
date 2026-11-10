@@ -350,3 +350,16 @@ This is author's local stdout observed in conversation, now recorded in the sour
 | This maintainer impact ledger | MODIFIED: preserve file ownership and evidence source revision | Documentation only |
 
 **Original source/experiment effects:** None. The curated tests are intentionally **not added** to the compiler preview allowlist; the runner is a release-maintainer-only checkout tool. The staged preview itself is untouched. Publication remains blocked by operative LICENSE, IP and rights-holder decisions, history/secrets and dependency review, external compiler baseline, missing strict physical/board evidence for general performance claims. PR #2 remains draft; main branch unchanged.
+
+## 10 November 2026 — curated source preview verified, distribution wheel guard added
+
+**Observed original author output:** At branch revision `4e82046667126ae2b8c6ce7d133480669ed1fc25`, `tests/test_verify_preview_test_suite.py` returned **5 passed (0.38s)**. The user then executed `python -m scripts.verify_preview_test_suite --execute` on the already installed preview, whose manifest was `5d95008e19806471184f11071d439621e9e9efac451442ac391d3845e4823c39`; result `CURATED_PREVIEW_SOURCE_TESTS_PASSED`, **65 passed, zero skipped, one checkout-only Git-index test deselected**. A separate `make release-links` passed with **168/168** links. No original R3/R4 study, native tool, GitHub Action or main branch was changed.
+
+| Path | Change and canonical owner | Connections and validation impact |
+|---|---|---|
+| `scripts/verify_compiler_wheel.py` | ADDED; source-distribution technical artifact gate, read-only default `--plan`, explicit `--execute` | Requires `verify_preview_test_suite` curated receipt; builds a wheel from previously copied source in a create-only ignored workspace; validates exact `src/fpgai_research/**/*.py` contents, metadata, archive-member safety, creates second isolated venv, installs wheel with ONNX dependency and generates checked toy HLS C++. This is no license/release step. **Not author executed.** |
+| `tests/test_verify_compiler_wheel.py` | ADDED; synthetic zip tests for expected modules, forbidden paper/weights/tests paths, missing modules, no-write planning and explicit switch | Does not build wheel, network or invoke vendors during tests. **Not author executed.** |
+| `docs/RELEASE_PREVIEW.md`, `docs/RESEARCH_PUBLICATION_STATUS.md`, `CHANGELOG.md`, `paper/compiler_ir/FEATURE_TO_IMPLEMENTATION_PUBLICATION_AUDIT_20261110.md` | MODIFIED; record original user 65-pass result, staged source SHA, wheel gate still prospective | No compiler library API or frozen source/physical/native evidence altered |
+| This maintainer file-impact ledger | MODIFIED; trace dependencies and test scope, prevent duplicate implementation | Documentation only |
+
+**Boundaries:** Wheel build and its checks may download Python build requirements only on deliberate `--execute`. No third-party code ownership, historical secrets/redistribution consent, clean DRC/FPGA runtime or exact same-workload external compiler capability is asserted. Keep PR #2 draft; `main` remains unchanged.

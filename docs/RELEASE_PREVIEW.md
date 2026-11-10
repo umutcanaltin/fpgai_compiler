@@ -118,3 +118,23 @@ python -m scripts.verify_preview_test_suite \
 ```
 
 The **new curated test runner has not yet been executed by the author**, and the earlier full 2,354-test development checkout suite is not equivalent to a curated source-suite run from the staged copy. This activity is nonpublishable: no licensing/IP/full-history security review, external compiler comparison, clean DRC physical timing, or verified board measurements have been established.
+
+### 10 November 2026 — curated preview regression passes; wheel check prepared
+
+The author executed the curated regression on the staged compiler-source copy using its isolated Python 3.12 environment: **65 passed, 0 skipped, 1 Git-checkout-only test deselected**. The audit checked the same `478` selected source files against staging SHA-256 `5d95008e19806471184f11071d439621e9e9efac451442ac391d3845e4823c39`. The runner's own five tests passed; `make release-links` again resolved all 168 local links. The `curated_preview_pytest_receipt.json` in `build/public_compiler_installed_smoke_20261110_01` records the exact test scope. This closes the nine-module **staged-source** regression for that revision, not wheel artifact packaging or full research reproducibility.
+
+The next checkout-only, **explicitly opt-in** verification builds a wheel into a new ignored directory, checks that every staged Python package module is included, refuses unsafe archive members and unreviewed payloads, and installs/executes the wheel from a completely new virtual environment. The `--plan` mode does not write files or run subprocesses:
+
+```bash
+python -m pytest -q tests/test_verify_compiler_wheel.py
+python -m scripts.verify_compiler_wheel \
+  --workspace build/public_compiler_installed_smoke_20261110_01 \
+  --output build/public_compiler_wheel_smoke_20261110_01 --plan
+python -m scripts.verify_compiler_wheel \
+  --workspace build/public_compiler_installed_smoke_20261110_01 \
+  --output build/public_compiler_wheel_smoke_20261110_01 --execute
+```
+
+`--execute` may download Python build requirements/dependencies. It builds an unlicensed **local test artifact only**; no PyPI/GitHub upload, native FPGA tool, external competitor or original research run. The target output must not exist. A failing module-inclusion check should lead to a packaging fix, not relaxation of the audit. The code and tests above **have not yet been author-executed**.
+
+No wheel passing status, public redistribution right, timing closure or board-performance claim is implied by the previously passing source-preview tests.
