@@ -102,3 +102,19 @@ python -m scripts.verify_compiler_preview \
 The default `--plan` checks only the manifest and link closure. **`--execute` explicitly creates a new isolated virtual environment and runs `pip install .[onnx,test]`, which may download third-party dependencies**. It copies the preview into a new ignored build workspace before installation, then invokes the installed compiler from a separate working directory to generate toy and CNN HLS C++ source; if GNU `g++` exists, the CNN synthetic source is also checked against NumPy intermediates. It never invokes Vitis/Vivado or touches original research study outputs. The output receipt is `build/public_compiler_installed_smoke_20261110_01/installed_preview_smoke_receipt.json`. It will never claim rights clearance or release approval, and a failure leaves the workspace intact for debugging. Use a fresh output path if this one already exists.
 
 The helper and its unit tests live in the research checkout and are deliberately **not** part of the 478-file public preview; this is a maintainer release check. After running it, separately review dependency licenses and complete rights/history/security review. Even a successful smoke does not qualify every graph, model or vendor design.
+
+### 10 November 2026 — installed preview smoke verified; curated preview pytest next
+
+The author ran `tests/test_verify_compiler_preview.py` on commit `ab9947f6f7be9c31aa70b7e28b05e45502c3c2f9`: **4 passed in 0.05 seconds**. The opt-in `scripts.verify_compiler_preview --plan` verified the previously staged 478-file manifest (SHA-256 `5d95008e19806471184f11071d439621e9e9efac451442ac391d3845e4823c39`) and 168/168 Markdown links. The author then executed `--execute`, genuinely installing the preview in a fresh Python 3.12 virtual environment and reporting `INSTALLED_PREVIEW_SOURCE_SMOKE_VERIFIED`: the installed `fpgai_research` import came from that virtual environment, the installed CLI generated correct-manifest toy MatMul/ReLU HLS source (SHA-256 `33ff3faf720d5038506aca63ff8b6d4bef963c634c78ad2565bfeccc7f93b77d`), and an independent-architecture CNN/dense pipeline generated source with SHA-256 `528a5b2c80ac893685f5db17122aae901fbf02107143a72685b56ea7beb4c96c`, all stages lowered and actual host GCC intermediate-value verification passed. Zero native vendor calls; neither the full staged-preview pytest selection nor licensing/security review occurred.
+
+A further opt-in checkout-only verifier now runs **all nine curated public preview test modules** with the isolated preview's already installed Python environment and no dependency reinstall. It records one intentionally deselected Git-checkout-only link-audit test: a staged preview deliberately has no `.git` directory. It checks all selected copied source bytes against the original staged files; runtime-generated pip/pytest caches in the copy do not count as source changes. Default `--plan` performs no subprocess/test execution; `--execute` writes a create-only test receipt under the existing isolated workspace:
+
+```bash
+python -m scripts.verify_preview_test_suite \
+  --workspace build/public_compiler_installed_smoke_20261110_01 --plan
+
+python -m scripts.verify_preview_test_suite \
+  --workspace build/public_compiler_installed_smoke_20261110_01 --execute
+```
+
+The **new curated test runner has not yet been executed by the author**, and the earlier full 2,354-test development checkout suite is not equivalent to a curated source-suite run from the staged copy. This activity is nonpublishable: no licensing/IP/full-history security review, external compiler comparison, clean DRC physical timing, or verified board measurements have been established.

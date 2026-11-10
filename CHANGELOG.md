@@ -1,3 +1,10 @@
+## 10 November 2026 — isolated preview installed-source smoke verified; curated copy tests added
+
+- Author-run `tests/test_verify_compiler_preview.py`: **4 passed in 0.05 s** on `ab9947f`. Installed-package smoke verified a fresh Python 3.12 virtual environment, installed CLI toy MatMul HLS source, independent-mapped CNN HLS source with actual GCC intermediate-value checks, exact source hashes and **0 native vendor invocations**.
+- Staged preview fingerprint `5d95008e...` covered 478 selected files, 168/168 links and 31 Markdown documents; the original staged file population was not modified.
+- Added a checkout-only, default-plan-only source test runner for the nine curated public preview test modules in the already installed isolated environment. It explicitly deselects one test that requires the original Git checkout, records actual pass/skip/deselect counts, checks selected source hashes against the original staged preview, and writes a create-only source-test receipt.
+- Added source-only safety/unit tests. **Neither the new runner tests nor the actual nine-module preview suite are yet author verified.** The full 2,354-test development run remains separately source-revision-pinned. No GitHub Actions, native runs, LICENSE, visibility, IP approvals or original evidence changed.
+
 ## 10 November 2026 — staged compiler preview verified and opt-in isolated install check added
 
 - The author created the 478-file nonpublishable compiler preview at `build/public_compiler_preview_20261110_01` on commit `fdfac75` and verified its independent staged inventory and **168/168 links**, 31 Markdown files, no unresolved references.
