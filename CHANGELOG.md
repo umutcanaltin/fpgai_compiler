@@ -1,3 +1,11 @@
+## 10 November 2026 — repair new bounded NCHW Phi ownership regression
+
+- Author verified the first implementation at `ce5970b`: focused source tests **15 failed, 20 passed**, full suite **46 failed, 49 errors, 2,297 passed, 3 skipped**, and `make research-audit-tests` **15 failed, 158 passed**; public links still **168/168**. The failed attempts are retained as evidence, not relabeled or suppressed.
+- All reported TypeError failures/errors follow the new `independent_nchw_access` owner evidence digest and `numpy.int64` values emitted by `np.unravel_index`; the remaining focused assertion was the old test expectation for a missing intermediate read, now rejected earlier at the consumer COMMIT.
+- Fixed the independent owner reference to accept integer-valued NumPy channel indices, normalize both channels and returned owner coordinates to built-in `int`, and reject noninteger/boolean channel indices. The independent mapping formula and strict commit-before-read rejection are unchanged.
+- Updated the affected canonical NCHW regression expectation; added normalized-owner/JSON SHA identity checks, malformed channel-index rejection, and a separate missing-final-sink test preserving end-of-trace completeness semantics.
+- **New fix and additional tests are committed but not yet run in the author's checkout.** Do not infer a passing full suite, independent physical hardware behavior, novel external-compiler comparison or release permission.
+
 ## 10 November 2026 — independent Conv Phi owner and causal source-commit contracts
 
 - Extended the existing independent NCHW NumPy access oracle to **independently calculate Conv PE, replica, SIMD-lane and output fold ownership** using effective operator-local Phi and channel/reduction tiling. It does not invoke `resolver.coordinate`, the E0 event generator or the C++ emitter. This detects mapping errors even when source generation and its usual replay checker share the same erroneous coordinate function.

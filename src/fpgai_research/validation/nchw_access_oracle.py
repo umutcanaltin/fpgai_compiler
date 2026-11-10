@@ -19,6 +19,16 @@ def _independent_conv_owner(point, out_channel:int, input_channel:int):
     """Closed-form Conv Phi owner, independently of the resolver and emitter."""
     if point.kind!="Conv" or len(point.iteration_shape)!=7:
         raise ValueError("Independent owner oracle expects resolved Conv")
+    # np.unravel_index returns numpy.integer coordinates. Normalize them
+    # at the independent-reference boundary: Python's canonical JSON
+    # fingerprint cannot serialize np.int64 without an explicit conversion.
+    if (isinstance(out_channel,(bool,np.bool_)) or
+            isinstance(input_channel,(bool,np.bool_)) or
+            not isinstance(out_channel,(int,np.integer)) or
+            not isinstance(input_channel,(int,np.integer))):
+        raise ValueError("Integral Conv channel coordinates required")
+    out_channel=int(out_channel)
+    input_channel=int(input_channel)
     a=point.effective
     shape=point.iteration_shape
     if (min(a.parallelism,a.pes,a.simd,a.serialization)<1 or
@@ -32,12 +42,14 @@ def _independent_conv_owner(point, out_channel:int, input_channel:int):
         raise ValueError("Invalid source Conv tile extent")
     local_output=out_channel%tile_out
     lanes_per_group=a.parallelism*a.pes
-    return (
+    # Preserve a built-in integer-only owner tuple even when resolved
+    # architecture fields originate from NumPy integer scalar inputs.
+    return tuple(int(v) for v in (
         (local_output//a.pes)%a.parallelism,
         local_output%a.pes,
         (input_channel%tile_reduce)%a.simd,
         (local_output//lanes_per_group)%a.serialization,
-    )
+    ))
 
 
 def independent_nchw_access(arch,events,*,max_events:int=100_000):

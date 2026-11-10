@@ -92,7 +92,9 @@ def test_forged_phi_missing_reduction_and_wrong_access_all_reject():
     assert independent_nchw_access(
         arch,bad_index)["status"]=="REJECTED_INDEPENDENT_NCHW_ACCESS"
     missing=events[:pos]+events[pos+1:]
-    assert verify_nchw_graph(arch,offsets,missing)["reason"]=="INCOMPLETE_GRAPH_CONSUMPTION"
+    # An intermediate READ deletion is now rejected at the *consumer's*
+    # COMMIT, rather than at the later end-of-trace completeness check.
+    assert verify_nchw_graph(arch,offsets,missing)["reason"]=="COMMIT_BEFORE_MODELED_INPUT_READS"
     dup=events[:pos+1]+(e,)+events[pos+1:]
     assert verify_nchw_graph(arch,offsets,dup)["reason"]=="DUPLICATE_READ_TOKEN"
     with pytest.raises(ValueError,match="invalid NCHW"):
@@ -253,3 +255,47 @@ def test_nchw_output_commit_requires_all_modeled_produced_input_reads(kind):
     original=verify_nchw_graph(arch,disjoint_nchw_offsets(arch),events)
     assert original["status"]=="VERIFIED_E0"
     assert original["modeled_produced_input_read_obligations"]>0
+
+
+def test_independent_nchw_owner_normalizes_numpy_coordinates_before_digest():
+    import json
+    from fpgai_research.validation.nchw_access_oracle import (
+        _independent_conv_owner,
+    )
+    arch=mapped(nchw_case("branch_concat",channels=4))
+    conv=arch.points[0]
+    owner_np=_independent_conv_owner(conv,np.int64(1),np.int64(0))
+    owner_python=_independent_conv_owner(conv,1,0)
+    assert owner_np==owner_python
+    assert all(type(component) is int for component in owner_np)
+    assert json.loads(json.dumps({"owner":owner_np}))["owner"]==list(owner_np)
+    # This is the path that previously raised TypeError(np.int64) in the
+    # owner evidence SHA-256 used by both logical and actual-GCC tests.
+    first=independent_nchw_access(arch,nchw_graph_events(arch))
+    second=independent_nchw_access(arch,nchw_graph_events(arch))
+    assert first["phi_owner_multiset_sha256"]==second["phi_owner_multiset_sha256"]
+    assert len(first["phi_owner_multiset_sha256"])==64
+
+
+def test_independent_nchw_owner_rejects_float_and_boolean_channels():
+    from fpgai_research.validation.nchw_access_oracle import (
+        _independent_conv_owner,
+    )
+    conv=mapped(nchw_case("branch_concat",channels=4)).points[0]
+    for out_channel in (1.0,True,np.float64(1),np.bool_(True)):
+        with pytest.raises(ValueError,match="Integral Conv"):
+            _independent_conv_owner(conv,out_channel,0)
+
+
+def test_missing_external_sink_read_remains_incomplete_consumption():
+    arch=mapped(nchw_case("pool_fork"),parallel=False)
+    events=nchw_graph_events(arch)
+    sink=next(i for i,e in enumerate(events)
+              if e.kind=="READ" and e.consumer=="EXTERNAL")
+    missing_sink=events[:sink]+events[sink+1:]
+    # The new source-operand-before-COMMIT rule does not replace the
+    # independent requirement that all final-output sink reads occur.
+    result=verify_nchw_graph(
+        arch,disjoint_nchw_offsets(arch),missing_sink)
+    assert result["status"]=="REJECTED"
+    assert result["reason"]=="INCOMPLETE_GRAPH_CONSUMPTION"
