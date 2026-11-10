@@ -1,3 +1,12 @@
+## 10 November 2026 — author-verified NCHW recovery and extended C1 regression
+
+- At source commit `2689745607d512a4dc2f349baf2075a991d8c952`, the author ran the focused NCHW/graph source suite: **38 passed in 3.80 s** (zero failed).
+- The complete development checkout test suite: **2,395 passed, 3 skipped, zero failed in 244.87 s**.
+- `make research-audit-tests`: **176 passed, zero failed in 54.85 s**. This audit includes the NCHW source/GCC contract tests added in the earlier commit.
+- `make release-links`: **168/168** checked local public Markdown references resolve across **31** source files; `public_release_authorized=false`.
+- The `ce5970b` failures and `2689745` correction remain in the change history. The new source assertions, independent Conv owner digest, NumPy integer conversion and read-before-COMMIT contracts are now covered by the author's passing local tests. This is E0 and selected host-GCC E1 verification, **not Vitis/Vivado, HLS cycle/port legality, strict clean-DRC routed timing, or board measurements**.
+- The 478-file source preview, 65-pass curated isolated suite and 420-module wheel verification were performed from a **prior staged source revision**. They are not current-source reproducibility verification; rebuild only a fresh nonpublishable preview and create-only install/wheel outputs after appropriate release review. Original experimental result directories/receipts are preserved; no license granted.
+
 ## 10 November 2026 — repair new bounded NCHW Phi ownership regression
 
 - Author verified the first implementation at `ce5970b`: focused source tests **15 failed, 20 passed**, full suite **46 failed, 49 errors, 2,297 passed, 3 skipped**, and `make research-audit-tests` **15 failed, 158 passed**; public links still **168/168**. The failed attempts are retained as evidence, not relabeled or suppressed.

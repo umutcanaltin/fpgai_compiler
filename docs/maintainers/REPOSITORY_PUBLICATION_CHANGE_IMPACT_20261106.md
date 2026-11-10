@@ -419,3 +419,17 @@ This is author's local stdout observed in conversation, now recorded in the sour
 | This maintainer impact ledger | MODIFIED engineering file inventory, failure triage and dependency history | No separate duplicate oracle, emitter, CI workflow or native-study mutation introduced. |
 
 **Dependencies:** original source `np.unravel_index` -> `_independent_conv_owner` -> `expected_owner` `Counter` -> `owner_rows` JSON SHA -> `nchw_graph_contract` and actual GCC NCHW validation -> HLS source-stage planners. Focused regression first, then full `pytest`, research-audit and release-links required on the new exact SHA. No Vitis/Vivado, GitHub Actions, `main` merge, original experiment overwrite or licensing/IP authorization.
+
+## 10 November 2026 — successful author regression at NCHW recovery revision
+
+**Verified source revision:** `2689745607d512a4dc2f349baf2075a991d8c952`. The author's terminal output reports `38 passed in 3.80s` for focused NCHW/graph tests; `2395 passed, 3 skipped in 244.87s` for full development pytest; `176 passed in 54.85s` for `make research-audit-tests`; and `168/168` local public documentation links across 31 markdown sources.
+
+| Path | Operation / responsibility | Effect and evidence |
+|---|---|---|
+| `CHANGELOG.md` | MODIFIED: successful regression timeline | Preserves earlier failures and relates fixed implementation and exact verified source SHA |
+| `docs/RESEARCH_PUBLICATION_STATUS.md` | MODIFIED: research evidence tier qualification | Local host E0/E1 verified; never promotes native/peer/release evidence |
+| `docs/SUPPORTED_FEATURES.md` | MODIFIED: replace obsolete NCHW "pending verification" wording with author-qualified source-only test numbers | Does not broaden admitted operator or hardware claims |
+| `paper/compiler_ir/FEATURE_TO_IMPLEMENTATION_PUBLICATION_AUDIT_20261110.md` | MODIFIED: C1 claim-to-code contract gate marked tested on exact source SHA | Peer/physical/rights requirements remain open |
+| This `docs/maintainers/REPOSITORY_PUBLICATION_CHANGE_IMPACT_20261106.md` | MODIFIED: required file-level dependency and test documentation | No source code, tests, original experiments, native tools or CI workflow modified |
+
+**Release artifact note:** The author-verifed earlier 478-file stage / isolated tests / wheel originated from source before this NCHW change. A new *nonpublishable* stage must use a fresh ignored build directory and new SHA-based evidence; past successful wheel/build artifacts must remain unchanged. PR #2 remains draft, no GitHub Actions, `main` unchanged, no license/IP authorization.
