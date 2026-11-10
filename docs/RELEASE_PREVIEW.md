@@ -68,3 +68,18 @@ See [Open-source release checklist](OPEN_SOURCE_RELEASE_CHECKLIST.md) and [Licen
 ## Scope of safe current work
 
 Maintaining documentation and preparing a local preview do not change visibility or confer distribution rights. Publishing a licensed release, deleting source-pinned evidence or rewriting Git history requires separate authorization.
+
+### Next step after a clean source checkout regression
+
+The author's 10 November 2026 full-source regression passed 2,354 tests with 3 skipped at source commit `156778309e92f90d10bf82242dbf57862a228936`. The 478-file compiler preview reported by `--plan` was **not generated or clean-room tested**. A safe, create-only local stage and manifest/link check is:
+
+```bash
+python scripts/prepare_public_preview.py \
+  --profile compiler \
+  --output build/public_compiler_preview_20261110_01
+python scripts/check_public_docs.py \
+  --profile compiler \
+  --root build/public_compiler_preview_20261110_01
+```
+
+Do not reuse a directory that exists; use a fresh ignored output name instead. The staged audit checks the selected file population, absence of unexpected/symlinked files and relative link integrity. It is **not** a fresh-env dependency installation or a complete clean-room test. Independently install/test a rights-reviewed copy in a separate environment only after examining source and dependency provenance. Neither test grants a license, authorizes publication or changes Git history.

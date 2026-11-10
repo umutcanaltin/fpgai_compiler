@@ -31,3 +31,9 @@
 ## Bottom line
 
 FPGAI has meaningful implemented **bounded** compiler functionality. The missing requirements for an unqualified publication-ready claim include broader contract/general operator coverage, executed external capability comparisons, strict physical qualification, reproducibility packaging and human-authorized licensing. These are not fixed by merely marking all Python unit tests green.
+
+## Author verified regression at the 10 November 2026 implementation SHA
+
+The author executed the new independent graph Phi source-order/GCC verification tests on commit `156778309e92f90d10bf82242dbf57862a228936`: **20/20 focused passed** and **2,354 full suite passed, 3 skipped, 0 failed**. The full suite lasted **242.70 s**. Separate documentation checker reported 168/168 local links across 31 Markdown files; the preview plan selected 478/916 tracked files with no internal paper and no vendor binaries or weights. The author did **not** stage or install that preview in a clean environment. The fail-closed release check still correctly reports no approved LICENSE, missing institutional/rightsholder approval, no gitleaks tool/full-history review, and no dependency/clean-room approval.
+
+This confirmation closes the immediate **source regression** gate for that exact commit, not a general scientific correctness proof. A later code commit needs its own local recheck. Remaining claim-level and legal/physical gates in this matrix are unchanged.

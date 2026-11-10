@@ -1,3 +1,12 @@
+## 10 November 2026 — author confirmed complete source regression on 1567783
+
+- The author pulled the research branch at `156778309e92f90d10bf82242dbf57862a228936` and ran the focused graph source/C++ tests: **20 passed in 2.38 s**.
+- The full local regression on that exact source revision: **2,354 passed, 3 skipped, zero failed in 242.70 s**. This supersedes the previous revision's 2,351 passed/two documentation failures.
+- `make release-links`: **168 local links checked across 31 Markdown files, zero unresolved**.
+- `make release-preview-plan`: **478 selected of 916 tracked files, 438 excluded**; internal paper and maintainer docs excluded, vendor binaries/weights excluded. This was a **plan only**, not a staged preview install or clean-room execution.
+- `make release-check`: no flagged tracked private artifact filenames, but **no operative LICENSE**, no signed IP/rights-holder approvals, no full-history gitleaks scan or human review, no clean-room install/dependency audit; `ready_to_switch_visibility=false` and `ready_to_publish=false` remain valid.
+- These are author-reported local results, not remotely rerun independent tests or hardware/competitor evidence. No GitHub Actions, original results, native toolchains or `main` modified.
+
 ## 10 November 2026 — source manifest binds independent Phi evidence to executed C++
 
 - Added independent bounded MatMul consumer READ-order signature and coverage to the emitted graph C++ manifest, and validated those fields against observed GCC source events.

@@ -312,3 +312,14 @@ The fix **does not weaken** `scripts/check_public_docs.py`, alter `scripts/prepa
 | `paper/compiler_ir/README.md`, `CHANGELOG.md`, `docs/RESEARCH_PUBLICATION_STATUS.md`, this impact record | MODIFIED: implementation pointers, test status and release limits. | Documentation only |
 
 The author previously reported 2,351 passed / 2 documentation failures / 3 skipped, then 13/13 fixed documentation tests and 168 resolved links. Those checks do NOT qualify this new source commit. No original R3/R4 outputs, attempt locks, actions, source results, GitHub Actions, distribution visibility or operative license were changed. Local verification required: `python -m pytest -q tests/test_cst_graph_phi_independent_issue.py tests/test_cst_graph_phi_source.py tests/test_cst_graph_edge_witness.py`; then `python -m pytest -q` and `make release-links`. No claim of full publication readiness or physical speedup.
+
+## 10 November 2026 — user workstation confirmation of source implementation
+
+The author pulled source revision `156778309e92f90d10bf82242dbf57862a228936` and executed:
+- Focused graph Phi/GCC tests: `20 passed in 2.38s`.
+- Full suite: `2354 passed, 3 skipped in 242.70s` (0 failures).
+- `make release-links`: 168/168 checked Markdown references resolve (31 documents).
+- `make release-preview-plan`: 478 included / 916 tracked; excludes 438 (no staging/clean-room test).
+- `make release-check`: no suspect tracked filename suffixes; not licensed or release cleared. Source distribution, full-history scan, IP/rights/third-party approval, dependency audit, and clean-room runtime remain OPEN.
+
+This is author's local stdout observed in conversation, now recorded in the source impact ledger. It is a **source-only test result**; no new native Vitis, Vivado, Allo, PYNQ board, hardware latency, Fmax, or main-branch merge. No claim of physical qualification or authorization. This documentation change does not alter source behavior, original experiment files, or any compiler APIs.
