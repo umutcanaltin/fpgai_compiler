@@ -1,3 +1,9 @@
+## 10 November 2026 — built wheel contents and installed compiler CLI verified
+
+- Author verified on `2078a6b`: 19/19 wheel verifier unit tests passed; wheel build, exact archive audit, installation into a second isolated Python 3.12 venv and installed CLI source-generation smoke **all passed** (`WHEEL_CONTENTS_AND_INSTALLED_CLI_VERIFIED`).
+- Wheel `fpgai_research-0.3.0.dev0-py3-none-any.whl`, SHA-256 `327d1fdff569726667d0218de07f124061ebf34e1e643153dcdaeba6d5635732`; 420/420 staged modules, 426 archive members, 0 extra files. Staged NOTICE verified, not an operative license.
+- Clean-room staged compiler source tests remain 65 pass and 1 checkout-only deselection. Neither these technical gates nor code visibility grants redistribution approval or qualifies native FPGA performance.
+
 ## 10 November 2026 — wheel audit packaging NOTICE false positive repaired
 
 - User ran `tests/test_verify_compiler_wheel.py`: **9 passed in 0.05 s**; `verify_compiler_wheel --plan` accepted prior 65-pass curated receipt and staged source SHA `5d95008e19806471184f11071d439621e9e9efac451442ac391d3845e4823c39`.

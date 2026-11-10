@@ -376,3 +376,17 @@ This is author's local stdout observed in conversation, now recorded in the sour
 | This maintainer impact ledger | MODIFIED: source/test dependency inventory, impact, and pending verification. | Documentation only. |
 
 **Critical release boundaries:** A wheel can contain a NOTICE.md describing no operative source code license while remaining entirely unlicensed for third-party redistribution. Nothing in the new audit promotes the wheel to distributable. No GitHub Action or branch main merge, no original research evidence alteration, no native HLS/Vivado/board or prior art execution.
+
+## 10 November 2026 — completed compiler wheel smoke, documentation-only attestation
+
+**Author-local evidence (10 November 2026, research branch `2078a6b041e7504e85003173090990d17d5a795f`):** After 19/19 wheel verifier unit tests passed in 0.10s, the author used fresh create-only output `build/public_compiler_wheel_smoke_20261110_03` and completed the wheel audit and installed CLI smoke. The tool reported `WHEEL_CONTENTS_AND_INSTALLED_CLI_VERIFIED` for `fpgai_research-0.3.0.dev0-py3-none-any.whl`: exactly **420 of 420 staged Python modules present**, **426 total wheel members**, **0 unexpected members**, exact staged `NOTICE.md` SHA-256 `3ba6f83964ea9e92d187093534754311b3a2e002e4ec7ff1241ce832be17d20e`, wheel SHA-256 `327d1fdff569726667d0218de07f124061ebf34e1e643153dcdaeba6d5635732`. Wheel independently installed into a new Python 3.12 virtual environment, and the wheel-installed CLI emitted synthetic toy HLS C++ with matching manifest SHA-256 `33ff3faf720d5038506aca63ff8b6d4bef963c634c78ad2565bfeccc7f93b77d`. The staging manifest remained `5d95008e19806471184f11071d439621e9e9efac451442ac391d3845e4823c39`; prior curated-preview test receipt reported 65 passing tests. **No native vendor tools executed, no original studies reproduced, and the NOTICE remains nonoperative as a software license.**
+
+| Path | Operation and dependencies | Verification and impact |
+|---|---|---|
+| `CHANGELOG.md` | MODIFIED: release-test chronology and exact wheel digest | Author-verified stdout; documentation only |
+| `docs/RELEASE_PREVIEW.md` | MODIFIED: successful wheel/NOTICE gate and remaining release blockers | No changes to wheel builder, staged preview policy or source artifacts |
+| `docs/RESEARCH_PUBLICATION_STATUS.md` | MODIFIED: technical source packaging milestone versus legal/scientific qualification | No new original experiment claim |
+| `paper/compiler_ir/FEATURE_TO_IMPLEMENTATION_PUBLICATION_AUDIT_20261110.md` | MODIFIED: claim-to-code readiness matrix with actual wheel proof and bounded scope | No scientific source data altered |
+| This impact ledger | MODIFIED: full path/change rationale and source-revision provenance | No compiler code, tests, native tools, workflow or API changed |
+
+`main` unchanged, research PR stays draft, GitHub Actions unused, original studies untouched. This commit only records observed local verification and should not be mistaken for a new full-suite regression.
