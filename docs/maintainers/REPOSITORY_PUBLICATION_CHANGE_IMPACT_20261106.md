@@ -363,3 +363,16 @@ This is author's local stdout observed in conversation, now recorded in the sour
 | This maintainer file-impact ledger | MODIFIED; trace dependencies and test scope, prevent duplicate implementation | Documentation only |
 
 **Boundaries:** Wheel build and its checks may download Python build requirements only on deliberate `--execute`. No third-party code ownership, historical secrets/redistribution consent, clean DRC/FPGA runtime or exact same-workload external compiler capability is asserted. Keep PR #2 draft; `main` remains unchanged.
+
+## 10 November 2026 — wheel NOTICE false-positive repair and precise file impact
+
+**Observed:** Author ran 9/9 focused `tests/test_verify_compiler_wheel.py` at `2fb3e10`. Plan passed; actual `--execute` wheel build reached ZIP audit and rejected only `fpgai_research-0.3.0.dev0.dist-info/licenses/NOTICE.md`. The real wheel install/CLI test was not reached. The build's create-only `_01` workspace remains on the author's workstation and must not be overwritten. The prior 65/65 source-preview tests remain attested; no native vendor run or original study mutation occurred.
+
+| Path | Operation and effect | Dependencies and qualification |
+|---|---|---|
+| `scripts/verify_compiler_wheel.py` | MODIFIED: exact `.dist-info/licenses/NOTICE.md` exception only when original staged NOTICE is allowed, wheel bytes match staged file and `License-File: NOTICE.md` is declared; reject unknown `License-Expression` and all other unreviewed license members. Audit receipt distinguishes NOTICE from operative LICENSE. | Reads `NOTICE.md` from original staged preview and uses existing source population/manifest checks. Does not modify packaging config, model code, original studies, Git history or release permission. New checks require author local rerun. |
+| `tests/test_verify_compiler_wheel.py` | MODIFIED: synthetic accepted NOTICE plus unknown, missing, forged/altered, extra license and metadata mutation controls. | No network, native tools or actual wheel installation in unit tests; **new tests not yet executed**. |
+| `CHANGELOG.md`, `docs/RELEASE_PREVIEW.md`, `docs/RESEARCH_PUBLICATION_STATUS.md`, `paper/compiler_ir/FEATURE_TO_IMPLEMENTATION_PUBLICATION_AUDIT_20261110.md` | MODIFIED: fail-closed qualification status, real failure point and safe `_02` create-only rerun. | Documentation only; explicitly no license grant or "publishable" claim. |
+| This maintainer impact ledger | MODIFIED: source/test dependency inventory, impact, and pending verification. | Documentation only. |
+
+**Critical release boundaries:** A wheel can contain a NOTICE.md describing no operative source code license while remaining entirely unlicensed for third-party redistribution. Nothing in the new audit promotes the wheel to distributable. No GitHub Action or branch main merge, no original research evidence alteration, no native HLS/Vivado/board or prior art execution.

@@ -1,3 +1,11 @@
+## 10 November 2026 — wheel audit packaging NOTICE false positive repaired
+
+- User ran `tests/test_verify_compiler_wheel.py`: **9 passed in 0.05 s**; `verify_compiler_wheel --plan` accepted prior 65-pass curated receipt and staged source SHA `5d95008e19806471184f11071d439621e9e9efac451442ac391d3845e4823c39`.
+- Real `--execute` built a wheel, then stopped **before wheel installation/CLI execution** at `Unexpected wheel metadata: fpgai_research-0.3.0.dev0.dist-info/licenses/NOTICE.md`. This is the standard Python PEP 639 metadata notice location, not a demonstrated compiler failure.
+- Updated the wheel archive audit to allow exactly `.dist-info/licenses/NOTICE.md` **only** when `NOTICE.md` was selected from the staged preview, embedded bytes match staged bytes, and the wheel's `License-File` metadata declares precisely `NOTICE.md`. No other license, paper, executable or unreviewed archive member is allowed. A `License-Expression` remains rejected; a NOTICE is explicitly *not* an operative LICENSE.
+- Expanded synthetic negative tests for missing/tampered notice, undeclared/unattested NOTICE, extra license files and unapproved metadata. **No real wheel recheck or new tests are yet author-verified on this fix.**
+- The first failed create-only output directory `build/public_compiler_wheel_smoke_20261110_01` exists, so next execution must use a fresh `_02` output. No prior local research or preview output is deleted.
+
 
 ## 10 November 2026 — 65 curated isolated source-preview tests verified; wheel artifact audit added
 

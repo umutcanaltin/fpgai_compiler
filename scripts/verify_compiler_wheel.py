@@ -85,7 +85,16 @@ def plan(workspace: str | Path, output: str | Path) -> dict:
     }
 
 
-def inspect_wheel(wheel: Path, selected_source_paths: set[str]) -> dict:
+def inspect_wheel(
+    wheel: Path, selected_source_paths: set[str], *,
+    expected_notice: bytes | None = None,
+) -> dict:
+    """Check exact curated wheel files; NOTICE is metadata, NOT a license grant.
+
+    When a staged NOTICE is supplied (production path), require an exact
+    byte-for-byte copy at PEP 639's only approved metadata location. Synthetic
+    fixtures without a NOTICE remain supported in the source-only unit tests.
+    """
     if wheel.is_symlink() or not wheel.is_file() or wheel.suffix != ".whl":
         raise ValueError("Actual wheel archive required")
     expected = {
@@ -113,6 +122,16 @@ def inspect_wheel(wheel: Path, selected_source_paths: set[str]) -> dict:
             "METADATA", "WHEEL", "RECORD", "entry_points.txt",
             "top_level.txt", "INSTALLER", "REQUESTED",
         }
+        notice_member = dist[0] + "/licenses/NOTICE.md"
+        if expected_notice is not None:
+            if "NOTICE.md" not in selected_source_paths:
+                raise ValueError("NOTICE.md not present in staged source allowlist")
+            if notice_member not in names:
+                raise ValueError("Wheel missing staged NOTICE.md")
+            if archive.read(notice_member) != expected_notice:
+                raise ValueError("Wheel NOTICE.md differs from staged source")
+        elif notice_member in names:
+            raise ValueError("Unattested NOTICE.md in wheel")
         module_names = set()
         for info in entries:
             name = info.filename
@@ -130,7 +149,11 @@ def inspect_wheel(wheel: Path, selected_source_paths: set[str]) -> dict:
                     raise ValueError("Unreviewed non-Python wheel payload: " + name)
                 module_names.add(name)
             elif name.startswith(dist[0] + "/"):
-                if name.removeprefix(dist[0] + "/") not in allowed_meta:
+                metadata_rel = name.removeprefix(dist[0] + "/")
+                if metadata_rel == "licenses/NOTICE.md":
+                    if expected_notice is None:
+                        raise ValueError("Unattested wheel notice")
+                elif metadata_rel not in allowed_meta:
                     raise ValueError("Unexpected wheel metadata: " + name)
             else:
                 raise ValueError("Unallowlisted wheel member: " + name)
@@ -143,6 +166,16 @@ def inspect_wheel(wheel: Path, selected_source_paths: set[str]) -> dict:
         meta = Parser().parsestr(archive.read(dist[0] + "/METADATA").decode())
         if meta.get("Name", "").replace("_", "-").lower() != "fpgai-research":
             raise ValueError("Wrong wheel distribution identity")
+        listed_license_files = meta.get_all("License-File", [])
+        if listed_license_files and listed_license_files != ["NOTICE.md"]:
+            raise ValueError("Unreviewed wheel License-File metadata")
+        # NOTICE is a restriction statement, not an operative LICENSE.
+        # Do not accept a newly declared distribution license through this
+        # maintainer-only source preview gate.
+        if meta.get("License-Expression"):
+            raise ValueError("Unapproved wheel License-Expression metadata")
+        if expected_notice is not None and listed_license_files != ["NOTICE.md"]:
+            raise ValueError("Wheel NOTICE.md not declared by License-File metadata")
         if "fpgai-research" not in archive.read(
                 dist[0] + "/entry_points.txt").decode():
             raise ValueError("Missing public compiler CLI entry point")
@@ -153,6 +186,12 @@ def inspect_wheel(wheel: Path, selected_source_paths: set[str]) -> dict:
             "wheel_python_module_count": len(module_names),
             "wheel_all_staged_modules_present": True,
             "wheel_unexpected_members": 0,
+            "staged_notice_sha256": (
+                sha256(expected_notice).hexdigest()
+                if expected_notice is not None else None
+            ),
+            "wheel_notice_matches_stage": expected_notice is not None,
+            "wheel_notice_is_operative_license": False,
             "package_name": meta["Name"],
         }
 
@@ -197,7 +236,13 @@ def execute(workspace: str | Path, output: str | Path) -> dict:
     preview = Path(original_receipt["preview"])
     manifest = json.loads(
         (preview / "PREVIEW_NOT_FOR_PUBLICATION.json").read_text())
-    wheel_receipt = inspect_wheel(wheels[0], set(manifest["selected_paths"]))
+    notice = preview / "NOTICE.md"
+    if notice.is_symlink() or not notice.is_file():
+        raise ValueError("Staged NOTICE.md missing or unsafe")
+    wheel_receipt = inspect_wheel(
+        wheels[0], set(manifest["selected_paths"]),
+        expected_notice=notice.read_bytes(),
+    )
 
     env_root = destination / "clean_venv"
     venv.create(env_root, with_pip=True, system_site_packages=False)

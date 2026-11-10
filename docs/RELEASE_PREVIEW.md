@@ -138,3 +138,23 @@ python -m scripts.verify_compiler_wheel \
 `--execute` may download Python build requirements/dependencies. It builds an unlicensed **local test artifact only**; no PyPI/GitHub upload, native FPGA tool, external competitor or original research run. The target output must not exist. A failing module-inclusion check should lead to a packaging fix, not relaxation of the audit. The code and tests above **have not yet been author-executed**.
 
 No wheel passing status, public redistribution right, timing closure or board-performance claim is implied by the previously passing source-preview tests.
+
+### 10 November 2026 — NOTICE wheel metadata gate correction
+
+The author ran **9/9 original wheel verifier tests** and a successful read-only wheel plan. The real wheel build proceeded to wheel member inspection, then the original audit rejected the standard generated `fpgai_research-0.3.0.dev0.dist-info/licenses/NOTICE.md` member. The exception occurred **before** the separate wheel installation or CLI smoke; those are not yet verified. This is a packaging-auditor false positive, not evidence of ONNX compiler or numerical failure.
+
+The patched wheel audit permits only that exact `NOTICE.md` metadata member, byte-for-byte matched to the original nonpublishable staged source `NOTICE.md`, and requires its `License-File` declaration. It rejects added/surprise license files and any `License-Expression` claim. **NOTICE.md grants no source redistribution rights.** No project license or rights approval was added.
+
+The original failed `build/public_compiler_wheel_smoke_20261110_01` is intentionally retained. After pulling the new commit, first run the expanded focused tests. If desired, audit the previously built wheel without another wheel build by invoking `inspect_wheel` with the original stage notice and selected manifest; then run the **full** opt-in wheel+installed CLI gate with an entirely new create-only destination:
+
+```bash
+python -m pytest -q tests/test_verify_compiler_wheel.py
+python -m scripts.verify_compiler_wheel \
+  --workspace build/public_compiler_installed_smoke_20261110_01 \
+  --output build/public_compiler_wheel_smoke_20261110_02 --plan
+python -m scripts.verify_compiler_wheel \
+  --workspace build/public_compiler_installed_smoke_20261110_01 \
+  --output build/public_compiler_wheel_smoke_20261110_02 --execute
+```
+
+These checks are **not yet rerun on the author's machine**. `--execute` may fetch Python build/dependency packages; it performs no native FPGA tool invocation, license grant, source publication, Git history rewrite or original-study change.

@@ -10,7 +10,8 @@ import pytest
 from scripts import verify_compiler_wheel as gate
 
 
-def _wheel(path: Path, *, omitted=(), extra=None):
+def _wheel(path: Path, *, omitted=(), extra=None, notice=None,
+           metadata_addendum=""):
     modules = sorted(gate.REQUIRED_MODULES)
     with ZipFile(path, "w") as z:
         for module in modules:
@@ -18,13 +19,17 @@ def _wheel(path: Path, *, omitted=(), extra=None):
                 z.writestr(module, "# synthetic\n")
         root = "fpgai_research-0.3.0.dev0.dist-info"
         z.writestr(root + "/METADATA",
-                   "Metadata-Version: 2.3\nName: fpgai-research\nVersion: 0.3.0.dev0\n")
+                   "Metadata-Version: 2.4\nName: fpgai-research\nVersion: 0.3.0.dev0\n"
+                   + ("License-File: NOTICE.md\n" if notice is not None else "")
+                   + metadata_addendum)
         z.writestr(root + "/WHEEL",
                    "Wheel-Version: 1.0\nGenerator: synthetic\nRoot-Is-Purelib: true\n"
                    "Tag: py3-none-any\n")
         z.writestr(root + "/entry_points.txt",
                    "[console_scripts]\nfpgai-research = fpgai_research.cli:main\n")
         z.writestr(root + "/RECORD", "synthetic test\n")
+        if notice is not None:
+            z.writestr(root + "/licenses/NOTICE.md", notice)
         if extra is not None:
             z.writestr(extra, "private payload")
     return path
@@ -101,3 +106,69 @@ def test_cli_requires_explicit_execute_or_plan(tmp_path):
     with pytest.raises(SystemExit):
         gate.main(["--workspace", str(tmp_path),
                    "--output", str(tmp_path / "new")])
+
+
+def test_standard_notice_member_is_attested_against_staged_file(tmp_path):
+    text = b"# Notices\nNo operative repository license.\n"
+    wheel = _wheel(tmp_path / "fpgai_research-0.3.0.dev0-py3-none-any.whl",
+                   notice=text)
+    selected = _selected() | {"NOTICE.md"}
+    receipt = gate.inspect_wheel(
+        wheel, selected, expected_notice=text)
+    assert receipt["wheel_notice_matches_stage"] is True
+    assert receipt["wheel_notice_is_operative_license"] is False
+    assert receipt["staged_notice_sha256"]
+
+
+def test_notice_member_without_staged_attestation_fails(tmp_path):
+    wheel = _wheel(tmp_path / "fpgai_research-0.3.0.dev0-py3-none-any.whl",
+                   notice=b"unreviewed notice")
+    with pytest.raises(ValueError, match="Unattested"):
+        gate.inspect_wheel(wheel, _selected())
+
+
+def test_notice_byte_mismatch_is_rejected(tmp_path):
+    wheel = _wheel(tmp_path / "fpgai_research-0.3.0.dev0-py3-none-any.whl",
+                   notice=b"original")
+    with pytest.raises(ValueError, match="differs from staged source"):
+        gate.inspect_wheel(wheel, _selected() | {"NOTICE.md"},
+                           expected_notice=b"tampered")
+
+
+def test_missing_notice_when_staged_source_contains_one_is_rejected(tmp_path):
+    wheel = _wheel(tmp_path / "fpgai_research-0.3.0.dev0-py3-none-any.whl")
+    with pytest.raises(ValueError, match="missing staged NOTICE"):
+        gate.inspect_wheel(wheel, _selected() | {"NOTICE.md"},
+                           expected_notice=b"staged")
+
+
+def test_staged_notice_requires_allowlisted_original_path(tmp_path):
+    wheel = _wheel(tmp_path / "fpgai_research-0.3.0.dev0-py3-none-any.whl",
+                   notice=b"staged")
+    with pytest.raises(ValueError, match="source allowlist"):
+        gate.inspect_wheel(wheel, _selected(), expected_notice=b"staged")
+
+
+@pytest.mark.parametrize("extra", [
+    "fpgai_research-0.3.0.dev0.dist-info/licenses/PRIVATE.md",
+    "fpgai_research-0.3.0.dev0.dist-info/licenses/LICENSE",
+    "fpgai_research-0.3.0.dev0.dist-info/third_party/secret.txt",
+])
+def test_only_exact_approved_notice_location_is_accepted(tmp_path, extra):
+    wheel = _wheel(tmp_path / "fpgai_research-0.3.0.dev0-py3-none-any.whl",
+                   notice=b"approved", extra=extra)
+    with pytest.raises(ValueError, match="Unexpected wheel metadata"):
+        gate.inspect_wheel(wheel, _selected() | {"NOTICE.md"},
+                           expected_notice=b"approved")
+
+
+@pytest.mark.parametrize("metadata_addendum", [
+    "License-File: OTHER.md\n",
+    "License-Expression: MIT\n",
+])
+def test_wheel_rejects_unknown_licensing_metadata(tmp_path, metadata_addendum):
+    wheel = _wheel(tmp_path / "fpgai_research-0.3.0.dev0-py3-none-any.whl",
+                   notice=b"staged", metadata_addendum=metadata_addendum)
+    with pytest.raises(ValueError, match="License-File|License-Expression"):
+        gate.inspect_wheel(wheel, _selected() | {"NOTICE.md"},
+                           expected_notice=b"staged")
