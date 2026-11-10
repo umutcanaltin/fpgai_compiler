@@ -83,3 +83,22 @@ python scripts/check_public_docs.py \
 ```
 
 Do not reuse a directory that exists; use a fresh ignored output name instead. The staged audit checks the selected file population, absence of unexpected/symlinked files and relative link integrity. It is **not** a fresh-env dependency installation or a complete clean-room test. Independently install/test a rights-reviewed copy in a separate environment only after examining source and dependency provenance. Neither test grants a license, authorizes publication or changes Git history.
+
+### 10 November 2026 — staged preview verified; independent installation next
+
+The author successfully created `build/public_compiler_preview_20261110_01` from the research branch at `fdfac755662a8904682c3597f103b20d8f242dda`, selecting **478 files**. The staged-preview inventory and relative-link checker independently accepted **168 local links across 31 Markdown files**, with zero unresolved; publication authorization correctly remained false.
+
+This validates the **staged files and relative links**, not a fresh virtual-environment install, actual CLI execution, package dependency isolation, or research reproduction. To perform an optional local installed-package smoke test without modifying the audited preview, use the checkout-only helper:
+
+```bash
+python -m scripts.verify_compiler_preview \
+  --preview build/public_compiler_preview_20261110_01 --plan
+
+python -m scripts.verify_compiler_preview \
+  --preview build/public_compiler_preview_20261110_01 \
+  --execute --output build/public_compiler_installed_smoke_20261110_01
+```
+
+The default `--plan` checks only the manifest and link closure. **`--execute` explicitly creates a new isolated virtual environment and runs `pip install .[onnx,test]`, which may download third-party dependencies**. It copies the preview into a new ignored build workspace before installation, then invokes the installed compiler from a separate working directory to generate toy and CNN HLS C++ source; if GNU `g++` exists, the CNN synthetic source is also checked against NumPy intermediates. It never invokes Vitis/Vivado or touches original research study outputs. The output receipt is `build/public_compiler_installed_smoke_20261110_01/installed_preview_smoke_receipt.json`. It will never claim rights clearance or release approval, and a failure leaves the workspace intact for debugging. Use a fresh output path if this one already exists.
+
+The helper and its unit tests live in the research checkout and are deliberately **not** part of the 478-file public preview; this is a maintainer release check. After running it, separately review dependency licenses and complete rights/history/security review. Even a successful smoke does not qualify every graph, model or vendor design.

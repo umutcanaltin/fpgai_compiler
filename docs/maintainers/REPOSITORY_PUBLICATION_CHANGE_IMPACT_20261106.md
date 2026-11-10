@@ -323,3 +323,17 @@ The author pulled source revision `156778309e92f90d10bf82242dbf57862a228936` and
 - `make release-check`: no suspect tracked filename suffixes; not licensed or release cleared. Source distribution, full-history scan, IP/rights/third-party approval, dependency audit, and clean-room runtime remain OPEN.
 
 This is author's local stdout observed in conversation, now recorded in the source impact ledger. It is a **source-only test result**; no new native Vitis, Vivado, Allo, PYNQ board, hardware latency, Fmax, or main-branch merge. No claim of physical qualification or authorization. This documentation change does not alter source behavior, original experiment files, or any compiler APIs.
+
+## 10 November 2026 — staged compiler preview attested; new optional isolated install smoke
+
+**Author-observed stage:** On the research branch at `fdfac755662a8904682c3597f103b20d8f242dda`, `prepare_public_preview.py --profile compiler --output build/public_compiler_preview_20261110_01` created **478 selected files**, `ready_to_publish=false`. Independent `check_public_docs.py --profile compiler --root build/public_compiler_preview_20261110_01` verified manifest file inventory and **168 local links** across 31 Markdown files (0 unresolved). This does not certify package import/install, dependency license, history scan, original research artifacts or publication rights.
+
+| Path | Operation and ownership | Dependency/effect and verification |
+|---|---|---|
+| `scripts/verify_compiler_preview.py` | ADDED: release-maintainer isolated installed-package smoke helper, read-only by default, explicit `--execute` required | Uses existing `scripts.check_public_docs` staged manifest audit, fresh copied preview, separate `venv` and `pip install .[onnx,test]`, `fpgai-research` CLI source smoke and gallery source smoke with optional GCC. Does not execute vendor tools, modify staged preview, or grant publication approval. New helper not yet locally run. |
+| `tests/test_verify_compiler_preview.py` | ADDED: safety/regression for no-install plan, missing/forged manifest and extra files, create-only build output constraints and explicit user install option | Uses only synthetic fixture preview; does not install packages or call native tools. Tests authored, not yet run. |
+| `docs/RELEASE_PREVIEW.md` | MODIFIED: verified stage result and explicit opt-in command | Existing preview scripting and 478-file allowlist not modified; checkout-only helper deliberately excluded from distributable preview. |
+| `docs/RESEARCH_PUBLICATION_STATUS.md`, `CHANGELOG.md`, `paper/compiler_ir/FEATURE_TO_IMPLEMENTATION_PUBLICATION_AUDIT_20261110.md` | MODIFIED: evidence-qualified stage/installation status and release blockers | No algorithm, source contract, original R3/R4 result, native lock or public LICENSE changes. |
+| This maintainer change-impact ledger | MODIFIED: file effects and subsequent verification required | Documentation only. |
+
+**Important:** The staged preview is a potential distribution candidate only after rights/legal, full all-ref history/security, dependency-license and clean-room review. This opt-in install workflow only tests selected source entry points, not all possible models and board or RTL constraints. GitHub Actions remain disabled and PR #2 remains draft.

@@ -1,3 +1,10 @@
+## 10 November 2026 — staged compiler preview verified and opt-in isolated install check added
+
+- The author created the 478-file nonpublishable compiler preview at `build/public_compiler_preview_20261110_01` on commit `fdfac75` and verified its independent staged inventory and **168/168 links**, 31 Markdown files, no unresolved references.
+- Added a default-plan-only installed-package smoke helper. With explicit `--execute`, it creates a new, non-overwriting ignored workspace, copies the preview, installs optional compiler/test dependencies into an isolated venv and runs synthetic toy/CNN HLS source generation from outside the staged source tree; optional host GCC checks are independently labeled.
+- Added negative release-smoke preflight tests. No new native Vitis/Vivado/board work, external competitor evaluation, license approval or release authorization.
+- This implementation and its focused tests are **not yet verified on the author's workstation**. The author's 2,354-pass regression belongs to the prior source revision.
+
 ## 10 November 2026 — author confirmed complete source regression on 1567783
 
 - The author pulled the research branch at `156778309e92f90d10bf82242dbf57862a228936` and ran the focused graph source/C++ tests: **20 passed in 2.38 s**.
