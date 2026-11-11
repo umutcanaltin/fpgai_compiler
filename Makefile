@@ -108,7 +108,7 @@ research-inventory:
 	$(PYTHON) scripts/audit_source_inventory.py
 
 research-audit-tests:
-	$(PYTHON) -m pytest -q tests/test_audit_source_inventory.py tests/test_repository_publication_hygiene.py tests/test_cst_paper_c2_original_readonly_analysis.py tests/test_cst_paper_c1_original_e1_readonly_descriptives.py tests/test_cst_paper_r4v_vitis_vivado_joint_compare.py tests/test_cst_paper_r4w_feasible_clock_sweep.py tests/test_cst_paper_r4x_feasible_only_core_latency.py tests/test_cst_paper_r4y_24ns_pipeline_source_prepare.py tests/test_cst_paper_r4z_24ns_four_arm_native.py tests/test_cst_graph_phi_independent_issue.py tests/test_cst_graph_phi_source.py tests/test_cst_nchw_graph_contract.py tests/test_campaign_strict_e4_qualification.py tests/test_public_docs_links.py tests/test_public_release_preview.py
+	$(PYTHON) -m pytest -q tests/test_audit_source_inventory.py tests/test_repository_publication_hygiene.py tests/test_cst_paper_c2_original_readonly_analysis.py tests/test_cst_paper_c1_original_e1_readonly_descriptives.py tests/test_cst_paper_r4v_vitis_vivado_joint_compare.py tests/test_cst_paper_r4w_feasible_clock_sweep.py tests/test_cst_paper_r4x_feasible_only_core_latency.py tests/test_cst_paper_r4y_24ns_pipeline_source_prepare.py tests/test_cst_paper_r4z_24ns_four_arm_native.py tests/test_cst_graph_phi_independent_issue.py tests/test_cst_graph_phi_source.py tests/test_cst_nchw_graph_contract.py tests/test_campaign_strict_e4_qualification.py tests/test_network_benchmark.py tests/test_public_docs_links.py tests/test_public_release_preview.py
 
 research-c2-review:
 	$(PYTHON) -m fpgai_research.experiments.cst_paper_c2_original_readonly_analysis --study build/paper_c2_fair_source_cost_20261106_01
@@ -195,3 +195,11 @@ research-r4z-native-audit:
 	$(PYTHON) -m fpgai_research.experiments.cst_paper_r4z_24ns_four_arm_native \
 	  --study $(R4Z_NEW_NATIVE) --audit-native
 
+
+# Cross-network synthetic source/architecture study; plan and tests only.
+# Real vendor execution is NEVER started by Makefile.
+network-benchmark-plan:
+	$(PYTHON) -m scripts.network_benchmark plan
+
+network-benchmark-tests:
+	$(PYTHON) -m pytest -q tests/test_network_benchmark.py

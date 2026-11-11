@@ -184,3 +184,15 @@ This additionally writes `host_reference_verification.json`. It checks the bound
 Example files and compilation directories are **create-only**. Use a new filename/output path for another run; never delete the original research studies to make these commands succeed.
 
 See [Using FPGAI](../docs/USING_FPGAI.md), [supported features](../docs/SUPPORTED_FEATURES.md), and [scientific reproducibility](../docs/SCIENTIFIC_REPRODUCIBILITY.md).
+
+## Source-pinned cross-network comparison experiment (11 November 2026)
+
+The repository now includes a maintainer experiment entry point for the same four untrained synthetic gallery networks (the 3 CNNs and standalone MLP). It requests scalar/operator-local mapping, 16/6 and 12/5 fixed-point formats and two target periods, yielding **32 prepared source design points**, without asserting any hardware measurements:
+
+```bash
+python -m scripts.network_benchmark plan
+python -m scripts.network_benchmark prepare --output build/network_matrix_20261111_01
+python -m scripts.network_benchmark collect --root build/network_matrix_20261111_01 --output build/network_matrix_report_20261111_01
+```
+
+The initial collector reports `TBD`/null for native cycles, estimated resources and routed timing because no licensed native tools have been run. In later **explicit** opt-in local runs, use `python -m scripts.network_benchmark run --root build/network_matrix_20261111_01 --stage vitis --first 0 --limit 1 --execute`, then explicitly run `--stage vivado` only after E3 synthesis and fixed-point CSim qualify. The source-only results are not trained-model accuracy, board inference latency or measured Fmax. See internal manuscript protocol at `paper/compiler_ir/CROSS_NETWORK_FPGAI_EXPERIMENT_PROTOCOL_20261111.md` (excluded from curated public preview).

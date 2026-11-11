@@ -464,3 +464,18 @@ This is author's local stdout observed in conversation, now recorded in the sour
 | This maintainer impact map | MODIFIED: file audit and provenance ledger | No C1/C2 source, test files, R3/R4 result blobs, GitHub workflow or main branch changed. |
 
 **Merge decision:** currently not ready. A complete human review of 154 files, confidential/IP and historical scanning, stable API/config compatibility and deliberate review/ready transition remain necessary before any guarded integration to `main`. Source-code merge permission is not paper scientific acceptance or approved redistribution.
+
+## 11 November 2026 — cross-network native-metrics study (new code and interfaces)
+
+**User goal:** grow experiments and capture different network topologies with comparable latency cycles, synthesis resources and routed timing where qualified. Only a fresh implementation and test harness is added; **no native data has been generated and this revision remains untested on author machine**. The last independently verified mainline parent `953eff6a5aeb614416d947631adc2d8778327641` has 2,409 full pytest pass / 3 skips, 190 research audit pass and 168/168 public links. The added code cannot inherit that passing status.
+
+| Path | Change and canonical owner | Dependency, effect and required validation |
+|---|---|---|
+| `scripts/network_benchmark.py` | ADDED: checkout-local, **create-only** 32/64-case generator/native-run planner/read-only table collector | Reuses `examples.make_neural_network_onnx`, `examples.make_mlp_onnx`, `examples.compile_neural_network.operator_mapping`, `compile_architecture`, `compile_neural_chain`, `write_vitis_package`, `write_vivado_package`, `vitis_hls.runner`, `vivado.runner`, `results.summarize_case`, `suite_native_batch._qualify_hls/_qualify`. No shadow compiler/parser or implicit vendor process; output is untracked `build/`. Digests seal ONNX, emitted C++, testbench and both Tcl scripts. Tests pending. |
+| `tests/test_network_benchmark.py` | ADDED: canonical multifamily experiment source and qualification tests | Tests balanced matrix, four actual synthetic ONNX generation/compilation cases, FX12 operator override, immutable source/bench/Tcl, no-default-vendor execution and negative synthetic physical evidence without claiming hardware results. Tests not yet run. |
+| `paper/compiler_ir/CROSS_NETWORK_FPGAI_EXPERIMENT_PROTOCOL_20261111.md` | ADDED: prespecified experiment cohort, accepted E1–E4 metrics and interpretation; author manuscript material | No new original results, source-pinned native receipts, or trained dataset accuracy. Internal paper content excluded from compiler-only public preview. |
+| `Makefile` | MODIFIED: `research-audit-tests` plus `network-benchmark-plan` and `network-benchmark-tests` | All make targets only call source-only planning/tests. Never vendor execution. |
+| `examples/NETWORK_GALLERY.md`, `docs/SUPPORTED_FEATURES.md`, `docs/RESEARCH_PUBLICATION_STATUS.md`, `CHANGELOG.md` | MODIFIED: user workflow and precise capability/evidence boundaries | Public gallery avoids linking to internal manuscript content, protecting allowlisted Markdown reference closure. |
+| This impact ledger | MODIFIED: full repository path/change and dependency matrix | Existing compiler source/API and prior papers/experimental result locks unchanged; no license, GitHub Actions or default-branch artifacts created. |
+
+**Required local execution before promotion:** focused `pytest tests/test_network_benchmark.py`, source-only plan, optional one-case source prepare (new output), full `pytest`, research audit, Markdown link check, optional explicit native case only after author inspected source/targets and installed Vivado/Vitis versions. Preserve negative failures and all case rows.

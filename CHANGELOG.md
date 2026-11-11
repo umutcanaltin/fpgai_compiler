@@ -1,3 +1,11 @@
+## 11 November 2026 — cross-network experimental matrix prepared (not yet executed)
+
+- Added `scripts/network_benchmark.py`: a 32-case deterministic factorial source-preparation matrix for 4 **existing synthetic** models (MLP, pooling CNN, strided CNN, two-Conv Softmax) × scalar/operator-local mapping × FX16_6/FX12_5 × requested 12/20 ns clock. Optional 64-case 12/16/20/24 ns sweep; same KV260 part and fixed synthetic inputs.
+- Reuses canonical ONNX generators and compiler, Vitis CSim/HLS/Tcl packaging, OOC Vivado Tcl, provenance-checked Vitis/Vivado runners and source-attested native report parser. **Plan and prepare never run vendors**; native calls require `run --execute` with bounded slice.
+- New create-only result collector writes source-checked `results.json`, `results.csv`, and `results.md`; records E1/E2/E3/E4 distinctions, estimated cycles, estimated HLS LUT/FF/DSP/BRAM/URAM, requested-clock latency proxy, observed routed WNS/resource/DRC, and strict paired deltas only when both arms qualify E4. Missing values are null/TBD. Exact attained Fmax, board latency and power are explicitly never fabricated.
+- Added `tests/test_network_benchmark.py` for real synthetic model preparation and negative provenance/DRC/numeric/timing/identity cases; registered the existing research audit target and safe Makefile `network-benchmark-plan` / `network-benchmark-tests`.
+- **New work not yet author-executed**; prior merged-main 2,409 passing pytest and 190 research-audit results do not establish this commit's validity. No original R3/R4 results overwritten, licensed vendor run performed, GitHub Actions enabled, new source-license issued, or paper/hardware success implied.
+
 ## 11 November 2026 — author verified 2409 tests; main merge diff audited, still gated
 
 - On source `f34f80f`, the author verified the new strict E4 regression: **23 focused passed; 2,409 full passed, 3 skipped; 190 research-audit passed; 168/168 public documentation links resolved**. Source-only `release-preview-plan` selected **478/923** tracked files and excluded 445; release approval remained false.
