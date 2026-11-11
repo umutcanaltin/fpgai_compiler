@@ -44,9 +44,11 @@ def _qualify(summary: dict) -> list[str]:
     if not _positive_wns(physical):
         blockers.append("Post-route timing closure not verified")
     if not (drc.get("summary_verified") is True
+            and drc.get("violations") == 0
+            and drc.get("clean") is True
             and drc.get("critical_warnings") == 0
             and drc.get("unconstrained_io") is False):
-        blockers.append("Critical/error and unconstrained I/O DRC gate not met")
+        blockers.append("Clean DRC gate not met: zero violations, verified summary, no critical/error or unconstrained I/O")
     utilization = physical.get("utilization") or {}
     for resource in ("lut", "ff", "dsp", "bram", "uram"):
         value = utilization.get(resource)

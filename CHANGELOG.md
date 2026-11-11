@@ -1,3 +1,11 @@
+## 11 November 2026 — strict E4 campaign qualification, main-merge gate kept separate
+
+- Tightened the canonical `suite_native_batch._qualify` native E4 predicate to require zero total DRC violations and explicit `clean=True`; updated `reproduction_audit.audit_campaign` to use that same qualifier rather than promoting all routed/time-met/CSim-pass cases to strict E4.
+- Source-campaign audit now distinguishes physically attested E4 report presence from **qualified** E4 and returns case-level reasons. `paper_physical_results_complete` requires all prespecified axes and **every** case strictly qualified. Lower-tier source reports may still satisfy a lower-tier request without inventing physical success.
+- Added synthetic fail-closed, no-vendor tests for advisory/noncritical DRC violations, absent DRC, incomplete routing, failed fixed-point CSim, timing failure, wrong OOC mode, missing physical utilization and lower E3 evidence. Added them to `make research-audit-tests`.
+- The prior source revision `2689745` had **2,395 full-suite tests passed, 3 skipped; 176 research audit passed; 168/168 links**. **The new patch and tests have not been run by the author**. No native or original experiment execution and no new physical evidence is claimed.
+- PR #2 is **390 commits ahead of `main`**, with no submitted reviews. This is a significant review/compatibility burden. Main-branch merging is a separate engineering decision and must not occur while this latest patch is unverified or PR remains draft; paper/release approval is a separate, stricter authorization track.
+
 ## 10 November 2026 — author-verified NCHW recovery and extended C1 regression
 
 - At source commit `2689745607d512a4dc2f349baf2075a991d8c952`, the author ran the focused NCHW/graph source suite: **38 passed in 3.80 s** (zero failed).

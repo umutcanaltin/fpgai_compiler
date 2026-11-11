@@ -433,3 +433,19 @@ This is author's local stdout observed in conversation, now recorded in the sour
 | This `docs/maintainers/REPOSITORY_PUBLICATION_CHANGE_IMPACT_20261106.md` | MODIFIED: required file-level dependency and test documentation | No source code, tests, original experiments, native tools or CI workflow modified |
 
 **Release artifact note:** The author-verifed earlier 478-file stage / isolated tests / wheel originated from source before this NCHW change. A new *nonpublishable* stage must use a fresh ignored build directory and new SHA-based evidence; past successful wheel/build artifacts must remain unchanged. PR #2 remains draft, no GitHub Actions, `main` unchanged, no license/IP authorization.
+
+
+## 11 November 2026 — strict E4 campaign qualification and explicit mainline merge criteria
+
+**Grounded starting state:** The author's most recent `2689745` source regression passed **2,395 full tests / 3 skipped**, **176 research tests**, and **168/168 public docs links**. The PR #2 research branch was observed 390 commits ahead of `main`, no submitted PR reviews, and still draft. The additional E4 patch and tests below have not been executed at the author's workstation.
+
+| Path | Action and responsibility | Connected caller/evidence and verification impact |
+|---|---|---|
+| `src/fpgai_research/experiments/suite_native_batch.py` | MODIFIED canonical physical E4 qualification, shared by campaign and independent native E4 audits | Enforces zero total DRC violations and explicit clean status alongside already required CSim, OOC route, WNS, utilization, source/RTL and no-critical/no-unconstrained gates. Prevents warning-only E4 promotion in other callers. Synthetic regression tests added; unrun. |\n| `src/fpgai_research/experiments/reproduction_audit.py` | MODIFIED existing source-pinned campaign evidence aggregator; no parallel E4 classifier | Imports the single canonical `suite_native_batch._qualify` predicate (now extended to require `drc.violations==0` and `drc.clean is True`). Keeps `campaign_complete_for_required_evidence` and `paper_physical_results_complete` conservative, adds per-case E4 blockers and exact strict-E4 count. No vendor execution; tests unrun. |
+| `tests/test_campaign_strict_e4_qualification.py` | ADDED one canonical synthetic E4 campaign-regression test owner | Positive balanced eight-case baseline/axes, adversarial zero-critical-but-nonzero DRC, missing/unclean DRC, incomplete routing, no CSim, negative WNS, wrong OOC mode, incomplete utilization and E3-only evidence, plus source-hash tampering. Fixtures do not represent actual executed Vivado cases. |
+| `Makefile` | MODIFIED `research-audit-tests` source-only target | Includes focused strict campaign E4 tests; still never invokes native Vitis/Vivado. |
+| `docs/RESEARCH_PUBLICATION_STATUS.md`, `docs/SCIENTIFIC_REPRODUCIBILITY.md`, `paper/compiler_ir/FEATURE_TO_IMPLEMENTATION_PUBLICATION_AUDIT_20261110.md` | MODIFIED scientific status and method-scope docs | Prevents E4-from-timing-only promotion; no source evidence, comparator results or board measurements changed. |
+| `AGENTS.md` | MODIFIED engineering rule for technical `main` merge | Still disallows draft PR merge and GitHub Actions; requires exact-head verification, full 390-commit scope review, intentional ready-for-review transition and guarded merge. |
+| `CHANGELOG.md` and this impact ledger | MODIFIED complete change and dependency trace | No experimental results/RTL/source model/synthetic weights altered. |
+
+**Paper and release guard:** Code-only merge is separate from open-source licensing and scientific acceptance. Main remains unchanged by this patch. Test execution and independent review are required before merging; no authority to claim prior-art novelty, measured board latency, clean DRC in unrun hardware, or IP/redistribution approval.

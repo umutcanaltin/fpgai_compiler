@@ -64,3 +64,10 @@ No general formal soundness theorem, universal accelerator performance gain, FPG
 The repository has no approved distribution license. Before releasing source, datasets or original native study outputs, complete [the ownership and source-history checklist](OPEN_SOURCE_RELEASE_CHECKLIST.md), secure rightsholder approval and scrub any affected historical commits if necessary. Source redaction in one file does **not** remove secrets from Git history.
 
 The research manuscript, public documentation and source release should be reviewed separately: a publication-ready paper does not by itself authorize publishing the entire research repository.
+
+
+### Campaign-level strict E4 evidence gate (11 November 2026)
+
+A completed vendor process and even an accepted `E4-Vivado-implementation` report are **not** a strict physical success by themselves. The general read-only campaign audit must independently require an identity-verified source/RTL native report, passing fixed-point Vitis CSim, a fully routed out-of-context implementation, nonnegative post-route WNS, valid utilization, verified DRC summary, **zero DRC violations** (including noncritical warnings) and an explicit `clean=True` DRC observation. Missing information is failure/unknown, never an inferred zero.
+
+The E4 qualification result is per case and applies to the complete prespecified campaign denominator. Source-level E0/E1 or HLS E3 may still be valid observations where physical E4 is rejected. Timing closure and a clean DRC report on one source-attested OOC implementation are **not** a board inference-latency measurement or a general achieved Fmax result. This updated gate's tests are pending workstation execution as of 11 November 2026; no frozen native campaign receipt was changed.
