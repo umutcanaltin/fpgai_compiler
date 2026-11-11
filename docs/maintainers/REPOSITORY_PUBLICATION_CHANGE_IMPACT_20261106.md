@@ -449,3 +449,18 @@ This is author's local stdout observed in conversation, now recorded in the sour
 | `CHANGELOG.md` and this impact ledger | MODIFIED complete change and dependency trace | No experimental results/RTL/source model/synthetic weights altered. |
 
 **Paper and release guard:** Code-only merge is separate from open-source licensing and scientific acceptance. Main remains unchanged by this patch. Test execution and independent review are required before merging; no authority to claim prior-art novelty, measured board latency, clean DRC in unrun hardware, or IP/redistribution approval.
+
+## 11 November 2026 — 2,409-pass author verification and PR #2 full diff inventory
+
+**Verified user terminal output on code revision `f34f80f93101b80f87fbf88d491db1881322b379`:** focused strict E4/paper 23 pass (0.18s), full regression 2,409 pass + 3 skipped (246.51s), research audit 190 pass (55.02s), doc links 168/168 across 31 Markdown files. Read-only preview 478 selected / 923 tracked / 445 excluded. Rights/history/license gate remains `ready_to_switch_visibility=false`.
+
+**GitHub change inventory:** PR #2 draft, 391 commits ahead/zero behind, no reviews, 154 paths changed: 125 added and 29 modified. Top-level counts: 46 `src`, 44 `tests`, 41 `paper`, 7 `docs`, 6 `scripts`, 3 GitHub community templates and 7 other root-level configuration/docs files. No files deleted or renamed; no PR-added GitHub Actions workflow. All 41 paper changes are outside the separate compiler-only distribution preview. Filepath status is **not** a confidentiality/security/history or rights audit.
+
+| Path | Operation / owner | Effect on dependencies, evidence and next validation |
+|---|---|---|
+| `docs/maintainers/MAIN_MERGE_READINESS_20261111.md` | ADDED: canonical main-merge risk and technical qualification report | Grounds PR diff size, public/default-branch visibility exposure and verified source tests; identifies must-review paper, compiler, configuration/API and legal/history boundaries. No compiler API or artifact mutation. |
+| `CHANGELOG.md` | MODIFIED: actual `f34f80f` successful tests and merge inventory | Supersedes prior "tests pending" only for the exact verified source revision; frozen native studies remain unchanged. |
+| `docs/RESEARCH_PUBLICATION_STATUS.md` | MODIFIED: strict E4 source tests now passed and public-release blockers distinguished | Links to maintainer gate; no claim of original Vivado or peer comparisons. |
+| This maintainer impact map | MODIFIED: file audit and provenance ledger | No C1/C2 source, test files, R3/R4 result blobs, GitHub workflow or main branch changed. |
+
+**Merge decision:** currently not ready. A complete human review of 154 files, confidential/IP and historical scanning, stable API/config compatibility and deliberate review/ready transition remain necessary before any guarded integration to `main`. Source-code merge permission is not paper scientific acceptance or approved redistribution.

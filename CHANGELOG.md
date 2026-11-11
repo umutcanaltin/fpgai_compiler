@@ -1,3 +1,10 @@
+## 11 November 2026 — author verified 2409 tests; main merge diff audited, still gated
+
+- On source `f34f80f`, the author verified the new strict E4 regression: **23 focused passed; 2,409 full passed, 3 skipped; 190 research-audit passed; 168/168 public documentation links resolved**. Source-only `release-preview-plan` selected **478/923** tracked files and excluded 445; release approval remained false.
+- Live GitHub PR #2 compare: **391 commits ahead of main, 0 behind, 154 changed files (125 added / 29 modified, 0 deleted)**; **41 paper files** outside the compiler-only preview. The PR is still draft with no submitted review. Filename-level scan found no unexpected workflow or binary/model paths in the diff; this is not a confidential-data/content/history scan.
+- Added `docs/maintainers/MAIN_MERGE_READINESS_20261111.md` with exact scope, split technical/scientific/legal gates, and a guarded mainline integration plan. **Not ready to merge yet:** complete large-PR scope/rights review and external source-history/security checks remain outstanding. Source tests alone do not authorize moving a public default branch.
+- All source and original research artifacts unchanged by this documentation-only attestation. No GitHub Actions, native runs, new license or default-branch mutation.
+
 ## 11 November 2026 — strict E4 campaign qualification, main-merge gate kept separate
 
 - Tightened the canonical `suite_native_batch._qualify` native E4 predicate to require zero total DRC violations and explicit `clean=True`; updated `reproduction_audit.audit_campaign` to use that same qualifier rather than promoting all routed/time-met/CSim-pass cases to strict E4.
