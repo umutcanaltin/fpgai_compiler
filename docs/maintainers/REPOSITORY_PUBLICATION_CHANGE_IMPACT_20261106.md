@@ -479,3 +479,17 @@ This is author's local stdout observed in conversation, now recorded in the sour
 | This impact ledger | MODIFIED: full repository path/change and dependency matrix | Existing compiler source/API and prior papers/experimental result locks unchanged; no license, GitHub Actions or default-branch artifacts created. |
 
 **Required local execution before promotion:** focused `pytest tests/test_network_benchmark.py`, source-only plan, optional one-case source prepare (new output), full `pytest`, research audit, Markdown link check, optional explicit native case only after author inspected source/targets and installed Vivado/Vitis versions. Preserve negative failures and all case rows.
+
+## 12 November 2026 — cross-network binary resolution repair; author failure provenance
+
+**Observed user execution at `b0f7a0c`:** 27 benchmark tests passed, all 32 deterministic source cases and native Tcl/testbench packages were prepared with source SHA recorded; `run --stage vitis` dry-run accepted `case_0000`. The explicit `--execute` call raised `FileNotFoundError: vitis_hls executable not found: vitis_hls` at `toolchains.runner.run_tool` *before* creating native output. Do not misclassify as numerical or HLS timing failure. Preserve `build/network_matrix_20261111_01`.
+
+| Path | Operation and owner | Dependencies and verification |
+|---|---|---|
+| `scripts/network_benchmark.py` | MODIFIED canonical cross-network driver; adds pure `tool_preflight`, `doctor --stage`, `run --executable`, and pre-case native tool resolution | Uses Python `shutil.which` only for doctor/dry-run and existence checks before explicit native calls. When execution is requested, forwards the resolved existing executable path to `toolchains.vitis_hls.runner.run_vitis` or `toolchains.vivado.runner.run_vivado`; it does not replace canonical vendor attestation nor change existing case source hashes. |
+| `tests/test_network_benchmark.py` | MODIFIED canonical test owner; three additional source-only tests | Verifies no prepared directory pollution on missing PATH, deterministic doctor response and exact executable pass-through using a monkeypatched native runner; no live Vitis/Vivado. New tests not yet executed by the author. |
+| `paper/compiler_ir/CROSS_NETWORK_FPGAI_EXPERIMENT_PROTOCOL_20261111.md` | MODIFIED controlled research protocol with toolchain startup/diagnosis commands | Vitis 2023.2 path remains installation-specific, so docs do not invent a local absolute path. |
+| `CHANGELOG.md`, `docs/RESEARCH_PUBLICATION_STATUS.md`, `examples/NETWORK_GALLERY.md` | MODIFIED chronological status and public-facing CLI usage | No scientific result promoted; previous tests still refer to parent `b0f7a0c` source. |
+| This impact ledger | MODIFIED engineering inventory and dependencies | No native runner code, original C1/C2/R4 report, source package, license, GitHub Actions or publication gate altered. |
+
+**Next validation:** targeted `pytest tests/test_network_benchmark.py`, source-only `doctor` and `run` dry-run, plus full `python -m pytest -q`, `make research-audit-tests`, `make release-links` on the new exact SHA. After identifying the real tool binary, run only one case with explicit `--execute`, then collect fresh source-attested native evidence.

@@ -68,3 +68,32 @@ Clock sweeps provide the highest **qualified tested target frequency**, not the 
 ## Paper release locks
 
 No new experimental result has been executed by committing this protocol. The exact-source Allo comparison, original C1/C2 reproducibility, timing-clean/DCR-clean hardware evidence, board power/latency and institutional redistribution approval remain separate open paper/release gates. Even a 32-case matrix with source-only outputs cannot close those gates.
+
+## 12 November 2026 — Vitis HLS startup preflight and local recovery
+
+The author verified source preparation and all 27 original benchmark tests but `vitis_hls` was not on their active shell `PATH`. This fails **before HLS launches** and is not a compiler or HLS-result observation. A Python virtual environment does not configure AMD binaries. Check actual installation and current shell:
+
+```bash
+command -v vitis_hls || true
+command -v vivado || true
+# Locate the REAL installed settings script / executable (example search roots; optional paths may not exist):
+find /tools /opt /usr/local "$HOME" -type f \( -name vitis_hls -o -name settings64.sh \) 2>/dev/null | grep -Ei 'Vitis|Vivado' | head -50
+```
+
+If an AMD 2023.2 installation is found, `source "<actual-installation>/settings64.sh"` in that same shell, then `command -v vitis_hls` and `vitis_hls -version`; the tool itself determines its actual version. The benchmark now supports zero-execution doctor mode:
+
+```bash
+python -m scripts.network_benchmark doctor --stage vitis
+python -m scripts.network_benchmark doctor --stage vivado
+# Or explicitly select a verified executable if PATH was not configured:
+python -m scripts.network_benchmark doctor --stage vitis --executable /REAL/ABSOLUTE/PATH/TO/vitis_hls
+```
+
+**Do not rerun `prepare`.** The source-prepared `build/network_matrix_20261111_01` remains usable. When doctor returns `"available": true`, try one case:
+
+```bash
+python -m scripts.network_benchmark run --root build/network_matrix_20261111_01 --stage vitis --first 0 --limit 1 --execute
+# Or append --executable /REAL/ABSOLUTE/PATH/TO/vitis_hls
+```
+
+If native execution produces an invocation receipt, do not run the same case twice: inspect its logs and use a new create-only experiment directory for any replacement. This *new* code and tests must first pass the local focused pytest and research audit. No native E2/E3/E4 results were produced by author at the time of this protocol update.

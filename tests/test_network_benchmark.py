@@ -259,3 +259,61 @@ def test_native_reinvocation_is_refused_even_as_a_dry_run(tmp_path):
     (case / "vitis_invocation.json").write_text('{"status":"previous run"}')
     with pytest.raises(FileExistsError, match="never rerun"):
         study.vendor(root, stage="vitis", execute=False)
+
+
+def test_native_tool_doctor_reports_missing_path_without_launch(monkeypatch, capsys):
+    monkeypatch.setattr(study.shutil, "which", lambda executable: None)
+    result = study.tool_preflight("vitis")
+    assert result["available"] is False
+    assert result["resolved_executable"] is None
+    assert result["native_tools_executed"] is False
+    assert "settings64.sh" in result["hint"]
+    study.main(["doctor", "--stage", "vitis"])
+    assert json.loads(capsys.readouterr().out) == result
+    with pytest.raises(ValueError, match="nonempty"):
+        study.tool_preflight("vivado", executable="")
+
+
+def test_missing_vitis_hls_fails_before_creating_any_native_output(
+        tmp_path, monkeypatch):
+    root = _prepare_pair(tmp_path)
+    monkeypatch.setattr(study.shutil, "which", lambda executable: None)
+    with pytest.raises(FileNotFoundError, match="Source the installed AMD"):
+        study.vendor(root, stage="vitis", first=0, limit=1, execute=True)
+    case = root / "cases/case_0000"
+    assert not (case / "fpgai_hls_project").exists()
+    assert not (case / "logs").exists()
+    assert not (case / "vitis_invocation.json").exists()
+    # The same prepared source is still intact for a subsequent real run.
+    assert study._inventory(root)["case_count"] == 2
+    dry = study.vendor(root, stage="vitis", first=0, limit=1, execute=False)
+    assert dry["tool_available"] is False
+    assert dry["cases"][0]["status"] == "DRY_RUN_NOT_EXECUTED"
+
+
+def test_explicit_native_binary_path_forwards_into_canonical_runner(
+        tmp_path, monkeypatch):
+    from fpgai_research.toolchains.vitis_hls import runner
+    root = _prepare_pair(tmp_path)
+    executable = tmp_path / "vitis_hls"
+    executable.write_text("#!/bin/sh\\nexit 0\\n")
+    executable.chmod(0o755)
+    monkeypatch.setattr(study.shutil, "which", lambda requested: (
+        str(executable) if requested == str(executable) else None))
+    preflight = study.tool_preflight("vitis", str(executable))
+    assert preflight["available"] is True
+    assert preflight["resolved_executable"] == str(executable)
+    args = []
+    def pretend_run(case, *, executable):
+        args.append((case, executable))
+        return {"completed_successfully": True}
+    monkeypatch.setattr(runner, "run_vitis", pretend_run)
+    response = study.vendor(
+        root, stage="vitis", first=0, limit=1, execute=True,
+        executable=str(executable))
+    assert len(args) == 1
+    assert args[0][1] == str(executable)
+    assert args[0][0] == root/"cases/case_0000"
+    assert response["cases"][0]["status"] == "INVOCATION_SUCCEEDED_AWAITING_EVIDENCE_AUDIT"
+    assert response["tool_available"] is True
+    assert not (root/"cases/case_0000/vitis_invocation.json").exists()

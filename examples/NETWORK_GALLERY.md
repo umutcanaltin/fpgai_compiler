@@ -196,3 +196,14 @@ python -m scripts.network_benchmark collect --root build/network_matrix_20261111
 ```
 
 The initial collector reports `TBD`/null for native cycles, estimated resources and routed timing because no licensed native tools have been run. In later **explicit** opt-in local runs, use `python -m scripts.network_benchmark run --root build/network_matrix_20261111_01 --stage vitis --first 0 --limit 1 --execute`, then explicitly run `--stage vivado` only after E3 synthesis and fixed-point CSim qualify. The source-only results are not trained-model accuracy, board inference latency or measured Fmax. See internal manuscript protocol at `paper/compiler_ir/CROSS_NETWORK_FPGAI_EXPERIMENT_PROTOCOL_20261111.md` (excluded from curated public preview).
+
+## Native tool not found during cross-network execution?
+
+A prepared source case does not require Vitis/Vivado, but `run --execute` does. If the CLI reports `vitis_hls executable not found`, source the **actual installed** AMD `settings64.sh` in your current terminal (or use the explicit path option), then run:
+
+```bash
+python -m scripts.network_benchmark doctor --stage vitis
+python -m scripts.network_benchmark run --root build/network_matrix_20261111_01 --stage vitis --first 0 --limit 1 --execute
+```
+
+`doctor` never launches a vendor tool. The Python virtual environment does not set the AMD toolchain path. Existing prepared cases need no regeneration, and a missing executable is not an HLS synthesis failure. See the internal experimental protocol at `paper/compiler_ir/CROSS_NETWORK_FPGAI_EXPERIMENT_PROTOCOL_20261111.md` for reproducible source/metric requirements.

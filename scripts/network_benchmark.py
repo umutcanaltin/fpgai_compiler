@@ -13,6 +13,7 @@ import csv
 from dataclasses import replace
 from hashlib import sha256
 import json
+import shutil
 from math import isfinite
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -268,8 +269,40 @@ def _inventory(root: Path):
     return manifest
 
 
+def tool_preflight(stage: str, executable: str | None = None) -> dict:
+    """Pure executable discovery; never launch a proprietary native tool.
+
+    The currently selected Python virtualenv does not automatically source
+    AMD settings64.sh or add the Vitis HLS / Vivado binary directories to PATH.
+    Prefer the caller's configured command or exact explicit executable.
+    """
+    if stage not in ("vitis", "vivado"):
+        raise ValueError("Native tool stage must be vitis or vivado")
+    name = "vitis_hls" if stage == "vitis" else "vivado"
+    if executable is not None and (
+            not isinstance(executable, str) or not executable.strip()
+            or "\x00" in executable):
+        raise ValueError("Explicit native executable must be a nonempty path or command")
+    requested = executable if executable is not None else name
+    found = shutil.which(requested)
+    available = bool(found and Path(found).is_file())
+    return {
+        "schema": "fpgai-research/network-native-tool-preflight/v1",
+        "stage": stage,
+        "tool": name,
+        "requested_executable": requested,
+        "resolved_executable": str(Path(found).resolve()) if available else None,
+        "available": available,
+        "native_tools_executed": False,
+        "hint": ("Source the installed AMD Vitis_HLS/Vivado settings64.sh in this "
+                 "terminal, or pass --executable /absolute/path/to/" + name
+                 + "; no prepared case has been modified by this check."),
+    }
+
+
 def vendor(root: str | Path, *, stage: str, execute: bool = False,
-           first: int = 0, limit: int = 1) -> dict:
+           first: int = 0, limit: int = 1,
+           executable: str | None = None) -> dict:
     from fpgai_research.experiments.results import summarize_case
     from fpgai_research.experiments.suite_native_batch import _qualify_hls
     from fpgai_research.toolchains.vitis_hls.runner import run_vitis
@@ -285,6 +318,15 @@ def vendor(root: str | Path, *, stage: str, execute: bool = False,
     selected = rows[first:first+limit]
     if not selected:
         raise ValueError("No matching benchmark case")
+    # Resolve the native executable before entering the case loop, so a
+    # missing AMD installation or unsourced environment cannot create
+    # incomplete native output or break a prepared, create-only case.
+    discovery = tool_preflight(stage, executable)
+    if execute and not discovery["available"]:
+        raise FileNotFoundError(
+            discovery["tool"] + " executable not found: "
+            + discovery["requested_executable"] + ". "
+            + discovery["hint"])
     output = []
     for row in selected:
         case = root / "cases" / row["case"]
@@ -301,8 +343,11 @@ def vendor(root: str | Path, *, stage: str, execute: bool = False,
                 raise FileExistsError("Existing routed output; do not rerun native Vivado")
         if execute:
             # Existing source/RTL-identity- and tool-version-attested runners.
-            receipt_data = (run_vitis(case) if stage == "vitis"
-                            else run_vivado(case))
+            receipt_data = (
+                run_vitis(case, executable=discovery["resolved_executable"])
+                if stage == "vitis"
+                else run_vivado(case, executable=discovery["resolved_executable"])
+            )
             status = ("INVOCATION_SUCCEEDED_AWAITING_EVIDENCE_AUDIT"
                       if receipt_data.get("completed_successfully") else
                       "INVOCATION_FAILED_AWAITING_DIAGNOSTICS")
@@ -312,6 +357,8 @@ def vendor(root: str | Path, *, stage: str, execute: bool = False,
                        "stage": stage, "status": status})
     return {"schema": "fpgai-research/cross-network-vendor-plan/v1",
             "stage": stage, "executed": execute, "cases": output,
+            "tool_available": discovery["available"],
+            "resolved_executable": discovery["resolved_executable"],
             "note": "A successful native process is not an E3/E4 result. Run collect for qualified evidence."}
 
 
@@ -506,12 +553,16 @@ def main(argv=None):
     preparep.add_argument("--output", required=True)
     preparep.add_argument("--seed", type=int, default=197)
     preparep.add_argument("--samples", type=int, default=2)
+    doctorp = sub.add_parser("doctor", help="Check AMD binary discovery without executing tools")
+    doctorp.add_argument("--stage", required=True, choices=("vitis", "vivado"))
+    doctorp.add_argument("--executable", help="Optional explicit native executable path")
     runp = sub.add_parser("run")
     runp.add_argument("--root", required=True)
     runp.add_argument("--stage", required=True, choices=("vitis", "vivado"))
     runp.add_argument("--first", type=int, default=0)
     runp.add_argument("--limit", type=int, default=1)
     runp.add_argument("--execute", action="store_true")
+    runp.add_argument("--executable", help="Explicit Vitis HLS / Vivado executable")
     collectp = sub.add_parser("collect")
     collectp.add_argument("--root", required=True)
     collectp.add_argument("--output", required=True)
@@ -522,6 +573,8 @@ def main(argv=None):
                     part=args.part)
         output = {"case_count": len(rows), "cases": rows,
                   "native_tools_executed": False}
+    elif args.action == "doctor":
+        output = tool_preflight(args.stage, args.executable)
     elif args.action == "prepare":
         output = prepare(
             args.output, networks=args.networks, mappings=args.mappings,
@@ -529,7 +582,8 @@ def main(argv=None):
             seed=args.seed, samples=args.samples)
     elif args.action == "run":
         output = vendor(args.root, stage=args.stage,
-                        execute=args.execute, first=args.first, limit=args.limit)
+                        execute=args.execute, first=args.first, limit=args.limit,
+                        executable=args.executable)
     else:
         output = collect(args.root, args.output)
         # CLI prints only the short totals, full source-qualified rows are on disk.

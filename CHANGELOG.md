@@ -1,3 +1,9 @@
+## 12 November 2026 — cross-network benchmark native executable preflight
+
+- Author-side results on `b0f7a0c`: **27 focused benchmark tests passed**; 32-case four-network matrix created, dry-run first case succeeded, but first explicit Vitis run **did not start** because `vitis_hls` could not be resolved from the active shell `PATH`. No E2/E3/E4 or resource/latency observation was produced and the existing prepared output does not need regeneration.
+- Added source-only `python -m scripts.network_benchmark doctor --stage vitis|vivado` tool-discovery command and optional `run --executable <real-path>`. Native binary resolution now happens before the selected case loop; unavailable tools fail clearly without modifying source-attested case records. Existing canonical Vitis/Vivado runners still own all actual execution and receipts.
+- Added three regression tests for missing tool with no case mutation, doctor output and exact explicit-binary forwarding. **New patch/tests not yet run on the author workstation**. No new native results, source/licensing approval, vendor files, original experiments or GitHub Actions changed.
+
 ## 11 November 2026 — cross-network experimental matrix prepared (not yet executed)
 
 - Added `scripts/network_benchmark.py`: a 32-case deterministic factorial source-preparation matrix for 4 **existing synthetic** models (MLP, pooling CNN, strided CNN, two-Conv Softmax) × scalar/operator-local mapping × FX16_6/FX12_5 × requested 12/20 ns clock. Optional 64-case 12/16/20/24 ns sweep; same KV260 part and fixed synthetic inputs.
