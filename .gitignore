@@ -1,0 +1,97 @@
+# FPGAI local outputs and private research evidence — never commit.
+# This ignore list does NOT remove files or secrets from Git history.
+
+# Python environments, caches and local tooling
+.venv/
+.venv-*/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.idea/
+.vscode/
+
+# Local experimental outputs and generated artifacts
+/build/
+/dist/
+/results/
+/data/
+/datasets/
+/weights/
+/checkpoints/
+/artifacts/
+/reports/
+/tmp/
+/temp/
+/logs/
+/generated/
+*.onnx
+*.npy
+*.npz
+*.pt
+*.pth
+*.h5
+*.hdf5
+*.safetensors
+*.tflite
+*.pb
+
+# FPGA toolchain products and native implementation logs
+*.bit
+*.bin
+*.hwh
+*.dcp
+*.xpr
+*.xsa
+*.wdb
+*.jou
+*.rpt
+*.log
+*.str
+*.ltx
+*.vcd
+*.vpd
+*.fst
+*.wcfg
+*.runs/
+*.cache/
+*.hw/
+*.ip_user_files/
+.Xil/
+
+# Secrets, approvals and machine-specific materials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.secret
+*.token
+release-approval.json
+release-approval.*.json
+private/
+secrets/
+
+# OS and editor transient files
+.DS_Store
+Thumbs.db
+*~
+*.swp
+*.swo
+
+# IMPORTANT: DO NOT commit real subject datasets, model weights, hardware
+# case reports or vendor projects. Keep original signed evidence in local
+# ignored build/ directories; do not delete or rewrite it during cleanup.

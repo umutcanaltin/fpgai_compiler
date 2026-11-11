@@ -100,3 +100,117 @@ def validate_phi_issue_conformance(arch,events,*,max_reads:int=100_000)->dict:
             "Does not certify independent H producer reduction completeness",
         ],
     }
+
+
+def reference_graph_phi_reader_order(arch, *, max_reads: int = 100_000):
+    """Independently derive exact source READ order for graph MatMul consumers.
+
+    This enumeration uses closed-form source-loop ranks. It does not call
+    mapped_matmul_order, resolver.coordinate, graph_source_events or the HLS
+    emitter. Only MatMul operators reading a produced intermediate have
+    observable per-reduction READ tokens in the bounded graph source trace.
+    """
+    from fpgai_research.model_ir.graph_phi_contract import GraphEvent, admit_graph
+
+    if type(max_reads) is not int or max_reads < 1:
+        raise ValueError("Positive finite graph Phi READ budget required")
+    model, produced = admit_graph(arch)
+    reference = {}
+    population = 0
+    for op, point in zip(model.operators, arch.points):
+        if op.kind != "MatMul" or op.inputs[0] not in produced:
+            continue
+        if point.kind != "MatMul" or point.operator != op.name:
+            raise ValueError("Graph Phi point/operator identity mismatch")
+        m, n, k = point.iteration_shape
+        a = point.effective
+        _tm, tn, tk = a.tile or point.iteration_shape
+        if min(tn, tk, a.parallelism, a.pes, a.simd, a.serialization) < 1:
+            raise ValueError("Nonpositive graph Phi source-loop factor")
+        count = m * n * k
+        if count > max_reads - population:
+            raise ValueError("Graph Phi READ population exceeds finite budget")
+        population += count
+        width = a.parallelism * a.pes
+        span = width * a.serialization
+        sortable = []
+        for mi in range(m):
+            for ni in range(n):
+                local_n = ni % tn
+                group = (local_n // span) * span
+                after_group = local_n - group
+                fold, spatial = divmod(after_group, width)
+                replica, pe = divmod(spatial, a.pes)
+                for kk in range(k):
+                    local_k = kk % tk
+                    group_k, lane = divmod(local_k, a.simd)
+                    rank = (mi, ni // tn, group, fold, replica, pe,
+                            kk // tk, group_k, lane)
+                    event = GraphEvent(
+                        "READ", op.inputs[0], mi * k + kk, op.name,
+                        mi * n + ni, 0, kk, (replica, pe, lane, fold))
+                    sortable.append((rank, event))
+        reference[op.name] = tuple(event for _, event in sorted(sortable,
+                                                               key=lambda x: x[0]))
+    return reference
+
+
+def validate_graph_phi_issue_conformance(arch, events, *, max_reads: int = 100_000) -> dict:
+    """Check operator-local mapped MatMul issue order separately from value safety.
+
+    The static graph and admission rules are shared with the compiler, while
+    the iteration ranking and Phi owners are independently calculated. No
+    claim is made for an externally sourced MatMul (no producer READ tokens),
+    scalar operations, inter-operator scheduling or achieved hardware cycles.
+    """
+    from fpgai_research.model_ir.graph_phi_contract import GraphEvent
+
+    if type(events) is not tuple or any(not isinstance(e, GraphEvent) for e in events):
+        raise ValueError("Graph Phi issue check requires immutable typed events")
+    expected = reference_graph_phi_reader_order(arch, max_reads=max_reads)
+    checked = 0
+    observed_signatures = []
+    for operator, wanted in expected.items():
+        observed = tuple(e for e in events if e.kind == "READ"
+                         and e.consumer == operator and e.input_port == 0)
+        checked += len(wanted)
+        for index in range(max(len(observed), len(wanted))):
+            got = observed[index] if index < len(observed) else None
+            want = wanted[index] if index < len(wanted) else None
+            if got != want:
+                def describe(e):
+                    return None if e is None else (
+                        e.tensor, e.element, e.consumer, e.output_element,
+                        e.input_port, e.reduction_k, e.phi_owner)
+                return {
+                    "schema": "fpgai-research/independent-graph-Phi-source-issue/v1",
+                    "status": "REJECTED",
+                    "reason": "GRAPH_PHI_SOURCE_ISSUE_ORDER_OR_OWNER_MISMATCH",
+                    "operator": operator,
+                    "first_read_index": index,
+                    "observed": describe(got),
+                    "expected": describe(want),
+                    "checked_reads": checked,
+                    "original_gcc_calls": 0,
+                    "original_vendor_calls": 0,
+                }
+        observed_signatures.extend(
+            (e.tensor, e.element, e.consumer, e.output_element,
+             e.input_port, e.reduction_k, e.phi_owner) for e in observed)
+    digest = sha256(json.dumps(observed_signatures, sort_keys=True,
+                               separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+    return {
+        "schema": "fpgai-research/independent-graph-Phi-source-issue/v1",
+        "status": "VERIFIED_E0" if checked else "NOT_APPLICABLE",
+        "checked_operators": len(expected),
+        "checked_reads": checked,
+        "observed_issue_signature_sha256": digest if checked else None,
+        "original_gcc_calls": 0,
+        "original_vendor_calls": 0,
+        "limitations": [
+            "Shared static graph admission; independently calculated loop ranks",
+            "Only MatMul READ tokens with a produced left-hand input",
+            "No guarantee for scalar source order or inter-operator scheduling",
+            "Source order is not hardware cycle, initiation interval, or RTL timing",
+        ],
+    }

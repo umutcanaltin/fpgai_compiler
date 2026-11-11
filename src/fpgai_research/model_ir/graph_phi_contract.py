@@ -318,6 +318,20 @@ def graph_contract(arch,offsets,*,max_events:int=100_000):
     if result["status"]!="VERIFIED_E0":
         raise ValueError("GRAPH_BOUNDARY_UNSAFE "+result["reason"]+
                          " "+str(result.get("counterexample")))
+    # An independently calculated source-loop ranking detects a common-mode
+    # issue-order error that the value/lifetime replay alone cannot detect.
+    # It covers only observable MatMul reads from produced intermediates.
+    from fpgai_research.model_ir.independent_phi_issue_reference import (
+        validate_graph_phi_issue_conformance,
+    )
+    issue = validate_graph_phi_issue_conformance(arch, events, max_reads=max_events)
+    if issue["status"] == "REJECTED":
+        raise ValueError("GRAPH_PHI_SOURCE_ISSUE_MISMATCH " +
+                         str(issue["operator"]) + " " + str(issue["first_read_index"]))
+    result["independent_phi_issue_status"] = issue["status"]
+    result["independent_phi_issue_checked_reads"] = issue["checked_reads"]
+    result["independent_phi_issue_checked_operators"] = issue["checked_operators"]
+    result["independent_phi_issue_signature_sha256"] = issue["observed_issue_signature_sha256"]
     result["operator_phi_iterations"]={name:len(seq)
                                       for name,seq in iterations.items()}
     result["operator_phi_sha256"]={name:_hash(seq)

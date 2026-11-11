@@ -1,0 +1,96 @@
+# R4u — source-pinned routed DCP, isolated one-time Vivado report-only native and read-only audit
+
+**6 November 2026 — R4t original AUTHOR VERIFIED, 28/28 tests passed**, and source-only checkpoint copies prepared at `build/r4t_routed_checkpoint_report_only_prepare_20261106_01` with `R4T_ISOLATED_CHECKPOINT_REPORT_ONLY_SOURCE_PREPARED`; zero new vendor tool calls and `strict_physical_E4=null`. Both original R4p Vivado implementation attempts MUST NEVER be rerun.
+
+**R4u code/tests committed, NOT YET TESTED on the author's workstation. No R4u native reports exist.** The script is a separate, one-time, REPORT-ONLY Vivado invocation on NEW copies of routed checkpoints, never implementation. Its source-only staging/dry-run should pass before opt-in native execution.
+
+## Exact original R4t source-pinned post-hoc checkpoint identity
+
+| Original R4p arm | SHA-256 of original `routed.dcp`, pinned after original run | Bytes | Original routed WNS |
+|---|---|---:|---:|
+| `full_storage` | `dec6616bd7d01d582ed59445122b26f80eaafe23fd00c2e8082c3dd441936137` | 3,379,985 | −2.170ns |
+| `row_storage` | `1cf5feea9bd4903d51ded333a640cdeb4bd0997c257dc3ceea2514b3c7ddb486` | 3,430,541 | −3.718ns |
+
+R4u **hard pins these exact observed SHA/size pairs**. Original R4p execution SHA-signed RTL, ROM, scripts and four routed report files **but not DCP outputs**. Therefore the original DCP hashes are only **POST-HOC source-location and content pins**, not contemporaneous execution-time vendor attestation. R4u MUST preserve this distinction and cannot retroactively upgrade original physical E4.
+
+## Research question
+
+Can Vivado 2023.2 `open_checkpoint` on **copied original routed checkpoints**, followed only by `report_timing -path_type full -input_pins -max_paths 20 -nworst 10`, `report_timing_summary` and `report_drc`, return original startpoint→endpoint→slack paths? Do new WNS values and DRC counts match the SHA-attested original R4p results? If available, those paths can inform later falsifiable hypotheses about why BRAM drops 7→4 while LUT/FF increase and WNS deteriorates −2.170→−3.718ns. Nothing in this study itself proves timing qualified E4, board performance, actual Fmax or a causal explanation.
+
+Vivado report-only command options: AMD Vivado UG835 [report_timing](https://docs.amd.com/r/2024.1-English/ug835-vivado-tcl-commands/report_timing), documented `-path_type full`, `-input_pins`, `-max_paths` and `-nworst`. Syntax verified for related UG835 versions; actual 2023.2 checkpoint opening and output semantics still require the author's native read-only pilot.
+
+## New/unchanged files and dependency edges
+
+| Path | Purpose and connectivity |
+|---|---|
+| `src/fpgai_research/experiments/cst_r4u_checkpoint_report_only_native.py` | NEW. Reuses original `cst_r4t_routed_checkpoint_report_only_prepare.inspect`, which calls the original signed R4s→R4q→R4p and R4r report/RTL/ROM provenance chain. Rechecks original R4t files and the exact author-observed post-hoc DCP hash/size pair. Creates a NEW independent R4u source-only copy, with `summary.json` and SHA manifest. Default dry-run verifies everything without invoking vendor tools. Optional explicitly confirmed native report-only execution is one-time, atomic-lock guarded, preserves stdout/stderr and native receipt. Separate read-only audit verifies all new input/report/log SHA hashes, WNS consistency and DRC counts and extracts explicit path witnesses via R4s parser. |
+| `tests/test_cst_r4u_checkpoint_report_only_native.py` | NEW. Synthetic tests for source pin, immutable copies, tampered original or new DCP/script, create-only output, dry-run, opt-in and timeout, partial-case retry guard, durable native lock, signed mock Vivado reports, mismatched WNS/DRC, incomplete detailed paths and forged report SHA. Tests contain synthetic DCPs/paths and make **zero native Vivado calls**. |
+| `paper/compiler_ir/R4U_COPIED_DCP_REPORT_ONLY_NATIVE_GATE_20261106.md` | NEW. This protocol and experiment change inventory. |
+| `src/fpgai_research/experiments/cst_r4t_routed_checkpoint_report_only_prepare.py` | EXISTING, VERIFIED workstation source-only original, including byte-for-byte DCP copies. UNCHANGED. |
+| `src/fpgai_research/experiments/cst_r4s_original_timing_drc_context.py` | EXISTING original timing/DRC lexical parser and original signed report gate. UNCHANGED. |
+| `src/fpgai_research/toolchains/vivado/report.py` | EXISTING signed R4p routed report parser. The R4u new report-only audit reuses its numeric WNS and DRC summary parsers. UNCHANGED. |
+| `paper/compiler_ir/FIRST_PAPER_SCIENTIFIC_COMPLETION_20261106.md` | Updated with R4t author's test and source-only preparation, R4u untested status. |
+
+## Three distinct stages; do not confuse them
+
+**Stage A — source-only NEW R4u preparation:** R4u refuses any output path inside/or overlapping original R4p/R4t/R4o/R4k/R4d/R4a studies. It independently rehashes original R4t report-only Tcl and both author-pinned post-hoc DCPs, copies them to `build/r4u_copied_dcp_report_only_native_20261106_01/{full_storage,row_storage}/` and writes an immutable source-only SHA manifest. **Zero vendor calls.**
+
+**Stage B — default dry-run:** revalidates the complete original source/ROM/receipt/report chain and exact R4u staged input hashes, scripts and directories. Expected `R4U_DRY_RUN_NO_VENDOR_CALLS`, `R4P_R4S_R4T_R4U_POSTHOC_COPIED_DCP_SHA_ATTESTED`, two planned report-only calls and zero actual. Does not consume the one-time attempt.
+
+**Stage C — separately opt-in one-time report-only native:** requires both `--execute-native` and `--confirm-report-only-native`, validates the actual Vivado executable and timeout, and atomically creates a permanent source-revision-pinned `r4u_native_attempt.json` BEFORE starting any Vivado subprocess. It refuses if the lock, original tool journal, report folder, log folder or invocation receipt already exists for either arm, and stops after any failed/incomplete first case. NEVER rerun either attempt in this study. Running Vivado is strictly limited to copies of existing checkpoints and the unchanged `report_only.tcl` already frozen by R4t. No synthesis, opt, place, route, bitstream or checkpoint rewrite commands. Any native failure must be kept as original negative evidence, not retried.
+
+**Stage D — postrun read-only audit:** requires permanent attempt lock, original R4t SHA input pins, original source/ROM/reports, original script copies and SHA manifest plus a new invocation record proving exact argv/cwd, stable input hashes before/after, zero exit/timeout false, original stdout/stderr SHA logs, and fresh `max_delay_paths.rpt`, `timing_summary.rpt`, `drc.rpt` report SHA values. Reports WNS agreement within 0.005ns of original and exact original DRC rule counts, and extracts bounded explicit startpoint/endpoint/slack paths. Missing, mutated or mismatching report values are FAILURE/UNKNOWN, never converted to zero or qualified E4. Even valid new path witnesses are post-hoc checkpoint report-only forensics, not timing- or clean-DRC-qualified E4, and not a measured real board clock.
+
+## Safe workstation commands — STAGES A AND B ONLY, NO VIVADO
+
+~~~bash
+cd ~/Desktop/github_projects/fpgai_compiler
+git pull --ff-only origin research/first-paper-source-memory-bridge-20261106
+
+python -m pytest -q \
+  tests/test_cst_r4u_checkpoint_report_only_native.py \
+  tests/test_cst_r4t_routed_checkpoint_report_only_prepare.py \
+  tests/test_cst_r4s_original_timing_drc_context.py
+
+python -m fpgai_research.experiments.cst_r4u_checkpoint_report_only_native \
+  --r4t-study build/r4t_routed_checkpoint_report_only_prepare_20261106_01 \
+  --study build/r4p_matched_vivado_ooc_native_20261106_01 \
+  --r4o-study build/r4o_matched_vivado_ooc_prepare_20261106_01 \
+  --r4k-study build/r4k_source_schedule_matched_storage_20261106_01 \
+  --original-r4d build/r4d_numeric_format_source_20261106_01 \
+  --original-r4a build/r4a_row_retained_paper_20261106_01 \
+  --prepare-output build/r4u_copied_dcp_report_only_native_20261106_01
+
+python -m fpgai_research.experiments.cst_r4u_checkpoint_report_only_native \
+  --r4t-study build/r4t_routed_checkpoint_report_only_prepare_20261106_01 \
+  --study build/r4p_matched_vivado_ooc_native_20261106_01 \
+  --r4o-study build/r4o_matched_vivado_ooc_prepare_20261106_01 \
+  --r4k-study build/r4k_source_schedule_matched_storage_20261106_01 \
+  --original-r4d build/r4d_numeric_format_source_20261106_01 \
+  --original-r4a build/r4a_row_retained_paper_20261106_01 \
+  --native-study build/r4u_copied_dcp_report_only_native_20261106_01
+~~~
+
+**Do NOT invoke the `--execute-native` flag until the author's new R4u tests and both safe source gates pass.** R4u original implementation is committed but unverified; no native physical path reports are claimed. A future one-time native invocation and read-only audit will be documented only after those gates pass.
+
+## Scientific status
+
+Original R4p/r4q/r4r descriptive mapped BRAM tiles **7→4** and DSP **24→21**; LUTs **1282→1710**, FF **883→1022**, and WNS **−2.170→−3.718ns**. Both original designs fail the requested 12ns clock and have unclean DRC; R4p strict `physical_E4=null` remains final. Detailed critical path root cause is still UNKNOWN. First paper remains **MAJOR REVISION / NOT SUBMISSION READY**. Draft PR only; `main` unchanged, no GitHub Actions.
+
+## R4u source-only gates AUTHOR VERIFIED — 6 November 2026
+
+The author pulled research head `5a46f5ebff6294c0ea1ab12a5f7f863768ab811b`, successfully ran `compileall` on the new R4u code and tests, then ran the focused **R4u/R4t/R4s workstation regression: 28/28 passed in 0.36s**. The author then created the independent new source-only R4u study `build/r4u_copied_dcp_report_only_native_20261106_01`: `status=R4U_ISOLATED_REPORT_ONLY_NATIVE_INPUTS_PREPARED`, `paired_report_only_cases=2`, `actual_native_vivado_calls=0`, `strict_physical_E4=null` and board qualification false. The SHA-256 identities of copied full/row routed checkpoints matched the exact original R4t post-hoc pinned pair.
+
+The author subsequently ran the independent **vendor-free default dry-run**, which returned `status=R4U_DRY_RUN_NO_VENDOR_CALLS`, `source_gate=R4P_R4S_R4T_R4U_POSTHOC_COPIED_DCP_SHA_ATTESTED`, `planned_report_only_calls=2`, `actual_vendor_calls=0`, and `actual_vendor_calls_during_audit=0`. The original source revision remains `776e3a7a4b599fd114718f6a03ab73e06be17f5c`, original checkpoint provenance remains `POST_HOC_SHA_NOT_EXECUTION_TIME_SIGNED`, and strict physical E4 stays NULL. The permanent R4u one-time execution lock has **not yet been created** by preparation or dry-run.
+
+Both source-only gates have therefore PASSED on the author's workstation. The **next optional action** is an explicit, **ONE-TIME** Vivado report-only run on the NEW R4u copied checkpoints with both `--execute-native` and `--confirm-report-only-native`, followed by a separately invoked **read-only `--audit-native`**. Do not repeat the execution if it fails or times out; preserve all original native outputs and the permanent attempt lock. No real R4u Vivado process, detailed path report, board run or new E4 result has yet been observed.
+
+## Author-verified R4u original report-only native execution and audit — 6 November 2026
+
+The author pulled the research branch at `7d3801f63f19623ac06134c8b05dcc599d78582f` and **executed the one-time R4u REPORT-ONLY Vivado 2023.2 script** in separate copied-checkpoint cases. `full_storage` exited 0 after **24 seconds**; `row_storage` exited 0 after **23 seconds**. Exactly **two new report-only Vivado calls** were recorded, and the permanent `r4u_native_attempt.json` lock is now in place. Never rerun either case or remove this lock. The native command reported `R4U_REPORT_ONLY_ATTEMPTS_RECORDED_AUDIT_REQUIRED`, exact original R4t post-hoc DCP hashes, and strict physical E4 null.
+
+The author then independently ran the **read-only `--audit-native`**. Both cases had `native_report_receipt_verified=true`, `original_to_new_WNS_consistency=true`, `new_drc_counts_consistent_with_original=true`, and **zero additional vendor calls during audit**. Reopened-checkpoint WNS exactly reproduced the original signed routed WNS: **−2.170ns** full and **−3.718ns** row. Both new DRC rule-count sets matched the originals. Neither case yielded any complete detailed timing paths through the CURRENT lexical extractor (`complete_detailed_path_count=0`, `sample_detailed_paths=[]`), so both cases returned `POSTHOC_CHECKPOINT_REPORT_ONLY_OBSERVATION_INCOMPLETE_OR_DIFFERENT`; pair audit `R4U_ORIGINAL_CHECKPOINT_REPORT_ONLY_DIAGNOSTICS_NOT_E4`, `reported_complete_path_arms=0`, strict E4 null and board qualification false.
+
+**This is NOT evidence that the report-only Vivado script failed to generate timing paths.** The R4s shared lexical extractor currently accepts a source header plus an endpoint and `Slack (VIOLATED|MET)` **after the source within at most 85 lines**. Vivado may put Slack BEFORE Source, use a longer path, or omit a marker altogether. Neither original full `max_delay_paths.rpt` has yet been examined line by line in the conversation. Therefore the exact explanation for zero extracted paths is **UNKNOWN**, with a report-format/parser mismatch a plausible hypothesis, not an established fact.
+
+The next [R4v signed original R4u path-report format diagnosis](R4V_SIGNED_R4U_PATH_REPORT_FORMAT_20261106.md) is a NEW vendor-FREE forensic stage. It should inspect only the already-signed two `max_delay_paths.rpt` files, record bounded original lexical markers, near-marker source excerpts, and report SHA, without overwriting reports or changing the published R4u outcome. Until that original text is inspected, do not claim a critical path start/end, physical cause, or timing improvement.

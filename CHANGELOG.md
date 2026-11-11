@@ -1,3 +1,195 @@
+## 11 November 2026 — author verified 2409 tests; main merge diff audited, still gated
+
+- On source `f34f80f`, the author verified the new strict E4 regression: **23 focused passed; 2,409 full passed, 3 skipped; 190 research-audit passed; 168/168 public documentation links resolved**. Source-only `release-preview-plan` selected **478/923** tracked files and excluded 445; release approval remained false.
+- Live GitHub PR #2 compare: **391 commits ahead of main, 0 behind, 154 changed files (125 added / 29 modified, 0 deleted)**; **41 paper files** outside the compiler-only preview. The PR is still draft with no submitted review. Filename-level scan found no unexpected workflow or binary/model paths in the diff; this is not a confidential-data/content/history scan.
+- Added `docs/maintainers/MAIN_MERGE_READINESS_20261111.md` with exact scope, split technical/scientific/legal gates, and a guarded mainline integration plan. **Not ready to merge yet:** complete large-PR scope/rights review and external source-history/security checks remain outstanding. Source tests alone do not authorize moving a public default branch.
+- All source and original research artifacts unchanged by this documentation-only attestation. No GitHub Actions, native runs, new license or default-branch mutation.
+
+## 11 November 2026 — strict E4 campaign qualification, main-merge gate kept separate
+
+- Tightened the canonical `suite_native_batch._qualify` native E4 predicate to require zero total DRC violations and explicit `clean=True`; updated `reproduction_audit.audit_campaign` to use that same qualifier rather than promoting all routed/time-met/CSim-pass cases to strict E4.
+- Source-campaign audit now distinguishes physically attested E4 report presence from **qualified** E4 and returns case-level reasons. `paper_physical_results_complete` requires all prespecified axes and **every** case strictly qualified. Lower-tier source reports may still satisfy a lower-tier request without inventing physical success.
+- Added synthetic fail-closed, no-vendor tests for advisory/noncritical DRC violations, absent DRC, incomplete routing, failed fixed-point CSim, timing failure, wrong OOC mode, missing physical utilization and lower E3 evidence. Added them to `make research-audit-tests`.
+- The prior source revision `2689745` had **2,395 full-suite tests passed, 3 skipped; 176 research audit passed; 168/168 links**. **The new patch and tests have not been run by the author**. No native or original experiment execution and no new physical evidence is claimed.
+- PR #2 is **390 commits ahead of `main`**, with no submitted reviews. This is a significant review/compatibility burden. Main-branch merging is a separate engineering decision and must not occur while this latest patch is unverified or PR remains draft; paper/release approval is a separate, stricter authorization track.
+
+## 10 November 2026 — author-verified NCHW recovery and extended C1 regression
+
+- At source commit `2689745607d512a4dc2f349baf2075a991d8c952`, the author ran the focused NCHW/graph source suite: **38 passed in 3.80 s** (zero failed).
+- The complete development checkout test suite: **2,395 passed, 3 skipped, zero failed in 244.87 s**.
+- `make research-audit-tests`: **176 passed, zero failed in 54.85 s**. This audit includes the NCHW source/GCC contract tests added in the earlier commit.
+- `make release-links`: **168/168** checked local public Markdown references resolve across **31** source files; `public_release_authorized=false`.
+- The `ce5970b` failures and `2689745` correction remain in the change history. The new source assertions, independent Conv owner digest, NumPy integer conversion and read-before-COMMIT contracts are now covered by the author's passing local tests. This is E0 and selected host-GCC E1 verification, **not Vitis/Vivado, HLS cycle/port legality, strict clean-DRC routed timing, or board measurements**.
+- The 478-file source preview, 65-pass curated isolated suite and 420-module wheel verification were performed from a **prior staged source revision**. They are not current-source reproducibility verification; rebuild only a fresh nonpublishable preview and create-only install/wheel outputs after appropriate release review. Original experimental result directories/receipts are preserved; no license granted.
+
+## 10 November 2026 — repair new bounded NCHW Phi ownership regression
+
+- Author verified the first implementation at `ce5970b`: focused source tests **15 failed, 20 passed**, full suite **46 failed, 49 errors, 2,297 passed, 3 skipped**, and `make research-audit-tests` **15 failed, 158 passed**; public links still **168/168**. The failed attempts are retained as evidence, not relabeled or suppressed.
+- All reported TypeError failures/errors follow the new `independent_nchw_access` owner evidence digest and `numpy.int64` values emitted by `np.unravel_index`; the remaining focused assertion was the old test expectation for a missing intermediate read, now rejected earlier at the consumer COMMIT.
+- Fixed the independent owner reference to accept integer-valued NumPy channel indices, normalize both channels and returned owner coordinates to built-in `int`, and reject noninteger/boolean channel indices. The independent mapping formula and strict commit-before-read rejection are unchanged.
+- Updated the affected canonical NCHW regression expectation; added normalized-owner/JSON SHA identity checks, malformed channel-index rejection, and a separate missing-final-sink test preserving end-of-trace completeness semantics.
+- **New fix and additional tests are committed but not yet run in the author's checkout.** Do not infer a passing full suite, independent physical hardware behavior, novel external-compiler comparison or release permission.
+
+## 10 November 2026 — independent Conv Phi owner and causal source-commit contracts
+
+- Extended the existing independent NCHW NumPy access oracle to **independently calculate Conv PE, replica, SIMD-lane and output fold ownership** using effective operator-local Phi and channel/reduction tiling. It does not invoke `resolver.coordinate`, the E0 event generator or the C++ emitter. This detects mapping errors even when source generation and its usual replay checker share the same erroneous coordinate function.
+- The bounded NCHW graph certificate now requires the independent value-access *and* Conv-owner multisets and retains their SHA-256 identities and checked reads; the GCC-executed Conv source attestation reports the same independently calculated owner checks.
+- Strengthened source event verification: **an output COMMIT cannot precede any of its modeled produced-input READ obligations**, even if all global value-read and last-use checks would otherwise accept the same source-event multiset. External input Conv taps remain outside the E0 source trace.
+- Added valid mapped NCHW graph tests, wrong-owner mutants, common-mode coordinate corruption, and read-set-preserving early-commit mutants for branch/concat, pool/fork and broadcast/fork topologies. Included the existing NCHW test module in `make research-audit-tests`.
+- The code and newly changed tests have been **committed pending author workstation execution**. This is prospective C1 source-contract coverage only, not a new original C1/C2 empirical result, proof for arbitrary graphs, timing-clean Vivado observation, board runtime, or licensed publication. No native tool, GitHub Action, frozen experiment, public license, or `main` merge.
+
+## 10 November 2026 — built wheel contents and installed compiler CLI verified
+
+- Author verified on `2078a6b`: 19/19 wheel verifier unit tests passed; wheel build, exact archive audit, installation into a second isolated Python 3.12 venv and installed CLI source-generation smoke **all passed** (`WHEEL_CONTENTS_AND_INSTALLED_CLI_VERIFIED`).
+- Wheel `fpgai_research-0.3.0.dev0-py3-none-any.whl`, SHA-256 `327d1fdff569726667d0218de07f124061ebf34e1e643153dcdaeba6d5635732`; 420/420 staged modules, 426 archive members, 0 extra files. Staged NOTICE verified, not an operative license.
+- Clean-room staged compiler source tests remain 65 pass and 1 checkout-only deselection. Neither these technical gates nor code visibility grants redistribution approval or qualifies native FPGA performance.
+
+## 10 November 2026 — wheel audit packaging NOTICE false positive repaired
+
+- User ran `tests/test_verify_compiler_wheel.py`: **9 passed in 0.05 s**; `verify_compiler_wheel --plan` accepted prior 65-pass curated receipt and staged source SHA `5d95008e19806471184f11071d439621e9e9efac451442ac391d3845e4823c39`.
+- Real `--execute` built a wheel, then stopped **before wheel installation/CLI execution** at `Unexpected wheel metadata: fpgai_research-0.3.0.dev0.dist-info/licenses/NOTICE.md`. This is the standard Python PEP 639 metadata notice location, not a demonstrated compiler failure.
+- Updated the wheel archive audit to allow exactly `.dist-info/licenses/NOTICE.md` **only** when `NOTICE.md` was selected from the staged preview, embedded bytes match staged bytes, and the wheel's `License-File` metadata declares precisely `NOTICE.md`. No other license, paper, executable or unreviewed archive member is allowed. A `License-Expression` remains rejected; a NOTICE is explicitly *not* an operative LICENSE.
+- Expanded synthetic negative tests for missing/tampered notice, undeclared/unattested NOTICE, extra license files and unapproved metadata. **No real wheel recheck or new tests are yet author-verified on this fix.**
+- The first failed create-only output directory `build/public_compiler_wheel_smoke_20261110_01` exists, so next execution must use a fresh `_02` output. No prior local research or preview output is deleted.
+
+
+## 10 November 2026 — 65 curated isolated source-preview tests verified; wheel artifact audit added
+
+- The author ran `tests/test_verify_preview_test_suite.py`: **5/5 passed in 0.38s** on `4e82046667126ae2b8c6ce7d133480669ed1fc25`.
+- The installed-preview workspace was independently rechecked against the original **478-file** staging manifest (`5d95008e19806471184f11071d439621e9e9efac451442ac391d3845e4823c39`): **65 curated tests passed, 0 skipped, 1 Git-checkout-only test explicitly deselected** across the 9 included preview test modules. The original preview remained unchanged and no native vendor commands were run.
+- `make release-links`: **168/168** local links resolved across **31 Markdown files**. No external IP, license or full-history security clearance was performed.
+- Added opt-in `scripts/verify_compiler_wheel.py` for the next technical gate: build a wheel from the already tested isolated preview COPY, verify its exact Python module population and archive safety, install the wheel in a **new** venv, and compile a synthetic ONNX model via the wheel-installed CLI. Added synthetic fail-closed archive tests.
+- This new wheel script and tests have **not** been run on the author's workstation. The original 2,354-pass full development test belongs to its earlier source revision. Package build may require network access; no distribution/upload/publishing is performed.
+
+## 10 November 2026 — isolated preview installed-source smoke verified; curated copy tests added
+
+- Author-run `tests/test_verify_compiler_preview.py`: **4 passed in 0.05 s** on `ab9947f`. Installed-package smoke verified a fresh Python 3.12 virtual environment, installed CLI toy MatMul HLS source, independent-mapped CNN HLS source with actual GCC intermediate-value checks, exact source hashes and **0 native vendor invocations**.
+- Staged preview fingerprint `5d95008e...` covered 478 selected files, 168/168 links and 31 Markdown documents; the original staged file population was not modified.
+- Added a checkout-only, default-plan-only source test runner for the nine curated public preview test modules in the already installed isolated environment. It explicitly deselects one test that requires the original Git checkout, records actual pass/skip/deselect counts, checks selected source hashes against the original staged preview, and writes a create-only source-test receipt.
+- Added source-only safety/unit tests. **Neither the new runner tests nor the actual nine-module preview suite are yet author verified.** The full 2,354-test development run remains separately source-revision-pinned. No GitHub Actions, native runs, LICENSE, visibility, IP approvals or original evidence changed.
+
+## 10 November 2026 — staged compiler preview verified and opt-in isolated install check added
+
+- The author created the 478-file nonpublishable compiler preview at `build/public_compiler_preview_20261110_01` on commit `fdfac75` and verified its independent staged inventory and **168/168 links**, 31 Markdown files, no unresolved references.
+- Added a default-plan-only installed-package smoke helper. With explicit `--execute`, it creates a new, non-overwriting ignored workspace, copies the preview, installs optional compiler/test dependencies into an isolated venv and runs synthetic toy/CNN HLS source generation from outside the staged source tree; optional host GCC checks are independently labeled.
+- Added negative release-smoke preflight tests. No new native Vitis/Vivado/board work, external competitor evaluation, license approval or release authorization.
+- This implementation and its focused tests are **not yet verified on the author's workstation**. The author's 2,354-pass regression belongs to the prior source revision.
+
+## 10 November 2026 — author confirmed complete source regression on 1567783
+
+- The author pulled the research branch at `156778309e92f90d10bf82242dbf57862a228936` and ran the focused graph source/C++ tests: **20 passed in 2.38 s**.
+- The full local regression on that exact source revision: **2,354 passed, 3 skipped, zero failed in 242.70 s**. This supersedes the previous revision's 2,351 passed/two documentation failures.
+- `make release-links`: **168 local links checked across 31 Markdown files, zero unresolved**.
+- `make release-preview-plan`: **478 selected of 916 tracked files, 438 excluded**; internal paper and maintainer docs excluded, vendor binaries/weights excluded. This was a **plan only**, not a staged preview install or clean-room execution.
+- `make release-check`: no flagged tracked private artifact filenames, but **no operative LICENSE**, no signed IP/rights-holder approvals, no full-history gitleaks scan or human review, no clean-room install/dependency audit; `ready_to_switch_visibility=false` and `ready_to_publish=false` remain valid.
+- These are author-reported local results, not remotely rerun independent tests or hardware/competitor evidence. No GitHub Actions, original results, native toolchains or `main` modified.
+
+## 10 November 2026 — source manifest binds independent Phi evidence to executed C++
+
+- Added independent bounded MatMul consumer READ-order signature and coverage to the emitted graph C++ manifest, and validated those fields against observed GCC source events.
+- Extended source-only GCC regressions with a falsified manifest receipt and broadened the explicit source research audit target.
+- Added a claim-to-implementation release audit separating implemented bounded source features from partial physical and publication requirements.
+- These are committed source changes awaiting fresh author tests. The prior 2,351-pass full run and subsequent 13-pass documentation check predate this code; no vendor studies were rerun.
+
+## 10 November 2026 — fix public compiler-preview documentation link
+
+- Corrected the single invalid relative link in the historical 6 November C1/C2 changelog entry: the linked source evidence remains under the intentionally excluded `paper/compiler_ir/` directory, so its reference now uses the existing public GitHub research-branch URL rather than a relative local preview path.
+- This resolves the **same root cause** reported by the author's 10 November local full suite: **2 failed, 2,351 passed, 3 skipped**. Both failures are documentation-link assertions, not compiler runtime errors. No test is asserted passing until the author reruns it.
+- The public link checker, internal source evidence, scientific results, licensing limitations, and exclusion of paper notebooks from the release preview are unchanged.
+
+## 9 November 2026 — graph-wide MatMul Phi source issue-order check
+
+- Extended the existing independent Phi reference with a bounded graph-wide closed-form MatMul source READ order and spatial-owner check, separate from memory/value safety.
+- Integrated the check into the graph source certificate; a value-safe reordering can now be rejected when it violates the declared MatMul source issue order.
+- Added focused source-only regressions for mixed mappings, swapped reads, simulated common-mode source-generator errors, and strict input/budget validation.
+- Locally checked Python syntax and independently compared the reference's ordering to 8,100 synthetic source-loop configurations. Repository pytest and all native vendor executions were **not** run; no frozen results were changed. See maintainer change-impact ledger.
+
+## 7 November 2026 — scientific Overleaf article source, source evidence preserved
+
+- Added a directly compileable `paper/compiler_ir/FPGAI_EXECUTABLE_SOURCE_CONTRACTS_MANUSCRIPT_20261107.tex` for Overleaf, retaining Radboud-only affiliation and removing Morfics identity.
+- Reframed the article around executable finite source obligations rather than engineering sprint/status narratives; qualitative number-free abstract, consolidated theory, fewer subsections and no enumerated scientific questions.
+- Added independently verified C1 54-profile GCC source slot distributions and honest negative C2 lazy-versus-eager CPU cost controls, with HLS and routed pilot outcomes reported under separate evidence criteria.
+- Recast proposed Allo/other-system comparison, new 24ns source-matched storage × MAC-pipeline HLS experiment, routing setup/hold/DRC, frequency frontier and on-board core/AXI/DMA timing as prospective falsifiable tests, not completed results.
+- PDFLaTeX article fallback builds to 21 pages with all cross-references and bibliography keys resolved; no native tool calls or original evidence writes. Original author manuscript revision remains preserved.
+
+## 7 November 2026 — author verified R4y source cohort; new isolated R4z Vitis stage
+
+- The author passed **60/60** R4y/R4x/R4w tests in 48.71s at `dde56d4`, then successfully prepared and read-only audited four 24ns / 1.5ns R4y source packages. The original frozen source revision is `776e3a7`, all four source hashes match, common CSim testbench/Tcl hashes match and vendor calls are zero. This is E1/source-only evidence, not E2/E3/E4.
+- Added R4z source SHA-attested 24ns four-arm **fresh native** experiment preparation in a completely NEW create-only root; default dry-run, double-opt-in Vitis HLS execution with one-time lock created BEFORE any call, strict read-only source/E2/E3 audit using canonical parser/qualification, 2x2 matched HLS contrasts and adverse outcomes retained.
+- Added new zero-vendor regression tests, a prospective method/runbook and Makefile targets that ONLY stage, dry-run and audit (never execute Vitis). New R4z tests and real native experiments are **not yet author executed**. All measured physical/FPGA latency and producer-loop DSP register/II claims remain UNKNOWN; original R4w and main branch untouched, no Actions.
+
+## 6 November 2026 — first actual author R4y test failures repaired (new code not yet retested)
+
+- The author pulled `9f04971`, ran new source-only R4y/R4x/R4w tests: **44 passed, 6 failed**. All six failures originated in R4y comparing its planned status with its distinct prepared status. `make research-r4y-plan` succeeded (four 24ns/1.5ns target sources); `make research-r4y-prepare` failed **before output creation** from an R4k-only `source_only_E1_verified` requirement missing from actual R4l native audit. The following audit predictably had no output directory. No new Vivado/HLS runs happened.
+- Fixed the two independently observed code bugs: R4y original provenance checks now use actual R4l native schema/E1/E2/E3/counts/SHA, preserving zero audit calls, and R4y audit accepts only the exact separately checked prepared-status transition while validating all other frozen plan values. Extra file and symlink checks remain fail-closed.
+- Updated R4y fixture to authentic R4l audit schema; added positive and negative schema, vendor-receipt, status, clock and fake-qualified E2 controls. **Pending the author's local regression rerun**; do not claim tests passed or 24ns packages were created.
+- No original evidence/attempt locks modified, no new native calls, no GitHub Actions, main unchanged.
+
+- R4y source manifest audit fix: JSON-normalize canonical tuple-valued source-slot metadata before comparison to saved JSON manifests; retain independent source SHA, exact package and all-file inventory checks. Added explicit round-trip regression; **new tests not yet author-workstation-verified**.
+## 6 November 2026 — prospective R4y four-arm HLS source preparation, no native calls
+
+- Author verified previous revision 42326c4 with **47/47** focused tests and read-only source-attested R4w/R4x, selecting 24ns post-hoc as conservative next experiment candidate; zero strict DRC-clean pairs and zero measured board latencies remain.
+- Added source-only R4y four-arm preparation: full/row storage × canonical/producer MAC inner-loop PIPELINE II=1 requested, 24ns fixed target, 1.5ns uncertainty, same graph/32,6 precision, matched numerical testbench and canonical source-event identity. The original R4l baseline SHA must match before creating any new study.
+- Added read-only source-package audit, create-only provenance, negative mutation/sidecar tests and Makefile plan/prepare/audit targets; detailed new protocol and file-level change map. Presence of a pragma is NOT evidence of achieved II, DSP pipelining or hardware speedup.
+- All new R4y tests and source packages remain **unrun on the author's workstation**. No GCC, Vitis, Vivado, original evidence mutation, GitHub Actions or main merge.
+
+## 6 November 2026 — 24ns retrospective margin-based planning, not board qualification
+
+- The author pulled the previous R4x implementation at `066a57c` and verified **43/43** focused tests, full original R4w 16/20/24ns audit and R4x read-only comparison: exactly **two warning-only timing-met matched pairs**, strict clean-DRC E4 pairs **zero**. No new native calls were made by either audit.
+- Added a deterministic **post-hoc** read-only clock-planning policy (minimum paired WNS >=1.0ns) on existing source-attested R4w observations: select **24ns** (full/row routed WNS **1.249/2.555ns**, min **1.249ns**), not 20ns (min **0.433ns**). Explicit JSON states **NOT physically safe or board qualified**, hold timing/all-path constraint coverage unknown, no achieved Fmax/real latency claims.
+- Strengthened prospective experimental protocol: matched source/precision/part, new four-arm storage×DSP pipeline HLS source and numerical checks at 24ns, preserved source and routed reports, independent hold/constraint/DRC inspections, staged ≥3 graphs/physical configurations if a hardware-general claim is pursued, and board measured cycles/II/DMA latency only after qualification. The main manuscript still prioritizes original C1/C2 source semantics and independent novelty gates.
+- No new Vitis/Vivado attempts, no original evidence mutation, no GitHub Actions, no merge. New source/test edits are **pending local author tests**.
+
+## 6 November 2026 — verified six-clock audit and non-promoting advisory sensitivity
+
+- The author pulled revision `5bbea74`, passed **32/32** focused R4w/R4x/R4v tests and independently audited the six already executed source/RTL/ROM-attested Vivado routes. Full/row WNS pairs: **+0.241/−0.975ns** at 16ns, **+0.433/+0.538ns** at 20ns, **+1.249/+2.555ns** at 24ns. The earlier generated-sidecar audit blockage is resolved. Nonzero recognized DRC findings **74/71** prevent every strict clean-DRC matched pair; core and board latency remain unknown.
+- The existing R4x *strict* eligibility and measured-latency NULLs are unchanged. Extended its source-only JSON report with a separate, explicitly non-promoting **advisory-only HLS cycles × requested timing-met period** sensitivity and descriptive mapped resources, guarded by original attempt lock, timing/DRC/status and resource invariants. Added 20/24ns positive fixtures and tampered-source/DRC negative tests, not yet independently tested on the author's workstation.
+- Reconciled the active manuscript, public research status, R4w method and change-impact ledger with actual original author results. **No new vendor runs, no workflow, no original output mutations, no draft PR merge.**
+
+## 6 November 2026 — original six Vivado runs, auditable source sidecar repair
+
+- Author original 54-profile E1 read-only analysis completed after **40/40 targeted tests passed**: **median 15.5 saved source scratch slots**, **50% median per-profile reduction**, per-profile savings 4–45 slots and 38.461538–55.555556%, maximum final/intermediate absolute numerical errors 2.3781921365539915e-7 / 2.408715820134688e-7, **271 original artifacts**; zero new compiler/GCC/vendor calls during the analysis. Aggregate 1999 vs 1009 source slots are across **distinct** generated programs, never a BRAM observation.
+- Author completed all **six** one-time new R4w Vivado 2023.2 processes for full/row at 16/20/24ns, process exits all 0; earlier 12ns original output and locks unchanged. The subsequent R4w and R4x read-only audits both stopped at `audit_prepared`: the original audit wrongly rejected **tool-generated sidecars** in the `vivado/rtl` working directory. WNS/DRC and valid physical latency remain UNKNOWN.
+- Fixed R4w `audit_prepared` to allow non-design/native-generated files in the native `vivado/rtl` work directory **only when the original, unaltered, valid one-time native attempt lock exists**. Still requires exact original SHA for staged RTL/ROM/Tcl, forbids postrun extra `.v/.sv/.dat/.mem/.xdc/.tcl/.xci` design inputs, rejects symlinks and any extra canonical HLS source files, and preserves existing native receipt and strict routed WNS/zero-DRC requirements. The native tool **must not be rerun**, and no `build/` evidence was changed.
+- Added four targeted synthetic postrun sidecar/lock/source-tamper regression tests in `tests/test_cst_paper_r4w_feasible_clock_sweep.py`, updated paper original-vendor execution status and C1 source effect-size table, and updated all file/dependency documentation. Fix and tests **not yet author-workstation-run**; next commands are tests and **read-only** R4w/R4x audits.
+
+## 6 November 2026 — valid-design-only Vitis/Vivado timing and latency research setup
+
+- Corrected a local `--summary-only` fixture failure in `cst_paper_c1_original_e1_readonly_descriptives`: the CLI now passes its exact original SHA manifest constant explicitly to `analyze()` so that test fixture monkeypatching works; original production attestation remains fixed. **The revised test is not yet author-rerun.**
+- Added original R4l Vitis E2/E3 vs R4p/R4q/R4r Vivado OOC **read-only** cross-stage Pareto report and synthetic source/negative-timing tests. These are separate from the completed 54-profile E1 source cohort; no new hardware result is claimed.
+- Added `cst_paper_r4w_feasible_clock_sweep`: new **create-only**, original RTL/ROM-SHA-staged paired **16/20/24ns** Vivado clock feasibility pilot (6 native cases), double-confirm native opt-in, permanent attempt lock, original source integrity re-audit, full routed WNS/resource/DRC metrics. It reuses the existing narrow conservative DSP warning-only OOC observation classifier but never waives warnings or promotes them to clean DRC or board deployment.
+- Added `cst_paper_r4x_feasible_only_core_latency`: **no latency winner unless both arms meet timing and clean DRC at the exact same clock**; `cycles × feasible_period` is explicitly an **estimate**, measured core/DMA/board latency remains null. Added six-source-stage tests, pipeline/latency method documentation, strict and failure-preserving make targets.
+- Corrected prior interpretation of original DPIP/DPOP messages: they are **DSP48 input/output pipelining recommendations**, not evidence of memory-port collisions. A new storage×DSP-pipeline 2×2 experiment requires independent Vitis numerical/schedule qualification followed by Vivado timing, and separate core/DMA/board measurement before physical performance can be published. **No new Vitis or Vivado run was launched by these commits; all new code/test checks require the author's workstation.**
+
+## 6 November 2026 — author verified full C1 E1 source bridge and source-slot analysis prepared
+
+- The author completed a separate **full, original source-revision-pinned C1 E0→generated-C++ E1** study at `3bd1e36ff49864d89fa4c676e61da8ba0b936fce`: **17 focused tests passed**, unchanged original E0 54-profile/486-trace report SHA verified; **54 canonical source profiles × 2 scratch layouts = 108 real GCC compilations/executions**, all original canonical E0 hashes matched, **54/54 positive source-slot reductions**, no vendor calls. Its independent read-only SHA audit verified **271 source artifacts** and original manifest SHA `a79e700208e5d7cada93dd1f488809b6622f52cf6b14fa7b7d7b05a8d624d83e`. This is host source E1 evidence only, not BRAM/Fmax/board latency.
+- Added full original result ledger `paper/compiler_ir/C1_FULL_54_PROFILE_E1_GCC_ORIGINAL_RESULTS_20261106.md`, updated the active C1/C2 manuscript, evidence/claim lock, source E1 preregistration, public research guide and archive index, without modifying any original experiment, original native R4p/R4u locks or production compiler semantics.
+- Added **new, unexecuted** read-only SHA-pinned per-profile C1 E1 analyzer `src/fpgai_research/experiments/cst_paper_c1_original_e1_readonly_descriptives.py` and synthetic/negative original-manifest tests; `make research-c1-e1-review` is the safe no-compiler/no-vendor invocation and `make research-audit-tests` includes its tests. This will quantify saved source slots, percentages, address witnesses and numeric-error distributions without recompilation. Exact source numerical effects are not claimed until the user runs it.
+- The critical external matched Allo/CODO semantic novelty test, timing-qualified FPGA latency and clean-room licensing/IP/history release review remain open, so PR #2 stays draft. Eager C2 source catalogs still lose to lazy caching in 108/108 original CPU trials.
+
+## 6 November 2026 — completed original C2 cost analysis and genuine C1 E1 GCC smoke
+
+- The author pulled source revision `5bc8e9c1ec749c1c3dcf09bf85bace91503ee0c7`, passed 30 targeted source/public tests (1.60 s), and verified all 168 public relative links (31 Markdown files, zero unresolved). The public-source preview selected 472/895 tracked files and still reported **no legal publication clearance**.
+- The existing immutable C2 source benchmark (`637f274...`, original report SHA `be2adaa4acf30196a2ccb17114f2caa0af3e6679dc2685872e27cb086ca86ec1`) was analyzed read-only across 108 paired workloads / 324 measured method rows: **lazy caching faster than eager full catalogs in 108/108** paired CPU trials, with total original measured source calls **lazy 198 / eager 864 / direct 1,476**, plus 48 excluded known-certified eligibility preflight calls. No new source compiler or vendor calls were made during the analysis. The paper now reports full six-condition median CPU ms data and does **not** claim eager source screening is cheaper than lazy.
+- The author executed a separate original two-profile matched C1 E0→generated-C++ E1 smoke at `5bc8e9c1…`: **4 actual g++ compilations and executions**, exact original E0 canonical events matched, and positive source slot savings in **2/2** original profiles. The read-only audit checked **11 files** with manifest SHA `51e022a07e35ab4ee96aed25d4a7bb990d97d49b54e98a07d977a6ed0bce4435`; 54-profile/108-GCC full original study remains **not yet executed**. No FPGA latency/BRAM claims.
+- Added [source-pinned verified C2 cost and C1 E1 smoke interpretation](https://github.com/umutcanaltin/fpgai_compiler/blob/research/first-paper-source-memory-bridge-20261106/paper/compiler_ir/C1_E1_SMOKE_C2_SOURCE_COST_ORIGINAL_RESULTS_20261106.md) and updated manuscript, evidence-to-claim ledger, E1 protocol, scientific strengthening plan and public research status. This is scientific evidence accounting and publication hygiene, not a new product compiler implementation.
+
+## 6 November 2026 — direct public documentation fix and stricter scientific novelty gate
+
+- Fixed the locally observed `make release-links` failure (`ModuleNotFoundError: No module named 'scripts'`) by making `scripts/check_public_docs.py` support both direct and module invocation, changing Makefile to `python -m scripts.check_public_docs`, and adding a direct-vs-module subprocess regression test. **New fix not yet workstation-tested.** The preceding user run verified 55 targeted tests and a clean 894-file/718-module static source inventory before the command stopped.
+- Found and explicitly incorporated Allo PLDI 2024 Section 5.2/Figure 6: its verifier already detects a producer/consumer FIFO access-order mismatch in two MatMul kernels. The paper no longer treats elementary source order verification as novel. Added falsifiable A–G semantic comparison protocol with exact external `SUPPORTED/UNKNOWN/SETUP_FAILED` distinctions and C2 lazy-cache/latency stop rules. **No new external Allo or native HLS experiment executed.**
+
+## 6 November 2026 — scientific results and non-destructive public artifact cleanup
+
+- Original source-revision `637f2745721b32d6f5a7e02c4659b0623bc9eee7`: 72 targeted source tests passed, C1 seeded held-out 54 profiles/486 typed event variants/0 observed oracle disagreements, and C2 324 source-compiler method rows with matching source identities and 48 explicitly excluded setup compiler calls; immutable original SHA reports retained in ignored `build/`.
+- Introduced SHA-pinned **read-only** C2 postrun CPU cost analysis; per-method CPU timing conclusions remain unverified until the author's original analysis run. Physical FPGA latency remains UNKNOWN for the earlier failed-clock routed pair.
+- Added `.gitignore`, public-safe GitHub issue/PR templates (NO GitHub Actions), a research publication/reproducibility guide, and publication-hygiene regression tests. Repaired public preview/source-distribution file inclusion for the separately linked PYNQ-Z2 pilot guide, which remains BOARD_NOT_QUALIFIED.
+- All 880 tracked-file baseline names on the original branch were inspected at its fixed 6-Nov source SHA. Existing source modules, full historical R3/R4 evidence, research manuscripts, RL work and original results were **not deleted, moved or retroactively rewritten**. Publicly viewable source remains **unlicensed for redistribution** pending institutional/third-party rights, full Git-history safety review and explicit release approval.
+- Research manuscript and original evidence/claims ledger updated without claiming external compiler novelty or finished paper submission. This cleanup is committed on the research branch, not merged into `main`. New hygiene and analysis tests still require workstation execution.
+- Added a static tracked-file source ownership/AST import map and six synthetic tests, plus `make research-inventory`, `make research-audit-tests`, `make research-c2-review` contributor entry points. The map does not infer dynamic callers or safe deletion, and the new code remains workstation-unverified.
+- Added a source-pinned, two-layout **actual GCC** C1 E0→E1 controlled refinement study for the original 54 new-shape source cohort, using existing R2h source emission and independent NumPy/scratch witnesses: **108 new GCC executions planned, not executed**. An isolated two-profile scalar/mixed-Φ smoke and immutable source-audit protocol are provided. Frozen original C1 results remain unchanged.
+- Corrected the source-pinned external Allo runbook to the active `fpgai_compiler` checkout; external semantic parity is still unexecuted and a P0 publication blocker.
 ## PYNQ-Z2 source-backed PS/DDR read-only audit — feature branch
 
 - User-run second Vivado full-board implementation generated .bit/.hwh,

@@ -16,6 +16,7 @@ include docs/NEUROSCIENTIST_QUICKSTART.md
 include docs/ARCHITECTURE.md
 include docs/SUPPORTED_FEATURES.md
 include docs/SCIENTIFIC_REPRODUCIBILITY.md
+include docs/RESEARCH_PUBLICATION_STATUS.md
 include docs/FAQ.md
 include docs/RELEASE_PREVIEW.md
 include docs/ROADMAP.md
@@ -26,12 +27,14 @@ include docs/ACADEMIC_RESEARCH_LICENSE_PROPOSAL.md
 include docs/WHO_CAN_USE_FPGAI.md
 include docs/AMD_TOOLCHAIN_SETUP.md
 include docs/FPGA_DEPLOYMENT.md
+include docs/PYNQ_Z2_BOARD_DMA_PILOT.md
 include scripts/setup_amd_environment.sh
 include scripts/check_amd_environment.py
 include scripts/check_fpga_deployment.py
 include scripts/check_open_source_readiness.py
 include scripts/prepare_public_preview.py
 include scripts/check_public_docs.py
+include scripts/audit_source_inventory.py
 recursive-include src *.py
 
 # Deliberately NOT bundled: private/native study outputs, historical paper

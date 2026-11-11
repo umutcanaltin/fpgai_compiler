@@ -68,3 +68,101 @@ See [Open-source release checklist](OPEN_SOURCE_RELEASE_CHECKLIST.md) and [Licen
 ## Scope of safe current work
 
 Maintaining documentation and preparing a local preview do not change visibility or confer distribution rights. Publishing a licensed release, deleting source-pinned evidence or rewriting Git history requires separate authorization.
+
+### Next step after a clean source checkout regression
+
+The author's 10 November 2026 full-source regression passed 2,354 tests with 3 skipped at source commit `156778309e92f90d10bf82242dbf57862a228936`. The 478-file compiler preview reported by `--plan` was **not generated or clean-room tested**. A safe, create-only local stage and manifest/link check is:
+
+```bash
+python scripts/prepare_public_preview.py \
+  --profile compiler \
+  --output build/public_compiler_preview_20261110_01
+python scripts/check_public_docs.py \
+  --profile compiler \
+  --root build/public_compiler_preview_20261110_01
+```
+
+Do not reuse a directory that exists; use a fresh ignored output name instead. The staged audit checks the selected file population, absence of unexpected/symlinked files and relative link integrity. It is **not** a fresh-env dependency installation or a complete clean-room test. Independently install/test a rights-reviewed copy in a separate environment only after examining source and dependency provenance. Neither test grants a license, authorizes publication or changes Git history.
+
+### 10 November 2026 — staged preview verified; independent installation next
+
+The author successfully created `build/public_compiler_preview_20261110_01` from the research branch at `fdfac755662a8904682c3597f103b20d8f242dda`, selecting **478 files**. The staged-preview inventory and relative-link checker independently accepted **168 local links across 31 Markdown files**, with zero unresolved; publication authorization correctly remained false.
+
+This validates the **staged files and relative links**, not a fresh virtual-environment install, actual CLI execution, package dependency isolation, or research reproduction. To perform an optional local installed-package smoke test without modifying the audited preview, use the checkout-only helper:
+
+```bash
+python -m scripts.verify_compiler_preview \
+  --preview build/public_compiler_preview_20261110_01 --plan
+
+python -m scripts.verify_compiler_preview \
+  --preview build/public_compiler_preview_20261110_01 \
+  --execute --output build/public_compiler_installed_smoke_20261110_01
+```
+
+The default `--plan` checks only the manifest and link closure. **`--execute` explicitly creates a new isolated virtual environment and runs `pip install .[onnx,test]`, which may download third-party dependencies**. It copies the preview into a new ignored build workspace before installation, then invokes the installed compiler from a separate working directory to generate toy and CNN HLS C++ source; if GNU `g++` exists, the CNN synthetic source is also checked against NumPy intermediates. It never invokes Vitis/Vivado or touches original research study outputs. The output receipt is `build/public_compiler_installed_smoke_20261110_01/installed_preview_smoke_receipt.json`. It will never claim rights clearance or release approval, and a failure leaves the workspace intact for debugging. Use a fresh output path if this one already exists.
+
+The helper and its unit tests live in the research checkout and are deliberately **not** part of the 478-file public preview; this is a maintainer release check. After running it, separately review dependency licenses and complete rights/history/security review. Even a successful smoke does not qualify every graph, model or vendor design.
+
+### 10 November 2026 — installed preview smoke verified; curated preview pytest next
+
+The author ran `tests/test_verify_compiler_preview.py` on commit `ab9947f6f7be9c31aa70b7e28b05e45502c3c2f9`: **4 passed in 0.05 seconds**. The opt-in `scripts.verify_compiler_preview --plan` verified the previously staged 478-file manifest (SHA-256 `5d95008e19806471184f11071d439621e9e9efac451442ac391d3845e4823c39`) and 168/168 Markdown links. The author then executed `--execute`, genuinely installing the preview in a fresh Python 3.12 virtual environment and reporting `INSTALLED_PREVIEW_SOURCE_SMOKE_VERIFIED`: the installed `fpgai_research` import came from that virtual environment, the installed CLI generated correct-manifest toy MatMul/ReLU HLS source (SHA-256 `33ff3faf720d5038506aca63ff8b6d4bef963c634c78ad2565bfeccc7f93b77d`), and an independent-architecture CNN/dense pipeline generated source with SHA-256 `528a5b2c80ac893685f5db17122aae901fbf02107143a72685b56ea7beb4c96c`, all stages lowered and actual host GCC intermediate-value verification passed. Zero native vendor calls; neither the full staged-preview pytest selection nor licensing/security review occurred.
+
+A further opt-in checkout-only verifier now runs **all nine curated public preview test modules** with the isolated preview's already installed Python environment and no dependency reinstall. It records one intentionally deselected Git-checkout-only link-audit test: a staged preview deliberately has no `.git` directory. It checks all selected copied source bytes against the original staged files; runtime-generated pip/pytest caches in the copy do not count as source changes. Default `--plan` performs no subprocess/test execution; `--execute` writes a create-only test receipt under the existing isolated workspace:
+
+```bash
+python -m scripts.verify_preview_test_suite \
+  --workspace build/public_compiler_installed_smoke_20261110_01 --plan
+
+python -m scripts.verify_preview_test_suite \
+  --workspace build/public_compiler_installed_smoke_20261110_01 --execute
+```
+
+The **new curated test runner has not yet been executed by the author**, and the earlier full 2,354-test development checkout suite is not equivalent to a curated source-suite run from the staged copy. This activity is nonpublishable: no licensing/IP/full-history security review, external compiler comparison, clean DRC physical timing, or verified board measurements have been established.
+
+### 10 November 2026 — curated preview regression passes; wheel check prepared
+
+The author executed the curated regression on the staged compiler-source copy using its isolated Python 3.12 environment: **65 passed, 0 skipped, 1 Git-checkout-only test deselected**. The audit checked the same `478` selected source files against staging SHA-256 `5d95008e19806471184f11071d439621e9e9efac451442ac391d3845e4823c39`. The runner's own five tests passed; `make release-links` again resolved all 168 local links. The `curated_preview_pytest_receipt.json` in `build/public_compiler_installed_smoke_20261110_01` records the exact test scope. This closes the nine-module **staged-source** regression for that revision, not wheel artifact packaging or full research reproducibility.
+
+The next checkout-only, **explicitly opt-in** verification builds a wheel into a new ignored directory, checks that every staged Python package module is included, refuses unsafe archive members and unreviewed payloads, and installs/executes the wheel from a completely new virtual environment. The `--plan` mode does not write files or run subprocesses:
+
+```bash
+python -m pytest -q tests/test_verify_compiler_wheel.py
+python -m scripts.verify_compiler_wheel \
+  --workspace build/public_compiler_installed_smoke_20261110_01 \
+  --output build/public_compiler_wheel_smoke_20261110_01 --plan
+python -m scripts.verify_compiler_wheel \
+  --workspace build/public_compiler_installed_smoke_20261110_01 \
+  --output build/public_compiler_wheel_smoke_20261110_01 --execute
+```
+
+`--execute` may download Python build requirements/dependencies. It builds an unlicensed **local test artifact only**; no PyPI/GitHub upload, native FPGA tool, external competitor or original research run. The target output must not exist. A failing module-inclusion check should lead to a packaging fix, not relaxation of the audit. The code and tests above **have not yet been author-executed**.
+
+No wheel passing status, public redistribution right, timing closure or board-performance claim is implied by the previously passing source-preview tests.
+
+### 10 November 2026 — NOTICE wheel metadata gate correction
+
+The author ran **9/9 original wheel verifier tests** and a successful read-only wheel plan. The real wheel build proceeded to wheel member inspection, then the original audit rejected the standard generated `fpgai_research-0.3.0.dev0.dist-info/licenses/NOTICE.md` member. The exception occurred **before** the separate wheel installation or CLI smoke; those are not yet verified. This is a packaging-auditor false positive, not evidence of ONNX compiler or numerical failure.
+
+The patched wheel audit permits only that exact `NOTICE.md` metadata member, byte-for-byte matched to the original nonpublishable staged source `NOTICE.md`, and requires its `License-File` declaration. It rejects added/surprise license files and any `License-Expression` claim. **NOTICE.md grants no source redistribution rights.** No project license or rights approval was added.
+
+The original failed `build/public_compiler_wheel_smoke_20261110_01` is intentionally retained. After pulling the new commit, first run the expanded focused tests. If desired, audit the previously built wheel without another wheel build by invoking `inspect_wheel` with the original stage notice and selected manifest; then run the **full** opt-in wheel+installed CLI gate with an entirely new create-only destination:
+
+```bash
+python -m pytest -q tests/test_verify_compiler_wheel.py
+python -m scripts.verify_compiler_wheel \
+  --workspace build/public_compiler_installed_smoke_20261110_01 \
+  --output build/public_compiler_wheel_smoke_20261110_02 --plan
+python -m scripts.verify_compiler_wheel \
+  --workspace build/public_compiler_installed_smoke_20261110_01 \
+  --output build/public_compiler_wheel_smoke_20261110_02 --execute
+```
+
+These checks are **not yet rerun on the author's machine**. `--execute` may fetch Python build/dependency packages; it performs no native FPGA tool invocation, license grant, source publication, Git history rewrite or original-study change.
+
+### 10 November 2026 — wheel artifact gate verified on create-only _03 workspace
+
+**Author-local evidence (10 November 2026, research branch `2078a6b041e7504e85003173090990d17d5a795f`):** After 19/19 wheel verifier unit tests passed in 0.10s, the author used fresh create-only output `build/public_compiler_wheel_smoke_20261110_03` and completed the wheel audit and installed CLI smoke. The tool reported `WHEEL_CONTENTS_AND_INSTALLED_CLI_VERIFIED` for `fpgai_research-0.3.0.dev0-py3-none-any.whl`: exactly **420 of 420 staged Python modules present**, **426 total wheel members**, **0 unexpected members**, exact staged `NOTICE.md` SHA-256 `3ba6f83964ea9e92d187093534754311b3a2e002e4ec7ff1241ce832be17d20e`, wheel SHA-256 `327d1fdff569726667d0218de07f124061ebf34e1e643153dcdaeba6d5635732`. Wheel independently installed into a new Python 3.12 virtual environment, and the wheel-installed CLI emitted synthetic toy HLS C++ with matching manifest SHA-256 `33ff3faf720d5038506aca63ff8b6d4bef963c634c78ad2565bfeccc7f93b77d`. The staging manifest remained `5d95008e19806471184f11071d439621e9e9efac451442ac391d3845e4823c39`; prior curated-preview test receipt reported 65 passing tests. **No native vendor tools executed, no original studies reproduced, and the NOTICE remains nonoperative as a software license.**
+
+**Technical status:** The existing staged-preview manifest/link check, isolated source installation/GCC smoke, nine-module curated preview regression and separate built wheel+installed CLI checks have passed on the described source revisions. The wheel test checks one synthetic MatMul CLI compilation, **not the full developer suite from an installed wheel**, full HLS or board execution. The wheel is a local, nonpublishable test artifact; its packaging notice does not grant rights to redistribute.
+
+**Still blocked independently:** written Radboud/institutional/collaborator IP approval, actual approved LICENSE, all-ref Git-history credential/confidentiality scan and human assessment, third-party dependency/license audit, complete scientific original-evidence reproduction, and external baseline/physical timing qualification for relevant paper claims. Do not upload the wheel or change repository visibility. The existing `_01`/`_02` directories and successful `_03` are retained; never overwrite or delete historical test artifacts to make a gate pass.

@@ -196,6 +196,8 @@ def verify_nchw_graph(arch,offsets,events,*,max_events:int=100_000):
         raise ValueError("Bounded immutable NCHW source event sequence required")
     expected=Counter()
     required_by_value=Counter()
+    required_by_output=Counter()
+    output_by_consumer={op.name:op.outputs[0] for op in model.operators}
     for ordinal,op in enumerate(model.operators):
         for out_index in range(sizes[op.outputs[0]]):
             for port,name,source_idx,red,coords in _source_reads(model,op,out_index):
@@ -204,6 +206,10 @@ def verify_nchw_graph(arch,offsets,events,*,max_events:int=100_000):
                                      port,red,_owner(arch.points[ordinal],coords))
                     expected[e]+=1
                     required_by_value[(name,source_idx)]+=1
+                    # A downstream output cannot be committed before its
+                    # declared produced-input reads have occurred. External
+                    # runtime input taps are not observed in this E0 trace.
+                    required_by_output[(op.outputs[0],out_index)]+=1
     for out_index in range(sizes[model.outputs[0]]):
         e=ConvValueEvent("READ",model.outputs[0],out_index,
                          "EXTERNAL",out_index,0)
@@ -213,6 +219,7 @@ def verify_nchw_graph(arch,offsets,events,*,max_events:int=100_000):
     active={}
     observed=Counter()
     read_counts=Counter()
+    observed_by_output=Counter()
     releases={}
     def reject(code,index,event,**more):
         return {"schema":SCHEMA,"status":"REJECTED","reason":code,
@@ -232,6 +239,10 @@ def verify_nchw_graph(arch,offsets,events,*,max_events:int=100_000):
                 return reject("INVALID_COMMIT",index,event)
             if key in ready:
                 return reject("DUPLICATE_COMMIT",index,event)
+            if observed_by_output[key]!=required_by_output[key]:
+                return reject("COMMIT_BEFORE_MODELED_INPUT_READS",index,event,
+                              required_reads=required_by_output[key],
+                              observed_reads=observed_by_output[key])
             if address in active:
                 return reject("OVERWRITE_BEFORE_GLOBAL_LAST_READ",index,event,
                               address=address,live_value=list(active[address]))
@@ -245,6 +256,12 @@ def verify_nchw_graph(arch,offsets,events,*,max_events:int=100_000):
             observed[event]+=1
             if observed[event]>expected[event]:
                 return reject("DUPLICATE_READ_TOKEN",index,event)
+            if event.consumer!="EXTERNAL" and event.consumer in output_by_consumer:
+                target=(output_by_consumer[event.consumer],event.output_element)
+                if target in ready:
+                    return reject("READ_AFTER_CONSUMER_OUTPUT_COMMIT",
+                                  index,event,target=list(target))
+                observed_by_output[target]+=1
             read_counts[key]+=1
             if read_counts[key]==required_by_value[key]:
                 releases[key]=index
@@ -269,6 +286,7 @@ def verify_nchw_graph(arch,offsets,events,*,max_events:int=100_000):
             "operator_kinds":sorted({x.kind for x in model.operators}),
             "edges":sum(name in produced for op in model.operators for name in op.inputs),
             "commits":len(ready),"reads":sum(expected.values()),
+            "modeled_produced_input_read_obligations":sum(required_by_output.values()),
             "source_scratch_elements":max(offsets[t]+sizes[t] for t in sizes),
             "native_vitis_calls":0,
             "evidence":"E0-general-topological-NCHW-source-read-Phi-last-use",
@@ -276,6 +294,7 @@ def verify_nchw_graph(arch,offsets,events,*,max_events:int=100_000):
                 "Mathematical producer-major source order, NOT the native HLS Conv loop order",
                 "Stock HLS emitter uses independent intermediate arrays, NOT planned scratch bases",
                 "No per-read source execution proof for all scalar/Conv graph operators",
+                "COMMIT-before-input obligation covers only modeled produced-input reads, not external runtime taps",
                 "No actual Vitis CSim/CSynth/RTL or bank/clock qualification",
             ]}
 
@@ -285,6 +304,24 @@ def nchw_graph_contract(arch,offsets,*,max_events:int=100_000):
     result=verify_nchw_graph(arch,offsets,events,max_events=max_events)
     if result["status"]!="VERIFIED_E0":
         raise ValueError("NCHW_GRAPH_INVALID "+result["reason"])
+    # This reference calculates Conv owners independently from the compiler's
+    # resolver.coordinate and E0 source-event generator. It is an additional
+    # finite source obligation, not an independent full graph semantics proof.
+    from fpgai_research.validation.nchw_access_oracle import (
+        independent_nchw_access,
+    )
+    independent=independent_nchw_access(arch,events,max_events=max_events)
+    if independent["status"]!="VERIFIED_INDEPENDENT_NCHW_ACCESS_E0":
+        raise ValueError("NCHW_INDEPENDENT_ACCESS_OR_PHI_INVALID "+
+                         independent.get("reason","UNKNOWN"))
+    result["independent_access_multiset_sha256"]=independent[
+        "access_multiset_sha256"]
+    result["independent_conv_phi_owner_multiset_sha256"]=independent[
+        "phi_owner_multiset_sha256"]
+    result["independent_conv_phi_owner_checked_reads"]=independent[
+        "phi_owner_checked_conv_reads"]
+    result["independent_conv_phi_owner_status"]=independent[
+        "phi_owner_validation"]
     return result
 
 
